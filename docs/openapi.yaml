@@ -101,6 +101,125 @@ paths:
                       summary: Stellar system with 1 star(s) and 4 orbital body(ies).
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/sector:
+    get:
+      summary: Observe a sector by player-relative coordinates
+      description: >
+        Coordinates are relative to the authenticated player's reference frame.
+        Absolute sector coordinates are never exposed. Detail depends on whether
+        the sector is current, visited, or only passively scanned from the probe
+        current sector.
+      parameters:
+        - name: x
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 1
+        - name: y
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 1
+        - name: z
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 0
+      responses:
+        '200':
+          description: Sector observation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sector]
+                properties:
+                  sector:
+                    $ref: '#/components/schemas/SectorObservation'
+              examples:
+                detailed:
+                  value:
+                    sector:
+                      relativeCoordinates: { x: 0, y: 0, z: 0 }
+                      distance: 0
+                      knowledgeLevel: detailed
+                      confidence: 1
+                      objects:
+                        - type: solar_system
+                          name: System abc123
+                          estimated: false
+                          summary: Stellar system with 1 star(s) and 4 orbital body(ies).
+                          dangerLevel: low
+                      scan:
+                        currentSectorResidenceSeconds: 42
+                        requiredResidenceSeconds: 0
+                        scanQuality: 1
+                neighborScan:
+                  value:
+                    sector:
+                      relativeCoordinates: { x: 1, y: 1, z: 0 }
+                      distance: 1
+                      knowledgeLevel: neighbor_scan
+                      confidence: 0.82
+                      estimatedObjects:
+                        star: true
+                        planetCountMin: 3
+                        planetCountMax: 7
+                        blackHoleProbability: 0.01
+                        dangerEstimate: low
+                        signalAge: recent
+                      scan:
+                        currentSectorResidenceSeconds: 1832
+                        requiredResidenceSeconds: 300
+                        scanQuality: 1
+                distantScan:
+                  value:
+                    sector:
+                      relativeCoordinates: { x: 2, y: 0, z: 0 }
+                      distance: 2
+                      knowledgeLevel: distant_scan
+                      confidence: 0.41
+                      possibleObjects: [stellar_mass_detected, dust_cloud_possible]
+                      dangerEstimate: moderate
+                      scan:
+                        currentSectorResidenceSeconds: 3600
+                        requiredResidenceSeconds: 1800
+                        scanQuality: 0.5
+                longRange:
+                  value:
+                    sector:
+                      relativeCoordinates: { x: 3, y: 3, z: 0 }
+                      distance: 3
+                      knowledgeLevel: long_range_estimation
+                      confidence: 0.12
+                      navigationalRisk: high
+                      message: Insufficient sensor accuracy.
+                      scan:
+                        currentSectorResidenceSeconds: 28800
+                        requiredResidenceSeconds: 7200
+                        scanQuality: 1
+        '400':
+          description: Bad request or insufficient scan data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidCoordinates:
+                  value:
+                    error:
+                      code: bad_request
+                      message: 'Invalid coordinates (1, 0, 0): sum must be even (got 1)'
+                insufficientScanData:
+                  value:
+                    error:
+                      code: insufficient_scan_data
+                      message: Too little passive scan data available to estimate nearby objects.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 components:
   securitySchemes:
     bearerAuth:
@@ -140,7 +259,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, internal_error]
             message:
               type: string
     SessionRequest:
@@ -228,3 +347,45 @@ components:
                 nullable: true
               summary:
                 type: string
+    SectorObservation:
+      type: object
+      required: [relativeCoordinates, distance, knowledgeLevel, confidence, scan]
+      properties:
+        relativeCoordinates:
+          $ref: '#/components/schemas/Vector'
+        distance:
+          type: integer
+        knowledgeLevel:
+          type: string
+          enum: [detailed, neighbor_scan, distant_scan, long_range_estimation]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        objects:
+          type: array
+          items:
+            type: object
+        estimatedObjects:
+          type: object
+          additionalProperties: true
+        possibleObjects:
+          type: array
+          items:
+            type: string
+        navigationalRisk:
+          type: string
+        message:
+          type: string
+        scan:
+          type: object
+          required: [currentSectorResidenceSeconds, requiredResidenceSeconds, scanQuality]
+          properties:
+            currentSectorResidenceSeconds:
+              type: integer
+            requiredResidenceSeconds:
+              type: integer
+            scanQuality:
+              type: number
+              minimum: 0
+              maximum: 1

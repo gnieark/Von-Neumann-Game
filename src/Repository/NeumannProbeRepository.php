@@ -20,8 +20,8 @@ final class NeumannProbeRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO neumann_probes
-             (player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, internal_clock_rate, current_task, created_at, updated_at)
-             VALUES (:player_id, :name, :x, :y, :z, 0, 0, 0, 0, 0, :status, 100, 0, 1, NULL, :created_at, :updated_at)'
+             (player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
+             VALUES (:player_id, :name, :x, :y, :z, 0, 0, 0, 0, 0, :status, 100, 0, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
         );
         $stmt->execute([
             'player_id' => $playerId,
@@ -30,6 +30,7 @@ final class NeumannProbeRepository
             'y' => $sector->getY(),
             'z' => $sector->getZ(),
             'status' => ProbeStatus::Idle->value,
+            'entered_current_sector_at' => $now,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -74,6 +75,7 @@ final class NeumannProbeRepository
                 energy_stored = :energy_stored,
                 internal_clock_rate = :internal_clock_rate,
                 current_task = :current_task,
+                entered_current_sector_at = :entered_current_sector_at,
                 updated_at = :updated_at
              WHERE id = :id'
         );
@@ -93,6 +95,7 @@ final class NeumannProbeRepository
             'energy_stored' => $probe->energyStored,
             'internal_clock_rate' => $probe->internalClockRate,
             'current_task' => $probe->currentTask,
+            'entered_current_sector_at' => $probe->enteredCurrentSectorAt,
             'updated_at' => $probe->updatedAt,
         ]);
     }
@@ -112,6 +115,7 @@ final class NeumannProbeRepository
             (float) $row['energy_stored'],
             (float) $row['internal_clock_rate'],
             $row['current_task'] !== null ? (string) $row['current_task'] : null,
+            (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );

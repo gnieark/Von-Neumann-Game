@@ -21,6 +21,7 @@ final class NeumannProbe
         public float $energyStored,
         public float $internalClockRate,
         public ?string $currentTask,
+        public string $enteredCurrentSectorAt,
         public readonly string $createdAt,
         public string $updatedAt,
     ) {}

@@ -17,6 +17,7 @@ final class SchemaInitializer
         foreach ($this->statements() as $statement) {
             $pdo->exec($statement);
         }
+        $this->applyLightweightMigrations($pdo);
     }
 
     /**
@@ -71,12 +72,27 @@ final class SchemaInitializer
                 energy_stored $decimal NOT NULL DEFAULT 0,
                 internal_clock_rate $decimal NOT NULL DEFAULT 1,
                 current_task $nullableText,
+                entered_current_sector_at $text NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
                 FOREIGN KEY(player_id) REFERENCES players(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_neumann_probes_sector ON neumann_probes(sector_x, sector_y, sector_z)",
+            "CREATE TABLE IF NOT EXISTS visited_sectors (
+                id $id,
+                player_id INTEGER NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                first_visited_at $text NOT NULL,
+                last_visited_at $text NOT NULL,
+                visit_count INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(player_id, sector_x, sector_y, sector_z),
+                FOREIGN KEY(player_id) REFERENCES players(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_visited_sectors_player_id ON visited_sectors(player_id)",
+            "CREATE INDEX IF NOT EXISTS idx_visited_sectors_player_coords ON visited_sectors(player_id, sector_x, sector_y, sector_z)",
             "CREATE TABLE IF NOT EXISTS sessions (
                 id $id,
                 player_id INTEGER NOT NULL,
@@ -90,5 +106,17 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_sessions_player_id ON sessions(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)",
         ];
+    }
+
+    private function applyLightweightMigrations(PDO $pdo): void
+    {
+        if ($this->driver === 'sqlite') {
+            $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
+            $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
+            if (!in_array('entered_current_sector_at', $names, true)) {
+                $now = gmdate('c');
+                $pdo->exec("ALTER TABLE neumann_probes ADD COLUMN entered_current_sector_at TEXT NOT NULL DEFAULT '$now'");
+            }
+        }
     }
 }

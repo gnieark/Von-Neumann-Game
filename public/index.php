@@ -8,7 +8,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 $kernel = (new AppFactory(dirname(__DIR__)))->apiKernel();
 $headers = function_exists('getallheaders') ? getallheaders() : [];
-$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$path = $_SERVER['REQUEST_URI'] ?? '/';
 $body = file_get_contents('php://input') ?: '';
 $response = $kernel->handle($_SERVER['REQUEST_METHOD'] ?? 'GET', $path, $headers, $body);
 

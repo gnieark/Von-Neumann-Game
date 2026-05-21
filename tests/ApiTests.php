@@ -10,8 +10,12 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\SessionRepository;
+use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Service\SectorObservationService;
+use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorFileRepository;
+use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorService;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -97,13 +101,22 @@ $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $sessions = new SessionRepository($pdo);
-$auth = new AuthService($players, $authMethods, $probes, $sessions, 7);
+$visitedSectors = new VisitedSectorRepository($pdo);
+$auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7);
 $sectorService = new SectorService(new SectorFileRepository($universePath), new SectorContentGenerator(), 'api-test-world');
-$kernel = new ApiKernel($auth, $probes, $sectorService);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors));
 
 $player = $auth->registerPlayerWithPassword('remi', 'secret', 'Remi');
 $test->assert($player->id > 0, 'user creation returns a persisted player');
-$test->assert($probes->findByPlayerId($player->id) !== null, 'a probe is automatically created for a new player');
+$createdProbe = $probes->findByPlayerId($player->id);
+$test->assert($createdProbe !== null, 'a probe is automatically created for a new player');
+$test->assert(!$player->homeSector->equals(SectorCoordinates::origin()), 'new player receives a pseudo-random absolute home sector');
+$homeSum = $player->homeSector->getX() + $player->homeSector->getY() + $player->homeSector->getZ();
+$test->assert($homeSum % 2 === 0, 'random initial sector respects the FCC parity constraint');
+$test->assert($visitedSectors->hasVisited($player, $player->homeSector), 'initial sector is automatically marked as visited');
+if ($createdProbe !== null) {
+    $test->assert($createdProbe->currentSector->equals($player->homeSector), 'initial probe starts in the player home sector');
+}
 $test->assertThrows(
     fn() => $auth->registerPlayerWithPassword('remi', 'other-secret', 'Duplicate'),
     'creating two users with the same username is rejected'
@@ -136,12 +149,58 @@ $probe = $kernel->handle('GET', '/api/probe', $headers);
 $test->assertEquals(200, $probe->status, 'valid token allows GET /api/probe');
 $test->assertEquals('idle', $probe->body['probe']['status'] ?? null, 'GET /api/probe returns probe status');
 $test->assert(isset($probe->body['probe']['sector']['relative']), 'GET /api/probe exposes relative sector coordinates');
+$test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $probe->body['probe']['sector']['relative'] ?? null, 'player sees initial sector as relative coordinates [0,0,0]');
+$test->assert(!str_contains(json_encode($probe->body, JSON_THROW_ON_ERROR), 'absolute'), 'GET /api/probe does not expose absolute coordinates');
 
 $sector = $kernel->handle('GET', '/api/probe/sector', $headers);
 $test->assertEquals(200, $sector->status, 'valid token allows GET /api/probe/sector');
 $test->assert(isset($sector->body['sector']['objects']), 'GET /api/probe/sector returns sector objects');
+$test->assertEquals('detailed', $sector->body['sector']['knowledgeLevel'] ?? null, 'current sector returns detailed information');
 
-foreach (['/api/me', '/api/probe', '/api/probe/sector'] as $path) {
+$currentProbe = $probes->findByPlayerId($player->id);
+if ($currentProbe !== null) {
+    $grid = new SectorGrid();
+    $neighbors = $grid->getNeighbors($currentProbe->currentSector);
+    $visitedNeighbor = $neighbors[0];
+    $visitedSectors->markVisited($player, $visitedNeighbor);
+    $visitedRelative = $visitedNeighbor->subtract($player->homeSector);
+    $visitedResponse = $kernel->handle('GET', '/api/sector?x=' . $visitedRelative['x'] . '&y=' . $visitedRelative['y'] . '&z=' . $visitedRelative['z'], $headers);
+    $test->assertEquals(200, $visitedResponse->status, 'visited sector can be consulted through GET /api/sector');
+    $test->assertEquals('detailed', $visitedResponse->body['sector']['knowledgeLevel'] ?? null, 'visited sector returns detailed information');
+
+    $currentProbe->enteredCurrentSectorAt = gmdate('c', time() - 8 * 3600);
+    $probes->save($currentProbe);
+
+    $distanceOne = $neighbors[1];
+    $relOne = $distanceOne->subtract($player->homeSector);
+    $distanceOneResponse = $kernel->handle('GET', '/api/sector?x=' . $relOne['x'] . '&y=' . $relOne['y'] . '&z=' . $relOne['z'], $headers);
+    $test->assertEquals(200, $distanceOneResponse->status, 'distance 1 sector returns partial scan data');
+    $test->assertEquals('neighbor_scan', $distanceOneResponse->body['sector']['knowledgeLevel'] ?? null, 'distance 1 uses neighbor_scan knowledge');
+
+    $distanceTwo = $currentProbe->currentSector->add(2, 0, 0);
+    $relTwo = $distanceTwo->subtract($player->homeSector);
+    $distanceTwoResponse = $kernel->handle('GET', '/api/sector?x=' . $relTwo['x'] . '&y=' . $relTwo['y'] . '&z=' . $relTwo['z'], $headers);
+    $test->assertEquals(200, $distanceTwoResponse->status, 'distance 2 sector returns distant scan data');
+    $test->assertEquals('distant_scan', $distanceTwoResponse->body['sector']['knowledgeLevel'] ?? null, 'distance 2 uses distant_scan knowledge');
+
+    $distanceThree = $currentProbe->currentSector->add(3, 3, 0);
+    $relThree = $distanceThree->subtract($player->homeSector);
+    $distanceThreeResponse = $kernel->handle('GET', '/api/sector?x=' . $relThree['x'] . '&y=' . $relThree['y'] . '&z=' . $relThree['z'], $headers);
+    $test->assertEquals(200, $distanceThreeResponse->status, 'distance >=3 sector returns minimal long range estimation');
+    $test->assertEquals('long_range_estimation', $distanceThreeResponse->body['sector']['knowledgeLevel'] ?? null, 'distance >=3 uses long_range_estimation knowledge');
+
+    $currentProbe->enteredCurrentSectorAt = gmdate('c', time() - 60);
+    $probes->save($currentProbe);
+    $tooEarly = $kernel->handle('GET', '/api/sector?x=' . $relOne['x'] . '&y=' . $relOne['y'] . '&z=' . $relOne['z'], $headers);
+    $test->assertEquals(400, $tooEarly->status, 'distance 1 scan before enough residence time returns an error');
+    $test->assertEquals('insufficient_scan_data', $tooEarly->body['error']['code'] ?? null, 'insufficient scan data error code is explicit');
+}
+
+$invalidCoordinates = $kernel->handle('GET', '/api/sector?x=1&y=0&z=0', $headers);
+$test->assertEquals(400, $invalidCoordinates->status, 'invalid relative FCC coordinates return a clean API error');
+$test->assertEquals('bad_request', $invalidCoordinates->body['error']['code'] ?? null, 'invalid coordinates use bad_request error code');
+
+foreach (['/api/me', '/api/probe', '/api/probe/sector', '/api/sector?x=0&y=0&z=0'] as $path) {
     $response = $kernel->handle('GET', $path);
     $test->assertEquals(401, $response->status, "protected endpoint $path rejects missing Authorization Bearer");
 }

@@ -50,6 +50,13 @@ curl -s http://localhost:8000/api/probe/sector \
   -H "Authorization: Bearer <token>"
 ```
 
+Observe another sector with player-relative coordinates:
+
+```bash
+curl -s 'http://localhost:8000/api/sector?x=1&y=1&z=0' \
+  -H "Authorization: Bearer <token>"
+```
+
 ## Configuration
 
 SQLite is configured in [config/database.json](config/database.json):

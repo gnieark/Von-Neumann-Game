@@ -9,6 +9,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\SessionRepository;
+use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\SectorCoordinates;
 
 final class AuthService
@@ -18,6 +19,7 @@ final class AuthService
         private readonly PlayerAuthRepository $authMethods,
         private readonly NeumannProbeRepository $probes,
         private readonly SessionRepository $sessions,
+        private readonly VisitedSectorRepository $visitedSectors,
         private readonly int $sessionTtlDays = 7,
     ) {}
 
@@ -27,11 +29,12 @@ final class AuthService
             throw new \RuntimeException('Username already exists.');
         }
 
-        $home = SectorCoordinates::origin();
+        $home = $this->randomHomeSector();
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
         $player = $this->players->createPlayer($username, $displayName, null, $home);
         $this->authMethods->addPasswordAuth($player->id, $passwordHash);
         $this->probes->createForPlayer($player->id, $probeName ?? 'Probe of ' . $username, $home);
+        $this->visitedSectors->markVisited($player, $home);
 
         return $player;
     }
@@ -79,5 +82,16 @@ final class AuthService
         }
 
         return trim($matches[1]);
+    }
+
+    private function randomHomeSector(): SectorCoordinates
+    {
+        do {
+            $x = random_int(-1000, 1000);
+            $y = random_int(-1000, 1000);
+            $z = random_int(-1000, 1000);
+        } while (($x + $y + $z) % 2 !== 0);
+
+        return new SectorCoordinates($x, $y, $z);
     }
 }

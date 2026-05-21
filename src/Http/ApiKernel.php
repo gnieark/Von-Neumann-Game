@@ -8,35 +8,41 @@ use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Repository\NeumannProbeRepository;
-use VonNeumannGame\Sector\Asteroid;
-use VonNeumannGame\Sector\BlackHole;
-use VonNeumannGame\Sector\DustCloud;
-use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Service\ObservationAccessException;
+use VonNeumannGame\Service\SectorObservationService;
+use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
-use VonNeumannGame\Sector\SectorContent;
-use VonNeumannGame\Sector\SectorService;
-use VonNeumannGame\Sector\SolarSystem;
-use VonNeumannGame\Sector\Star;
-use VonNeumannGame\Sector\UniverseObject;
 
 final class ApiKernel
 {
     public function __construct(
         private readonly AuthService $auth,
         private readonly NeumannProbeRepository $probes,
-        private readonly SectorService $sectors,
+        private readonly SectorObservationService $observations,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
     {
+        $uri = parse_url($path);
+        $routePath = (string) ($uri['path'] ?? $path);
+        $query = [];
+        if (isset($uri['query'])) {
+            parse_str((string) $uri['query'], $query);
+        }
+
         try {
-            return match ($path) {
+            return match ($routePath) {
                 '/api/session' => $this->routeSession($method, $body),
                 '/api/me' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => new ApiResponse(200, ['player' => $player->publicArray()])),
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
+                '/api/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $query)),
                 default => ApiResponse::error(404, 'not_found', 'Endpoint not found'),
             };
+        } catch (ObservationAccessException $e) {
+            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
+        } catch (InvalidSectorCoordinatesException|\InvalidArgumentException $e) {
+            return ApiResponse::error(400, 'bad_request', $e->getMessage());
         } catch (\Throwable) {
             return ApiResponse::error(500, 'internal_error', 'Internal server error');
         }
@@ -96,19 +102,24 @@ final class ApiKernel
     private function probeSectorResponse(Player $player): ApiResponse
     {
         $probe = $this->requiredProbe($player);
-        $content = $this->sectors->getOrCreateSector($probe->currentSector);
-        $relative = PlayerReferenceFrame::atGlobalCoordinates(
-            $player->homeSector->getX(),
-            $player->homeSector->getY(),
-            $player->homeSector->getZ(),
-        )->globalToRelative($probe->currentSector);
+        $observation = $this->observations->observe($player, $probe, $probe->currentSector);
 
-        return new ApiResponse(200, [
-            'sector' => [
-                'coordinates' => ['relative' => $relative],
-                'objects' => array_map(fn(UniverseObject $object): array => $this->objectSummary($object), $content->getObjects()),
-            ],
-        ]);
+        return new ApiResponse(200, ['sector' => $observation->toArray()]);
+    }
+
+    private function sectorResponse(Player $player, array $query): ApiResponse
+    {
+        foreach (['x', 'y', 'z'] as $field) {
+            if (!isset($query[$field]) || !is_numeric($query[$field]) || (string) (int) $query[$field] !== (string) $query[$field]) {
+                return ApiResponse::error(400, 'bad_request', 'Query parameters x, y and z must be integer relative coordinates.');
+            }
+        }
+
+        $probe = $this->requiredProbe($player);
+        $target = $this->observations->relativeToAbsolute($player, (int) $query['x'], (int) $query['y'], (int) $query['z']);
+        $observation = $this->observations->observe($player, $probe, $target);
+
+        return new ApiResponse(200, ['sector' => $observation->toArray()]);
     }
 
     private function requiredProbe(Player $player): NeumannProbe
@@ -134,29 +145,6 @@ final class ApiKernel
                 'internalClockRate' => $probe->internalClockRate,
                 'currentTask' => $probe->currentTask,
             ],
-        ];
-    }
-
-    private function objectSummary(UniverseObject $object): array
-    {
-        $summary = match (true) {
-            $object instanceof SolarSystem => sprintf(
-                'Stellar system with %d star(s) and %d orbital body(ies).',
-                count($object->getStars()),
-                count($object->getOrbitalBodies()),
-            ),
-            $object instanceof Star => 'Isolated star or stellar remnant.',
-            $object instanceof Planet => 'Planetary body detected.',
-            $object instanceof Asteroid => 'Wandering asteroid body.',
-            $object instanceof DustCloud => 'Diffuse dust cloud with sensor interference.',
-            $object instanceof BlackHole => 'Dangerous compact object detected.',
-            default => 'Unknown astronomical object.',
-        };
-
-        return [
-            'type' => $object->getType()->value,
-            'name' => $object->getName(),
-            'summary' => $summary,
         ];
     }
 
