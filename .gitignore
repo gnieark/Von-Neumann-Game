@@ -1,0 +1,37 @@
+# Composer
+/vendor/
+
+# Local runtime data
+/var/
+/data/
+
+# SQLite databases and sidecar files
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment and local configuration overrides
+.env
+.env.*
+!.env.example
+/config/*.local.json
+
+# Logs and cache
+*.log
+/cache/
+/tmp/
+.phpunit.result.cache
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

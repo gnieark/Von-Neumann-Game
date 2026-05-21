@@ -1,0 +1,230 @@
+openapi: 3.0.3
+info:
+  title: Von Neumann Game API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8000
+security:
+  - bearerAuth: []
+paths:
+  /api/session:
+    post:
+      security: []
+      summary: Create a password session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionRequest'
+            example:
+              username: remi
+              password: secret
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+              example:
+                token: eyJlocalExampleToken
+                expiresAt: '2026-05-28T12:00:00+00:00'
+                player:
+                  id: 1
+                  username: remi
+                  displayName: Remi
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /api/me:
+    get:
+      summary: Get authenticated player
+      responses:
+        '200':
+          description: Current player
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [player]
+                properties:
+                  player:
+                    $ref: '#/components/schemas/Player'
+              example:
+                player:
+                  id: 1
+                  username: remi
+                  displayName: Remi
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe:
+    get:
+      summary: Get current Neumann probe
+      responses:
+        '200':
+          description: Current probe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [probe]
+                properties:
+                  probe:
+                    $ref: '#/components/schemas/Probe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/sector:
+    get:
+      summary: Get or create the probe current sector
+      responses:
+        '200':
+          description: Current sector summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sector]
+                properties:
+                  sector:
+                    $ref: '#/components/schemas/SectorSummary'
+              example:
+                sector:
+                  coordinates:
+                    relative: { x: 0, y: 0, z: 0 }
+                  objects:
+                    - type: solar_system
+                      name: System abc123
+                      summary: Stellar system with 1 star(s) and 4 orbital body(ies).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: unauthorized
+              message: Missing or invalid bearer token
+    MethodNotAllowed:
+      description: Method not allowed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, internal_error]
+            message:
+              type: string
+    SessionRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    SessionResponse:
+      type: object
+      required: [token, expiresAt, player]
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        player:
+          $ref: '#/components/schemas/Player'
+    Player:
+      type: object
+      required: [id, username]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+    Vector:
+      type: object
+      required: [x, y, z]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        z: { type: number }
+    Probe:
+      type: object
+      required: [id, name, status, sector, movement]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [idle, accelerating, cruising, decelerating, orbiting, disabled]
+        sector:
+          type: object
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+        movement:
+          type: object
+          properties:
+            velocityC:
+              type: number
+            accelerationCPerDay:
+              type: number
+            direction:
+              $ref: '#/components/schemas/Vector'
+    SectorSummary:
+      type: object
+      required: [coordinates, objects]
+      properties:
+        coordinates:
+          type: object
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+        objects:
+          type: array
+          items:
+            type: object
+            required: [type, name, summary]
+            properties:
+              type:
+                type: string
+              name:
+                type: string
+                nullable: true
+              summary:
+                type: string

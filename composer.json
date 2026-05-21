@@ -1,0 +1,21 @@
+{
+  "name": "von-neumann/game",
+  "description": "Persistent procedural Von Neumann probe game.",
+  "type": "project",
+  "license": "proprietary",
+  "require": {
+    "php": ">=8.2",
+    "ext-pdo": "*",
+    "ext-json": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "VonNeumannGame\\": "src/",
+      "VonNeumannGame\\Sector\\": "class/"
+    }
+  },
+  "scripts": {
+    "test": "php tests/ApiTests.php",
+    "init-db": "php scripts/init-db.php"
+  }
+}
