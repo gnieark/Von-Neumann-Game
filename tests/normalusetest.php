@@ -74,3 +74,17 @@ printResponse('GET /api/probe', $probe);
 
 $sector = requestJson('GET', $apiUrl . '/api/probe/sector', null, $token);
 printResponse('GET /api/probe/sector', $sector);
+
+$sectorQueries = [
+    'neighbor +x +y' => ['x' => 1, 'y' => 1, 'z' => 0],
+    'neighbor +x -y' => ['x' => 1, 'y' => -1, 'z' => 0],
+    'neighbor -x -z' => ['x' => -1, 'y' => 0, 'z' => -1],
+    'distance 2' => ['x' => 2, 'y' => 0, 'z' => 0],
+    'distance 3' => ['x' => 3, 'y' => 3, 'z' => 0],
+];
+
+foreach ($sectorQueries as $label => $coordinates) {
+    $query = http_build_query($coordinates);
+    $response = requestJson('GET', $apiUrl . '/api/sector?' . $query, null, $token);
+    printResponse('GET /api/sector (' . $label . ')', $response);
+}
