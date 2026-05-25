@@ -79,28 +79,93 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/sector:
     get:
-      summary: Get or create the probe current sector
+      summary: Get or create the probe current sector and onboard inventory
       responses:
         '200':
-          description: Current sector summary
+          description: Current sector summary and probe inventory
           content:
             application/json:
               schema:
                 type: object
-                required: [sector]
+                required: [sector, inventory]
                 properties:
                   sector:
-                    $ref: '#/components/schemas/SectorSummary'
+                    $ref: '#/components/schemas/SectorObservation'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
               example:
                 sector:
-                  coordinates:
-                    relative: { x: 0, y: 0, z: 0 }
+                  relativeCoordinates: { x: 0, y: 0, z: 0 }
+                  distance: 0
+                  knowledgeLevel: detailed
+                  confidence: 1
                   objects:
                     - type: solar_system
                       name: System abc123
                       summary: Stellar system with 1 star(s) and 4 orbital body(ies).
+                  scan:
+                    currentSectorResidenceSeconds: 42
+                    requiredResidenceSeconds: 0
+                    scanQuality: 1
+                inventory:
+                  capacity: 1
+                  capacityUnit: earth_container_equivalent
+                  usedCapacity: 0.5
+                  freeCapacity: 0.5
+                  items:
+                    - id: probe-1-atomic-3d-printer
+                      type: atomic_3d_printer
+                      name: Imprimante 3D atomique
+                      containerSpace: 0.3
+                      currentTask: null
+                      taskProgressPercent: 0
+                    - id: probe-1-manny-1
+                      type: manny
+                      name: Manny 1
+                      containerSpace: 0.05
+                      currentTask: null
+                      taskProgressPercent: 0
+                  externalTanks:
+                    - id: probe-1-deuterium-tank
+                      type: deuterium
+                      name: Cuve externe de deutérium
+                      fillPercent: 100
+                      external: true
+                      usesCargoCapacity: false
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/probe/inventory/{itemId}:
+    get:
+      summary: Get task state for an onboard inventory item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: probe-1-manny-1
+      responses:
+        '200':
+          description: Inventory item task state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item]
+                properties:
+                  item:
+                    $ref: '#/components/schemas/ProbeInventoryItemTask'
+              example:
+                item:
+                  id: probe-1-manny-1
+                  type: manny
+                  name: Manny 1
+                  currentTask: null
+                  taskProgressPercent: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/sector:
     get:
       summary: Observe a sector by player-relative coordinates
@@ -248,6 +313,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
     ErrorResponse:
       type: object
@@ -302,7 +373,7 @@ components:
         z: { type: number }
     Probe:
       type: object
-      required: [id, name, status, sector, movement]
+      required: [id, name, status, sector, movement, inventory]
       properties:
         id:
           type: integer
@@ -325,6 +396,94 @@ components:
               type: number
             direction:
               $ref: '#/components/schemas/Vector'
+        inventory:
+          $ref: '#/components/schemas/ProbeInventory'
+    ProbeInventory:
+      type: object
+      required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, externalTanks]
+      properties:
+        capacity:
+          type: number
+          description: Maximum transport capacity in equivalent earth containers.
+          example: 1
+        capacityUnit:
+          type: string
+          enum: [earth_container_equivalent]
+        usedCapacity:
+          type: number
+          example: 0.5
+        freeCapacity:
+          type: number
+          example: 0.5
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeInventoryItem'
+        externalTanks:
+          type: array
+          description: Special external tanks that do not consume cargo capacity.
+          items:
+            $ref: '#/components/schemas/ProbeExternalTank'
+    ProbeExternalTank:
+      type: object
+      required: [id, type, name, fillPercent, external, usesCargoCapacity]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [deuterium]
+        name:
+          type: string
+        fillPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        external:
+          type: boolean
+          enum: [true]
+        usesCargoCapacity:
+          type: boolean
+          enum: [false]
+    ProbeInventoryItem:
+      type: object
+      required: [id, type, name, containerSpace, currentTask, taskProgressPercent]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [atomic_3d_printer, manny]
+        name:
+          type: string
+        containerSpace:
+          type: number
+          description: Space occupied in equivalent earth containers.
+        currentTask:
+          type: string
+          nullable: true
+        taskProgressPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+    ProbeInventoryItemTask:
+      type: object
+      required: [id, type, name, currentTask, taskProgressPercent]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [atomic_3d_printer, manny]
+        name:
+          type: string
+        currentTask:
+          type: string
+          nullable: true
+        taskProgressPercent:
+          type: number
+          minimum: 0
+          maximum: 100
     SectorSummary:
       type: object
       required: [coordinates, objects]

@@ -50,6 +50,23 @@ curl -s http://localhost:8000/api/probe/sector \
   -H "Authorization: Bearer <token>"
 ```
 
+The current-sector response also includes the probe inventory. A new probe has
+1 `earth_container_equivalent` of transport capacity and starts with:
+
+- 1 atomic 3D printer, occupying 0.3 containers, with no current task
+- 4 Mannies, each occupying 0.05 containers, with no current task
+
+The probe uses nuclear fusion and also starts with a full external deuterium
+tank. This special tank is mounted outside cargo storage, so it does not consume
+the available container capacity.
+
+Read the task state for one onboard object by using its inventory `id`:
+
+```bash
+curl -s http://localhost:8000/api/probe/inventory/probe-1-manny-1 \
+  -H "Authorization: Bearer <token>"
+```
+
 Observe another sector with player-relative coordinates:
 
 ```bash

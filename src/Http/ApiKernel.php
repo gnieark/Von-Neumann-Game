@@ -7,6 +7,7 @@ namespace VonNeumannGame\Http;
 use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
+use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Service\ObservationAccessException;
 use VonNeumannGame\Service\SectorObservationService;
@@ -31,6 +32,10 @@ final class ApiKernel
         }
 
         try {
+            if (preg_match('#^/api/probe/inventory/([^/]+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeInventoryItemResponse($player, rawurldecode($matches[1])));
+            }
+
             return match ($routePath) {
                 '/api/session' => $this->routeSession($method, $body),
                 '/api/me' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => new ApiResponse(200, ['player' => $player->publicArray()])),
@@ -104,7 +109,22 @@ final class ApiKernel
         $probe = $this->requiredProbe($player);
         $observation = $this->observations->observe($player, $probe, $probe->currentSector);
 
-        return new ApiResponse(200, ['sector' => $observation->toArray()]);
+        return new ApiResponse(200, [
+            'sector' => $observation->toArray(),
+            'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
+        ]);
+    }
+
+    private function probeInventoryItemResponse(Player $player, string $itemId): ApiResponse
+    {
+        $probe = $this->requiredProbe($player);
+        $item = ProbeInventory::defaultForProbe($probe)->findItem($itemId);
+
+        if ($item === null) {
+            return ApiResponse::error(404, 'not_found', 'Inventory item not found.');
+        }
+
+        return new ApiResponse(200, ['item' => $item->taskArray()]);
     }
 
     private function sectorResponse(Player $player, array $query): ApiResponse
@@ -145,6 +165,7 @@ final class ApiKernel
                 'internalClockRate' => $probe->internalClockRate,
                 'currentTask' => $probe->currentTask,
             ],
+            'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
         ];
     }
 

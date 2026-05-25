@@ -156,6 +156,38 @@ $sector = $kernel->handle('GET', '/api/probe/sector', $headers);
 $test->assertEquals(200, $sector->status, 'valid token allows GET /api/probe/sector');
 $test->assert(isset($sector->body['sector']['objects']), 'GET /api/probe/sector returns sector objects');
 $test->assertEquals('detailed', $sector->body['sector']['knowledgeLevel'] ?? null, 'current sector returns detailed information');
+$test->assertEquals(1.0, $sector->body['inventory']['capacity'] ?? null, 'GET /api/probe/sector returns default probe transport capacity');
+$test->assertEquals('earth_container_equivalent', $sector->body['inventory']['capacityUnit'] ?? null, 'probe transport capacity uses earth container equivalent units');
+$test->assertEquals(0.5, $sector->body['inventory']['usedCapacity'] ?? null, 'default inventory occupies half a container');
+$test->assertEquals(0.5, $sector->body['inventory']['freeCapacity'] ?? null, 'external deuterium tank does not consume cargo capacity');
+$test->assertEquals(5, count($sector->body['inventory']['items'] ?? []), 'default inventory contains one printer and four mannies');
+$test->assertEquals(1, count($sector->body['inventory']['externalTanks'] ?? []), 'default probe has one external tank');
+$deuteriumTank = $sector->body['inventory']['externalTanks'][0] ?? null;
+$test->assertEquals('deuterium', $deuteriumTank['type'] ?? null, 'default external tank stores deuterium');
+$test->assertEquals(100.0, $deuteriumTank['fillPercent'] ?? null, 'default deuterium tank starts full');
+$test->assertEquals(false, $deuteriumTank['usesCargoCapacity'] ?? null, 'deuterium tank is outside cargo capacity');
+
+$inventoryItems = $sector->body['inventory']['items'] ?? [];
+$printer = $inventoryItems[0] ?? null;
+$test->assertEquals('atomic_3d_printer', $printer['type'] ?? null, 'default inventory starts with an atomic 3D printer');
+$test->assertEquals(0.3, $printer['containerSpace'] ?? null, 'atomic 3D printer occupies 0.3 containers');
+
+$mannyItems = array_values(array_filter($inventoryItems, static fn(array $item): bool => ($item['type'] ?? null) === 'manny'));
+$test->assertEquals(4, count($mannyItems), 'default inventory contains four mannies');
+$test->assertEquals(0.05, $mannyItems[0]['containerSpace'] ?? null, 'each manny occupies 0.05 containers');
+
+$printerTask = $kernel->handle('GET', '/api/probe/inventory/' . rawurlencode((string) ($printer['id'] ?? 'missing')), $headers);
+$test->assertEquals(200, $printerTask->status, 'inventory item id endpoint returns printer task state');
+$test->assert(array_key_exists('currentTask', $printerTask->body['item'] ?? []) && $printerTask->body['item']['currentTask'] === null, 'default printer has no current task');
+$test->assertEquals(0.0, $printerTask->body['item']['taskProgressPercent'] ?? null, 'default printer task progress is zero');
+
+$mannyTask = $kernel->handle('GET', '/api/probe/inventory/' . rawurlencode((string) ($mannyItems[0]['id'] ?? 'missing')), $headers);
+$test->assertEquals(200, $mannyTask->status, 'inventory item id endpoint returns manny task state');
+$test->assert(array_key_exists('currentTask', $mannyTask->body['item'] ?? []) && $mannyTask->body['item']['currentTask'] === null, 'default manny has no current task');
+$test->assertEquals(0.0, $mannyTask->body['item']['taskProgressPercent'] ?? null, 'default manny task progress is zero');
+
+$missingItem = $kernel->handle('GET', '/api/probe/inventory/missing-item', $headers);
+$test->assertEquals(404, $missingItem->status, 'unknown inventory item id returns 404');
 
 $currentProbe = $probes->findByPlayerId($player->id);
 if ($currentProbe !== null) {
