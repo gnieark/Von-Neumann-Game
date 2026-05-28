@@ -50,6 +50,31 @@ curl -s http://localhost:8000/api/probe/sector \
   -H "Authorization: Bearer <token>"
 ```
 
+Initiate an asynchronous intersector movement with player-relative FCC
+coordinates:
+
+```bash
+curl -s -X POST http://localhost:8000/api/probe/move \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer <token>" \
+  -d '{"target":{"x":1,"y":1,"z":0}}'
+```
+
+Follow the movement. The server derives the current phase from timestamps, so no
+cron task is required for movement progression:
+
+```bash
+curl -s http://localhost:8000/api/probe \
+  -H "Authorization: Bearer <token>"
+```
+
+After arrival, consult the new current sector:
+
+```bash
+curl -s http://localhost:8000/api/probe/sector \
+  -H "Authorization: Bearer <token>"
+```
+
 The current-sector response also includes the probe inventory. A new probe has
 1 `earth_container_equivalent` of transport capacity and starts with:
 
@@ -58,7 +83,8 @@ The current-sector response also includes the probe inventory. A new probe has
 
 The probe uses nuclear fusion and also starts with a full external deuterium
 tank. This special tank is mounted outside cargo storage, so it does not consume
-the available container capacity.
+the available container capacity. Each intersector movement currently consumes
+2% of the probe's current deuterium stock.
 
 Read the task state for one onboard object by using its inventory `id`:
 

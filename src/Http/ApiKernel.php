@@ -8,11 +8,17 @@ use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
+use VonNeumannGame\Domain\ProbeMovement;
+use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\ObservationAccessException;
+use VonNeumannGame\Service\ProbeMovementException;
+use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
+use VonNeumannGame\Sector\SectorGrid;
 
 final class ApiKernel
 {
@@ -20,6 +26,8 @@ final class ApiKernel
         private readonly AuthService $auth,
         private readonly NeumannProbeRepository $probes,
         private readonly SectorObservationService $observations,
+        private readonly ProbeMovementService $movements,
+        private readonly VisitedSectorRepository $visitedSectors,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -41,9 +49,12 @@ final class ApiKernel
                 '/api/me' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => new ApiResponse(200, ['player' => $player->publicArray()])),
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
+                '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
                 '/api/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $query)),
                 default => ApiResponse::error(404, 'not_found', 'Endpoint not found'),
             };
+        } catch (ProbeMovementException $e) {
+            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (ObservationAccessException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (InvalidSectorCoordinatesException|\InvalidArgumentException $e) {
@@ -94,23 +105,68 @@ final class ApiKernel
 
     private function probeResponse(Player $player): ApiResponse
     {
-        $probe = $this->requiredProbe($player);
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        if ($probe->status === ProbeStatus::Dead) {
+            return new ApiResponse(200, [
+                'probe' => [
+                    'id' => $probe->id,
+                    'name' => $probe->name,
+                    'status' => 'dead',
+                    'message' => 'The probe is no longer operational. Its intelligence core is isolated from all sensors and actuators.',
+                    'fuel' => ['deuterium' => $probe->deuteriumStock],
+                    'sensorMode' => 'blind',
+                ],
+            ]);
+        }
+
         $relative = PlayerReferenceFrame::atGlobalCoordinates(
             $player->homeSector->getX(),
             $player->homeSector->getY(),
             $player->homeSector->getZ(),
         )->globalToRelative($probe->currentSector);
 
-        return new ApiResponse(200, ['probe' => $this->probeArray($probe, $relative)]);
+        return new ApiResponse(200, ['probe' => $this->probeArray($player, $probe, $relative)]);
     }
 
     private function probeSectorResponse(Player $player): ApiResponse
     {
-        $probe = $this->requiredProbe($player);
-        $observation = $this->observations->observe($player, $probe, $probe->currentSector);
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $movement = $this->movements->activeMovementForProbe($probe);
+        $sensorMode = $this->movements->sensorModeFor($movement, $probe->status);
+        if ($sensorMode === 'blind') {
+            return ApiResponse::error(400, 'sensors_unavailable', 'External sensors are unavailable at current relativistic velocity.');
+        }
+
+        $observableSector = $this->movements->observableSectorFor($probe, $movement) ?? $probe->currentSector;
+        if ($sensorMode === 'degraded') {
+            $frame = new PlayerReferenceFrame($player->homeSector);
+
+            return new ApiResponse(200, [
+                'sector' => [
+                    'relativeCoordinates' => $frame->globalToRelative($observableSector),
+                    'distance' => 0,
+                    'knowledgeLevel' => 'long_range_estimation',
+                    'confidence' => 0.2,
+                    'sensorMode' => 'degraded',
+                    'dataFreshness' => 'degraded_live',
+                    'message' => 'Sensors are degraded during intersector maneuvering.',
+                    'scan' => [
+                        'currentSectorResidenceSeconds' => 0,
+                        'requiredResidenceSeconds' => 0,
+                        'scanQuality' => 0.2,
+                    ],
+                ],
+                'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
+            ]);
+        }
+
+        $observation = $this->observations->observe($player, $probe, $observableSector)->toArray();
+        $observation['sensorMode'] = $sensorMode;
+        $observation['dataFreshness'] = 'live';
 
         return new ApiResponse(200, [
-            'sector' => $observation->toArray(),
+            'sector' => $observation,
             'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
         ]);
     }
@@ -118,6 +174,7 @@ final class ApiKernel
     private function probeInventoryItemResponse(Player $player, string $itemId): ApiResponse
     {
         $probe = $this->requiredProbe($player);
+        $this->movements->ensureProbeOperational($probe);
         $item = ProbeInventory::defaultForProbe($probe)->findItem($itemId);
 
         if ($item === null) {
@@ -135,11 +192,61 @@ final class ApiKernel
             }
         }
 
-        $probe = $this->requiredProbe($player);
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
         $target = $this->observations->relativeToAbsolute($player, (int) $query['x'], (int) $query['y'], (int) $query['z']);
-        $observation = $this->observations->observe($player, $probe, $target);
+        $movement = $this->movements->activeMovementForProbe($probe);
+        $sensorMode = $this->movements->sensorModeFor($movement, $probe->status);
 
-        return new ApiResponse(200, ['sector' => $observation->toArray()]);
+        if ($sensorMode === 'blind' && !$this->visitedSectors->hasVisited($player, $target)) {
+            return ApiResponse::error(400, 'sensors_unavailable', 'External sensors are unavailable at current relativistic velocity.');
+        }
+        if ($sensorMode === 'degraded' && !$this->visitedSectors->hasVisited($player, $target) && !$target->equals($probe->currentSector)) {
+            $observable = $this->movements->observableSectorFor($probe, $movement) ?? $probe->currentSector;
+            $frame = new PlayerReferenceFrame($player->homeSector);
+
+            return new ApiResponse(200, [
+                'sector' => [
+                    'relativeCoordinates' => $frame->globalToRelative($target),
+                    'distance' => (new SectorGrid())->getDistance($observable, $target),
+                    'knowledgeLevel' => 'long_range_estimation',
+                    'confidence' => 0.12,
+                    'sensorMode' => 'degraded',
+                    'dataFreshness' => 'degraded_live',
+                    'message' => 'Sensors are degraded during intersector maneuvering.',
+                    'scan' => [
+                        'currentSectorResidenceSeconds' => 0,
+                        'requiredResidenceSeconds' => 0,
+                        'scanQuality' => 0.12,
+                    ],
+                ],
+            ]);
+        }
+
+        $observation = $this->observations->observe($player, $probe, $target)->toArray();
+        $observation['sensorMode'] = $sensorMode;
+        $observation['dataFreshness'] = $sensorMode === 'blind' ? 'historical' : ($sensorMode === 'degraded' ? 'degraded_live' : 'live');
+
+        return new ApiResponse(200, ['sector' => $observation]);
+    }
+
+    private function probeMoveResponse(Player $player, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data) || !isset($data['target']) || !is_array($data['target'])) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain target coordinates.');
+        }
+        foreach (['x', 'y', 'z'] as $field) {
+            if (!isset($data['target'][$field]) || !is_int($data['target'][$field])) {
+                return ApiResponse::error(400, 'bad_request', 'Target coordinates x, y and z must be integers.');
+            }
+        }
+
+        $target = $this->observations->relativeToAbsolute($player, $data['target']['x'], $data['target']['y'], $data['target']['z']);
+        $movement = $this->movements->startMovement($probe, $target);
+
+        return new ApiResponse(202, ['movement' => $this->movementArray($player, $movement)]);
     }
 
     private function requiredProbe(Player $player): NeumannProbe
@@ -147,18 +254,25 @@ final class ApiKernel
         return $this->probes->findByPlayerId($player->id) ?? throw new \RuntimeException('Probe not found.');
     }
 
-    private function probeArray(NeumannProbe $probe, array $relative): array
+    private function probeArray(Player $player, NeumannProbe $probe, array $relative): array
     {
+        $movement = $this->movements->activeMovementForProbe($probe);
+        $latest = $movement ?? $this->movements->latestMovementForProbe($probe);
+        $sensorMode = $this->movements->sensorModeFor($movement, $probe->status);
+
         return [
             'id' => $probe->id,
             'name' => $probe->name,
             'status' => $probe->status->value,
-            'sector' => ['relative' => $relative],
-            'movement' => [
+            'fuel' => ['deuterium' => $probe->deuteriumStock],
+            'sensorMode' => $sensorMode,
+            'sector' => $movement === null ? ['relative' => $relative] : null,
+            'navigation' => [
                 'velocityC' => $probe->velocityC,
                 'accelerationCPerDay' => $probe->accelerationCPerDay,
                 'direction' => $probe->direction->toArray(),
             ],
+            'movement' => $latest !== null ? $this->movementArray($player, $latest, $movement !== null) : null,
             'systems' => [
                 'integrityPercent' => $probe->integrityPercent,
                 'energyStored' => $probe->energyStored,
@@ -167,6 +281,26 @@ final class ApiKernel
             ],
             'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
         ];
+    }
+
+    private function movementArray(Player $player, ProbeMovement $movement, bool $includeLive = true): array
+    {
+        $frame = new PlayerReferenceFrame($player->homeSector);
+
+        return [
+            'status' => $movement->status,
+            'origin' => $frame->globalToRelative($movement->origin),
+            'target' => $frame->globalToRelative($movement->target),
+            'distance' => $movement->distance,
+            'fuelCostDeuterium' => $movement->fuelCostDeuterium,
+            'startedAt' => $movement->startedAt,
+            'arrivalAt' => $movement->arrivalAt,
+        ] + ($includeLive ? [
+            'phase' => $this->movements->phaseFor($movement),
+            'secondsRemaining' => $this->movements->secondsRemaining($movement),
+            'sensorMode' => $this->movements->sensorModeFor($movement, ProbeStatus::from($movement->status === 'destroyed' ? 'dead' : ($movement->status === 'arrived' ? 'idle' : $movement->status))),
+            'estimatedVelocityC' => $this->movements->estimatedVelocityC($movement),
+        ] : []);
     }
 
     private function decodeJsonBody(?string $body): ?array

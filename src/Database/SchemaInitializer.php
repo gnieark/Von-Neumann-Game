@@ -70,6 +70,7 @@ final class SchemaInitializer
                 status $text NOT NULL,
                 integrity_percent $decimal NOT NULL DEFAULT 100,
                 energy_stored $decimal NOT NULL DEFAULT 0,
+                deuterium_stock $decimal NOT NULL DEFAULT 100,
                 internal_clock_rate $decimal NOT NULL DEFAULT 1,
                 current_task $nullableText,
                 entered_current_sector_at $text NOT NULL,
@@ -79,6 +80,32 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_neumann_probes_sector ON neumann_probes(sector_x, sector_y, sector_z)",
+            "CREATE TABLE IF NOT EXISTS probe_movements (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                origin_x INTEGER NOT NULL,
+                origin_y INTEGER NOT NULL,
+                origin_z INTEGER NOT NULL,
+                target_x INTEGER NOT NULL,
+                target_y INTEGER NOT NULL,
+                target_z INTEGER NOT NULL,
+                distance INTEGER NOT NULL,
+                status $text NOT NULL,
+                started_at $text NOT NULL,
+                preparation_ends_at $text NOT NULL,
+                acceleration_ends_at $text NOT NULL,
+                cruise_ends_at $text NOT NULL,
+                deceleration_ends_at $text NOT NULL,
+                arrival_at $text NOT NULL,
+                fuel_cost_deuterium $decimal NOT NULL,
+                destruction_checked_at $nullableText,
+                destroyed_at $nullableText,
+                destruction_reason $nullableText,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_movements_probe_status ON probe_movements(probe_id, status)",
             "CREATE TABLE IF NOT EXISTS visited_sectors (
                 id $id,
                 player_id INTEGER NOT NULL,
@@ -116,6 +143,15 @@ final class SchemaInitializer
             if (!in_array('entered_current_sector_at', $names, true)) {
                 $now = gmdate('c');
                 $pdo->exec("ALTER TABLE neumann_probes ADD COLUMN entered_current_sector_at TEXT NOT NULL DEFAULT '$now'");
+            }
+            if (!in_array('deuterium_stock', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock REAL NOT NULL DEFAULT 100');
+            }
+        } elseif ($this->driver === 'mysql') {
+            $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
+            $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
+            if (!in_array('deuterium_stock', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock DOUBLE NOT NULL DEFAULT 100 AFTER energy_stored');
             }
         }
     }

@@ -12,8 +12,10 @@ use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
+use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorFileRepository;
@@ -49,14 +51,16 @@ final class AppFactory
         $players = new PlayerRepository($pdo);
         $authMethods = new PlayerAuthRepository($pdo);
         $probes = new NeumannProbeRepository($pdo);
+        $movements = new ProbeMovementRepository($pdo);
         $sessions = new SessionRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7));
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
         $observations = new SectorObservationService($sectorService, $visitedSectors);
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
 
-        return new ApiKernel($auth, $probes, $observations);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors);
     }
 
     public function authService(PDO $pdo): AuthService

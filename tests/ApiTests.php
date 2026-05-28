@@ -9,8 +9,10 @@ use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
+use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
@@ -100,11 +102,13 @@ $test->assert(is_file($dbPath), 'temporary SQLite database is created');
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
+$movements = new ProbeMovementRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7);
 $sectorService = new SectorService(new SectorFileRepository($universePath), new SectorContentGenerator(), 'api-test-world');
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors));
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, worldSeed: 'api-test-world');
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors);
 
 $player = $auth->registerPlayerWithPassword('remi', 'secret', 'Remi');
 $test->assert($player->id > 0, 'user creation returns a persisted player');
@@ -231,6 +235,187 @@ if ($currentProbe !== null) {
 $invalidCoordinates = $kernel->handle('GET', '/api/sector?x=1&y=0&z=0', $headers);
 $test->assertEquals(400, $invalidCoordinates->status, 'invalid relative FCC coordinates return a clean API error');
 $test->assertEquals('bad_request', $invalidCoordinates->body['error']['code'] ?? null, 'invalid coordinates use bad_request error code');
+
+$moveSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'remi', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$moveHeaders = ['Authorization' => 'Bearer ' . (string) ($moveSession->body['token'] ?? '')];
+$moveProbe = $probes->findByPlayerId($player->id);
+
+$moveWithoutToken = $kernel->handle('POST', '/api/probe/move', [], json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+$test->assertEquals(401, $moveWithoutToken->status, 'POST /api/probe/move rejects missing token');
+
+$invalidMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $invalidMove->status, 'POST /api/probe/move rejects invalid relative FCC coordinates');
+
+$sameMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 0, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameMove->status, 'POST /api/probe/move rejects current sector destination');
+
+if ($moveProbe !== null) {
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 0 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $noFuel = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $noFuel->status, 'POST /api/probe/move rejects insufficient deuterium');
+
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $startMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $startMove->status, 'POST /api/probe/move starts movement with 202');
+    $test->assertEquals('preparing', $startMove->body['movement']['status'] ?? null, 'new movement starts in preparing status');
+    $test->assertEquals(1, $startMove->body['movement']['distance'] ?? null, 'movement distance is computed on FCC layers');
+    $test->assertEquals(2.0, $startMove->body['movement']['fuelCostDeuterium'] ?? null, 'movement consumes 2 percent of current deuterium');
+    $test->assert(!str_contains(json_encode($startMove->body, JSON_THROW_ON_ERROR), 'sector_x'), 'movement response does not expose absolute database coordinates');
+
+    $afterStartProbe = $probes->findByPlayerId($player->id);
+    $test->assertEquals(98.0, $afterStartProbe?->deuteriumStock, 'probe deuterium stock is persisted after movement start');
+    $test->assertEquals('preparing', $afterStartProbe?->status->value, 'probe status becomes preparing');
+
+    $secondMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 2, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(409, $secondMove->status, 'second movement cannot start while active movement exists');
+
+    $movement = $movements->findActiveByProbeId($moveProbe->id);
+    if ($movement !== null) {
+        $probeDuringPreparation = $kernel->handle('GET', '/api/probe', $moveHeaders);
+        $test->assertEquals('preparing', $probeDuringPreparation->body['probe']['movement']['phase'] ?? null, 'GET /api/probe reports preparation phase');
+        $test->assertEquals('normal', $probeDuringPreparation->body['probe']['movement']['sensorMode'] ?? null, 'preparation sensor mode is normal');
+
+        $base = time();
+        $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival WHERE id = :id")->execute([
+            'id' => $movement->id,
+            'started' => gmdate('c', $base - 20 * 60),
+            'prep' => gmdate('c', $base - 10 * 60),
+            'accel' => gmdate('c', $base + 10 * 60),
+            'cruise' => gmdate('c', $base + 40 * 60),
+            'decel' => gmdate('c', $base + 60 * 60),
+            'arrival' => gmdate('c', $base + 60 * 60),
+        ]);
+        $acceleratingProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
+        $test->assertEquals('accelerating', $acceleratingProbe->body['probe']['movement']['phase'] ?? null, 'GET /api/probe reports acceleration phase from dates');
+        $test->assertEquals('degraded', $acceleratingProbe->body['probe']['movement']['sensorMode'] ?? null, 'acceleration sensor mode is degraded');
+
+        $pdo->prepare("UPDATE probe_movements SET status = 'accelerating', started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
+            'id' => $movement->id,
+            'started' => gmdate('c', $base - 60 * 60),
+            'prep' => gmdate('c', $base - 50 * 60),
+            'accel' => gmdate('c', $base - 30 * 60),
+            'cruise' => gmdate('c', $base + 30 * 60),
+            'decel' => gmdate('c', $base + 50 * 60),
+            'arrival' => gmdate('c', $base + 50 * 60),
+        ]);
+        $cruisingProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
+        $test->assertEquals('cruising', $cruisingProbe->body['probe']['movement']['phase'] ?? null, 'GET /api/probe reports cruise phase from dates');
+        $test->assertEquals('blind', $cruisingProbe->body['probe']['movement']['sensorMode'] ?? null, 'cruise sensor mode is blind');
+
+        $blindSector = $kernel->handle('GET', '/api/probe/sector', $moveHeaders);
+        $test->assertEquals(400, $blindSector->status, 'GET /api/probe/sector is unavailable while blind');
+        $test->assertEquals('sensors_unavailable', $blindSector->body['error']['code'] ?? null, 'blind probe sector error code is explicit');
+
+        $historicalSector = $kernel->handle('GET', '/api/sector?x=0&y=0&z=0', $moveHeaders);
+        $test->assertEquals(200, $historicalSector->status, 'GET /api/sector returns historical data for visited sectors while blind');
+        $test->assertEquals('historical', $historicalSector->body['sector']['dataFreshness'] ?? null, 'blind visited sector response is marked historical');
+
+        $pdo->prepare("UPDATE probe_movements SET status = 'cruising', cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival WHERE id = :id")->execute([
+            'id' => $movement->id,
+            'cruise' => gmdate('c', $base - 5 * 60),
+            'decel' => gmdate('c', $base + 15 * 60),
+            'arrival' => gmdate('c', $base + 15 * 60),
+        ]);
+        $deceleratingProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
+        $test->assertEquals('decelerating', $deceleratingProbe->body['probe']['movement']['phase'] ?? null, 'GET /api/probe reports deceleration phase from dates');
+        $test->assertEquals('degraded', $deceleratingProbe->body['probe']['movement']['sensorMode'] ?? null, 'deceleration sensor mode is degraded');
+
+        $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+            'id' => $movement->id,
+            'arrival' => gmdate('c', $base - 60),
+        ]);
+        $arrivedProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
+        $test->assertEquals('idle', $arrivedProbe->body['probe']['status'] ?? null, 'GET /api/probe finalizes arrived movement');
+        $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $arrivedProbe->body['probe']['sector']['relative'] ?? null, 'after arrival target sector becomes current relative sector');
+
+        $arrivedProbeEntity = $probes->findByPlayerId($player->id);
+        if ($arrivedProbeEntity !== null) {
+            $test->assert($visitedSectors->hasVisited($player, $arrivedProbeEntity->currentSector), 'arrival marks target sector as visited');
+            $test->assertEquals('normal', $arrivedProbe->body['probe']['sensorMode'] ?? null, 'idle sensor mode is normal after arrival');
+        }
+    }
+}
+
+$riskPlayer = $auth->registerPlayerWithPassword('risk', 'secret', 'Risk');
+$riskSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'risk', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$riskHeaders = ['Authorization' => 'Bearer ' . (string) ($riskSession->body['token'] ?? '')];
+$riskProbe = $probes->findByPlayerId($riskPlayer->id);
+if ($riskProbe !== null) {
+    $shortRiskMove = $kernel->handle('POST', '/api/probe/move', $riskHeaders, json_encode(['target' => ['x' => 2, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $shortRiskMove->status, 'distance <= 2 movement can start for destruction safety test');
+    $shortMovement = $movements->findActiveByProbeId($riskProbe->id);
+    if ($shortMovement !== null) {
+        $base = time();
+        $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival WHERE id = :id")->execute([
+            'id' => $shortMovement->id,
+            'started' => gmdate('c', $base - 120 * 60),
+            'prep' => gmdate('c', $base - 110 * 60),
+            'accel' => gmdate('c', $base - 70 * 60),
+            'cruise' => gmdate('c', $base + 30 * 60),
+            'decel' => gmdate('c', $base + 70 * 60),
+            'arrival' => gmdate('c', $base + 70 * 60),
+        ]);
+        $shortCruise = $kernel->handle('GET', '/api/probe', $riskHeaders);
+        $test->assertEquals('cruising', $shortCruise->body['probe']['status'] ?? null, 'distance <= 2 movement reaches cruise');
+        $test->assert(($movements->findActiveByProbeId($riskProbe->id)?->destructionCheckedAt ?? null) !== null, 'distance <= 2 destruction check is recorded');
+        $test->assertEquals('cruising', $probes->findByPlayerId($riskPlayer->id)?->status->value, 'distance <= 2 movement does not destroy the probe');
+
+        $pdo->prepare("UPDATE probe_movements SET arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+            'id' => $shortMovement->id,
+            'arrival' => gmdate('c', $base - 60),
+        ]);
+        $kernel->handle('GET', '/api/probe', $riskHeaders);
+    }
+
+    $longRiskMove = $kernel->handle('POST', '/api/probe/move', $riskHeaders, json_encode(['target' => ['x' => 8, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $longRiskMove->status, 'distance > 2 movement can start for deterministic destruction test');
+    $longMovement = $movements->findActiveByProbeId($riskProbe->id);
+    if ($longMovement !== null) {
+        $base = time();
+        $chosenStartedAt = gmdate('c', $base - 240 * 60);
+        for ($i = 0; $i < 2000; $i++) {
+            $candidate = gmdate('c', $base - (240 * 60) - $i);
+            $payload = implode('|', [
+                'api-test-world',
+                $longMovement->probeId,
+                $longMovement->id,
+                $longMovement->origin->toKey(),
+                $longMovement->target->toKey(),
+                $candidate,
+            ]);
+            $roll = hexdec(substr(hash('sha256', $payload), 0, 15)) / hexdec(str_repeat('f', 15));
+            if ($roll < 0.40) {
+                $chosenStartedAt = $candidate;
+                break;
+            }
+        }
+
+        $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
+            'id' => $longMovement->id,
+            'started' => $chosenStartedAt,
+            'prep' => gmdate('c', $base - 230 * 60),
+            'accel' => gmdate('c', $base - 110 * 60),
+            'cruise' => gmdate('c', $base + 70 * 60),
+            'decel' => gmdate('c', $base + 190 * 60),
+            'arrival' => gmdate('c', $base + 190 * 60),
+        ]);
+
+        $destroyedProbe = $kernel->handle('GET', '/api/probe', $riskHeaders);
+        $test->assertEquals('dead', $destroyedProbe->body['probe']['status'] ?? null, 'deterministic destruction sets probe status dead');
+        $destroyedMovement = $movements->findLatestByProbeId($riskProbe->id);
+        $test->assertEquals('destroyed', $destroyedMovement?->status, 'deterministic destruction sets movement status destroyed');
+        $firstCheckedAt = $destroyedMovement?->destructionCheckedAt;
+        $kernel->handle('GET', '/api/probe', $riskHeaders);
+        $test->assertEquals($firstCheckedAt, $movements->findLatestByProbeId($riskProbe->id)?->destructionCheckedAt, 'destruction risk roll is performed only once');
+
+        $deadMove = $kernel->handle('POST', '/api/probe/move', $riskHeaders, json_encode(['target' => ['x' => 10, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+        $test->assertEquals(409, $deadMove->status, 'dead probe cannot start a movement');
+        $test->assertEquals('probe_dead', $deadMove->body['error']['code'] ?? null, 'dead action error code is explicit');
+        $deadSector = $kernel->handle('GET', '/api/probe/sector', $riskHeaders);
+        $test->assertEquals(409, $deadSector->status, 'dead probe cannot access current sector details');
+        $test->assert(!str_contains(json_encode($destroyedProbe->body, JSON_THROW_ON_ERROR), 'sector_x'), 'dead probe response does not expose absolute coordinates');
+    }
+}
 
 foreach (['/api/me', '/api/probe', '/api/probe/sector', '/api/sector?x=0&y=0&z=0'] as $path) {
     $response = $kernel->handle('GET', $path);

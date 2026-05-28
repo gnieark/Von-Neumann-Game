@@ -47,7 +47,7 @@ final class ProbeInventory
                 'probe-' . $probe->id . '-deuterium-tank',
                 'deuterium',
                 'Cuve externe de deutérium',
-                100,
+                $probe->deuteriumStock,
             ),
         ];
 

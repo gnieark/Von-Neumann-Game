@@ -19,6 +19,7 @@ final class NeumannProbe
         public ProbeStatus $status,
         public float $integrityPercent,
         public float $energyStored,
+        public float $deuteriumStock,
         public float $internalClockRate,
         public ?string $currentTask,
         public string $enteredCurrentSectorAt,

@@ -79,7 +79,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/sector:
     get:
-      summary: Get or create the probe current sector and onboard inventory
+      summary: Get observable probe sector and onboard inventory
       responses:
         '200':
           description: Current sector summary and probe inventory
@@ -134,6 +134,88 @@ paths:
                       usesCargoCapacity: false
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Probe is dead
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Sensors unavailable while cruising
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: sensors_unavailable
+                  message: External sensors are unavailable at current relativistic velocity.
+  /api/probe/move:
+    post:
+      summary: Start an asynchronous intersector movement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeMoveRequest'
+            example:
+              target: { x: 1, y: 1, z: 0 }
+      responses:
+        '202':
+          description: Movement accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [movement]
+                properties:
+                  movement:
+                    $ref: '#/components/schemas/ProbeMovement'
+              example:
+                movement:
+                  status: preparing
+                  origin: { x: 0, y: 0, z: 0 }
+                  target: { x: 1, y: 1, z: 0 }
+                  distance: 1
+                  fuelCostDeuterium: 2
+                  startedAt: '2026-05-28T12:00:00+00:00'
+                  arrivalAt: '2026-05-28T13:20:00+00:00'
+                  phase: preparing
+                  secondsRemaining: 4800
+                  sensorMode: normal
+                  estimatedVelocityC: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Probe is already moving or dead
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                moving:
+                  value:
+                    error:
+                      code: probe_already_moving
+                      message: The probe is already moving between sectors.
+                dead:
+                  value:
+                    error:
+                      code: probe_dead
+                      message: The probe is no longer operational.
+        '422':
+          description: Insufficient deuterium
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: insufficient_fuel
+                  message: Insufficient deuterium for movement.
   /api/probe/inventory/{itemId}:
     get:
       summary: Get task state for an onboard inventory item
@@ -173,7 +255,8 @@ paths:
         Coordinates are relative to the authenticated player's reference frame.
         Absolute sector coordinates are never exposed. Detail depends on whether
         the sector is current, visited, or only passively scanned from the probe
-        current sector.
+        current sector. During blind cruise, only already visited sectors can be
+        consulted as historical cartography.
       parameters:
         - name: x
           in: query
@@ -285,6 +368,12 @@ paths:
                       message: Too little passive scan data available to estimate nearby objects.
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Probe is dead
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerAuth:
@@ -330,7 +419,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, insufficient_fuel, same_destination, internal_error]
             message:
               type: string
     SessionRequest:
@@ -371,9 +460,46 @@ components:
         x: { type: number }
         y: { type: number }
         z: { type: number }
+    ProbeMoveRequest:
+      type: object
+      required: [target]
+      properties:
+        target:
+          $ref: '#/components/schemas/Vector'
+    ProbeMovement:
+      type: object
+      required: [status, origin, target, distance, fuelCostDeuterium, startedAt, arrivalAt]
+      properties:
+        status:
+          type: string
+          enum: [preparing, accelerating, cruising, decelerating, arrived, failed, destroyed]
+        origin:
+          $ref: '#/components/schemas/Vector'
+        target:
+          $ref: '#/components/schemas/Vector'
+        distance:
+          type: integer
+        fuelCostDeuterium:
+          type: number
+        startedAt:
+          type: string
+          format: date-time
+        arrivalAt:
+          type: string
+          format: date-time
+        phase:
+          type: string
+          enum: [idle, preparing, accelerating, cruising, decelerating, arrived, failed, destroyed]
+        secondsRemaining:
+          type: integer
+        sensorMode:
+          type: string
+          enum: [normal, degraded, blind]
+        estimatedVelocityC:
+          type: number
     Probe:
       type: object
-      required: [id, name, status, sector, movement, inventory]
+      required: [id, name, status, fuel, sensorMode, movement, inventory]
       properties:
         id:
           type: integer
@@ -381,19 +507,29 @@ components:
           type: string
         status:
           type: string
-          enum: [idle, accelerating, cruising, decelerating, orbiting, disabled]
+          enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, dead]
+        fuel:
+          type: object
+          properties:
+            deuterium:
+              type: number
+        sensorMode:
+          type: string
+          enum: [normal, degraded, blind]
         sector:
           type: object
+          nullable: true
           properties:
             relative:
               $ref: '#/components/schemas/Vector'
         movement:
+          nullable: true
+          $ref: '#/components/schemas/ProbeMovement'
+        navigation:
           type: object
           properties:
-            velocityC:
-              type: number
-            accelerationCPerDay:
-              type: number
+            velocityC: { type: number }
+            accelerationCPerDay: { type: number }
             direction:
               $ref: '#/components/schemas/Vector'
         inventory:
@@ -536,6 +672,12 @@ components:
           type: string
         message:
           type: string
+        sensorMode:
+          type: string
+          enum: [normal, degraded, blind]
+        dataFreshness:
+          type: string
+          enum: [live, degraded_live, historical, unavailable]
         scan:
           type: object
           required: [currentSectorResidenceSeconds, requiredResidenceSeconds, scanQuality]

@@ -16,7 +16,12 @@ final class VisitedSectorRepository
 
     public function markVisited(Player $player, SectorCoordinates $coordinates): VisitedSector
     {
-        $existing = $this->getVisitedSector($player, $coordinates);
+        return $this->markVisitedByPlayerId($player->id, $coordinates);
+    }
+
+    public function markVisitedByPlayerId(int $playerId, SectorCoordinates $coordinates): VisitedSector
+    {
+        $existing = $this->getVisitedSectorByPlayerId($playerId, $coordinates);
         $now = gmdate('c');
 
         if ($existing !== null) {
@@ -25,7 +30,7 @@ final class VisitedSectorRepository
             );
             $stmt->execute(['id' => $existing->id, 'last_visited_at' => $now]);
 
-            return $this->getVisitedSector($player, $coordinates) ?? $existing;
+            return $this->getVisitedSectorByPlayerId($playerId, $coordinates) ?? $existing;
         }
 
         $stmt = $this->pdo->prepare(
@@ -33,7 +38,7 @@ final class VisitedSectorRepository
              VALUES (:player_id, :x, :y, :z, :first_visited_at, :last_visited_at, 1)'
         );
         $stmt->execute([
-            'player_id' => $player->id,
+            'player_id' => $playerId,
             'x' => $coordinates->getX(),
             'y' => $coordinates->getY(),
             'z' => $coordinates->getZ(),
@@ -41,7 +46,7 @@ final class VisitedSectorRepository
             'last_visited_at' => $now,
         ]);
 
-        return $this->getVisitedSector($player, $coordinates) ?? throw new \RuntimeException('Unable to mark sector visited.');
+        return $this->getVisitedSectorByPlayerId($playerId, $coordinates) ?? throw new \RuntimeException('Unable to mark sector visited.');
     }
 
     public function hasVisited(Player $player, SectorCoordinates $coordinates): bool
@@ -51,12 +56,17 @@ final class VisitedSectorRepository
 
     public function getVisitedSector(Player $player, SectorCoordinates $coordinates): ?VisitedSector
     {
+        return $this->getVisitedSectorByPlayerId($player->id, $coordinates);
+    }
+
+    public function getVisitedSectorByPlayerId(int $playerId, SectorCoordinates $coordinates): ?VisitedSector
+    {
         $stmt = $this->pdo->prepare(
             'SELECT * FROM visited_sectors
              WHERE player_id = :player_id AND sector_x = :x AND sector_y = :y AND sector_z = :z'
         );
         $stmt->execute([
-            'player_id' => $player->id,
+            'player_id' => $playerId,
             'x' => $coordinates->getX(),
             'y' => $coordinates->getY(),
             'z' => $coordinates->getZ(),
