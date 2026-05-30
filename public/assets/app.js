@@ -26,6 +26,8 @@
     const validRelativeCoordinates = (target) => (target.x + target.y + target.z) % 2 === 0;
     const t = (key, fallback) => i18n[key] || fallback;
     const invalidCoordinateMessage = t('invalidCoordinates', 'Invalid relative coordinates: x + y + z must be even.');
+    const alreadyMovingMessage = 'The probe is already moving between sectors.';
+    let probeAlreadyMoving = false;
     const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) {
@@ -113,6 +115,19 @@
         });
     }
 
+    function updateMoveButtonState(probe) {
+        const button = document.getElementById('move-submit');
+        if (!button) {
+            return;
+        }
+
+        const movement = probe && probe.movement ? probe.movement : null;
+        probeAlreadyMoving = Boolean(movement && ['preparing', 'accelerating', 'cruising', 'decelerating'].includes(movement.phase || movement.status));
+        button.disabled = probeAlreadyMoving;
+        button.title = probeAlreadyMoving ? alreadyMovingMessage : '';
+        button.setAttribute('aria-disabled', probeAlreadyMoving ? 'true' : 'false');
+    }
+
     async function api(path, options) {
         const response = await fetch(path, {
             ...options,
@@ -131,6 +146,7 @@
         try {
             const data = await api('/api/probe');
             const probe = data.probe || {};
+            updateMoveButtonState(probe);
             const systems = probe.systems || {};
             const nav = probe.navigation || {};
             const movement = probe.movement || null;
@@ -161,6 +177,7 @@
             setText('probe-json', pretty(data));
             setText('inventory-json', pretty(probe.inventory || {}));
         } catch (error) {
+            updateMoveButtonState(null);
             setText('probe-json', error.message);
             setText('inventory-json', error.message);
         }
@@ -223,8 +240,20 @@
         }
     });
 
+    document.getElementById('jump-control')?.addEventListener('click', () => {
+        if (probeAlreadyMoving) {
+            setText('action-status', alreadyMovingMessage);
+            setText('movement-json', '');
+        }
+    });
+
     document.getElementById('move-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
+        if (probeAlreadyMoving) {
+            setText('action-status', alreadyMovingMessage);
+            setText('movement-json', '');
+            return;
+        }
         const form = new FormData(event.currentTarget);
         const target = {
             x: Number.parseInt(form.get('x'), 10),

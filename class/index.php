@@ -10,7 +10,6 @@
  *   require_once 'class/index.php';
  *   use VonNeumannGame\Sector\SectorCoordinates;
  */
- 
 declare(strict_types=1);
 
 // Load all classes

@@ -137,7 +137,9 @@
                         <label>{{t.targetX}}<input name="x" type="number" step="1" value="1"></label>
                         <label>{{t.targetY}}<input name="y" type="number" step="1" value="1"></label>
                         <label>{{t.targetZ}}<input name="z" type="number" step="1" value="0"></label>
-                        <button class="primary" type="submit">{{t.initiateJump}}</button>
+                        <span id="jump-control" class="jump-control">
+                            <button id="move-submit" class="primary" type="submit">{{t.initiateJump}}</button>
+                        </span>
                     </form>
                     <p id="action-status" class="action-status"></p>
                     <pre id="movement-json" class="json-dump"></pre>

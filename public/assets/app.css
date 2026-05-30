@@ -147,6 +147,11 @@ button:hover {
     border-color: var(--cold);
 }
 
+button:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+}
+
 .primary {
     border-color: rgba(184, 111, 75, .65);
     background: linear-gradient(180deg, #8b5137, #3b241c);
@@ -464,6 +469,18 @@ button:hover {
 
 .action-panel {
     grid-template-columns: repeat(3, minmax(86px, 1fr)) minmax(150px, auto);
+}
+
+.jump-control {
+    display: block;
+}
+
+.jump-control button {
+    width: 100%;
+}
+
+.jump-control button:disabled {
+    pointer-events: none;
 }
 
 @media (max-width: 760px) {
