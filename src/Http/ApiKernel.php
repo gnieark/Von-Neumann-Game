@@ -106,6 +106,18 @@ final class ApiKernel
     private function probeResponse(Player $player): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        if ($probe->status === ProbeStatus::TrappedByBlackHole) {
+            return new ApiResponse(200, [
+                'probe' => [
+                    'id' => $probe->id,
+                    'name' => $probe->name,
+                    'status' => 'trapped_by_black_hole',
+                    'message' => 'The probe has crossed a black hole escape threshold. No signal or actuator response can be recovered.',
+                    'fuel' => ['deuterium' => $probe->deuteriumStock],
+                    'sensorMode' => 'blind',
+                ],
+            ]);
+        }
         if ($probe->status === ProbeStatus::Dead) {
             return new ApiResponse(200, [
                 'probe' => [
@@ -139,6 +151,9 @@ final class ApiKernel
         }
 
         $observableSector = $this->movements->observableSectorFor($probe, $movement) ?? $probe->currentSector;
+        if ($movement === null && $observableSector->equals($probe->currentSector)) {
+            $this->movements->refreshCurrentSectorHazards($probe);
+        }
         if ($sensorMode === 'degraded') {
             $frame = new PlayerReferenceFrame($player->homeSector);
 
@@ -164,6 +179,7 @@ final class ApiKernel
         $observation = $this->observations->observe($player, $probe, $observableSector)->toArray();
         $observation['sensorMode'] = $sensorMode;
         $observation['dataFreshness'] = 'live';
+        $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
 
         return new ApiResponse(200, [
             'sector' => $observation,
@@ -191,12 +207,18 @@ final class ApiKernel
                 return ApiResponse::error(400, 'bad_request', 'Query parameters x, y and z must be integer relative coordinates.');
             }
         }
+        if (!$this->validRelativeCoordinateParity((int) $query['x'], (int) $query['y'], (int) $query['z'])) {
+            return $this->invalidRelativeCoordinateResponse();
+        }
 
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $target = $this->observations->relativeToAbsolute($player, (int) $query['x'], (int) $query['y'], (int) $query['z']);
         $movement = $this->movements->activeMovementForProbe($probe);
         $sensorMode = $this->movements->sensorModeFor($movement, $probe->status);
+        if ($movement === null && $target->equals($probe->currentSector)) {
+            $this->movements->refreshCurrentSectorHazards($probe);
+        }
 
         if ($sensorMode === 'blind' && !$this->visitedSectors->hasVisited($player, $target)) {
             return ApiResponse::error(400, 'sensors_unavailable', 'External sensors are unavailable at current relativistic velocity.');
@@ -226,6 +248,9 @@ final class ApiKernel
         $observation = $this->observations->observe($player, $probe, $target)->toArray();
         $observation['sensorMode'] = $sensorMode;
         $observation['dataFreshness'] = $sensorMode === 'blind' ? 'historical' : ($sensorMode === 'degraded' ? 'degraded_live' : 'live');
+        if ($movement === null && $target->equals($probe->currentSector)) {
+            $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
+        }
 
         return new ApiResponse(200, ['sector' => $observation]);
     }
@@ -241,6 +266,9 @@ final class ApiKernel
             if (!isset($data['target'][$field]) || !is_int($data['target'][$field])) {
                 return ApiResponse::error(400, 'bad_request', 'Target coordinates x, y and z must be integers.');
             }
+        }
+        if (!$this->validRelativeCoordinateParity($data['target']['x'], $data['target']['y'], $data['target']['z'])) {
+            return $this->invalidRelativeCoordinateResponse();
         }
 
         $target = $this->observations->relativeToAbsolute($player, $data['target']['x'], $data['target']['y'], $data['target']['z']);
@@ -303,6 +331,23 @@ final class ApiKernel
         ] : []);
     }
 
+    private function withBlackHoleTrapCountdown(array $observation, NeumannProbe $probe): array
+    {
+        $trap = $this->movements->pendingBlackHoleTrapForProbe($probe);
+        if ($trap === null || !isset($observation['objects']) || !is_array($observation['objects'])) {
+            return $observation;
+        }
+
+        foreach ($observation['objects'] as &$object) {
+            if (($object['type'] ?? null) === 'black_hole') {
+                $object['noReturnCountdown'] = $trap;
+            }
+        }
+        unset($object);
+
+        return $observation;
+    }
+
     private function decodeJsonBody(?string $body): ?array
     {
         try {
@@ -312,6 +357,16 @@ final class ApiKernel
         }
 
         return is_array($decoded) ? $decoded : null;
+    }
+
+    private function validRelativeCoordinateParity(int $x, int $y, int $z): bool
+    {
+        return ($x + $y + $z) % 2 === 0;
+    }
+
+    private function invalidRelativeCoordinateResponse(): ApiResponse
+    {
+        return ApiResponse::error(400, 'bad_request', 'Relative coordinates are invalid: x + y + z must be even.');
     }
 
     private function authorizationHeader(array $headers): ?string

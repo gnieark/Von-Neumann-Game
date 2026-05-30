@@ -10,10 +10,14 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
+use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
+use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorFileRepository;
@@ -103,11 +107,14 @@ $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
+$scheduledEvents = new ScheduledEventRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7);
-$sectorService = new SectorService(new SectorFileRepository($universePath), new SectorContentGenerator(), 'api-test-world');
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, worldSeed: 'api-test-world');
+$sectorRepository = new SectorFileRepository($universePath);
+$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, worldSeed: 'api-test-world');
+$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors);
 
 $player = $auth->registerPlayerWithPassword('remi', 'secret', 'Remi');
@@ -235,6 +242,7 @@ if ($currentProbe !== null) {
 $invalidCoordinates = $kernel->handle('GET', '/api/sector?x=1&y=0&z=0', $headers);
 $test->assertEquals(400, $invalidCoordinates->status, 'invalid relative FCC coordinates return a clean API error');
 $test->assertEquals('bad_request', $invalidCoordinates->body['error']['code'] ?? null, 'invalid coordinates use bad_request error code');
+$test->assertEquals('Relative coordinates are invalid: x + y + z must be even.', $invalidCoordinates->body['error']['message'] ?? null, 'invalid sector coordinates return a relative-coordinate message');
 
 $moveSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'remi', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $moveHeaders = ['Authorization' => 'Bearer ' . (string) ($moveSession->body['token'] ?? '')];
@@ -245,6 +253,7 @@ $test->assertEquals(401, $moveWithoutToken->status, 'POST /api/probe/move reject
 
 $invalidMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
 $test->assertEquals(400, $invalidMove->status, 'POST /api/probe/move rejects invalid relative FCC coordinates');
+$test->assertEquals('Relative coordinates are invalid: x + y + z must be even.', $invalidMove->body['error']['message'] ?? null, 'invalid movement coordinates return a relative-coordinate message');
 
 $sameMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 0, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
 $test->assertEquals(400, $sameMove->status, 'POST /api/probe/move rejects current sector destination');
@@ -265,6 +274,7 @@ if ($moveProbe !== null) {
     $afterStartProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(98.0, $afterStartProbe?->deuteriumStock, 'probe deuterium stock is persisted after movement start');
     $test->assertEquals('preparing', $afterStartProbe?->status->value, 'probe status becomes preparing');
+    $test->assertEquals(4, $scheduledEvents->countByStatus('pending'), 'starting a movement schedules its phase events');
 
     $secondMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 2, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(409, $secondMove->status, 'second movement cannot start while active movement exists');
@@ -324,6 +334,11 @@ if ($moveProbe !== null) {
             'id' => $movement->id,
             'arrival' => gmdate('c', $base - 60),
         ]);
+        $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $movement->id, gmdate('c'), ['probeId' => $movement->probeId, 'phase' => 'arrived']);
+        $schedulerStats = $scheduler->processDueEvents();
+        $test->assertEquals(1, $schedulerStats['processed'], 'scheduler processes due movement events');
+        $test->assertEquals('idle', $probes->findByPlayerId($player->id)?->status->value, 'scheduler finalizes arrived movement without an API read');
+
         $arrivedProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
         $test->assertEquals('idle', $arrivedProbe->body['probe']['status'] ?? null, 'GET /api/probe finalizes arrived movement');
         $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $arrivedProbe->body['probe']['sector']['relative'] ?? null, 'after arrival target sector becomes current relative sector');
@@ -415,6 +430,61 @@ if ($riskProbe !== null) {
         $test->assertEquals(409, $deadSector->status, 'dead probe cannot access current sector details');
         $test->assert(!str_contains(json_encode($destroyedProbe->body, JSON_THROW_ON_ERROR), 'sector_x'), 'dead probe response does not expose absolute coordinates');
     }
+}
+
+$blackHolePlayer = $auth->registerPlayerWithPassword('black-hole', 'secret', 'Black Hole');
+$blackHoleSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'black-hole', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$blackHoleHeaders = ['Authorization' => 'Bearer ' . (string) ($blackHoleSession->body['token'] ?? '')];
+$blackHoleProbe = $probes->findByPlayerId($blackHolePlayer->id);
+if ($blackHoleProbe !== null) {
+    $sectorRepository->save(new SectorContent($blackHoleProbe->currentSector, [
+        new BlackHole('test-black-hole', null, 7.5, 22.0, true, 160.0),
+    ]));
+
+    $blackHoleSector = $kernel->handle('GET', '/api/probe/sector', $blackHoleHeaders);
+    $test->assertEquals(200, $blackHoleSector->status, 'black hole sector remains observable before trap threshold');
+    $test->assertEquals('extreme', $blackHoleSector->body['sector']['objects'][0]['dangerLevel'] ?? null, 'black holes are exposed as extreme danger objects');
+    $test->assert(isset($blackHoleSector->body['sector']['objects'][0]['noReturnCountdown']), 'black hole sector exposes the no-return countdown');
+
+    $trapEvent = $scheduledEvents->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $blackHoleProbe->id);
+    $test->assert($trapEvent !== null, 'observing a current black hole sector schedules a trap event');
+    if ($trapEvent !== null) {
+        $trapDelay = (new DateTimeImmutable($trapEvent->runAt))->getTimestamp() - time();
+        $test->assert($trapDelay >= 9890 && $trapDelay <= 9910, 'black hole trap delay is modulated by black hole mass');
+        $test->assertEquals(9900, $blackHoleSector->body['sector']['objects'][0]['noReturnCountdown']['delaySeconds'] ?? null, 'black hole countdown exposes the mass-modulated delay');
+        $pdo->prepare('UPDATE scheduled_events SET run_at = :run_at WHERE id = :id')->execute([
+            'id' => $trapEvent->id,
+            'run_at' => gmdate('c', time() - 1),
+        ]);
+        $trapStats = $scheduler->processDueEvents();
+        $test->assertEquals(1, $trapStats['processed'], 'scheduler processes due black hole trap events');
+        $test->assertEquals('trapped_by_black_hole', $probes->findByPlayerId($blackHolePlayer->id)?->status->value, 'black hole trap sets the terminal probe status');
+
+        $trappedProbe = $kernel->handle('GET', '/api/probe', $blackHoleHeaders);
+        $test->assertEquals('trapped_by_black_hole', $trappedProbe->body['probe']['status'] ?? null, 'GET /api/probe reports black hole trapped status');
+        $test->assertEquals('blind', $trappedProbe->body['probe']['sensorMode'] ?? null, 'black hole trapped probe has blind sensors');
+        $trappedSector = $kernel->handle('GET', '/api/probe/sector', $blackHoleHeaders);
+        $test->assertEquals(409, $trappedSector->status, 'black hole trapped probe cannot access sector sensors');
+        $trappedMove = $kernel->handle('POST', '/api/probe/move', $blackHoleHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+        $test->assertEquals(409, $trappedMove->status, 'black hole trapped probe cannot start movement');
+        $test->assertEquals('probe_trapped_by_black_hole', $trappedMove->body['error']['code'] ?? null, 'black hole trapped action error code is explicit');
+    }
+}
+
+$escapePlayer = $auth->registerPlayerWithPassword('escape-black-hole', 'secret', 'Escape');
+$escapeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'escape-black-hole', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$escapeHeaders = ['Authorization' => 'Bearer ' . (string) ($escapeSession->body['token'] ?? '')];
+$escapeProbe = $probes->findByPlayerId($escapePlayer->id);
+if ($escapeProbe !== null) {
+    $sectorRepository->save(new SectorContent($escapeProbe->currentSector, [
+        new BlackHole('escape-black-hole', null, 5.0, 18.0, false, 120.0),
+    ]));
+    $kernel->handle('GET', '/api/probe/sector', $escapeHeaders);
+    $test->assert($scheduledEvents->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $escapeProbe->id) !== null, 'black hole escape test starts with a pending trap event');
+
+    $escapeMove = $kernel->handle('POST', '/api/probe/move', $escapeHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $escapeMove->status, 'probe can start escaping from a black hole sector before trap threshold');
+    $test->assert($scheduledEvents->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $escapeProbe->id) === null, 'starting a movement cancels the pending black hole trap event');
 }
 
 foreach (['/api/me', '/api/probe', '/api/probe/sector', '/api/sector?x=0&y=0&z=0'] as $path) {

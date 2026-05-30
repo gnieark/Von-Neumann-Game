@@ -13,9 +13,11 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
+use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorFileRepository;
@@ -52,15 +54,31 @@ final class AppFactory
         $authMethods = new PlayerAuthRepository($pdo);
         $probes = new NeumannProbeRepository($pdo);
         $movements = new ProbeMovementRepository($pdo);
+        $scheduledEvents = new ScheduledEventRepository($pdo);
         $sessions = new SessionRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7));
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
         $observations = new SectorObservationService($sectorService, $visitedSectors);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
 
         return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors);
+    }
+
+    public function schedulerService(?PDO $pdo = null): SchedulerService
+    {
+        $pdo ??= $this->pdo(initializeSchema: true);
+        $appConfig = $this->appConfig();
+        $probes = new NeumannProbeRepository($pdo);
+        $movements = new ProbeMovementRepository($pdo);
+        $visitedSectors = new VisitedSectorRepository($pdo);
+        $scheduledEvents = new ScheduledEventRepository($pdo);
+        $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
+
+        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
     }
 
     public function authService(PDO $pdo): AuthService

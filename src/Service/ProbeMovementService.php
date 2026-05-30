@@ -10,18 +10,26 @@ use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
+use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
 
 final class ProbeMovementService
 {
+    public const BLACK_HOLE_TRAP_MIN_DELAY_SECONDS = 5400;
+    public const BLACK_HOLE_TRAP_MAX_DELAY_SECONDS = 10800;
+
     private readonly SectorGrid $grid;
 
     public function __construct(
         private readonly NeumannProbeRepository $probes,
         private readonly ProbeMovementRepository $movements,
         private readonly VisitedSectorRepository $visitedSectors,
+        private readonly ?ScheduledEventRepository $scheduledEvents = null,
+        private readonly ?SectorService $sectors = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -70,6 +78,8 @@ final class ProbeMovementService
         $probe->direction = $this->directionBetween($movement->origin, $movement->target);
         $probe->currentTask = 'intersector_movement';
         $this->probes->save($probe);
+        $this->cancelBlackHoleTrap($probe);
+        $this->scheduleMovementEvents($movement);
 
         return $movement;
     }
@@ -95,6 +105,7 @@ final class ProbeMovementService
             $probe->enteredCurrentSectorAt = $now->format('c');
             $this->probes->save($probe);
             $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
+            $this->scheduleBlackHoleTrapIfNeeded($probe);
 
             return $this->probes->findById($probe->id) ?? $probe;
         }
@@ -122,9 +133,31 @@ final class ProbeMovementService
         return $this->movements->findActiveByProbeId($probe->id);
     }
 
+    public function refreshCurrentSectorHazards(NeumannProbe $probe): void
+    {
+        $this->scheduleBlackHoleTrapIfNeeded($probe);
+    }
+
     public function latestMovementForProbe(NeumannProbe $probe): ?ProbeMovement
     {
         return $this->movements->findLatestByProbeId($probe->id);
+    }
+
+    public function pendingBlackHoleTrapForProbe(NeumannProbe $probe): ?array
+    {
+        $event = $this->scheduledEvents?->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $probe->id);
+        if ($event === null) {
+            return null;
+        }
+
+        $trapAt = new \DateTimeImmutable($event->runAt);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+
+        return [
+            'trapAt' => $event->runAt,
+            'secondsRemaining' => max(0, $trapAt->getTimestamp() - $now->getTimestamp()),
+            'delaySeconds' => (int) ($event->payload['delaySeconds'] ?? 0),
+        ];
     }
 
     public function phaseFor(?ProbeMovement $movement): string
@@ -206,6 +239,9 @@ final class ProbeMovementService
     {
         if ($probe->status === ProbeStatus::Dead) {
             throw new ProbeMovementException(409, 'probe_dead', 'The probe is no longer operational.');
+        }
+        if ($probe->status === ProbeStatus::TrappedByBlackHole) {
+            throw new ProbeMovementException(409, 'probe_trapped_by_black_hole', 'The probe is trapped beyond a black hole escape threshold.');
         }
     }
 
@@ -289,5 +325,100 @@ final class ProbeMovementService
     private function isAtOrAfter(\DateTimeImmutable $now, string $date): bool
     {
         return $now->getTimestamp() >= (new \DateTimeImmutable($date))->getTimestamp();
+    }
+
+    private function scheduleMovementEvents(ProbeMovement $movement): void
+    {
+        if ($this->scheduledEvents === null) {
+            return;
+        }
+
+        foreach ([
+            'accelerating' => $movement->preparationEndsAt,
+            'cruising' => $movement->accelerationEndsAt,
+            'decelerating' => $movement->cruiseEndsAt,
+            'arrived' => $movement->arrivalAt,
+        ] as $phase => $runAt) {
+            $this->scheduledEvents->schedule(
+                SchedulerService::PROBE_MOVEMENT_PHASE,
+                'probe_movement',
+                $movement->id,
+                $runAt,
+                [
+                    'probeId' => $movement->probeId,
+                    'phase' => $phase,
+                ],
+            );
+        }
+    }
+
+    public function trapProbeByBlackHole(NeumannProbe $probe): void
+    {
+        if ($this->movements->findActiveByProbeId($probe->id) !== null) {
+            return;
+        }
+        if ($this->sectors === null || !$this->sectors->getOrCreateSector($probe->currentSector)->hasBlackHole()) {
+            return;
+        }
+        if ($probe->status === ProbeStatus::Dead || $probe->status === ProbeStatus::TrappedByBlackHole) {
+            return;
+        }
+
+        $probe->status = ProbeStatus::TrappedByBlackHole;
+        $probe->velocityC = 0.0;
+        $probe->accelerationCPerDay = 0.0;
+        $probe->direction = new ProbeDirection(0.0, 0.0, 0.0);
+        $probe->currentTask = null;
+        $probe->integrityPercent = 0.0;
+        $this->probes->save($probe);
+    }
+
+    private function scheduleBlackHoleTrapIfNeeded(NeumannProbe $probe): void
+    {
+        if ($this->scheduledEvents === null || $this->sectors === null) {
+            return;
+        }
+        $delaySeconds = $this->blackHoleTrapDelaySecondsForCurrentSector($probe);
+        if ($delaySeconds === null) {
+            return;
+        }
+        if ($this->scheduledEvents->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $probe->id) !== null) {
+            return;
+        }
+
+        $this->scheduledEvents->schedule(
+            SchedulerService::PROBE_BLACK_HOLE_TRAP,
+            'probe',
+            $probe->id,
+            gmdate('c', time() + $delaySeconds),
+            ['delaySeconds' => $delaySeconds],
+        );
+    }
+
+    private function cancelBlackHoleTrap(NeumannProbe $probe): void
+    {
+        $this->scheduledEvents?->cancelPending(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $probe->id);
+    }
+
+    private function blackHoleTrapDelaySecondsForCurrentSector(NeumannProbe $probe): ?int
+    {
+        if ($this->sectors === null) {
+            return null;
+        }
+
+        $masses = [];
+        foreach ($this->sectors->getOrCreateSector($probe->currentSector)->getObjects() as $object) {
+            if ($object instanceof BlackHole) {
+                $masses[] = $object->getMass();
+            }
+        }
+        if ($masses === []) {
+            return null;
+        }
+
+        $mass = max($masses);
+        $factor = max(0.0, min(1.0, ($mass - 3.0) / 27.0));
+
+        return (int) round(self::BLACK_HOLE_TRAP_MAX_DELAY_SECONDS - ($factor * (self::BLACK_HOLE_TRAP_MAX_DELAY_SECONDS - self::BLACK_HOLE_TRAP_MIN_DELAY_SECONDS)));
     }
 }

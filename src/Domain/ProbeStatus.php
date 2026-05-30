@@ -13,5 +13,6 @@ enum ProbeStatus: string
     case Decelerating = 'decelerating';
     case Orbiting = 'orbiting';
     case Disabled = 'disabled';
+    case TrappedByBlackHole = 'trapped_by_black_hole';
     case Dead = 'dead';
 }

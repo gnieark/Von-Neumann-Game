@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="{{language}}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{pageTitle}}</title>
+    <link rel="stylesheet" href="/assets/app.css">
+    <script src="/assets/app.js" defer></script>
+</head>
+<body class="{{bodyClass}}" data-authenticated="{{authenticated}}">
+    <script type="application/json" id="i18n-json">{{i18nJson}}</script>
+    <header class="topbar">
+        <div>
+            <span class="sigil">VN</span>
+            <span class="system-name">Von Neumann Game</span>
+        </div>
+        <form class="language-form" method="get" action="/">
+            <label>
+                <span>{{t.languageLabel}}</span>
+                <select name="lang">
+                    <option value="fr" {{frSelected}}>{{t.languageFrench}}</option>
+                    <option value="en" {{enSelected}}>{{t.languageEnglish}}</option>
+                </select>
+            </label>
+            <button type="submit">OK</button>
+        </form>
+        <!-- BEGIN sessionbar -->
+        <form class="logout-form" method="post" action="/logout">
+            <span class="operator">{{sessionbar.displayName}}</span>
+            <button type="submit">{{t.logout}}</button>
+        </form>
+        <!-- END sessionbar -->
+    </header>
+
+    <main>
+        <!-- BEGIN loginview -->
+        <section class="auth-shell">
+            <form class="login-panel" method="post" action="/login">
+                <div>
+                    <p class="eyebrow">{{t.loginEyebrow}}</p>
+                    <h1>{{t.loginTitle}}</h1>
+                </div>
+                <!-- BEGIN loginview.loginerror -->
+                <p class="form-error">{{loginview.loginerror.message}}</p>
+                <!-- END loginview.loginerror -->
+                <label>
+                    {{t.username}}
+                    <input name="username" autocomplete="username" required>
+                </label>
+                <label>
+                    {{t.password}}
+                    <input name="password" type="password" autocomplete="current-password" required>
+                </label>
+                <label class="remember">
+                    <input name="remember" type="checkbox" value="1">
+                    <span>{{t.rememberMe}}</span>
+                </label>
+                <button class="primary" type="submit">{{t.authenticate}}</button>
+            </form>
+        </section>
+
+        <section class="game-brief">
+            <div class="brief-copy">
+                <p class="eyebrow">{{t.briefEyebrow}}</p>
+                <h2>{{t.briefTitle}}</h2>
+                <p>{{t.briefText}}</p>
+            </div>
+            <div class="brief-placeholder" aria-hidden="true">
+                <div class="orbit-line"></div>
+                <div class="probe-mark"></div>
+            </div>
+        </section>
+        <!-- END loginview -->
+
+        <!-- BEGIN consoleview -->
+        <section class="console-grid">
+            <aside class="nav-panel">
+                <p class="eyebrow">{{t.consoleEyebrow}}</p>
+                <h1>{{consoleview.displayName}}</h1>
+                <button class="panel-tab active" data-panel-target="probe-panel" type="button">{{t.tabProbe}}</button>
+                <button class="panel-tab" data-panel-target="environment-panel" type="button">{{t.tabEnvironment}}</button>
+                <button class="panel-tab" data-panel-target="systems-panel" type="button">{{t.tabSystems}}</button>
+                <button class="panel-tab" data-panel-target="actions-panel" type="button">{{t.tabActions}}</button>
+            </aside>
+
+            <section class="workspace">
+                <article id="probe-panel" class="data-panel active">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">GET /api/probe</p>
+                            <h2>{{t.tabProbe}}</h2>
+                        </div>
+                        <button class="icon-button" data-refresh="probe" type="button" title="{{t.refresh}}">⟳</button>
+                    </div>
+                    <div id="probe-summary" class="metrics"></div>
+                    <pre id="probe-json" class="json-dump">{{t.loading}}</pre>
+                </article>
+
+                <article id="environment-panel" class="data-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">GET /api/probe/sector</p>
+                            <h2>{{t.tabEnvironment}}</h2>
+                        </div>
+                        <button class="icon-button" data-refresh="sector" type="button" title="{{t.refresh}}">⟳</button>
+                    </div>
+                    <form id="sector-form" class="coordinate-form">
+                        <label>X<input name="x" type="number" step="1" value="0"></label>
+                        <label>Y<input name="y" type="number" step="1" value="0"></label>
+                        <label>Z<input name="z" type="number" step="1" value="0"></label>
+                        <button type="submit">{{t.scan}}</button>
+                    </form>
+                    <div id="sector-objects" class="sector-objects"></div>
+                    <pre id="sector-json" class="json-dump">{{t.loading}}</pre>
+                </article>
+
+                <article id="systems-panel" class="data-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">GET /api/probe</p>
+                            <h2>{{t.tabSystems}}</h2>
+                        </div>
+                        <button class="icon-button" data-refresh="probe" type="button" title="{{t.refresh}}">⟳</button>
+                    </div>
+                    <div id="systems-summary" class="metrics"></div>
+                    <pre id="inventory-json" class="json-dump">{{t.loading}}</pre>
+                </article>
+
+                <article id="actions-panel" class="data-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">POST /api/probe/move</p>
+                            <h2>{{t.movement}}</h2>
+                        </div>
+                    </div>
+                    <form id="move-form" class="action-panel">
+                        <label>{{t.targetX}}<input name="x" type="number" step="1" value="1"></label>
+                        <label>{{t.targetY}}<input name="y" type="number" step="1" value="1"></label>
+                        <label>{{t.targetZ}}<input name="z" type="number" step="1" value="0"></label>
+                        <button class="primary" type="submit">{{t.initiateJump}}</button>
+                    </form>
+                    <p id="action-status" class="action-status"></p>
+                    <pre id="movement-json" class="json-dump"></pre>
+                </article>
+            </section>
+        </section>
+        <!-- END consoleview -->
+    </main>
+</body>
+</html>
