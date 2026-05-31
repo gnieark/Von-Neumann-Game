@@ -415,6 +415,21 @@ button:disabled {
     margin-bottom: 14px;
 }
 
+.sector-context {
+    margin: -6px 0 10px;
+    color: var(--muted);
+    font-size: .9rem;
+}
+
+.sector-summary {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(143, 182, 189, .28);
+    background: rgba(143, 182, 189, .08);
+    color: #dce9eb;
+    font-weight: 700;
+}
+
 .sector-object {
     border: 1px solid rgba(255,255,255,.12);
     background: rgba(0,0,0,.18);

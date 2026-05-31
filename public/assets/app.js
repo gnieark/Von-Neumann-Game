@@ -70,12 +70,147 @@
             '<div><dt>' + escapeHtml(item.label) + '</dt><dd>' + escapeHtml(item.value) + '</dd></div>'
         )).join('') + '</dl>'
     );
+    const formatText = (template, values) => Object.entries(values).reduce(
+        (text, [key, value]) => text.replaceAll('{' + key + '}', String(value)),
+        template
+    );
+    const pluralWord = (count, singularKey, singularFallback, pluralKey, pluralFallback) => (
+        Number(count) === 1 ? t(singularKey, singularFallback) : t(pluralKey, pluralFallback)
+    );
+    const numericCount = (value) => {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : 0;
+    };
+    const sumCount = (items, key) => items.reduce((total, item) => total + numericCount(item[key]), 0);
+    const sectorContext = (sector) => {
+        const distance = Number(sector && sector.distance);
+        if (!Number.isFinite(distance)) {
+            return t('sectorContextUnavailable', 'Displayed sector: unavailable.');
+        }
+        if (distance === 0) {
+            return t('sectorContextCurrent', 'Displayed sector: current probe position.');
+        }
+
+        return formatText(t('sectorContextRemote', 'Displayed sector: sector {distance} {sectorStepWord} away.'), {
+            distance,
+            sectorStepWord: pluralWord(distance, 'sectorStepSingular', 'sector', 'sectorStepPlural', 'sectors'),
+        });
+    };
+    const detailedSectorSummary = (objects) => {
+        if (objects.length === 0) {
+            return t('sectorSummaryEmpty', 'Empty sector.');
+        }
+
+        const blackHoles = objects.filter((object) => object.type === 'black_hole');
+        if (blackHoles.length > 0) {
+            const otherObjects = objects.length - blackHoles.length;
+            if (otherObjects === 0) {
+                if (blackHoles.length === 1) {
+                    return t('sectorSummaryBlackHole', 'Hazardous sector: black hole detected.');
+                }
+
+                return formatText(t('sectorSummaryBlackHoles', 'Hazardous sector: {blackHoles} {blackHoleWord} detected.'), {
+                    blackHoles: blackHoles.length,
+                    blackHoleWord: pluralWord(blackHoles.length, 'blackHoleSingular', 'black hole', 'blackHolePlural', 'black holes'),
+                });
+            }
+
+            return formatText(t('sectorSummaryBlackHoleWithObjects', 'Hazardous sector: {blackHoles} {blackHoleWord} and {objects} {otherObjectWord} present.'), {
+                blackHoles: blackHoles.length,
+                blackHoleWord: pluralWord(blackHoles.length, 'blackHoleSingular', 'black hole', 'blackHolePlural', 'black holes'),
+                objects: otherObjects,
+                otherObjectWord: pluralWord(otherObjects, 'otherObjectSingular', 'other object', 'otherObjectPlural', 'other objects'),
+            });
+        }
+
+        const solarSystems = objects.filter((object) => object.type === 'solar_system');
+        if (solarSystems.length > 0) {
+            const planets = sumCount(solarSystems, 'planetCount');
+            const orbitals = sumCount(solarSystems, 'orbitalBodyCount');
+            const stars = Math.max(1, sumCount(solarSystems, 'starCount'));
+
+            return formatText(t('sectorSummarySolarSystem', 'Solar system: {planets} {planetWord} among {orbitals} {orbitalObjectWord}, around {stars} {starWord}.'), {
+                planets,
+                planetWord: pluralWord(planets, 'planetSingular', 'planet', 'planetPlural', 'planets'),
+                orbitals,
+                orbitalObjectWord: pluralWord(orbitals, 'orbitalObjectSingular', 'orbital object', 'orbitalObjectPlural', 'orbital objects'),
+                stars,
+                starWord: pluralWord(stars, 'starSingular', 'star', 'starPlural', 'stars'),
+            });
+        }
+
+        if (objects.length === 1) {
+            return t('sectorSummarySingleObject', 'Occupied sector: 1 object detected.');
+        }
+
+        return formatText(t('sectorSummaryObjects', 'Occupied sector: {count} objects detected.'), {
+            count: objects.length,
+        });
+    };
+    const estimatedSectorSummary = (estimate) => {
+        if (Number(estimate.blackHoleProbability || 0) >= 0.5) {
+            return t('sectorSummaryBlackHoleLikely', 'Strong gravity signature: black hole likely.');
+        }
+        if (estimate.star) {
+            return formatText(t('sectorSummaryNeighborStar', 'Probable stellar system: {min} to {max} planets estimated.'), {
+                min: numericCount(estimate.planetCountMin),
+                max: numericCount(estimate.planetCountMax),
+            });
+        }
+
+        return t('sectorSummaryNoMajorNearby', 'No major nearby object estimated.');
+    };
+    const possibleSectorSummary = (sector) => {
+        const signatures = Array.isArray(sector.possibleObjects) ? sector.possibleObjects : [];
+        if (signatures.includes('strong_gravity_signature')) {
+            return t('sectorSummaryGravitySignature', 'Strong gravity signature: black hole possible.');
+        }
+        if (signatures.includes('stellar_mass_detected')) {
+            return t('sectorSummaryDistantStar', 'Distant stellar signature detected.');
+        }
+        if (signatures.includes('dust_cloud_possible')) {
+            return t('sectorSummaryDustPossible', 'Possible dust cloud in the sector.');
+        }
+
+        return t('sectorSummaryNoMajorSignature', 'No major signature detected.');
+    };
+    const sectorSummary = (sector) => {
+        if (!sector) {
+            return t('sectorSummaryUnavailable', 'No sector analysis available.');
+        }
+        if (Array.isArray(sector.objects)) {
+            return detailedSectorSummary(sector.objects);
+        }
+        if (sector.estimatedObjects && typeof sector.estimatedObjects === 'object') {
+            return estimatedSectorSummary(sector.estimatedObjects);
+        }
+        if (Array.isArray(sector.possibleObjects)) {
+            return possibleSectorSummary(sector);
+        }
+
+        return t('sectorSummaryLongRange', 'Long-range estimate: not enough detail for a reliable inventory.');
+    };
+    const syncSectorForm = (sector) => {
+        const relative = sector && sector.relativeCoordinates;
+        const form = document.getElementById('sector-form');
+        if (!form || !relative) {
+            return;
+        }
+
+        ['x', 'y', 'z'].forEach((field) => {
+            if (form.elements[field]) {
+                form.elements[field].value = relative[field] ?? 0;
+            }
+        });
+    };
     const renderSectorObjects = (sector) => {
         const node = document.getElementById('sector-objects');
         if (!node) {
             return;
         }
 
+        setText('sector-context', sectorContext(sector));
+        setText('sector-summary', sectorSummary(sector));
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         currentMineTargets = objects.flatMap((object) => {
             const direct = object.mannyMineable ? [{
@@ -301,6 +436,7 @@
     async function loadCurrentSector() {
         try {
             const data = await api('/api/probe/sector');
+            syncSectorForm(data.sector);
             renderSectorObjects(data.sector);
             setText('sector-json', pretty(data));
         } catch (error) {
@@ -351,6 +487,7 @@
         }
         try {
             const data = await api('/api/sector?' + query.toString());
+            syncSectorForm(data.sector);
             renderSectorObjects(data.sector);
             setText('sector-json', pretty(data));
         } catch (error) {
