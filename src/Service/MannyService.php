@@ -8,6 +8,7 @@ use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Sector\Asteroid;
@@ -102,16 +103,17 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
-    public function startMining(NeumannProbe $probe, string $uid, string $objectId, string $resourceType, float $targetAmount): Manny
+    public function startMining(NeumannProbe $probe, string $uid, string $objectId, string|array $resourceTypes, float $targetAmount): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
         $this->ensureMannyInRange($manny, $probe);
         $this->ensureMannyIdle($manny);
 
-        $resourceType = strtolower(trim($resourceType));
-        if (!in_array($resourceType, ['deuterium', 'metals', 'other'], true)) {
-            throw new MannyActionException(400, 'bad_request', 'Mining resource must be deuterium, metals or other.');
+        try {
+            $selectedResources = ResourceComposition::normalizeSelection($resourceTypes);
+        } catch (\InvalidArgumentException $e) {
+            throw new MannyActionException(400, 'bad_request', $e->getMessage());
         }
         $targetAmount = round($targetAmount, 4);
         if ($targetAmount <= 0) {
@@ -123,11 +125,16 @@ final class MannyService
             throw new MannyActionException(422, 'invalid_mining_target', 'This object cannot be mined by a Manny.');
         }
 
-        $available = $this->availableResourceTypes($target);
-        if (!in_array($resourceType, $available, true)) {
+        $composition = $this->resourceComposition($target);
+        $available = ResourceComposition::availableTypes($composition);
+        $unavailable = array_diff($selectedResources, $available);
+        if ($unavailable !== []) {
             throw new MannyActionException(422, 'resource_unavailable', 'The requested resource is not present on this object.');
         }
-        if ($resourceType !== 'deuterium' && $targetAmount > $this->freeCargoCapacity($probe) + ($manny->isOnProbe() ? 0.05 : 0.0) + 0.00001) {
+
+        $resourceProfile = ResourceComposition::profileForSelection($composition, $selectedResources);
+        $storedAmount = round($targetAmount * (($resourceProfile['metals'] ?? 0.0) + ($resourceProfile['other'] ?? 0.0)), 4);
+        if ($storedAmount > $this->freeCargoCapacity($probe) + ($manny->isOnProbe() ? 0.05 : 0.0) + 0.00001) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this mining target.');
         }
 
@@ -139,10 +146,15 @@ final class MannyService
         $manny->taskEndsAt = $now->modify('+' . $this->miningDurationSeconds($targetAmount) . ' seconds')->format('c');
         $manny->taskPayload = [
             'objectId' => $objectId,
-            'resourceType' => $resourceType,
+            'resourceType' => $selectedResources[0],
+            'resourceTypes' => $selectedResources,
             'targetAmount' => $targetAmount,
             'depositedAmount' => 0.0,
+            'depositedResources' => [],
             'availableResources' => $available,
+            'resourceComposition' => $composition,
+            'resourceProfile' => $resourceProfile,
+            'target' => $this->miningTargetArray($target),
         ];
         $manny->cargoDeuterium = 0.0;
         $manny->cargoMetals = 0.0;
@@ -158,6 +170,17 @@ final class MannyService
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
         $this->ensureMannyInRange($manny, $probe);
 
+        if ($manny->currentTask === Manny::TASK_REPAIR) {
+            $metalsCost = round(max(0.0, (float) ($manny->taskPayload['metalsCost'] ?? 0.0)), 4);
+            if ($metalsCost > 0.0) {
+                $this->transferResourceToProbe($probe, 'metals', $metalsCost);
+                $this->probes->save($probe);
+            }
+            $this->clearTask($manny);
+            $this->mannies->save($manny);
+
+            return $this->requiredManny($probe, $uid);
+        }
         if ($manny->isOnProbe()) {
             return $manny;
         }
@@ -247,23 +270,25 @@ final class MannyService
 
         $elapsed = max(0, $now->getTimestamp() - (new \DateTimeImmutable($manny->taskStartedAt))->getTimestamp());
         $progress = $this->miningProgress((float) ($manny->taskPayload['targetAmount'] ?? 0), $elapsed);
-        $resourceType = (string) ($manny->taskPayload['resourceType'] ?? 'metals');
+        $resourceProfile = $this->miningResourceProfile($manny);
         $deposited = (float) ($manny->taskPayload['depositedAmount'] ?? 0);
         $delivered = round((float) $progress['deliveredAmount'], 4);
         if ($delivered > $deposited) {
-            $accepted = $this->transferResourceToProbe($probe, $resourceType, round($delivered - $deposited, 4));
-            $manny->taskPayload['depositedAmount'] = round($deposited + $accepted, 4);
+            $this->transferMiningResourcesToProbe($probe, $resourceProfile, round($delivered - $deposited, 4));
+            $manny->taskPayload['depositedAmount'] = $delivered;
+            $manny->taskPayload['depositedResources'] = $this->resourceAmountsForTotal((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
         }
 
-        $this->setMannyCargo($manny, $resourceType, (float) $progress['cargoAmount']);
+        $this->setMannyCargoProfile($manny, $resourceProfile, (float) $progress['cargoAmount']);
         $manny->taskPayload['phase'] = $progress['phase'];
         $manny->taskPayload['tripIndex'] = $progress['tripIndex'];
 
         if ($progress['phase'] === 'complete' || $this->isAtOrAfter($now, $manny->taskEndsAt)) {
             $remaining = round((float) ($manny->taskPayload['targetAmount'] ?? 0) - (float) ($manny->taskPayload['depositedAmount'] ?? 0), 4);
             if ($remaining > 0) {
-                $accepted = $this->transferResourceToProbe($probe, $resourceType, $remaining);
-                $manny->taskPayload['depositedAmount'] = round((float) ($manny->taskPayload['depositedAmount'] ?? 0) + $accepted, 4);
+                $this->transferMiningResourcesToProbe($probe, $resourceProfile, $remaining);
+                $manny->taskPayload['depositedAmount'] = round((float) ($manny->taskPayload['depositedAmount'] ?? 0) + $remaining, 4);
+                $manny->taskPayload['depositedResources'] = $this->resourceAmountsForTotal((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
             }
             $this->clearMannyCargo($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
@@ -344,27 +369,44 @@ final class MannyService
     }
 
     /**
-     * @return array<string>
+     * @return array<string, float>
      */
-    private function availableResourceTypes(UniverseObject $object): array
+    private function resourceComposition(UniverseObject $object): array
+    {
+        $data = $object->toArray();
+
+        return ResourceComposition::fromHints($data['estimatedResources'] ?? $data['resourceHints'] ?? []);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function miningTargetArray(UniverseObject $object): array
     {
         $data = $object->toArray();
         $resources = $data['estimatedResources'] ?? $data['resourceHints'] ?? [];
-        $types = [];
-        foreach ($resources as $resource) {
-            $resource = strtolower((string) $resource);
-            if (str_contains($resource, 'water') || str_contains($resource, 'ice') || str_contains($resource, 'volatile') || str_contains($resource, 'hydrogen')) {
-                $types[] = 'deuterium';
-                continue;
-            }
-            if (str_contains($resource, 'iron') || str_contains($resource, 'nickel') || str_contains($resource, 'metal') || str_contains($resource, 'platinum') || str_contains($resource, 'magnesium')) {
-                $types[] = 'metals';
-                continue;
-            }
-            $types[] = 'other';
+        $composition = ResourceComposition::fromHints($resources);
+
+        $target = [
+            'id' => $object->getId(),
+            'type' => $object->getType()->value,
+            'name' => $object->getName(),
+            'mass' => $object->getMass(),
+            'radius' => $object->getRadius(),
+            'resources' => $resources,
+            'resourceTypes' => ResourceComposition::availableTypes($composition),
+            'resourceComposition' => $composition,
+        ];
+
+        if ($object instanceof Asteroid) {
+            $target['composition'] = $data['composition'] ?? null;
+            $target['sizeCategory'] = $data['sizeCategory'] ?? null;
+        }
+        if ($object instanceof Planet) {
+            $target['category'] = $object->getCategory();
         }
 
-        return array_values(array_unique($types === [] ? ['other'] : $types));
+        return $target;
     }
 
     private function miningDurationSeconds(float $targetAmount): int
@@ -449,6 +491,17 @@ final class MannyService
         return round($accepted, 4);
     }
 
+    /**
+     * @param array<string, float> $profile
+     */
+    private function transferMiningResourcesToProbe(NeumannProbe $probe, array $profile, float $amount): void
+    {
+        $amounts = $this->resourceAmountsForTotal($amount, $profile);
+        foreach ($amounts as $type => $resourceAmount) {
+            $this->transferResourceToProbe($probe, $type, $resourceAmount);
+        }
+    }
+
     private function freeCargoCapacity(NeumannProbe $probe): float
     {
         $used = ProbeInventory::defaultForProbe($probe, $this->mannies->findByProbeId($probe->id))->usedCapacity();
@@ -456,16 +509,78 @@ final class MannyService
         return max(0.0, round(1.0 - $used, 4));
     }
 
-    private function setMannyCargo(Manny $manny, string $resourceType, float $amount): void
+    /**
+     * @param array<string, float> $profile
+     */
+    private function setMannyCargoProfile(Manny $manny, array $profile, float $amount): void
     {
         $this->clearMannyCargo($manny);
-        if ($resourceType === 'deuterium') {
-            $manny->cargoDeuterium = round($amount, 4);
-        } elseif ($resourceType === 'metals') {
-            $manny->cargoMetals = round($amount, 4);
-        } else {
-            $manny->cargoOther = round($amount, 4);
+        $amounts = $this->resourceAmountsForTotal($amount, $profile);
+        $manny->cargoDeuterium = $amounts['deuterium'] ?? 0.0;
+        $manny->cargoMetals = $amounts['metals'] ?? 0.0;
+        $manny->cargoOther = $amounts['other'] ?? 0.0;
+    }
+
+    /**
+     * @return array<string, float>
+     */
+    private function miningResourceProfile(Manny $manny): array
+    {
+        $profile = $manny->taskPayload['resourceProfile'] ?? null;
+        if (is_array($profile)) {
+            $normalized = array_fill_keys(ResourceComposition::TYPES, 0.0);
+            foreach (ResourceComposition::TYPES as $type) {
+                $normalized[$type] = round(max(0.0, (float) ($profile[$type] ?? 0.0)), 4);
+            }
+
+            if (array_sum($normalized) > 0.0) {
+                return $normalized;
+            }
         }
+
+        $resourceType = (string) ($manny->taskPayload['resourceType'] ?? 'metals');
+        try {
+            $resourceType = ResourceComposition::normalizeSelection($resourceType)[0];
+        } catch (\InvalidArgumentException) {
+            $resourceType = 'metals';
+        }
+
+        $legacyProfile = array_fill_keys(ResourceComposition::TYPES, 0.0);
+        $legacyProfile[$resourceType] = 1.0;
+
+        return $legacyProfile;
+    }
+
+    /**
+     * @param array<string, float> $profile
+     * @return array<string, float>
+     */
+    private function resourceAmountsForTotal(float $amount, array $profile): array
+    {
+        $amount = round(max(0.0, $amount), 4);
+        $positiveTypes = array_values(array_filter(
+            ResourceComposition::TYPES,
+            static fn(string $type): bool => (float) ($profile[$type] ?? 0.0) > 0.0,
+        ));
+        if ($positiveTypes === []) {
+            return array_fill_keys(ResourceComposition::TYPES, 0.0);
+        }
+
+        $amounts = array_fill_keys(ResourceComposition::TYPES, 0.0);
+        $remaining = $amount;
+        $lastIndex = count($positiveTypes) - 1;
+        foreach ($positiveTypes as $index => $type) {
+            if ($index === $lastIndex) {
+                $amounts[$type] = round(max(0.0, $remaining), 4);
+                break;
+            }
+
+            $resourceAmount = round($amount * (float) ($profile[$type] ?? 0.0), 4);
+            $amounts[$type] = $resourceAmount;
+            $remaining = round($remaining - $resourceAmount, 4);
+        }
+
+        return $amounts;
     }
 
     private function clearMannyCargo(Manny $manny): void

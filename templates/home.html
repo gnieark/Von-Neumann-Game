@@ -35,7 +35,7 @@
     <main>
         <!-- BEGIN loginview -->
         <section class="auth-shell">
-            <form class="login-panel" method="post" action="/login">
+            <div class="login-panel">
                 <div>
                     <p class="eyebrow">{{t.loginEyebrow}}</p>
                     <h1>{{t.loginTitle}}</h1>
@@ -43,6 +43,45 @@
                 <!-- BEGIN loginview.loginerror -->
                 <p class="form-error">{{loginview.loginerror.message}}</p>
                 <!-- END loginview.loginerror -->
+                <!-- BEGIN loginview.oauthsection -->
+                <div class="oauth-section">
+                    <p>{{t.oauthSeparator}}</p>
+                    <div class="oauth-buttons">
+                        <!-- BEGIN loginview.oauthsection.oauthprovider -->
+                        <a class="oauth-button {{loginview.oauthsection.oauthprovider.class}}" href="{{loginview.oauthsection.oauthprovider.url}}">{{loginview.oauthsection.oauthprovider.label}}</a>
+                        <!-- END loginview.oauthsection.oauthprovider -->
+                    </div>
+                </div>
+                <!-- END loginview.oauthsection -->
+                <!-- BEGIN loginview.oauthmissing -->
+                <p class="form-error">{{t.oauthUnavailable}}</p>
+                <!-- END loginview.oauthmissing -->
+            </div>
+        </section>
+
+        <section class="game-brief">
+            <div class="brief-copy">
+                <p class="eyebrow">{{t.briefEyebrow}}</p>
+                <h2>{{t.briefTitle}}</h2>
+                <p>{{t.briefText}}</p>
+            </div>
+            <div class="brief-placeholder" aria-hidden="true">
+                <div class="orbit-line"></div>
+                <div class="probe-mark"></div>
+            </div>
+        </section>
+        <!-- END loginview -->
+
+        <!-- BEGIN passwordauthview -->
+        <section class="auth-shell">
+            <form class="login-panel" method="post" action="/authbypwd">
+                <div>
+                    <p class="eyebrow">{{t.passwordDebugEyebrow}}</p>
+                    <h1>{{t.passwordDebugTitle}}</h1>
+                </div>
+                <!-- BEGIN passwordauthview.loginerror -->
+                <p class="form-error">{{passwordauthview.loginerror.message}}</p>
+                <!-- END passwordauthview.loginerror -->
                 <label>
                     {{t.username}}
                     <input name="username" autocomplete="username" required>
@@ -58,19 +97,59 @@
                 <button class="primary" type="submit">{{t.authenticate}}</button>
             </form>
         </section>
+        <!-- END passwordauthview -->
 
-        <section class="game-brief">
-            <div class="brief-copy">
-                <p class="eyebrow">{{t.briefEyebrow}}</p>
-                <h2>{{t.briefTitle}}</h2>
-                <p>{{t.briefText}}</p>
-            </div>
-            <div class="brief-placeholder" aria-hidden="true">
-                <div class="orbit-line"></div>
-                <div class="probe-mark"></div>
-            </div>
+        <!-- BEGIN oauthpseudoview -->
+        <section class="auth-shell">
+            <form class="login-panel" method="post" action="/auth/pseudo">
+                <div>
+                    <p class="eyebrow">{{t.oauthPseudoEyebrow}}</p>
+                    <h1>{{t.oauthPseudoTitle}}</h1>
+                </div>
+                <!-- BEGIN oauthpseudoview.error -->
+                <p class="form-error">{{oauthpseudoview.error.message}}</p>
+                <!-- END oauthpseudoview.error -->
+                <input name="csrf" type="hidden" value="{{oauthpseudoview.csrf}}">
+                <label>
+                    {{t.pseudonym}}
+                    <input name="pseudonym" value="{{oauthpseudoview.pseudonym}}" autocomplete="nickname" minlength="3" maxlength="40" required>
+                </label>
+                <button class="primary" type="submit">{{t.createProbe}}</button>
+            </form>
         </section>
-        <!-- END loginview -->
+        <!-- END oauthpseudoview -->
+
+        <!-- BEGIN aboutview -->
+        <section class="about-page">
+            <p class="eyebrow">{{t.aboutEyebrow}}</p>
+            <h1>{{t.aboutTitle}}</h1>
+            <p>
+                {{t.aboutIntro}}
+            </p>
+
+            <h2>{{t.aboutPrivacyTitle}}</h2>
+            <p>
+                {{t.aboutPrivacyText}}
+            </p>
+            <p>
+                {{t.aboutCookiesText}}
+            </p>
+
+            <h2>{{t.aboutHostingTitle}}</h2>
+            <p>
+                {{t.aboutHostingText}}
+            </p>
+
+            <h2>{{t.aboutContactTitle}}</h2>
+            <p>
+                {{t.aboutContactText}}
+            </p>
+
+            <p class="about-source">
+                <a href="https://github.com/gnieark/Von-Neumann-Game">github.com/gnieark/Von-Neumann-Game</a>
+            </p>
+        </section>
+        <!-- END aboutview -->
 
         <!-- BEGIN consoleview -->
         <section class="console-grid">
@@ -164,5 +243,8 @@
         </section>
         <!-- END consoleview -->
     </main>
+    <footer class="site-footer">
+        <a href="/about">{{t.aboutFooterLink}}</a>
+    </footer>
 </body>
 </html>

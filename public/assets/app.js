@@ -30,7 +30,8 @@
     const invalidCoordinateMessage = t('invalidCoordinates', 'Invalid relative coordinates: x + y + z must be even.');
     const alreadyMovingMessage = 'The probe is already moving between sectors.';
     let probeAlreadyMoving = false;
-    let currentMineTargets = [];
+    let currentMannyMineTargets = [];
+    const miningResourceTypes = ['deuterium', 'metals', 'other'];
     const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) {
@@ -82,6 +83,164 @@
         return Number.isFinite(number) ? number : 0;
     };
     const sumCount = (items, key) => items.reduce((total, item) => total + numericCount(item[key]), 0);
+    const resourceTypeLabel = (type) => ({
+        deuterium: t('deuterium', 'Deuterium'),
+        metals: t('metals', 'Metals'),
+        other: t('otherResources', 'Other'),
+    }[type] || type);
+    const resourceTypeFromHint = (hint) => {
+        const value = String(hint || '').toLowerCase();
+        if (value.includes('water') || value.includes('ice') || value.includes('volatile') || value.includes('hydrogen')) {
+            return 'deuterium';
+        }
+        if (value.includes('iron') || value.includes('nickel') || value.includes('metal') || value.includes('platinum') || value.includes('magnesium')) {
+            return 'metals';
+        }
+
+        return 'other';
+    };
+    const resourceCompositionForTarget = (target) => {
+        const composition = target && target.resourceComposition && typeof target.resourceComposition === 'object'
+            ? target.resourceComposition
+            : null;
+        if (composition) {
+            return miningResourceTypes.reduce((result, type) => {
+                result[type] = Math.max(0, Number(composition[type]) || 0);
+                return result;
+            }, {});
+        }
+
+        const hints = Array.isArray(target && target.resources) ? target.resources : [];
+        const counts = miningResourceTypes.reduce((result, type) => {
+            result[type] = 0;
+            return result;
+        }, {});
+        hints.forEach((hint) => {
+            counts[resourceTypeFromHint(hint)] += 1;
+        });
+        const total = miningResourceTypes.reduce((sum, type) => sum + counts[type], 0) || 1;
+
+        return miningResourceTypes.reduce((result, type) => {
+            result[type] = counts[type] / total;
+            return result;
+        }, {});
+    };
+    const resourceTypesForTarget = (target) => {
+        if (!target) {
+            return [];
+        }
+        if (Array.isArray(target.resourceTypes) && target.resourceTypes.length > 0) {
+            return miningResourceTypes.filter((type) => target.resourceTypes.includes(type));
+        }
+        const composition = resourceCompositionForTarget(target);
+
+        return miningResourceTypes.filter((type) => Number(composition[type]) > 0);
+    };
+    const resourceCompositionLabel = (target) => {
+        const composition = resourceCompositionForTarget(target);
+        const parts = miningResourceTypes
+            .filter((type) => Number(composition[type]) > 0)
+            .map((type) => resourceTypeLabel(type) + ' ' + Math.round(Number(composition[type]) * 100) + '%');
+
+        return parts.length > 0 ? parts.join(', ') : t('compositionUnknown', 'unknown composition');
+    };
+    const mineTargetLabel = (target) => {
+        const name = target.name || target.id || '';
+        const base = [target.type || 'object', name].filter(Boolean).join(' ');
+
+        return base + ' (' + resourceCompositionLabel(target) + ')';
+    };
+    const taskLabel = (task) => ({
+        repair: t('repair', 'Repair'),
+        mining: t('mine', 'Mine'),
+        returning: t('returning', 'Returning'),
+    }[task] || task || t('noTask', 'None'));
+    const selectedResourceLabels = (types) => {
+        const resources = Array.isArray(types) ? types : (types ? [types] : []);
+
+        return resources.map(resourceTypeLabel).join(', ');
+    };
+    const miningTargetDetails = (target) => {
+        if (!target) {
+            return t('unknownMiningTarget', 'unknown target');
+        }
+
+        const name = target.name || target.id || t('unknownMiningTarget', 'unknown target');
+        const type = target.type || t('object', 'object');
+        const details = [];
+        if (target.composition) {
+            details.push(t('composition', 'Composition') + ' ' + target.composition);
+        }
+        if (target.category) {
+            details.push(t('category', 'Category') + ' ' + target.category);
+        }
+        if (target.sizeCategory) {
+            details.push(t('size', 'Size') + ' ' + target.sizeCategory);
+        }
+        details.push(resourceCompositionLabel(target));
+
+        return [type, name].filter(Boolean).join(' ') + ' (' + details.filter(Boolean).join(', ') + ')';
+    };
+    const miningTaskTarget = (payload) => {
+        if (payload && payload.target) {
+            return payload.target;
+        }
+
+        return currentMannyMineTargets.find((target) => target.id === (payload && payload.objectId)) || null;
+    };
+    const renderMannyTaskPanel = (manny) => {
+        const payload = manny.task || {};
+        const progress = numberValue(manny.taskProgressPercent, '%');
+        if (manny.currentTask === 'repair') {
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('repairInProgress', 'Repair in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('repairTaskDetail', '{percent}% damage scheduled, {metals} metal containers committed.'), {
+                    percent: numberValue(payload.damagePercent),
+                    metals: numberValue(payload.metalsCost),
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+                + '<button class="manny-recall-button" type="button">' + escapeHtml(t('cancelRepair', 'Cancel repairs')) + '</button>'
+                + '</section>';
+        }
+        if (manny.currentTask === 'mining') {
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('miningInProgress', 'Mining in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('miningTaskDetail', '{resources} on {target}.'), {
+                    resources: selectedResourceLabels(payload.resourceTypes || payload.resourceType),
+                    target: miningTargetDetails(miningTaskTarget(payload)),
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+                + '<button class="manny-recall-button" type="button">' + escapeHtml(t('recall', 'Recall')) + '</button>'
+                + '</section>';
+        }
+
+        return '<section class="manny-task-panel">'
+            + '<h4>' + escapeHtml(taskLabel(manny.currentTask)) + '</h4>'
+            + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+            + '</section>';
+    };
+    const renderMannyActionForms = () => (
+        '<div class="manny-action-grid">'
+        + '<section class="manny-action-section">'
+        + '<h4>' + escapeHtml(t('repairActionTitle', 'Repair')) + '</h4>'
+        + '<form class="manny-repair-form manny-form">'
+        + '<label>' + escapeHtml(t('repairPercent', 'Damage to repair')) + '<input name="percent" type="number" min="1" max="100" step="1" value="1"></label>'
+        + '<button type="submit">' + escapeHtml(t('repair', 'Repair')) + '</button>'
+        + '</form>'
+        + '</section>'
+        + '<section class="manny-action-section">'
+        + '<h4>' + escapeHtml(t('miningActionTitle', 'Mine')) + '</h4>'
+        + '<form class="manny-mine-form manny-form">'
+        + '<label>' + escapeHtml(t('mineTarget', 'Object')) + '<select class="manny-mine-target" name="objectId">' + mineTargetOptions('') + '</select></label>'
+        + '<label>' + escapeHtml(t('resources', 'Resources')) + '<select class="manny-mine-resources" name="resources" multiple size="3">'
+        + mineResourceOptions(currentMannyMineTargets[0] || null, [])
+        + '</select></label>'
+        + '<label>' + escapeHtml(t('targetAmount', 'Amount')) + '<input name="targetAmount" type="number" min="0.01" max="0.55" step="0.01" value="0.01"></label>'
+        + '<button type="submit">' + escapeHtml(t('mine', 'Mine')) + '</button>'
+        + '</form>'
+        + '</section>'
+        + '</div>'
+    );
     const sectorContext = (sector) => {
         const distance = Number(sector && sector.distance);
         if (!Number.isFinite(distance)) {
@@ -203,7 +362,29 @@
             }
         });
     };
-    const renderSectorObjects = (sector) => {
+    const mineTargetsFromObjects = (objects) => objects.flatMap((object) => {
+        const direct = object.mannyMineable ? [{
+            id: object.id,
+            type: object.type || 'object',
+            name: object.name || object.id || '',
+            resources: object.resources || [],
+            resourceTypes: object.resourceTypes || [],
+            resourceComposition: object.resourceComposition || {},
+        }] : [];
+        const nested = Array.isArray(object.minableTargets)
+            ? object.minableTargets.map((target) => ({
+                id: target.id,
+                type: target.type || 'object',
+                name: target.name || target.id || '',
+                resources: target.resources || [],
+                resourceTypes: target.resourceTypes || [],
+                resourceComposition: target.resourceComposition || {},
+            }))
+            : [];
+
+        return direct.concat(nested).filter((target) => target.id);
+    });
+    const renderSectorObjects = (sector, options = {}) => {
         const node = document.getElementById('sector-objects');
         if (!node) {
             return;
@@ -212,21 +393,11 @@
         setText('sector-context', sectorContext(sector));
         setText('sector-summary', sectorSummary(sector));
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
-        currentMineTargets = objects.flatMap((object) => {
-            const direct = object.mannyMineable ? [{
-                id: object.id,
-                label: (object.type || 'object') + ' ' + (object.name || object.id || ''),
-                resources: object.resources || [],
-            }] : [];
-            const nested = Array.isArray(object.minableTargets)
-                ? object.minableTargets.map((target) => ({
-                    id: target.id,
-                    label: (target.type || 'object') + ' ' + (target.name || target.id || ''),
-                    resources: target.resources || [],
-                }))
-                : [];
-            return direct.concat(nested).filter((target) => target.id);
-        });
+        const distance = Number(sector && sector.distance);
+        const syncMannyTargets = options.syncMannyTargets ?? (Boolean(sector) && Number.isFinite(distance) && distance === 0);
+        if (syncMannyTargets) {
+            currentMannyMineTargets = mineTargetsFromObjects(objects);
+        }
         node.innerHTML = objects.map((object) => {
             const danger = object.dangerLevel || 'unknown';
             const classes = ['sector-object', danger === 'extreme' ? 'sector-object-warning' : ''].filter(Boolean).join(' ');
@@ -241,7 +412,9 @@
                 + countdown
                 + '</article>';
         }).join('');
-        updateMannyTargetOptions();
+        if (syncMannyTargets) {
+            updateMannyTargetOptions();
+        }
     };
 
     const metric = (label, value, detail) => {
@@ -359,21 +532,57 @@
     };
 
     function mineTargetOptions(selected) {
-        if (currentMineTargets.length === 0) {
+        if (currentMannyMineTargets.length === 0) {
             return '<option value="">-</option>';
         }
 
-        return currentMineTargets.map((target) => (
+        return currentMannyMineTargets.map((target) => (
             '<option value="' + escapeHtml(target.id) + '"' + (target.id === selected ? ' selected' : '') + '>'
-            + escapeHtml(target.label)
+            + escapeHtml(mineTargetLabel(target))
             + '</option>'
         )).join('');
+    }
+
+    function mineResourceOptions(target, selectedResources) {
+        const available = resourceTypesForTarget(target);
+        const selected = selectedResources.filter((type) => available.includes(type));
+        const effectiveSelection = selected.length > 0 ? selected : available;
+
+        return miningResourceTypes.map((type) => {
+            const disabled = !available.includes(type);
+            const isSelected = effectiveSelection.includes(type);
+
+            return '<option value="' + escapeHtml(type) + '"'
+                + (disabled ? ' disabled' : '')
+                + (isSelected ? ' selected' : '')
+                + '>' + escapeHtml(resourceTypeLabel(type)) + '</option>';
+        }).join('');
+    }
+
+    function updateMannyResourceOptions(form) {
+        if (!form) {
+            return;
+        }
+
+        const targetSelect = form.querySelector('.manny-mine-target');
+        const resourceSelect = form.querySelector('.manny-mine-resources');
+        if (!targetSelect || !resourceSelect) {
+            return;
+        }
+
+        const target = currentMannyMineTargets.find((item) => item.id === targetSelect.value) || null;
+        const selectedResources = Array.from(resourceSelect.selectedOptions).map((option) => option.value);
+        resourceSelect.innerHTML = mineResourceOptions(target, selectedResources);
     }
 
     function updateMannyTargetOptions() {
         document.querySelectorAll('.manny-mine-target').forEach((select) => {
             const selected = select.value;
             select.innerHTML = mineTargetOptions(selected);
+            if (!currentMannyMineTargets.some((target) => target.id === select.value)) {
+                select.value = currentMannyMineTargets[0] ? currentMannyMineTargets[0].id : '';
+            }
+            updateMannyResourceOptions(select.closest('.manny-mine-form'));
         });
     }
 
@@ -391,7 +600,10 @@
             const busy = manny.currentTask !== null;
             return '<article class="manny-card" data-manny-id="' + escapeHtml(manny.id) + '">'
                 + '<div class="manny-card-head">'
+                + '<div class="manny-title">'
                 + '<b>' + escapeHtml(manny.name) + '</b>'
+                + '<button class="manny-settings-button icon-button" type="button" aria-expanded="false" title="' + escapeHtml(t('mannySettings', 'Manny settings')) + '" aria-label="' + escapeHtml(t('mannySettings', 'Manny settings')) + '">&#9881;</button>'
+                + '</div>'
                 + '<span>' + escapeHtml(manny.currentTask || t('noTask', 'None')) + '</span>'
                 + '</div>'
                 + '<div class="manny-metrics">'
@@ -399,25 +611,11 @@
                 + metric(t('cargo', 'Cargo'), mannyCargo(manny))
                 + metric(t('task', 'Task'), busy ? numberValue(manny.taskProgressPercent, '%') : t('noTask', 'None'))
                 + '</div>'
-                + '<form class="manny-rename-form manny-form">'
+                + '<form class="manny-rename-form manny-form" hidden>'
                 + '<label>' + escapeHtml(t('rename', 'Rename')) + '<input name="name" value="' + escapeHtml(manny.name) + '" maxlength="40"></label>'
                 + '<button type="submit">' + escapeHtml(t('rename', 'Rename')) + '</button>'
                 + '</form>'
-                + '<form class="manny-repair-form manny-form">'
-                + '<label>' + escapeHtml(t('repairPercent', 'Damage to repair')) + '<input name="percent" type="number" min="1" max="100" step="1" value="1"></label>'
-                + '<button type="submit" ' + (busy ? 'disabled' : '') + '>' + escapeHtml(t('repair', 'Repair')) + '</button>'
-                + '</form>'
-                + '<form class="manny-mine-form manny-form">'
-                + '<label>' + escapeHtml(t('mineTarget', 'Object')) + '<select class="manny-mine-target" name="objectId">' + mineTargetOptions('') + '</select></label>'
-                + '<label>' + escapeHtml(t('resource', 'Resource')) + '<select name="resource">'
-                + '<option value="metals">' + escapeHtml(t('metals', 'Metals')) + '</option>'
-                + '<option value="deuterium">' + escapeHtml(t('deuterium', 'Deuterium')) + '</option>'
-                + '<option value="other">' + escapeHtml(t('otherResources', 'Other')) + '</option>'
-                + '</select></label>'
-                + '<label>' + escapeHtml(t('targetAmount', 'Amount')) + '<input name="targetAmount" type="number" min="0.01" max="0.55" step="0.01" value="0.01"></label>'
-                + '<button type="submit" ' + (busy ? 'disabled' : '') + '>' + escapeHtml(t('mine', 'Mine')) + '</button>'
-                + '</form>'
-                + '<button class="manny-recall-button" type="button">' + escapeHtml(t('recall', 'Recall')) + '</button>'
+                + (busy ? renderMannyTaskPanel(manny) : renderMannyActionForms())
                 + '</article>';
         }).join('');
     }
@@ -440,7 +638,7 @@
             renderSectorObjects(data.sector);
             setText('sector-json', pretty(data));
         } catch (error) {
-            renderSectorObjects(null);
+            renderSectorObjects(null, {syncMannyTargets: true});
             setText('sector-json', error.message);
         }
     }
@@ -491,7 +689,7 @@
             renderSectorObjects(data.sector);
             setText('sector-json', pretty(data));
         } catch (error) {
-            renderSectorObjects(null);
+            renderSectorObjects(null, {syncMannyTargets: false});
             setText('sector-json', error.message);
         }
     });
@@ -557,11 +755,19 @@
                     body: JSON.stringify({percent: Number.parseFloat(form.get('percent'))}),
                 });
             } else if (event.target.classList.contains('manny-mine-form')) {
+                const resourceSelect = event.target.querySelector('.manny-mine-resources');
+                const resources = resourceSelect
+                    ? Array.from(resourceSelect.selectedOptions).filter((option) => !option.disabled).map((option) => option.value)
+                    : [];
+                if (resources.length === 0) {
+                    setText('manny-status', t('noMiningResourceSelected', 'Select at least one available resource.'));
+                    return;
+                }
                 await api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/mine', {
                     method: 'POST',
                     body: JSON.stringify({
                         objectId: form.get('objectId'),
-                        resource: form.get('resource'),
+                        resources,
                         targetAmount: Number.parseFloat(form.get('targetAmount')),
                     }),
                 });
@@ -574,7 +780,30 @@
         }
     });
 
+    document.getElementById('manny-list')?.addEventListener('change', (event) => {
+        if (event.target.classList.contains('manny-mine-target')) {
+            updateMannyResourceOptions(event.target.closest('.manny-mine-form'));
+        }
+    });
+
     document.getElementById('manny-list')?.addEventListener('click', async (event) => {
+        const settingsButton = event.target.closest('.manny-settings-button');
+        if (settingsButton) {
+            const card = settingsButton.closest('.manny-card');
+            const renameForm = card ? card.querySelector('.manny-rename-form') : null;
+            if (!renameForm) {
+                return;
+            }
+
+            const willOpen = renameForm.hidden;
+            renameForm.hidden = !willOpen;
+            settingsButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            if (willOpen) {
+                renameForm.querySelector('input[name="name"]')?.focus();
+            }
+            return;
+        }
+
         const button = event.target.closest('.manny-recall-button');
         if (!button) {
             return;

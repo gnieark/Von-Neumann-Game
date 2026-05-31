@@ -6,6 +6,7 @@ namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
+use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\SectorKnowledgeLevel;
 use VonNeumannGame\Domain\SectorObservation;
 use VonNeumannGame\Repository\VisitedSectorRepository;
@@ -173,8 +174,18 @@ final class SectorObservationService
         }
 
         if ($object instanceof Planet || $object instanceof Asteroid) {
-            $data['resources'] = $object->toArray()['resourceHints'] ?? $object->toArray()['estimatedResources'] ?? [];
+            $resources = $this->objectResourceHints($object);
+            $composition = ResourceComposition::fromHints($resources);
+            $data['resources'] = $resources;
+            $data['resourceTypes'] = ResourceComposition::availableTypes($composition);
+            $data['resourceComposition'] = $composition;
             $data['mannyMineable'] = $this->isMannyMineable($object);
+            if ($object instanceof Asteroid) {
+                $data['composition'] = $object->toArray()['composition'] ?? null;
+            }
+            if ($object instanceof Planet) {
+                $data['category'] = $object->getCategory();
+            }
         }
 
         return $data;
@@ -189,16 +200,27 @@ final class SectorObservationService
                 continue;
             }
 
+            $resources = $this->objectResourceHints($object);
+            $composition = ResourceComposition::fromHints($resources);
             $targets[] = [
                 'id' => $object->getId(),
                 'type' => $object->getType()->value,
                 'name' => $object->getName(),
                 'mass' => $object->getMass(),
-                'resources' => $object->toArray()['resourceHints'] ?? $object->toArray()['estimatedResources'] ?? [],
+                'resources' => $resources,
+                'resourceTypes' => ResourceComposition::availableTypes($composition),
+                'resourceComposition' => $composition,
             ];
         }
 
         return $targets;
+    }
+
+    private function objectResourceHints(UniverseObject $object): array
+    {
+        $data = $object->toArray();
+
+        return $data['resourceHints'] ?? $data['estimatedResources'] ?? [];
     }
 
     private function isMannyMineable(UniverseObject $object): bool

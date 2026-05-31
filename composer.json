@@ -6,7 +6,10 @@
   "require": {
     "php": ">=8.2",
     "ext-pdo": "*",
-    "ext-json": "*"
+    "ext-json": "*",
+    "league/oauth2-client": "^2.9",
+    "league/oauth2-google": "^4.2",
+    "wohali/oauth2-discord-new": "^1.2"
   },
   "autoload": {
     "psr-4": {

@@ -48,26 +48,18 @@ if (isset($_GET['lang']) && in_array((string) $_GET['lang'], Translator::support
     return;
 }
 
-if ($routePath === '/login' && $method === 'POST') {
-    $pdo = $factory->pdo(initializeSchema: true);
-    $auth = $factory->authService($pdo);
-    $player = $auth->authenticateWithPassword((string) ($_POST['username'] ?? ''), (string) ($_POST['password'] ?? ''));
-    if ($player === null) {
-        renderHome($projectRoot, $translator, null, $translator->get('loginInvalid'));
-        return;
-    }
+if ($method === 'GET' && preg_match('#^/auth/provider/([^/]+)$#', $routePath, $matches) === 1) {
+    handleOAuthProvider($factory, $projectRoot, $translator, strtolower(rawurldecode($matches[1])));
+    return;
+}
 
-    $session = $auth->createSessionForPlayer($player);
-    $expiresAt = new DateTimeImmutable((string) $session['expiresAt']);
-    $remember = isset($_POST['remember']);
-    setcookie(SESSION_COOKIE, (string) $session['token'], [
-        'expires' => $remember ? $expiresAt->getTimestamp() : 0,
-        'path' => '/',
-        'secure' => isHttps(),
-        'httponly' => false,
-        'samesite' => 'Lax',
-    ]);
-    redirect('/');
+if ($routePath === '/auth/pseudo') {
+    handleOAuthPseudo($factory, $projectRoot, $translator, $method);
+    return;
+}
+
+if ($routePath === '/authbypwd') {
+    handlePasswordAuth($factory, $projectRoot, $translator, $method);
     return;
 }
 
@@ -80,6 +72,11 @@ if ($routePath === '/logout' && $method === 'POST') {
         'samesite' => 'Lax',
     ]);
     redirect('/');
+    return;
+}
+
+if ($routePath === '/about' && in_array($method, ['GET', 'HEAD'], true)) {
+    renderAbout($projectRoot, $translator, currentPlayer($factory));
     return;
 }
 
@@ -113,6 +110,20 @@ function renderHome(string $projectRoot, Translator $translator, ?Player $player
                 'message' => e($loginError),
             ]));
         }
+        $oauthProviderLinks = oauthProviderLinks($projectRoot, $translator);
+        if ($oauthProviderLinks !== []) {
+            $oauthSection = new TplBlock('oauthsection');
+            foreach ($oauthProviderLinks as $provider) {
+                $oauthSection->addSubBlock((new TplBlock('oauthprovider'))->addVars([
+                    'class' => e($provider['class']),
+                    'label' => e($provider['label']),
+                    'url' => e($provider['url']),
+                ]));
+            }
+            $loginView->addSubBlock($oauthSection);
+        } else {
+            $loginView->addSubBlock(new TplBlock('oauthmissing'));
+        }
         $tpl->addSubBlock($loginView);
     } else {
         $displayName = e($player->displayName ?? $player->username);
@@ -126,6 +137,306 @@ function renderHome(string $projectRoot, Translator $translator, ?Player $player
 
     header('Content-Type: text/html; charset=utf-8');
     echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function renderPasswordAuth(string $projectRoot, Translator $translator, ?string $loginError = null): void
+{
+    $tpl = new TplBlock();
+    $tpl->addVars([
+        'pageTitle' => 'Von Neumann Game',
+        'bodyClass' => 'is-guest',
+        'authenticated' => '0',
+        'language' => $translator->language(),
+        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
+        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
+    ]);
+    $tpl->addPrefixedVars('t', $translator->allEscaped());
+
+    $passwordView = new TplBlock('passwordauthview');
+    if ($loginError !== null) {
+        $passwordView->addSubBlock((new TplBlock('loginerror'))->addVars([
+            'message' => e($loginError),
+        ]));
+    }
+    $tpl->addSubBlock($passwordView);
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function handlePasswordAuth(AppFactory $factory, string $projectRoot, Translator $translator, string $method): void
+{
+    if ($method === 'GET') {
+        if (currentPlayer($factory) !== null) {
+            redirect('/');
+            return;
+        }
+
+        renderPasswordAuth($projectRoot, $translator);
+        return;
+    }
+
+    if ($method !== 'POST') {
+        http_response_code(405);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Method not allowed';
+        return;
+    }
+
+    $auth = $factory->authService($factory->pdo(initializeSchema: true));
+    $player = $auth->authenticateWithPassword((string) ($_POST['username'] ?? ''), (string) ($_POST['password'] ?? ''));
+    if ($player === null) {
+        renderPasswordAuth($projectRoot, $translator, $translator->get('loginInvalid'));
+        return;
+    }
+
+    issueSessionCookie($auth, $player, isset($_POST['remember']));
+    header('Location: /', true, 303);
+}
+
+function renderAbout(string $projectRoot, Translator $translator, ?Player $player): void
+{
+    $tpl = new TplBlock();
+    $tpl->addVars([
+        'pageTitle' => 'Von Neumann Game - ' . $translator->get('aboutFooterLink'),
+        'bodyClass' => 'is-guest',
+        'authenticated' => '0',
+        'language' => $translator->language(),
+        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
+        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
+    ]);
+    $tpl->addPrefixedVars('t', $translator->allEscaped());
+    $tpl->addSubBlock(new TplBlock('aboutview'));
+
+    if ($player !== null) {
+        $tpl->addSubBlock((new TplBlock('sessionbar'))->addVars([
+            'displayName' => e($player->displayName ?? $player->username),
+        ]));
+    }
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function renderOAuthPseudo(string $projectRoot, Translator $translator, string $csrf, ?string $error = null, string $pseudonym = ''): void
+{
+    $tpl = new TplBlock();
+    $tpl->addVars([
+        'pageTitle' => 'Von Neumann Game',
+        'bodyClass' => 'is-guest',
+        'authenticated' => '0',
+        'language' => $translator->language(),
+        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
+        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
+    ]);
+    $tpl->addPrefixedVars('t', $translator->allEscaped());
+
+    $pseudoView = (new TplBlock('oauthpseudoview'))->addVars([
+        'csrf' => e($csrf),
+        'pseudonym' => e($pseudonym),
+    ]);
+    if ($error !== null) {
+        $pseudoView->addSubBlock((new TplBlock('error'))->addVars([
+            'message' => e($error),
+        ]));
+    }
+    $tpl->addSubBlock($pseudoView);
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function handleOAuthProvider(AppFactory $factory, string $projectRoot, Translator $translator, string $providerName): void
+{
+    ensurePhpSession();
+
+    try {
+        $oauth = $factory->oauthService();
+        $provider = $oauth->createProvider($providerName, absoluteUrl('/auth/provider/' . rawurlencode($providerName)));
+    } catch (Throwable) {
+        renderHome($projectRoot, $translator, null, $translator->get('oauthProviderUnavailable'));
+        return;
+    }
+
+    if (isset($_GET['error'])) {
+        unset($_SESSION['oauth2state'][$providerName]);
+        renderHome($projectRoot, $translator, null, $translator->get('oauthLoginCancelled'));
+        return;
+    }
+
+    if (!isset($_GET['code'])) {
+        $authorizationUrl = $provider->getAuthorizationUrl($oauth->authorizationOptions($providerName));
+        $_SESSION['oauth2state'][$providerName] = $provider->getState();
+        header('Location: ' . $authorizationUrl);
+        return;
+    }
+
+    $expectedState = $_SESSION['oauth2state'][$providerName] ?? null;
+    $actualState = isset($_GET['state']) ? (string) $_GET['state'] : '';
+    unset($_SESSION['oauth2state'][$providerName]);
+    if (!is_string($expectedState) || !hash_equals($expectedState, $actualState)) {
+        renderHome($projectRoot, $translator, null, $translator->get('oauthStateInvalid'));
+        return;
+    }
+
+    try {
+        $token = $provider->getAccessToken('authorization_code', [
+            'code' => (string) $_GET['code'],
+        ]);
+        $providerUserId = $oauth->subjectFromAccessToken($providerName, $token);
+        $auth = $factory->authService($factory->pdo(initializeSchema: true));
+        $player = $auth->authenticateWithExternal($providerName, $providerUserId);
+        if ($player !== null) {
+            unset($_SESSION['pending_oauth']);
+            issueSessionCookie($auth, $player);
+            redirect('/');
+            return;
+        }
+
+        $_SESSION['pending_oauth'] = [
+            'provider' => $providerName,
+            'providerUserId' => $providerUserId,
+            'csrf' => randomToken(),
+        ];
+        redirect('/auth/pseudo');
+    } catch (Throwable) {
+        renderHome($projectRoot, $translator, null, $translator->get('oauthLoginFailed'));
+    }
+}
+
+function handleOAuthPseudo(AppFactory $factory, string $projectRoot, Translator $translator, string $method): void
+{
+    ensurePhpSession();
+    $pending = pendingOAuthIdentity();
+    if ($pending === null) {
+        redirect('/');
+        return;
+    }
+
+    if ($method === 'GET') {
+        renderOAuthPseudo($projectRoot, $translator, $pending['csrf']);
+        return;
+    }
+
+    if ($method !== 'POST') {
+        http_response_code(405);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Method not allowed';
+        return;
+    }
+
+    $pseudonym = (string) ($_POST['pseudonym'] ?? '');
+    $csrf = (string) ($_POST['csrf'] ?? '');
+    if (!hash_equals($pending['csrf'], $csrf)) {
+        renderOAuthPseudo($projectRoot, $translator, $pending['csrf'], $translator->get('oauthStateInvalid'), $pseudonym);
+        return;
+    }
+
+    $auth = $factory->authService($factory->pdo(initializeSchema: true));
+    try {
+        $player = $auth->registerPlayerWithExternalAuth($pseudonym, $pending['provider'], $pending['providerUserId']);
+        unset($_SESSION['pending_oauth']);
+        issueSessionCookie($auth, $player);
+        redirect('/');
+    } catch (InvalidArgumentException $exception) {
+        $message = $exception->getMessage() === 'Pseudonym already exists.'
+            ? $translator->get('pseudonymAlreadyUsed')
+            : $translator->get('pseudonymInvalid');
+        renderOAuthPseudo($projectRoot, $translator, $pending['csrf'], $message, $pseudonym);
+    } catch (Throwable) {
+        $player = $auth->authenticateWithExternal($pending['provider'], $pending['providerUserId']);
+        if ($player !== null) {
+            unset($_SESSION['pending_oauth']);
+            issueSessionCookie($auth, $player);
+            redirect('/');
+            return;
+        }
+
+        renderOAuthPseudo($projectRoot, $translator, $pending['csrf'], $translator->get('oauthRegistrationFailed'), $pseudonym);
+    }
+}
+
+/**
+ * @return array<int, array{class: string, label: string, url: string}>
+ */
+function oauthProviderLinks(string $projectRoot, Translator $translator): array
+{
+    try {
+        $oauth = new VonNeumannGame\Auth\OAuthService(
+            VonNeumannGame\Auth\OAuthConfig::fromFile($projectRoot . '/config/oauth.json')
+        );
+    } catch (Throwable) {
+        return [];
+    }
+
+    return array_map(static fn(string $provider): array => [
+        'class' => $provider,
+        'label' => match ($provider) {
+            'google' => $translator->get('oauthLoginGoogle'),
+            'discord' => $translator->get('oauthLoginDiscord'),
+            default => $provider,
+        },
+        'url' => '/auth/provider/' . rawurlencode($provider),
+    ], $oauth->availableProviders());
+}
+
+/**
+ * @return array{provider: string, providerUserId: string, csrf: string}|null
+ */
+function pendingOAuthIdentity(): ?array
+{
+    $pending = $_SESSION['pending_oauth'] ?? null;
+    if (!is_array($pending)
+        || !isset($pending['provider'], $pending['providerUserId'], $pending['csrf'])
+        || !is_string($pending['provider'])
+        || !is_string($pending['providerUserId'])
+        || !is_string($pending['csrf'])
+    ) {
+        return null;
+    }
+
+    return $pending;
+}
+
+function issueSessionCookie(VonNeumannGame\Auth\AuthService $auth, Player $player, bool $remember = false): void
+{
+    $session = $auth->createSessionForPlayer($player);
+    $expiresAt = new DateTimeImmutable((string) $session['expiresAt']);
+    setcookie(SESSION_COOKIE, (string) $session['token'], [
+        'expires' => $remember ? $expiresAt->getTimestamp() : 0,
+        'path' => '/',
+        'secure' => isHttps(),
+        'httponly' => false,
+        'samesite' => 'Lax',
+    ]);
+}
+
+function ensurePhpSession(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        return;
+    }
+
+    session_start([
+        'cookie_httponly' => true,
+        'cookie_secure' => isHttps(),
+        'cookie_samesite' => 'Lax',
+    ]);
+}
+
+function absoluteUrl(string $path): string
+{
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+
+    return (isHttps() ? 'https' : 'http') . '://' . $host . $path;
+}
+
+function randomToken(): string
+{
+    return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
 }
 
 function selectedLanguage(): string

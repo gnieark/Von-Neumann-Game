@@ -26,6 +26,22 @@ Create a first player and its initial probe:
 php scripts/create-user.php remi secret "Remi"
 ```
 
+Optional OAuth sign-in uses Google and Discord OpenID. Copy the example file,
+fill your provider client IDs and secrets, and register these callback URLs in
+the provider consoles:
+
+```bash
+cp config/oauth.example.json config/oauth.json
+```
+
+```text
+http://localhost:8000/auth/provider/google
+http://localhost:8000/auth/provider/discord
+```
+
+Only the provider name and OpenID `sub` are stored. On first sign-in, the player
+chooses a pseudonym; the account and initial Von Neumann probe are then created.
+
 Run the built-in PHP server:
 
 ```bash

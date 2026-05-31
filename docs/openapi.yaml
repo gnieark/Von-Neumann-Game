@@ -369,7 +369,7 @@ paths:
               $ref: '#/components/schemas/MannyMineRequest'
             example:
               objectId: mine-rock
-              resource: metals
+              resources: [metals, other]
               targetAmount: 0.3
       responses:
         '202':
@@ -871,13 +871,26 @@ components:
           description: Damage percentage to repair. Each percent takes 10 real minutes and consumes 0.01 containers of metals.
     MannyMineRequest:
       type: object
-      required: [objectId, resource, targetAmount]
+      required: [objectId, targetAmount]
+      oneOf:
+        - required: [objectId, resources, targetAmount]
+        - required: [objectId, resource, targetAmount]
       properties:
         objectId:
           type: string
+        resources:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [deuterium, metals, other]
+          description: Resource categories to mine. The extracted amount is split according to the target object's composition, normalized over the selected categories.
         resource:
           type: string
           enum: [deuterium, metals, other]
+          deprecated: true
+          description: Legacy single resource selector. Prefer resources.
         targetAmount:
           type: number
           minimum: 0

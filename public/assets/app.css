@@ -168,6 +168,49 @@ button:disabled {
     min-height: 18px;
 }
 
+.oauth-section {
+    display: grid;
+    gap: 10px;
+    padding-top: 4px;
+}
+
+.oauth-section p {
+    margin: 0;
+    color: var(--muted);
+    font-size: .9rem;
+}
+
+.oauth-buttons {
+    display: grid;
+    gap: 8px;
+}
+
+.oauth-button {
+    display: grid;
+    min-height: 42px;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.oauth-button:hover {
+    border-color: var(--cold);
+}
+
+.oauth-button.google {
+    background: linear-gradient(180deg, #f4f7f7, #d9dfdf);
+    color: #16191a;
+}
+
+.oauth-button.discord {
+    border-color: rgba(143, 182, 189, .55);
+    background: linear-gradient(180deg, #5865f2, #303a94);
+    color: #fff;
+}
+
 .form-error,
 .action-status {
     margin: 0;
@@ -215,6 +258,48 @@ button:disabled {
     border: 1px solid var(--hot);
     background: #22272a;
     box-shadow: 0 0 24px rgba(184, 111, 75, .3);
+}
+
+.about-page {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 28px;
+    border: 1px solid rgba(210, 220, 220, .14);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.015)),
+        var(--panel);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 18px 45px rgba(0,0,0,.28);
+}
+
+.about-page h1 {
+    margin-bottom: 18px;
+}
+
+.about-page h2 {
+    margin-top: 26px;
+    margin-bottom: 10px;
+}
+
+.about-page p {
+    color: var(--text);
+    line-height: 1.65;
+}
+
+.about-source {
+    margin-top: 28px;
+    font-size: .82rem;
+}
+
+.about-source a,
+.site-footer a {
+    color: var(--cold);
+}
+
+.site-footer {
+    width: min(1180px, calc(100% - 32px));
+    margin: -22px auto 24px;
+    text-align: right;
+    font-size: .78rem;
 }
 
 .logout-form {
@@ -494,6 +579,24 @@ button:disabled {
     align-items: center;
 }
 
+.manny-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.manny-title b {
+    overflow-wrap: anywhere;
+}
+
+.manny-settings-button {
+    flex: 0 0 auto;
+    width: 34px;
+    min-height: 34px;
+    font-size: 1rem;
+}
+
 .manny-card-head span {
     color: var(--muted);
 }
@@ -511,6 +614,41 @@ button:disabled {
     align-items: end;
 }
 
+.manny-rename-form[hidden] {
+    display: none;
+}
+
+.manny-action-grid,
+.manny-task-panel {
+    display: grid;
+    gap: 16px;
+    border-top: 1px solid rgba(255,255,255,.1);
+    padding-top: 14px;
+}
+
+.manny-action-section {
+    display: grid;
+    gap: 10px;
+}
+
+.manny-action-section + .manny-action-section {
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 14px;
+}
+
+.manny-action-section h4,
+.manny-task-panel h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text);
+}
+
+.manny-task-panel p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.5;
+}
+
 .manny-form select {
     width: 100%;
     min-height: 42px;
@@ -519,6 +657,10 @@ button:disabled {
     background: #121516;
     color: var(--text);
     padding: 9px 11px;
+}
+
+.manny-form select[multiple] {
+    min-height: 96px;
 }
 
 .manny-recall-button {
@@ -561,6 +703,12 @@ button:disabled {
 
     main {
         width: min(100% - 20px, 1180px);
+    }
+
+    .site-footer {
+        width: min(100% - 20px, 1180px);
+        margin-top: -28px;
+        text-align: center;
     }
 
     .language-form {

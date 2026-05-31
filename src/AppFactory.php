@@ -6,6 +6,8 @@ namespace VonNeumannGame;
 
 use PDO;
 use VonNeumannGame\Auth\AuthService;
+use VonNeumannGame\Auth\OAuthConfig;
+use VonNeumannGame\Auth\OAuthService;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Http\ApiKernel;
@@ -98,6 +100,11 @@ final class AppFactory
             (int) ($appConfig['sessionTtlDays'] ?? 7),
             new MannyRepository($pdo),
         );
+    }
+
+    public function oauthService(): OAuthService
+    {
+        return new OAuthService(OAuthConfig::fromFile($this->projectRoot . '/config/oauth.json'));
     }
 
     public function appConfig(): array

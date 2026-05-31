@@ -43,6 +43,22 @@ final class PlayerAuthRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    public function findExternalAuth(string $provider, string $providerUserId): ?PlayerAuthMethod
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM player_auth_methods
+             WHERE provider = :provider AND provider_user_id = :provider_user_id
+             ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([
+            'provider' => $provider,
+            'provider_user_id' => $providerUserId,
+        ]);
+        $row = $stmt->fetch();
+
+        return $row ? $this->hydrate($row) : null;
+    }
+
     public function addExternalAuth(int $playerId, string $provider, string $providerUserId): PlayerAuthMethod
     {
         $now = gmdate('c');

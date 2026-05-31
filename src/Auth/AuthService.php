@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Auth;
 
+use VonNeumannGame\Domain\AuthProvider;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
@@ -15,6 +16,8 @@ use VonNeumannGame\Sector\SectorCoordinates;
 
 final class AuthService
 {
+    private const PSEUDONYM_PATTERN = '/\A[\p{L}\p{N}][\p{L}\p{N} ._-]{1,38}[\p{L}\p{N}]\z/u';
+
     public function __construct(
         private readonly PlayerRepository $players,
         private readonly PlayerAuthRepository $authMethods,
@@ -42,9 +45,38 @@ final class AuthService
         return $player;
     }
 
+    public function registerPlayerWithExternalAuth(string $pseudonym, string $provider, string $providerUserId): Player
+    {
+        $provider = $this->normalizeExternalProvider($provider);
+        $pseudonym = $this->normalizePseudonym($pseudonym);
+
+        if ($this->players->existsByUsername($pseudonym)) {
+            throw new \InvalidArgumentException('Pseudonym already exists.');
+        }
+        if ($this->authenticateWithExternal($provider, $providerUserId) !== null) {
+            throw new \RuntimeException('External account already linked.');
+        }
+
+        $home = $this->randomHomeSector();
+        $player = $this->players->createPlayer($pseudonym, $pseudonym, null, $home);
+        $this->authMethods->addExternalAuth($player->id, $provider, $providerUserId);
+        $probe = $this->probes->createForPlayer($player->id, 'Sonde de ' . $pseudonym, $home);
+        $this->mannies?->ensureDefaultsForProbe($probe);
+        $this->visitedSectors->markVisited($player, $home);
+
+        return $player;
+    }
+
     public function authenticateWithPassword(string $username, string $password): ?Player
     {
         return (new PasswordAuthProvider($this->players, $this->authMethods))->authenticate($username, $password);
+    }
+
+    public function authenticateWithExternal(string $provider, string $providerUserId): ?Player
+    {
+        $method = $this->authMethods->findExternalAuth($this->normalizeExternalProvider($provider), $providerUserId);
+
+        return $method === null ? null : $this->players->findById($method->playerId);
     }
 
     /**
@@ -85,6 +117,26 @@ final class AuthService
         }
 
         return trim($matches[1]);
+    }
+
+    private function normalizeExternalProvider(string $provider): string
+    {
+        $provider = strtolower(trim($provider));
+        if (!in_array($provider, AuthProvider::externalValues(), true)) {
+            throw new \InvalidArgumentException('Unsupported external auth provider.');
+        }
+
+        return $provider;
+    }
+
+    private function normalizePseudonym(string $pseudonym): string
+    {
+        $normalized = preg_replace('/\s+/u', ' ', trim($pseudonym));
+        if (!is_string($normalized) || preg_match(self::PSEUDONYM_PATTERN, $normalized) !== 1) {
+            throw new \InvalidArgumentException('Invalid pseudonym.');
+        }
+
+        return $normalized;
     }
 
     private function randomHomeSector(): SectorCoordinates

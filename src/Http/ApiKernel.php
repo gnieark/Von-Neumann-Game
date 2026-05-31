@@ -337,11 +337,22 @@ final class ApiKernel
         }
 
         if ($action === 'mine') {
-            if (!isset($data['objectId'], $data['resource'], $data['targetAmount']) || !is_string($data['objectId']) || !is_string($data['resource']) || !is_numeric($data['targetAmount'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId, resource and targetAmount.');
+            if (!isset($data['objectId'], $data['targetAmount']) || !is_string($data['objectId']) || !is_numeric($data['targetAmount'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId, resources and targetAmount.');
             }
 
-            $manny = $this->mannies->startMining($probe, $uid, $data['objectId'], $data['resource'], (float) $data['targetAmount']);
+            $resources = $data['resources'] ?? $data['resource'] ?? null;
+            if (is_array($resources)) {
+                foreach ($resources as $resource) {
+                    if (!is_string($resource)) {
+                        return ApiResponse::error(400, 'bad_request', 'Mining resources must be strings.');
+                    }
+                }
+            } elseif (!is_string($resources)) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain resources or resource.');
+            }
+
+            $manny = $this->mannies->startMining($probe, $uid, $data['objectId'], $resources, (float) $data['targetAmount']);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }

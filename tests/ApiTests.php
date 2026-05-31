@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use League\OAuth2\Client\Token\AccessToken;
 use VonNeumannGame\Auth\AuthService;
+use VonNeumannGame\Auth\OAuthConfig;
+use VonNeumannGame\Auth\OAuthService;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Http\ApiKernel;
@@ -94,12 +97,38 @@ function removeDirectory(string $directory): void
     rmdir($directory);
 }
 
+function fakeIdToken(array $payload): string
+{
+    $encode = static fn(array $data): string => rtrim(strtr(base64_encode(json_encode($data, JSON_THROW_ON_ERROR)), '+/', '-_'), '=');
+
+    return $encode(['alg' => 'none']) . '.' . $encode($payload) . '.signature';
+}
+
 $test = new TestRunner();
 $root = dirname(__DIR__);
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_api_tests_' . bin2hex(random_bytes(4));
 $dbPath = $tmp . DIRECTORY_SEPARATOR . 'database.sqlite';
 $universePath = $tmp . DIRECTORY_SEPARATOR . 'universe';
 mkdir($tmp, 0775, true);
+
+$oauthConfigPath = $tmp . DIRECTORY_SEPARATOR . 'oauth.json';
+file_put_contents($oauthConfigPath, json_encode([
+    'google' => ['web' => ['client_id' => 'google-client', 'client_secret' => 'google-secret']],
+    'discord' => ['web' => ['client_id' => 'discord-client', 'client_secret' => 'discord-secret']],
+], JSON_THROW_ON_ERROR));
+$oauthService = new OAuthService(OAuthConfig::fromFile($oauthConfigPath));
+$test->assertEquals(['google', 'discord'], $oauthService->availableProviders(), 'OAuth config exposes configured providers');
+$idToken = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'google-client', 'exp' => time() + 3600]);
+$test->assertEquals(
+    'google-openid-subject',
+    $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $idToken])),
+    'OAuth service extracts the OpenID subject without profile data'
+);
+$wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
+$test->assertThrows(
+    fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),
+    'OAuth service rejects an OpenID token for another client'
+);
 
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();
@@ -139,6 +168,23 @@ $test->assertThrows(
 );
 $test->assert($auth->authenticateWithPassword('remi', 'secret')?->id === $player->id, 'AuthService verifies a valid password');
 $test->assert($auth->authenticateWithPassword('remi', 'bad-password') === null, 'AuthService rejects an invalid password');
+
+$oauthPlayer = $auth->registerPlayerWithExternalAuth('Nova Pilot', 'google', 'google-openid-subject');
+$test->assert($oauthPlayer->id > 0, 'OAuth registration creates a persisted player');
+$test->assertEquals('Nova Pilot', $oauthPlayer->username, 'OAuth registration uses the chosen pseudonym');
+$test->assert($auth->authenticateWithExternal('google', 'google-openid-subject')?->id === $oauthPlayer->id, 'OAuth identity authenticates the existing player');
+$oauthProbe = $probes->findByPlayerId($oauthPlayer->id);
+$test->assert($oauthProbe !== null, 'OAuth registration creates an initial probe');
+$test->assert($oauthProbe?->currentSector->equals($oauthPlayer->homeSector), 'OAuth probe starts in the player home sector');
+$test->assert($visitedSectors->hasVisited($oauthPlayer, $oauthPlayer->homeSector), 'OAuth registration marks the initial sector as visited');
+$test->assertThrows(
+    fn() => $auth->registerPlayerWithExternalAuth('Nova Pilot', 'discord', 'discord-openid-subject'),
+    'OAuth registration rejects an already used pseudonym'
+);
+$test->assertThrows(
+    fn() => $auth->registerPlayerWithExternalAuth('x', 'google', 'other-google-subject'),
+    'OAuth registration rejects invalid pseudonyms'
+);
 
 $goodSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'remi', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $goodSession->status, 'POST /api/session with good password returns 200');
@@ -211,6 +257,8 @@ $test->assertEquals(200, $mannyList->status, 'GET /api/probe/mannies returns per
 $test->assertEquals(4, count($mannyList->body['mannies'] ?? []), 'new probe starts with four persisted Mannies');
 $firstMannyId = (string) ($mannyList->body['mannies'][0]['id'] ?? '');
 $secondMannyId = (string) ($mannyList->body['mannies'][1]['id'] ?? '');
+$thirdMannyId = (string) ($mannyList->body['mannies'][2]['id'] ?? '');
+$fourthMannyId = (string) ($mannyList->body['mannies'][3]['id'] ?? '');
 $test->assert(str_starts_with($firstMannyId, 'mny_'), 'Manny public API id is a stable generated uid');
 $test->assertEquals('manny-1', $mannyList->body['mannies'][0]['name'] ?? null, 'default Manny names are player-facing names');
 
@@ -244,6 +292,8 @@ if ($createdProbe !== null) {
     $mineableSector = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('mine-rock', $mineableSector->body['sector']['objects'][0]['id'] ?? null, 'sector observation exposes object ids for Manny mining orders');
     $test->assertEquals(true, $mineableSector->body['sector']['objects'][0]['mannyMineable'] ?? null, 'small asteroids are marked as Manny-mineable');
+    $test->assertEquals(['metals'], $mineableSector->body['sector']['objects'][0]['resourceTypes'] ?? null, 'sector observation exposes mineable resource categories');
+    $test->assertEquals(1.0, $mineableSector->body['sector']['objects'][0]['resourceComposition']['metals'] ?? null, 'sector observation exposes resource composition shares');
 
     $mineManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
         'objectId' => 'mine-rock',
@@ -266,6 +316,43 @@ if ($createdProbe !== null) {
     $minedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(0.04, $minedProbe?->metalsStock, 'completed Manny mining transfers metals to the probe inventory');
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'completed mining returns the Manny to the probe');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('mixed-rock', null, 'mixed', ['iron', 'water_ice', 'silicates'], 'small', 0.000001, 0.001),
+    ]));
+    $mixedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($thirdMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'mixed-rock',
+        'resources' => ['deuterium', 'metals', 'other'],
+        'targetAmount' => 0.03,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $mixedMine->status, 'POST /api/probe/mannies/{id}/mine accepts multiple resource categories');
+    $test->assertEquals(0.3333, $mixedMine->body['manny']['task']['resourceProfile']['deuterium'] ?? null, 'multi-resource mining keeps the deuterium composition share');
+    $test->assertEquals(0.3333, $mixedMine->body['manny']['task']['resourceProfile']['metals'] ?? null, 'multi-resource mining keeps the metals composition share');
+    $test->assertEquals(0.3334, $mixedMine->body['manny']['task']['resourceProfile']['other'] ?? null, 'multi-resource mining assigns the remaining composition share');
+    $test->assertEquals('mixed-rock', $mixedMine->body['manny']['task']['target']['id'] ?? null, 'mining task exposes its target details');
+    $test->assertEquals('mixed', $mixedMine->body['manny']['task']['target']['composition'] ?? null, 'mining task exposes asteroid composition');
+
+    $mixedRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $mixedRow->execute(['uid' => $thirdMannyId]);
+    $mixedMannyDbId = (int) $mixedRow->fetchColumn();
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $mixedMannyDbId,
+        'started' => gmdate('c', time() - 3000),
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $mixedProbe = $probes->findByPlayerId($player->id);
+    $test->assertEquals(0.05, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
+    $test->assertEquals(0.01, $mixedProbe?->otherStock, 'completed multi-resource mining transfers the other-materials share');
+
+    $pdo->prepare('UPDATE neumann_probes SET damage_percent = 4, integrity_percent = 96, metals_stock = 0.2 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/repair', $headers, json_encode(['percent' => 1], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $cancelRepair->status, 'fourth Manny can start a repair before cancellation');
+    $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/recall', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $cancelRepair->status, 'POST /api/probe/mannies/{id}/recall cancels an active repair task');
+    $test->assertEquals(null, $cancelRepair->body['manny']['currentTask'] ?? null, 'cancelled repair returns the Manny to idle');
+    $test->assertEquals(0.2, $probes->findByPlayerId($player->id)?->metalsStock, 'cancelled repair refunds committed metals when capacity is available');
+    $pdo->prepare('UPDATE neumann_probes SET damage_percent = 3, integrity_percent = 97 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 }
 
 $currentProbe = $probes->findByPlayerId($player->id);
