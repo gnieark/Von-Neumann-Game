@@ -1,6 +1,10 @@
 # Von Neumann Game
 
-Persistent PHP 8.2 prototype for a procedural Von Neumann probe game.
+Persistent PHP 8 prototype for a procedural Von Neumann probe game.
+
+## Development status: 
+
+ongoing
 
 ## Setup
 
