@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Auth;
 
 use VonNeumannGame\Domain\Player;
+use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
@@ -21,6 +22,7 @@ final class AuthService
         private readonly SessionRepository $sessions,
         private readonly VisitedSectorRepository $visitedSectors,
         private readonly int $sessionTtlDays = 7,
+        private readonly ?MannyRepository $mannies = null,
     ) {}
 
     public function registerPlayerWithPassword(string $username, string $password, ?string $displayName = null, ?string $probeName = null): Player
@@ -33,7 +35,8 @@ final class AuthService
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
         $player = $this->players->createPlayer($username, $displayName, null, $home);
         $this->authMethods->addPasswordAuth($player->id, $passwordHash);
-        $this->probes->createForPlayer($player->id, $probeName ?? 'Probe of ' . $username, $home);
+        $probe = $this->probes->createForPlayer($player->id, $probeName ?? 'Probe of ' . $username, $home);
+        $this->mannies?->ensureDefaultsForProbe($probe);
         $this->visitedSectors->markVisited($player, $home);
 
         return $player;

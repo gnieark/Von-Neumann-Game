@@ -79,17 +79,19 @@ The current-sector response also includes the probe inventory. A new probe has
 1 `earth_container_equivalent` of transport capacity and starts with:
 
 - 1 atomic 3D printer, occupying 0.3 containers, with no current task
-- 4 Mannies, each occupying 0.05 containers, with no current task
+- 4 persisted Mannies, named `manny-1` through `manny-4`, each occupying
+  0.05 containers while onboard
 
 The probe uses nuclear fusion and also starts with a full external deuterium
 tank. This special tank is mounted outside cargo storage, so it does not consume
 the available container capacity. Each intersector movement currently consumes
-2% of the probe's current deuterium stock.
+2% of the probe's current deuterium stock and adds 0 to 3% hull damage per
+traversed sector.
 
-Read the task state for one onboard object by using its inventory `id`:
+List Manny robots and use their generated `id` for orders:
 
 ```bash
-curl -s http://localhost:8000/api/probe/inventory/probe-1-manny-1 \
+curl -s http://localhost:8000/api/probe/mannies \
   -H "Authorization: Bearer <token>"
 ```
 

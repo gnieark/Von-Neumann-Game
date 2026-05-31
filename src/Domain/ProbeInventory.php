@@ -11,14 +11,19 @@ final class ProbeInventory
     /**
      * @param array<ProbeInventoryItem> $items
      * @param array<ProbeExternalTank> $externalTanks
+     * @param array<array<string, mixed>> $resourceStocks
      */
     public function __construct(
         public readonly float $capacity,
         public readonly array $items,
         public readonly array $externalTanks,
+        public readonly array $resourceStocks = [],
     ) {}
 
-    public static function defaultForProbe(NeumannProbe $probe): self
+    /**
+     * @param array<Manny> $mannies
+     */
+    public static function defaultForProbe(NeumannProbe $probe, array $mannies = []): self
     {
         $items = [
             new ProbeInventoryItem(
@@ -31,15 +36,32 @@ final class ProbeInventory
             ),
         ];
 
-        for ($i = 1; $i <= 4; $i++) {
-            $items[] = new ProbeInventoryItem(
-                'probe-' . $probe->id . '-manny-' . $i,
-                'manny',
-                'Manny ' . $i,
-                0.05,
-                null,
-                0,
-            );
+        if ($mannies === []) {
+            for ($i = 1; $i <= 4; $i++) {
+                $items[] = new ProbeInventoryItem(
+                    'probe-' . $probe->id . '-manny-' . $i,
+                    'manny',
+                    'manny-' . $i,
+                    0.05,
+                    null,
+                    0,
+                    ['type' => Manny::LOCATION_PROBE],
+                    ['capacity' => 0.3, 'deuterium' => 0.0, 'metals' => 0.0, 'other' => 0.0, 'capacityUnit' => self::CAPACITY_UNIT],
+                );
+            }
+        } else {
+            foreach ($mannies as $manny) {
+                $items[] = new ProbeInventoryItem(
+                    $manny->uid,
+                    'manny',
+                    $manny->name,
+                    $manny->isOnProbe() ? 0.05 : 0.0,
+                    $manny->currentTask,
+                    $manny->taskProgressPercent(),
+                    ['type' => $manny->locationType],
+                    $manny->cargoArray(),
+                );
+            }
         }
 
         $externalTanks = [
@@ -51,7 +73,24 @@ final class ProbeInventory
             ),
         ];
 
-        return new self(1, $items, $externalTanks);
+        $resourceStocks = [
+            [
+                'type' => 'metals',
+                'name' => 'Métaux',
+                'amount' => $probe->metalsStock,
+                'containerSpace' => $probe->metalsStock,
+                'capacityUnit' => self::CAPACITY_UNIT,
+            ],
+            [
+                'type' => 'other',
+                'name' => 'Autres matériaux',
+                'amount' => $probe->otherStock,
+                'containerSpace' => $probe->otherStock,
+                'capacityUnit' => self::CAPACITY_UNIT,
+            ],
+        ];
+
+        return new self(1, $items, $externalTanks, $resourceStocks);
     }
 
     public function usedCapacity(): float
@@ -59,6 +98,10 @@ final class ProbeInventory
         return round(array_reduce(
             $this->items,
             static fn(float $total, ProbeInventoryItem $item): float => $total + $item->containerSpace,
+            0.0,
+        ) + array_reduce(
+            $this->resourceStocks,
+            static fn(float $total, array $stock): float => $total + (float) ($stock['containerSpace'] ?? 0),
             0.0,
         ), 4);
     }
@@ -85,6 +128,7 @@ final class ProbeInventory
                 static fn(ProbeInventoryItem $item): array => $item->toArray(),
                 $this->items,
             ),
+            'resourceStocks' => $this->resourceStocks,
             'externalTanks' => array_map(
                 static fn(ProbeExternalTank $tank): array => $tank->toArray(),
                 $this->externalTanks,

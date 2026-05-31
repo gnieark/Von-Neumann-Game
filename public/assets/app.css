@@ -458,6 +458,59 @@ button:disabled {
     color: var(--error);
 }
 
+.manny-list {
+    display: grid;
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.manny-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(0,0,0,.18);
+}
+
+.manny-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+}
+
+.manny-card-head span {
+    color: var(--muted);
+}
+
+.manny-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+}
+
+.manny-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)) auto;
+    gap: 10px;
+    align-items: end;
+}
+
+.manny-form select {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: #121516;
+    color: var(--text);
+    padding: 9px 11px;
+}
+
+.manny-recall-button {
+    justify-self: start;
+    min-width: 130px;
+}
+
 .coordinate-form,
 .action-panel {
     display: grid;
@@ -502,7 +555,8 @@ button:disabled {
     .game-brief,
     .console-grid,
     .coordinate-form,
-    .action-panel {
+    .action-panel,
+    .manny-form {
         grid-template-columns: 1fr;
     }
 

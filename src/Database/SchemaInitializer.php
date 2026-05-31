@@ -69,8 +69,11 @@ final class SchemaInitializer
                 direction_z $decimal NOT NULL DEFAULT 0,
                 status $text NOT NULL,
                 integrity_percent $decimal NOT NULL DEFAULT 100,
+                damage_percent $decimal NOT NULL DEFAULT 0,
                 energy_stored $decimal NOT NULL DEFAULT 0,
                 deuterium_stock $decimal NOT NULL DEFAULT 100,
+                metals_stock $decimal NOT NULL DEFAULT 0,
+                other_stock $decimal NOT NULL DEFAULT 0,
                 internal_clock_rate $decimal NOT NULL DEFAULT 1,
                 current_task $nullableText,
                 entered_current_sector_at $text NOT NULL,
@@ -80,6 +83,30 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_neumann_probes_sector ON neumann_probes(sector_x, sector_y, sector_z)",
+            "CREATE TABLE IF NOT EXISTS mannies (
+                id $id,
+                uid $text NOT NULL UNIQUE,
+                probe_id INTEGER NOT NULL,
+                name $text NOT NULL,
+                location_type $text NOT NULL,
+                sector_x INTEGER NULL,
+                sector_y INTEGER NULL,
+                sector_z INTEGER NULL,
+                current_task $nullableText,
+                task_started_at $nullableText,
+                task_ends_at $nullableText,
+                task_payload_json TEXT NOT NULL,
+                cargo_deuterium $decimal NOT NULL DEFAULT 0,
+                cargo_metals $decimal NOT NULL DEFAULT 0,
+                cargo_other $decimal NOT NULL DEFAULT 0,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(probe_id, name),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_mannies_probe_id ON mannies(probe_id)",
+            "CREATE INDEX IF NOT EXISTS idx_mannies_uid ON mannies(uid)",
+            "CREATE INDEX IF NOT EXISTS idx_mannies_sector ON mannies(sector_x, sector_y, sector_z)",
             "CREATE TABLE IF NOT EXISTS probe_movements (
                 id $id,
                 probe_id INTEGER NOT NULL,
@@ -164,11 +191,29 @@ final class SchemaInitializer
             if (!in_array('deuterium_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock REAL NOT NULL DEFAULT 100');
             }
+            if (!in_array('damage_percent', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN damage_percent REAL NOT NULL DEFAULT 0');
+            }
+            if (!in_array('metals_stock', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock REAL NOT NULL DEFAULT 0');
+            }
+            if (!in_array('other_stock', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock REAL NOT NULL DEFAULT 0');
+            }
         } elseif ($this->driver === 'mysql') {
             $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
             if (!in_array('deuterium_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock DOUBLE NOT NULL DEFAULT 100 AFTER energy_stored');
+            }
+            if (!in_array('damage_percent', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN damage_percent DOUBLE NOT NULL DEFAULT 0 AFTER integrity_percent');
+            }
+            if (!in_array('metals_stock', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock DOUBLE NOT NULL DEFAULT 0 AFTER deuterium_stock');
+            }
+            if (!in_array('other_stock', $names, true)) {
+                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock DOUBLE NOT NULL DEFAULT 0 AFTER metals_stock');
             }
         }
     }

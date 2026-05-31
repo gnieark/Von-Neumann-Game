@@ -6,6 +6,7 @@ use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Http\ApiKernel;
+use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
@@ -13,9 +14,11 @@ use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
+use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -106,16 +109,18 @@ $test->assert(is_file($dbPath), 'temporary SQLite database is created');
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
+$mannies = new MannyRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
 $scheduledEvents = new ScheduledEventRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
-$auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7);
+$auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies);
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, worldSeed: 'api-test-world');
+$mannyService = new MannyService($mannies, $probes, $sectorService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService);
 
 $player = $auth->registerPlayerWithPassword('remi', 'secret', 'Remi');
 $test->assert($player->id > 0, 'user creation returns a persisted player');
@@ -159,6 +164,7 @@ $test->assertEquals('remi', $me->body['player']['username'] ?? null, 'GET /api/m
 $probe = $kernel->handle('GET', '/api/probe', $headers);
 $test->assertEquals(200, $probe->status, 'valid token allows GET /api/probe');
 $test->assertEquals('idle', $probe->body['probe']['status'] ?? null, 'GET /api/probe returns probe status');
+$test->assertEquals(0.0, $probe->body['probe']['systems']['damagePercent'] ?? null, 'new probe starts with zero damage');
 $test->assert(isset($probe->body['probe']['sector']['relative']), 'GET /api/probe exposes relative sector coordinates');
 $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $probe->body['probe']['sector']['relative'] ?? null, 'player sees initial sector as relative coordinates [0,0,0]');
 $test->assert(!str_contains(json_encode($probe->body, JSON_THROW_ON_ERROR), 'absolute'), 'GET /api/probe does not expose absolute coordinates');
@@ -199,6 +205,68 @@ $test->assertEquals(0.0, $mannyTask->body['item']['taskProgressPercent'] ?? null
 
 $missingItem = $kernel->handle('GET', '/api/probe/inventory/missing-item', $headers);
 $test->assertEquals(404, $missingItem->status, 'unknown inventory item id returns 404');
+
+$mannyList = $kernel->handle('GET', '/api/probe/mannies', $headers);
+$test->assertEquals(200, $mannyList->status, 'GET /api/probe/mannies returns persisted Mannies');
+$test->assertEquals(4, count($mannyList->body['mannies'] ?? []), 'new probe starts with four persisted Mannies');
+$firstMannyId = (string) ($mannyList->body['mannies'][0]['id'] ?? '');
+$secondMannyId = (string) ($mannyList->body['mannies'][1]['id'] ?? '');
+$test->assert(str_starts_with($firstMannyId, 'mny_'), 'Manny public API id is a stable generated uid');
+$test->assertEquals('manny-1', $mannyList->body['mannies'][0]['name'] ?? null, 'default Manny names are player-facing names');
+
+$renameManny = $kernel->handle('PATCH', '/api/probe/mannies/' . rawurlencode($firstMannyId), $headers, json_encode(['name' => 'atelier'], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $renameManny->status, 'PATCH /api/probe/mannies/{id} renames a Manny');
+$test->assertEquals('atelier', $renameManny->body['manny']['name'] ?? null, 'renamed Manny response exposes the new name');
+$duplicateManny = $kernel->handle('PATCH', '/api/probe/mannies/' . rawurlencode($firstMannyId), $headers, json_encode(['name' => 'manny-2'], JSON_THROW_ON_ERROR));
+$test->assertEquals(409, $duplicateManny->status, 'Manny names must remain unique per probe');
+
+if ($createdProbe !== null) {
+    $pdo->prepare('UPDATE neumann_probes SET damage_percent = 5, integrity_percent = 95, metals_stock = 0.05 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $repairManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/repair', $headers, json_encode(['percent' => 2], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $repairManny->status, 'POST /api/probe/mannies/{id}/repair starts a real-time repair task');
+    $test->assertEquals('repair', $repairManny->body['manny']['currentTask'] ?? null, 'repair task is exposed on Manny');
+    $test->assertEquals(0.03, $probes->findByPlayerId($player->id)?->metalsStock, 'repair consumes 0.01 containers of metals per damage percent');
+    $repairRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $repairRow->execute(['uid' => $firstMannyId]);
+    $repairMannyDbId = (int) $repairRow->fetchColumn();
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $repairMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $repairedProbe = $probes->findByPlayerId($player->id);
+    $test->assertEquals(3.0, $repairedProbe?->damagePercent, 'completed Manny repair lowers probe damage');
+    $test->assertEquals(97.0, $repairedProbe?->integrityPercent, 'completed Manny repair restores matching integrity');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+    ]));
+    $mineableSector = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $test->assertEquals('mine-rock', $mineableSector->body['sector']['objects'][0]['id'] ?? null, 'sector observation exposes object ids for Manny mining orders');
+    $test->assertEquals(true, $mineableSector->body['sector']['objects'][0]['mannyMineable'] ?? null, 'small asteroids are marked as Manny-mineable');
+
+    $mineManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'mine-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.01,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $mineManny->status, 'POST /api/probe/mannies/{id}/mine starts a mining task');
+    $test->assertEquals('mining', $mineManny->body['manny']['currentTask'] ?? null, 'mining task is exposed on Manny');
+    $test->assertEquals('sector', $mineManny->body['manny']['location']['type'] ?? null, 'mining moves the Manny outside the probe');
+
+    $mineRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $mineRow->execute(['uid' => $secondMannyId]);
+    $mineMannyDbId = (int) $mineRow->fetchColumn();
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $mineMannyDbId,
+        'started' => gmdate('c', time() - 2200),
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $minedProbe = $probes->findByPlayerId($player->id);
+    $test->assertEquals(0.04, $minedProbe?->metalsStock, 'completed Manny mining transfers metals to the probe inventory');
+    $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'completed mining returns the Manny to the probe');
+}
 
 $currentProbe = $probes->findByPlayerId($player->id);
 if ($currentProbe !== null) {
@@ -342,6 +410,8 @@ if ($moveProbe !== null) {
         $arrivedProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
         $test->assertEquals('idle', $arrivedProbe->body['probe']['status'] ?? null, 'GET /api/probe finalizes arrived movement');
         $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $arrivedProbe->body['probe']['sector']['relative'] ?? null, 'after arrival target sector becomes current relative sector');
+        $arrivalDamage = (float) ($arrivedProbe->body['probe']['systems']['damagePercent'] ?? -1);
+        $test->assert($arrivalDamage >= 3.0 && $arrivalDamage <= 6.0, 'intersector arrival applies 0 to 3 percent damage per traversed sector');
 
         $arrivedProbeEntity = $probes->findByPlayerId($player->id);
         if ($arrivedProbeEntity !== null) {

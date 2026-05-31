@@ -80,6 +80,7 @@
                 <button class="panel-tab active" data-panel-target="probe-panel" type="button">{{t.tabProbe}}</button>
                 <button class="panel-tab" data-panel-target="environment-panel" type="button">{{t.tabEnvironment}}</button>
                 <button class="panel-tab" data-panel-target="systems-panel" type="button">{{t.tabSystems}}</button>
+                <button class="panel-tab" data-panel-target="mannies-panel" type="button">{{t.tabMannies}}</button>
                 <button class="panel-tab" data-panel-target="actions-panel" type="button">{{t.tabActions}}</button>
             </aside>
 
@@ -124,6 +125,19 @@
                     </div>
                     <div id="systems-summary" class="metrics"></div>
                     <pre id="inventory-json" class="json-dump">{{t.loading}}</pre>
+                </article>
+
+                <article id="mannies-panel" class="data-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">GET /api/probe/mannies</p>
+                            <h2>{{t.mannyManagement}}</h2>
+                        </div>
+                        <button class="icon-button" data-refresh="mannies" type="button" title="{{t.refresh}}">⟳</button>
+                    </div>
+                    <div id="manny-list" class="manny-list"></div>
+                    <p id="manny-status" class="action-status"></p>
+                    <pre id="manny-json" class="json-dump">{{t.loading}}</pre>
                 </article>
 
                 <article id="actions-panel" class="data-panel">

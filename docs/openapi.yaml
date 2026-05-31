@@ -119,12 +119,26 @@ paths:
                       containerSpace: 0.3
                       currentTask: null
                       taskProgressPercent: 0
-                    - id: probe-1-manny-1
+                    - id: mny_8d4a2c1f5a91b334
                       type: manny
-                      name: Manny 1
+                      name: manny-1
                       containerSpace: 0.05
                       currentTask: null
                       taskProgressPercent: 0
+                      location:
+                        type: probe
+                      cargo:
+                        capacity: 0.3
+                        deuterium: 0
+                        metals: 0
+                        other: 0
+                        capacityUnit: earth_container_equivalent
+                  resourceStocks:
+                    - type: metals
+                      name: Métaux
+                      amount: 0
+                      containerSpace: 0
+                      capacityUnit: earth_container_equivalent
                   externalTanks:
                     - id: probe-1-deuterium-tank
                       type: deuterium
@@ -225,7 +239,7 @@ paths:
           required: true
           schema:
             type: string
-          example: probe-1-manny-1
+          example: mny_8d4a2c1f5a91b334
       responses:
         '200':
           description: Inventory item task state
@@ -239,15 +253,177 @@ paths:
                     $ref: '#/components/schemas/ProbeInventoryItemTask'
               example:
                 item:
-                  id: probe-1-manny-1
+                  id: mny_8d4a2c1f5a91b334
                   type: manny
-                  name: Manny 1
+                  name: manny-1
                   currentTask: null
                   taskProgressPercent: 0
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/probe/mannies:
+    get:
+      summary: List persisted Manny robots for the current probe
+      responses:
+        '200':
+          description: Manny robots
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mannies]
+                properties:
+                  mannies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Manny'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/mannies/{mannyId}:
+    patch:
+      summary: Rename a Manny robot
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyRenameRequest'
+            example:
+              name: atelier
+      responses:
+        '200':
+          description: Manny renamed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Duplicate Manny name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/repair:
+    post:
+      summary: Start repairing probe damage with a Manny
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyRepairRequest'
+            example:
+              percent: 2
+      responses:
+        '202':
+          description: Repair task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable or probe cannot be repaired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Insufficient metals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/mine:
+    post:
+      summary: Start mining a small body with a Manny
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyMineRequest'
+            example:
+              objectId: mine-rock
+              resource: metals
+              targetAmount: 0.3
+      responses:
+        '202':
+          description: Mining task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Invalid target, unavailable resource, or insufficient cargo capacity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/recall:
+    post:
+      summary: Recall an exterior Manny to the probe
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      responses:
+        '202':
+          description: Recall accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is outside the probe current sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sector:
     get:
       summary: Observe a sector by player-relative coordinates
@@ -379,6 +555,14 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+  parameters:
+    MannyId:
+      name: mannyId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: mny_8d4a2c1f5a91b334
   responses:
     BadRequest:
       description: Bad request
@@ -419,7 +603,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, insufficient_fuel, same_destination, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, no_probe_damage, insufficient_metals, invalid_mining_target, resource_unavailable, insufficient_cargo_capacity, internal_error]
             message:
               type: string
     SessionRequest:
@@ -532,11 +716,29 @@ components:
             accelerationCPerDay: { type: number }
             direction:
               $ref: '#/components/schemas/Vector'
+        systems:
+          type: object
+          properties:
+            integrityPercent:
+              type: number
+              minimum: 0
+              maximum: 100
+            damagePercent:
+              type: number
+              minimum: 0
+              maximum: 100
+            energyStored:
+              type: number
+            internalClockRate:
+              type: number
+            currentTask:
+              type: string
+              nullable: true
         inventory:
           $ref: '#/components/schemas/ProbeInventory'
     ProbeInventory:
       type: object
-      required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, externalTanks]
+      required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, externalTanks]
       properties:
         capacity:
           type: number
@@ -555,11 +757,32 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProbeInventoryItem'
+        resourceStocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeResourceStock'
         externalTanks:
           type: array
           description: Special external tanks that do not consume cargo capacity.
           items:
             $ref: '#/components/schemas/ProbeExternalTank'
+    ProbeResourceStock:
+      type: object
+      required: [type, name, amount, containerSpace, capacityUnit]
+      properties:
+        type:
+          type: string
+          enum: [metals, other]
+        name:
+          type: string
+        amount:
+          type: number
+          description: Stored amount in equivalent earth containers.
+        containerSpace:
+          type: number
+        capacityUnit:
+          type: string
+          enum: [earth_container_equivalent]
     ProbeExternalTank:
       type: object
       required: [id, type, name, fillPercent, external, usesCargoCapacity]
@@ -602,6 +825,10 @@ components:
           type: number
           minimum: 0
           maximum: 100
+        location:
+          $ref: '#/components/schemas/MannyLocation'
+        cargo:
+          $ref: '#/components/schemas/MannyCargo'
     ProbeInventoryItemTask:
       type: object
       required: [id, type, name, currentTask, taskProgressPercent]
@@ -620,6 +847,99 @@ components:
           type: number
           minimum: 0
           maximum: 100
+        location:
+          $ref: '#/components/schemas/MannyLocation'
+        cargo:
+          $ref: '#/components/schemas/MannyCargo'
+    MannyRenameRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+    MannyRepairRequest:
+      type: object
+      required: [percent]
+      properties:
+        percent:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 100
+          description: Damage percentage to repair. Each percent takes 10 real minutes and consumes 0.01 containers of metals.
+    MannyMineRequest:
+      type: object
+      required: [objectId, resource, targetAmount]
+      properties:
+        objectId:
+          type: string
+        resource:
+          type: string
+          enum: [deuterium, metals, other]
+        targetAmount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Amount to mine in equivalent earth containers. Manny cargo capacity is 0.3 per trip.
+    Manny:
+      type: object
+      required: [id, name, location, currentTask, taskProgressPercent, task, cargo, canReceiveOrders]
+      properties:
+        id:
+          type: string
+          description: Stable generated Manny uid used by API calls.
+          example: mny_8d4a2c1f5a91b334
+        name:
+          type: string
+          example: manny-1
+        location:
+          $ref: '#/components/schemas/MannyLocation'
+        currentTask:
+          type: string
+          nullable: true
+          enum: [repair, mining, returning]
+        taskProgressPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        task:
+          type: object
+          additionalProperties: true
+        cargo:
+          $ref: '#/components/schemas/MannyCargo'
+        canReceiveOrders:
+          type: boolean
+    MannyLocation:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [probe, sector]
+        sector:
+          type: object
+          nullable: true
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+    MannyCargo:
+      type: object
+      required: [capacity, deuterium, metals, other, capacityUnit]
+      properties:
+        capacity:
+          type: number
+          example: 0.3
+        deuterium:
+          type: number
+        metals:
+          type: number
+        other:
+          type: number
+        capacityUnit:
+          type: string
+          enum: [earth_container_equivalent]
     SectorSummary:
       type: object
       required: [coordinates, objects]

@@ -24,6 +24,8 @@ use VonNeumannGame\Sector\UniverseObject;
 
 final class SectorObservationService
 {
+    private const MANNY_MINEABLE_MAX_MASS = 0.0123;
+
     private readonly SectorGrid $grid;
 
     public function __construct(
@@ -143,6 +145,7 @@ final class SectorObservationService
     private function detailedObject(UniverseObject $object): array
     {
         $data = [
+            'id' => $object->getId(),
             'type' => $object->getType()->value,
             'name' => $object->getName(),
             'estimated' => false,
@@ -162,6 +165,7 @@ final class SectorObservationService
             $data['starCount'] = count($object->getStars());
             $data['planetCount'] = $planetCount;
             $data['orbitalBodyCount'] = count($object->getOrbitalBodies());
+            $data['minableTargets'] = $this->minableTargets($object);
         }
 
         if ($object instanceof Star) {
@@ -170,9 +174,37 @@ final class SectorObservationService
 
         if ($object instanceof Planet || $object instanceof Asteroid) {
             $data['resources'] = $object->toArray()['resourceHints'] ?? $object->toArray()['estimatedResources'] ?? [];
+            $data['mannyMineable'] = $this->isMannyMineable($object);
         }
 
         return $data;
+    }
+
+    private function minableTargets(SolarSystem $system): array
+    {
+        $targets = [];
+        foreach ($system->getOrbitalBodies() as $body) {
+            $object = $body->getObject();
+            if (!$this->isMannyMineable($object)) {
+                continue;
+            }
+
+            $targets[] = [
+                'id' => $object->getId(),
+                'type' => $object->getType()->value,
+                'name' => $object->getName(),
+                'mass' => $object->getMass(),
+                'resources' => $object->toArray()['resourceHints'] ?? $object->toArray()['estimatedResources'] ?? [],
+            ];
+        }
+
+        return $targets;
+    }
+
+    private function isMannyMineable(UniverseObject $object): bool
+    {
+        return ($object instanceof Planet || $object instanceof Asteroid)
+            && $object->getMass() <= self::MANNY_MINEABLE_MAX_MASS;
     }
 
     private function neighborEstimate(SectorContent $content, float $quality): array

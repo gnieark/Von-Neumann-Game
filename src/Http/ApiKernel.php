@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Http;
 
 use VonNeumannGame\Auth\AuthService;
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
@@ -12,6 +13,8 @@ use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Service\MannyActionException;
+use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\ObservationAccessException;
 use VonNeumannGame\Service\ProbeMovementException;
 use VonNeumannGame\Service\ProbeMovementService;
@@ -28,6 +31,7 @@ final class ApiKernel
         private readonly SectorObservationService $observations,
         private readonly ProbeMovementService $movements,
         private readonly VisitedSectorRepository $visitedSectors,
+        private readonly MannyService $mannies,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -43,6 +47,12 @@ final class ApiKernel
             if (preg_match('#^/api/probe/inventory/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeInventoryItemResponse($player, rawurldecode($matches[1])));
             }
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|recall)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
+            }
+            if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMannyRenameResponse($player, rawurldecode($matches[1]), $body));
+            }
 
             return match ($routePath) {
                 '/api/session' => $this->routeSession($method, $body),
@@ -50,10 +60,13 @@ final class ApiKernel
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
+                '/api/probe/mannies' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeManniesResponse($player)),
                 '/api/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $query)),
                 default => ApiResponse::error(404, 'not_found', 'Endpoint not found'),
             };
         } catch (ProbeMovementException $e) {
+            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
+        } catch (MannyActionException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (ObservationAccessException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
@@ -115,6 +128,10 @@ final class ApiKernel
                     'message' => 'The probe has crossed a black hole escape threshold. No signal or actuator response can be recovered.',
                     'fuel' => ['deuterium' => $probe->deuteriumStock],
                     'sensorMode' => 'blind',
+                    'systems' => [
+                        'integrityPercent' => $probe->integrityPercent,
+                        'damagePercent' => $probe->damagePercent,
+                    ],
                 ],
             ]);
         }
@@ -127,6 +144,10 @@ final class ApiKernel
                     'message' => 'The probe is no longer operational. Its intelligence core is isolated from all sensors and actuators.',
                     'fuel' => ['deuterium' => $probe->deuteriumStock],
                     'sensorMode' => 'blind',
+                    'systems' => [
+                        'integrityPercent' => $probe->integrityPercent,
+                        'damagePercent' => $probe->damagePercent,
+                    ],
                 ],
             ]);
         }
@@ -172,7 +193,7 @@ final class ApiKernel
                         'scanQuality' => 0.2,
                     ],
                 ],
-                'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
             ]);
         }
 
@@ -183,7 +204,7 @@ final class ApiKernel
 
         return new ApiResponse(200, [
             'sector' => $observation,
-            'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
+            'inventory' => $this->inventoryForProbe($probe)->toArray(),
         ]);
     }
 
@@ -191,7 +212,7 @@ final class ApiKernel
     {
         $probe = $this->requiredProbe($player);
         $this->movements->ensureProbeOperational($probe);
-        $item = ProbeInventory::defaultForProbe($probe)->findItem($itemId);
+        $item = $this->inventoryForProbe($probe)->findItem($itemId);
 
         if ($item === null) {
             return ApiResponse::error(404, 'not_found', 'Inventory item not found.');
@@ -277,6 +298,59 @@ final class ApiKernel
         return new ApiResponse(202, ['movement' => $this->movementArray($player, $movement)]);
     }
 
+    private function probeManniesResponse(Player $player): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $mannies = $this->mannies->manniesForProbe($probe);
+
+        return new ApiResponse(200, [
+            'mannies' => array_map(fn($manny): array => $this->mannyArray($player, $probe, $manny), $mannies),
+        ]);
+    }
+
+    private function probeMannyRenameResponse(Player $player, string $uid, ?string $body): ApiResponse
+    {
+        $probe = $this->requiredProbe($player);
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data) || !isset($data['name']) || !is_string($data['name'])) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a Manny name.');
+        }
+
+        $manny = $this->mannies->renameManny($probe, $uid, $data['name']);
+
+        return new ApiResponse(200, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+    }
+
+    private function probeMannyActionResponse(Player $player, string $uid, string $action, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $data = $this->decodeJsonBody($body) ?? [];
+
+        if ($action === 'repair') {
+            if (!isset($data['percent']) || !is_numeric($data['percent'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain repair percent.');
+            }
+
+            $manny = $this->mannies->startRepair($probe, $uid, (float) $data['percent']);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        if ($action === 'mine') {
+            if (!isset($data['objectId'], $data['resource'], $data['targetAmount']) || !is_string($data['objectId']) || !is_string($data['resource']) || !is_numeric($data['targetAmount'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId, resource and targetAmount.');
+            }
+
+            $manny = $this->mannies->startMining($probe, $uid, $data['objectId'], $data['resource'], (float) $data['targetAmount']);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        $manny = $this->mannies->recallManny($probe, $uid);
+
+        return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+    }
+
     private function requiredProbe(Player $player): NeumannProbe
     {
         return $this->probes->findByPlayerId($player->id) ?? throw new \RuntimeException('Probe not found.');
@@ -303,12 +377,27 @@ final class ApiKernel
             'movement' => $latest !== null ? $this->movementArray($player, $latest, $movement !== null) : null,
             'systems' => [
                 'integrityPercent' => $probe->integrityPercent,
+                'damagePercent' => $probe->damagePercent,
                 'energyStored' => $probe->energyStored,
                 'internalClockRate' => $probe->internalClockRate,
                 'currentTask' => $probe->currentTask,
             ],
-            'inventory' => ProbeInventory::defaultForProbe($probe)->toArray(),
+            'inventory' => $this->inventoryForProbe($probe)->toArray(),
         ];
+    }
+
+    private function inventoryForProbe(NeumannProbe $probe): ProbeInventory
+    {
+        return ProbeInventory::defaultForProbe($probe, $this->mannies->manniesForProbe($probe));
+    }
+
+    private function mannyArray(Player $player, NeumannProbe $probe, Manny $manny): array
+    {
+        $relativeSector = $manny->sector === null
+            ? null
+            : (new PlayerReferenceFrame($player->homeSector))->globalToRelative($manny->sector);
+
+        return $this->mannies->publicArray($probe, $manny, $relativeSector);
     }
 
     private function movementArray(Player $player, ProbeMovement $movement, bool $includeLive = true): array

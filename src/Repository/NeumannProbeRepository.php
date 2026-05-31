@@ -20,8 +20,8 @@ final class NeumannProbeRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO neumann_probes
-             (player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
-             VALUES (:player_id, :name, :x, :y, :z, 0, 0, 0, 0, 0, :status, 100, 0, 100, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
+             (player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, damage_percent, energy_stored, deuterium_stock, metals_stock, other_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
+             VALUES (:player_id, :name, :x, :y, :z, 0, 0, 0, 0, 0, :status, 100, 0, 0, 100, 0, 0, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
         );
         $stmt->execute([
             'player_id' => $playerId,
@@ -72,8 +72,11 @@ final class NeumannProbeRepository
                 direction_z = :direction_z,
                 status = :status,
                 integrity_percent = :integrity_percent,
+                damage_percent = :damage_percent,
                 energy_stored = :energy_stored,
                 deuterium_stock = :deuterium_stock,
+                metals_stock = :metals_stock,
+                other_stock = :other_stock,
                 internal_clock_rate = :internal_clock_rate,
                 current_task = :current_task,
                 entered_current_sector_at = :entered_current_sector_at,
@@ -93,8 +96,11 @@ final class NeumannProbeRepository
             'direction_z' => $probe->direction->z,
             'status' => $probe->status->value,
             'integrity_percent' => $probe->integrityPercent,
+            'damage_percent' => $probe->damagePercent,
             'energy_stored' => $probe->energyStored,
             'deuterium_stock' => $probe->deuteriumStock,
+            'metals_stock' => $probe->metalsStock,
+            'other_stock' => $probe->otherStock,
             'internal_clock_rate' => $probe->internalClockRate,
             'current_task' => $probe->currentTask,
             'entered_current_sector_at' => $probe->enteredCurrentSectorAt,
@@ -104,6 +110,11 @@ final class NeumannProbeRepository
 
     private function hydrate(array $row): NeumannProbe
     {
+        $integrity = (float) $row['integrity_percent'];
+        $damage = array_key_exists('damage_percent', $row)
+            ? (float) $row['damage_percent']
+            : max(0.0, 100.0 - $integrity);
+
         return new NeumannProbe(
             (int) $row['id'],
             (int) $row['player_id'],
@@ -113,9 +124,12 @@ final class NeumannProbeRepository
             (float) $row['acceleration_c_per_day'],
             new ProbeDirection((float) $row['direction_x'], (float) $row['direction_y'], (float) $row['direction_z']),
             ProbeStatus::from((string) $row['status']),
-            (float) $row['integrity_percent'],
+            $integrity,
+            $damage,
             (float) $row['energy_stored'],
             (float) ($row['deuterium_stock'] ?? 100),
+            (float) ($row['metals_stock'] ?? 0),
+            (float) ($row['other_stock'] ?? 0),
             (float) $row['internal_clock_rate'],
             $row['current_task'] !== null ? (string) $row['current_task'] : null,
             (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
