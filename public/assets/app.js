@@ -63,7 +63,7 @@
     const alreadyMovingMessage = 'The probe is already moving between sectors.';
     let probeAlreadyMoving = false;
     let currentMannyMineTargets = [];
-    const miningResourceTypes = ['deuterium', 'metals', 'other'];
+    const miningResourceTypes = ['deuterium', 'metals', 'ice', 'carbon_compounds'];
     const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) {
@@ -118,6 +118,8 @@
     const resourceTypeLabel = (type) => ({
         deuterium: t('deuterium', 'Deuterium'),
         metals: t('metals', 'Metals'),
+        ice: t('ice', 'Ice'),
+        carbon_compounds: t('carbonCompounds', 'Carbon compounds'),
         other: t('otherResources', 'Other'),
     }[type] || type);
     const objectTypeLabel = (type) => ({
@@ -129,14 +131,20 @@
     }[state] || state || '-');
     const resourceTypeFromHint = (hint) => {
         const value = String(hint || '').toLowerCase();
-        if (value.includes('water') || value.includes('ice') || value.includes('volatile') || value.includes('hydrogen')) {
+        if (value.includes('deuterium') || value.includes('hydrogen')) {
             return 'deuterium';
         }
-        if (value.includes('iron') || value.includes('nickel') || value.includes('metal') || value.includes('platinum') || value.includes('magnesium')) {
+        if (value.includes('iron') || value.includes('nickel') || value.includes('metal') || value.includes('platinum') || value.includes('magnesium') || value.includes('silicate')) {
             return 'metals';
         }
+        if (value.includes('water') || value.includes('ice') || value.includes('volatile') || value.includes('ammonia')) {
+            return 'ice';
+        }
+        if (value.includes('carbon') || value.includes('organic') || value.includes('hydrocarbon')) {
+            return 'carbon_compounds';
+        }
 
-        return 'other';
+        return 'carbon_compounds';
     };
     const resourceCompositionForTarget = (target) => {
         const composition = target && target.resourceComposition && typeof target.resourceComposition === 'object'
@@ -272,7 +280,7 @@
         + '<h4>' + escapeHtml(t('miningActionTitle', 'Mine')) + '</h4>'
         + '<form class="manny-mine-form manny-form">'
         + '<label>' + escapeHtml(t('mineTarget', 'Object')) + '<select class="manny-mine-target" name="objectId">' + mineTargetOptions('') + '</select></label>'
-        + '<label>' + escapeHtml(t('resources', 'Resources')) + '<select class="manny-mine-resources" name="resources" multiple size="3">'
+        + '<label>' + escapeHtml(t('resources', 'Resources')) + '<select class="manny-mine-resources" name="resources" multiple size="4">'
         + mineResourceOptions(currentMannyMineTargets[0] || null, [])
         + '</select></label>'
         + '<label>' + escapeHtml(t('targetAmount', 'Amount')) + '<input name="targetAmount" type="number" min="0.01" max="0.55" step="0.01" value="0.01"></label>'

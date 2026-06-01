@@ -18,6 +18,8 @@ use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SolarSystem;
 use VonNeumannGame\Sector\Star;
+use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\Asteroid;
 
 /**
  * Simple test runner with assertions.
@@ -118,6 +120,52 @@ function findGeneratedSector(SectorContentGenerator $generator, string $worldSee
     }
 
     return null;
+}
+
+function solarSystemAsteroidStats(SectorContentGenerator $generator, string $worldSeed, int $limit = 5000): array
+{
+    $stats = [
+        'poorSystems' => 0,
+        'poorSystemsWithAsteroids' => 0,
+        'richSystems' => 0,
+        'richSystemsWithAsteroids' => 0,
+    ];
+
+    for ($i = 0; $i < $limit; $i++) {
+        $sector = $generator->generate(new SectorCoordinates($i * 2, 0, 0), $worldSeed);
+        foreach ($sector->getObjects() as $object) {
+            if (!$object instanceof SolarSystem) {
+                continue;
+            }
+
+            $planetCount = 0;
+            $asteroidCount = 0;
+            foreach ($object->getOrbitalBodies() as $body) {
+                $orbitalObject = $body->getObject();
+                if ($orbitalObject instanceof Planet) {
+                    $planetCount++;
+                }
+                if ($orbitalObject instanceof Asteroid) {
+                    $asteroidCount++;
+                }
+            }
+
+            if ($planetCount <= 3) {
+                $stats['poorSystems']++;
+                if ($asteroidCount > 0) {
+                    $stats['poorSystemsWithAsteroids']++;
+                }
+            }
+            if ($planetCount >= 8) {
+                $stats['richSystems']++;
+                if ($asteroidCount > 0) {
+                    $stats['richSystemsWithAsteroids']++;
+                }
+            }
+        }
+    }
+
+    return $stats;
 }
 
 // ============================================================================
@@ -407,6 +455,13 @@ if ($solarSystemSector !== null) {
         }
     }
 }
+
+$asteroidStats = solarSystemAsteroidStats($contentGenerator, 'asteroid_scaling_seed');
+$test->assert($asteroidStats['poorSystems'] > 0, 'asteroid scaling sample contains low-planet solar systems');
+$test->assert($asteroidStats['richSystems'] > 0, 'asteroid scaling sample contains high-planet solar systems');
+$poorAsteroidRate = $asteroidStats['poorSystemsWithAsteroids'] / max(1, $asteroidStats['poorSystems']);
+$richAsteroidRate = $asteroidStats['richSystemsWithAsteroids'] / max(1, $asteroidStats['richSystems']);
+$test->assert($richAsteroidRate > $poorAsteroidRate, 'solar systems with more planets are more likely to contain asteroids');
 
 $binarySector = findGeneratedSector(
     $contentGenerator,

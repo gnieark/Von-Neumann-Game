@@ -18,6 +18,7 @@ use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\SchedulerService;
@@ -156,9 +157,15 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(1, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(3, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
+
+$movementTimeline = (new MovementDurationCalculator())->timeline(new DateTimeImmutable('2026-01-01T00:00:00+00:00'), 2);
+$test->assertEquals('2026-01-01T00:05:00+00:00', $movementTimeline['preparationEndsAt']->format('c'), 'beta movement preparation delay is halved');
+$test->assertEquals('2026-01-01T00:25:00+00:00', $movementTimeline['accelerationEndsAt']->format('c'), 'beta movement acceleration delay is halved');
+$test->assertEquals('2026-01-01T00:55:00+00:00', $movementTimeline['cruiseEndsAt']->format('c'), 'beta movement cruise delay is halved');
+$test->assertEquals('2026-01-01T01:15:00+00:00', $movementTimeline['arrivalAt']->format('c'), 'beta movement total delay is halved');
 
 $player = $auth->registerPlayerWithPassword('remi', 'secret', 'Remi');
 $test->assert($player->id > 0, 'user creation returns a persisted player');
@@ -357,17 +364,17 @@ if ($createdProbe !== null) {
     $test->assertEquals(422, $oversizedMine->status, 'Manny mining refuses an order larger than the asteroid material reserve');
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
-        new Asteroid('mixed-rock', null, 'mixed', ['iron', 'water_ice', 'silicates'], 'small', 0.000001, 0.001),
+        new Asteroid('mixed-rock', null, 'mixed', ['iron', 'water_ice', 'carbon'], 'small', 0.000001, 0.001),
     ]));
     $mixedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($thirdMannyId) . '/mine', $headers, json_encode([
         'objectId' => 'mixed-rock',
-        'resources' => ['deuterium', 'metals', 'other'],
+        'resources' => ['metals', 'ice', 'carbon_compounds'],
         'targetAmount' => 0.03,
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $mixedMine->status, 'POST /api/probe/mannies/{id}/mine accepts multiple resource categories');
-    $test->assertEquals(0.3333, $mixedMine->body['manny']['task']['resourceProfile']['deuterium'] ?? null, 'multi-resource mining keeps the deuterium composition share');
     $test->assertEquals(0.3333, $mixedMine->body['manny']['task']['resourceProfile']['metals'] ?? null, 'multi-resource mining keeps the metals composition share');
-    $test->assertEquals(0.3334, $mixedMine->body['manny']['task']['resourceProfile']['other'] ?? null, 'multi-resource mining assigns the remaining composition share');
+    $test->assertEquals(0.3333, $mixedMine->body['manny']['task']['resourceProfile']['ice'] ?? null, 'multi-resource mining keeps the ice composition share');
+    $test->assertEquals(0.3334, $mixedMine->body['manny']['task']['resourceProfile']['carbon_compounds'] ?? null, 'multi-resource mining assigns the remaining composition share');
     $test->assertEquals('mixed-rock', $mixedMine->body['manny']['task']['target']['id'] ?? null, 'mining task exposes its target details');
     $test->assertEquals('mixed', $mixedMine->body['manny']['task']['target']['composition'] ?? null, 'mining task exposes asteroid composition');
 
@@ -382,11 +389,12 @@ if ($createdProbe !== null) {
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $mixedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(0.05, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
-    $test->assertEquals(0.01, $mixedProbe?->otherStock, 'completed multi-resource mining transfers the other-materials share');
+    $test->assertEquals(0.02, $mixedProbe?->otherStock, 'completed multi-resource mining transfers the ice and carbon-compound shares to generic cargo');
     $mixedSector = $sectorRepository->load($createdProbe->currentSector);
     $mixedAsteroid = $mixedSector->getObjects()[0] ?? null;
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'multi-resource mining subtracts the metals share from the asteroid');
-    $test->assertEquals(0.3234, $mixedAsteroid?->toArray()['resourceAmounts']['other'] ?? null, 'multi-resource mining subtracts the other-materials share from the asteroid');
+    $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['ice'] ?? null, 'multi-resource mining subtracts the ice share from the asteroid');
+    $test->assertEquals(0.3234, $mixedAsteroid?->toArray()['resourceAmounts']['carbon_compounds'] ?? null, 'multi-resource mining subtracts the carbon-compound share from the asteroid');
 
     $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 96, metals_stock = 0.2 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 1], JSON_THROW_ON_ERROR));

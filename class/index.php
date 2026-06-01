@@ -21,6 +21,7 @@ require_once __DIR__ . '/SectorSeedGenerator.php';
 require_once __DIR__ . '/UniverseObjectType.php';
 require_once __DIR__ . '/UniverseObject.php';
 require_once __DIR__ . '/UniverseObjectFactory.php';
+require_once __DIR__ . '/../src/Domain/ResourceComposition.php';
 require_once __DIR__ . '/Star.php';
 require_once __DIR__ . '/Planet.php';
 require_once __DIR__ . '/Asteroid.php';

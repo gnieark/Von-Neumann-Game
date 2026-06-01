@@ -8,19 +8,16 @@ final class ResourceComposition
 {
     public const DEUTERIUM = 'deuterium';
     public const METALS = 'metals';
-    public const OTHER = 'other';
-    public const TYPES = [self::DEUTERIUM, self::METALS, self::OTHER];
+    public const ICE = 'ice';
+    public const CARBON_COMPOUNDS = 'carbon_compounds';
+    public const TYPES = [self::DEUTERIUM, self::METALS, self::ICE, self::CARBON_COMPOUNDS];
+    private const LEGACY_OTHER = 'other';
 
     public static function typeForHint(string $hint): string
     {
         $hint = strtolower($hint);
 
-        if (
-            str_contains($hint, 'water')
-            || str_contains($hint, 'ice')
-            || str_contains($hint, 'volatile')
-            || str_contains($hint, 'hydrogen')
-        ) {
+        if (str_contains($hint, 'deuterium') || str_contains($hint, 'hydrogen')) {
             return self::DEUTERIUM;
         }
 
@@ -30,11 +27,29 @@ final class ResourceComposition
             || str_contains($hint, 'metal')
             || str_contains($hint, 'platinum')
             || str_contains($hint, 'magnesium')
+            || str_contains($hint, 'silicate')
         ) {
             return self::METALS;
         }
 
-        return self::OTHER;
+        if (
+            str_contains($hint, 'water')
+            || str_contains($hint, 'ice')
+            || str_contains($hint, 'volatile')
+            || str_contains($hint, 'ammonia')
+        ) {
+            return self::ICE;
+        }
+
+        if (
+            str_contains($hint, 'carbon')
+            || str_contains($hint, 'organic')
+            || str_contains($hint, 'hydrocarbon')
+        ) {
+            return self::CARBON_COMPOUNDS;
+        }
+
+        return self::CARBON_COMPOUNDS;
     }
 
     /**
@@ -49,7 +64,7 @@ final class ResourceComposition
         }
 
         if (array_sum($counts) === 0) {
-            $counts[self::OTHER] = 1;
+            $counts[self::CARBON_COMPOUNDS] = 1;
         }
 
         $total = (float) array_sum($counts);
@@ -67,6 +82,11 @@ final class ResourceComposition
      */
     public static function fromAmounts(array $amounts): array
     {
+        if (isset($amounts[self::LEGACY_OTHER])) {
+            $amounts[self::CARBON_COMPOUNDS] = (float) ($amounts[self::CARBON_COMPOUNDS] ?? 0.0)
+                + (float) $amounts[self::LEGACY_OTHER];
+        }
+
         $normalized = [];
         $total = 0.0;
         foreach (self::TYPES as $type) {
@@ -117,15 +137,15 @@ final class ResourceComposition
         $types = is_string($types) ? [$types] : $types;
         $normalized = [];
         foreach ($types as $type) {
-            $type = strtolower(trim((string) $type));
-            if ($type === '') {
+            $normalizedType = self::normalizeType((string) $type);
+            if ($normalizedType === null) {
                 continue;
             }
-            if (!in_array($type, self::TYPES, true)) {
-                throw new \InvalidArgumentException('Mining resource must be deuterium, metals or other.');
+            if (!in_array($normalizedType, self::TYPES, true)) {
+                throw new \InvalidArgumentException('Mining resource must be deuterium, metals, ice or carbon_compounds.');
             }
-            if (!in_array($type, $normalized, true)) {
-                $normalized[] = $type;
+            if (!in_array($normalizedType, $normalized, true)) {
+                $normalized[] = $normalizedType;
             }
         }
 
@@ -134,6 +154,23 @@ final class ResourceComposition
         }
 
         return $normalized;
+    }
+
+    private static function normalizeType(string $type): ?string
+    {
+        $type = strtolower(trim($type));
+        $type = str_replace(['-', ' '], '_', $type);
+        if ($type === '') {
+            return null;
+        }
+
+        return match ($type) {
+            self::DEUTERIUM => self::DEUTERIUM,
+            self::METALS, 'metal' => self::METALS,
+            self::ICE, 'water', 'water_ice', 'volatile', 'volatiles' => self::ICE,
+            self::CARBON_COMPOUNDS, 'carbon', 'organic', 'organics', 'organic_compounds', self::LEGACY_OTHER => self::CARBON_COMPOUNDS,
+            default => $type,
+        };
     }
 
     /**

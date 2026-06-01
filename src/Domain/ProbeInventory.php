@@ -85,7 +85,7 @@ final class ProbeInventory
             [
                 'id' => 'probe-' . $probe->id . '-stock-other',
                 'type' => 'other',
-                'name' => 'Autres matériaux',
+                'name' => 'Matériaux non métalliques',
                 'amount' => $probe->otherStock,
                 'containerSpace' => $probe->otherStock,
                 'capacityUnit' => self::CAPACITY_UNIT,

@@ -6,7 +6,8 @@ namespace VonNeumannGame\Sector;
 
 final class SectorContentGenerator
 {
-    private const GENERATION_VERSION = 1;
+    private const GENERATION_VERSION = 3;
+    private const ASTEROID_BELT_CHANCE_PER_PLANET = 0.075;
 
     /**
      * @param array<SectorContent> $knownNeighbors
@@ -97,7 +98,7 @@ final class SectorContentGenerator
             $orbitIndex++;
         }
 
-        $asteroidBelts = $random->nextInt(0, 2);
+        $asteroidBelts = $this->asteroidBeltCount($random, $planetCount);
         for ($i = 0; $i < $asteroidBelts; $i++) {
             $axis = $this->round($random->nextFloatBetween(1.8, 12.0));
             $orbitalBodies[] = new OrbitingBody(
@@ -126,6 +127,27 @@ final class SectorContentGenerator
             $this->round($radius),
             $binary ? 'Rare binary stellar system.' : 'Stellar system with stable orbital architecture.',
         );
+    }
+
+    private function asteroidBeltCount(DeterministicRandom $random, int $planetCount): int
+    {
+        $count = $random->nextInt(0, 2);
+        if ($planetCount <= 0) {
+            return $count;
+        }
+
+        $planetaryChance = min(0.95, $planetCount * self::ASTEROID_BELT_CHANCE_PER_PLANET);
+        if ($count === 0 && $random->nextFloat() < $planetaryChance) {
+            $count = 1;
+        }
+        if ($random->nextFloat() < max(0.0, $planetaryChance - 0.35)) {
+            $count++;
+        }
+        if ($random->nextFloat() < max(0.0, $planetaryChance - 0.65)) {
+            $count++;
+        }
+
+        return min(4, $count);
     }
 
     private function createStar(DeterministicRandom $random, SectorCoordinates $coordinates, int $index, bool $deadOnly): Star
@@ -195,8 +217,8 @@ final class SectorContentGenerator
         $resources = match ($composition) {
             'iron' => ['iron', 'nickel'],
             'silicate' => ['silicates', 'magnesium'],
-            'carbonaceous' => ['carbon', 'water_trace'],
-            'ice' => ['water_ice', 'volatiles'],
+            'carbonaceous' => ['carbon', 'organics', 'ice_trace'],
+            'ice' => ['water_ice', 'deuterium_trace', 'volatiles'],
             default => ['rare_metals', 'platinum_group'],
         };
 

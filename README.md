@@ -155,10 +155,10 @@ connaissance:
 `ProbeMovementService` lance et rafraichit les mouvements intersecteurs. Un
 mouvement consomme 2% du deuterium courant et suit la timeline:
 
-- 10 minutes de preparation;
-- 20 minutes par secteur d'acceleration;
-- 30 minutes par secteur de croisiere;
-- 20 minutes par secteur de deceleration.
+- 5 minutes de preparation pendant la beta;
+- 10 minutes par secteur d'acceleration pendant la beta;
+- 15 minutes par secteur de croisiere pendant la beta;
+- 10 minutes par secteur de deceleration pendant la beta.
 
 L'etat courant est derive des timestamps a chaque lecture. Le scheduler CLI
 (`php scripts/scheduler.php`) traite aussi les evenements planifies utiles aux

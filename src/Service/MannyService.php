@@ -143,7 +143,7 @@ final class MannyService
         if ($target instanceof Asteroid && $availableAmounts !== null) {
             $this->ensureAsteroidHasResources($availableAmounts, $resourceProfile, $targetAmount);
         }
-        $storedAmount = round($targetAmount * (($resourceProfile['metals'] ?? 0.0) + ($resourceProfile['other'] ?? 0.0)), 4);
+        $storedAmount = $this->cargoAmountForResourceProfile($targetAmount, $resourceProfile);
         if ($storedAmount > $this->freeCargoCapacity($probe) + ($manny->isOnProbe() ? 0.05 : 0.0) + 0.00001) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this mining target.');
         }
@@ -687,8 +687,7 @@ final class MannyService
     {
         $amounts = $this->resourceAmountsForTotal($amount, $profile);
         $requiredStorage = round(
-            ($amounts['metals'] ?? 0.0)
-            + ($amounts['other'] ?? 0.0)
+            $this->cargoAmountForResources($amounts)
             + ($includeManny ? self::MANNY_CONTAINER_SPACE : 0.0),
             4,
         );
@@ -770,9 +769,13 @@ final class MannyService
     {
         $this->clearMannyCargo($manny);
         $amounts = $this->resourceAmountsForTotal($amount, $profile);
-        $manny->cargoDeuterium = $amounts['deuterium'] ?? 0.0;
-        $manny->cargoMetals = $amounts['metals'] ?? 0.0;
-        $manny->cargoOther = $amounts['other'] ?? 0.0;
+        $manny->cargoDeuterium = $amounts[ResourceComposition::DEUTERIUM] ?? 0.0;
+        $manny->cargoMetals = $amounts[ResourceComposition::METALS] ?? 0.0;
+        $manny->cargoOther = round(
+            ($amounts[ResourceComposition::ICE] ?? 0.0)
+            + ($amounts[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0),
+            4,
+        );
     }
 
     /**
@@ -786,6 +789,10 @@ final class MannyService
             foreach (ResourceComposition::TYPES as $type) {
                 $normalized[$type] = round(max(0.0, (float) ($profile[$type] ?? 0.0)), 4);
             }
+            $normalized[ResourceComposition::CARBON_COMPOUNDS] = round(
+                $normalized[ResourceComposition::CARBON_COMPOUNDS] + max(0.0, (float) ($profile['other'] ?? 0.0)),
+                4,
+            );
 
             if (array_sum($normalized) > 0.0) {
                 return $normalized;
@@ -835,6 +842,31 @@ final class MannyService
         }
 
         return $amounts;
+    }
+
+    /**
+     * @param array<string, float> $profile
+     */
+    private function cargoAmountForResourceProfile(float $amount, array $profile): float
+    {
+        return $this->cargoAmountForResources($this->resourceAmountsForTotal($amount, $profile));
+    }
+
+    /**
+     * @param array<string, float> $amounts
+     */
+    private function cargoAmountForResources(array $amounts): float
+    {
+        $total = 0.0;
+        foreach (ResourceComposition::TYPES as $type) {
+            if ($type === ResourceComposition::DEUTERIUM) {
+                continue;
+            }
+
+            $total += max(0.0, (float) ($amounts[$type] ?? 0.0));
+        }
+
+        return round($total, 4);
     }
 
     private function clearMannyCargo(Manny $manny): void
