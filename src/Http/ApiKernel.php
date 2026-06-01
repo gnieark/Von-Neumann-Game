@@ -25,6 +25,9 @@ use VonNeumannGame\Sector\SectorGrid;
 
 final class ApiKernel
 {
+    /** Bump when the public API contract changes. */
+    public const API_VERSION = 1;
+
     public function __construct(
         private readonly AuthService $auth,
         private readonly NeumannProbeRepository $probes,
@@ -58,6 +61,7 @@ final class ApiKernel
             }
 
             return match ($routePath) {
+                '/api/version' => $this->routeApiVersion($method),
                 '/api/session' => $this->routeSession($method, $body),
                 '/api/me' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => new ApiResponse(200, ['player' => $player->publicArray()])),
                 '/api/me/api-key' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->apiKeyResponse($player)),
@@ -79,6 +83,15 @@ final class ApiKernel
         } catch (\Throwable) {
             return ApiResponse::error(500, 'internal_error', 'Internal server error');
         }
+    }
+
+    private function routeApiVersion(string $method): ApiResponse
+    {
+        if ($method !== 'GET') {
+            return ApiResponse::error(405, 'method_not_allowed', 'Method not allowed');
+        }
+
+        return new ApiResponse(200, ['apiVersion' => self::API_VERSION]);
     }
 
     private function routeSession(string $method, ?string $body): ApiResponse
@@ -139,7 +152,6 @@ final class ApiKernel
                     'sensorMode' => 'blind',
                     'systems' => [
                         'integrityPercent' => $probe->integrityPercent,
-                        'damagePercent' => $probe->damagePercent,
                     ],
                 ],
             ]);
@@ -155,7 +167,6 @@ final class ApiKernel
                     'sensorMode' => 'blind',
                     'systems' => [
                         'integrityPercent' => $probe->integrityPercent,
-                        'damagePercent' => $probe->damagePercent,
                     ],
                 ],
             ]);
@@ -433,11 +444,12 @@ final class ApiKernel
         $data = $this->decodeJsonBody($body) ?? [];
 
         if ($action === 'repair') {
-            if (!isset($data['percent']) || !is_numeric($data['percent'])) {
+            $repairPercent = $data['integrityPercent'] ?? $data['percent'] ?? null;
+            if (!is_numeric($repairPercent)) {
                 return ApiResponse::error(400, 'bad_request', 'JSON body must contain repair percent.');
             }
 
-            $manny = $this->mannies->startRepair($probe, $uid, (float) $data['percent']);
+            $manny = $this->mannies->startRepair($probe, $uid, (float) $repairPercent);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }
@@ -494,7 +506,6 @@ final class ApiKernel
             'movement' => $latest !== null ? $this->movementArray($player, $latest, $movement !== null) : null,
             'systems' => [
                 'integrityPercent' => $probe->integrityPercent,
-                'damagePercent' => $probe->damagePercent,
                 'energyStored' => $probe->energyStored,
                 'internalClockRate' => $probe->internalClockRate,
                 'currentTask' => $probe->currentTask,

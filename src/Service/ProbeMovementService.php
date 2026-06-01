@@ -107,7 +107,7 @@ final class ProbeMovementService
             $probe->direction = new ProbeDirection(0.0, 0.0, 0.0);
             $probe->currentTask = null;
             $probe->enteredCurrentSectorAt = $now->format('c');
-            $this->applyIntersectorDustDamage($probe, $movement);
+            $this->applyIntersectorIntegrityLoss($probe, $movement);
             $this->probes->save($probe);
             $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
             $this->scheduleBlackHoleTrapIfNeeded($probe);
@@ -292,7 +292,6 @@ final class ProbeMovementService
             $probe->status = ProbeStatus::Dead;
             $probe->velocityC = 0.0;
             $probe->accelerationCPerDay = 0.0;
-            $probe->damagePercent = 100.0;
             $probe->integrityPercent = 0.0;
             $probe->currentTask = null;
             $this->probes->save($probe);
@@ -409,14 +408,13 @@ final class ProbeMovementService
         $probe->accelerationCPerDay = 0.0;
         $probe->direction = new ProbeDirection(0.0, 0.0, 0.0);
         $probe->currentTask = null;
-        $probe->damagePercent = 100.0;
         $probe->integrityPercent = 0.0;
         $this->probes->save($probe);
     }
 
-    private function applyIntersectorDustDamage(NeumannProbe $probe, ProbeMovement $movement): void
+    private function applyIntersectorIntegrityLoss(NeumannProbe $probe, ProbeMovement $movement): void
     {
-        $damage = 0.0;
+        $integrityLoss = 0.0;
         for ($sectorIndex = 1; $sectorIndex <= $movement->distance; $sectorIndex++) {
             $payload = implode('|', [
                 $this->worldSeed,
@@ -429,11 +427,10 @@ final class ProbeMovementService
                 $sectorIndex,
             ]);
             $roll = hexdec(substr(hash('sha256', $payload), 0, 8)) / hexdec('ffffffff');
-            $damage += round($roll * 3.0, 2);
+            $integrityLoss += round($roll * 3.0, 2);
         }
 
-        $probe->damagePercent = round(min(100.0, $probe->damagePercent + $damage), 2);
-        $probe->integrityPercent = round(max(0.0, 100.0 - $probe->damagePercent), 2);
+        $probe->integrityPercent = round(max(0.0, $probe->integrityPercent - $integrityLoss), 2);
     }
 
     private function scheduleBlackHoleTrapIfNeeded(NeumannProbe $probe): void

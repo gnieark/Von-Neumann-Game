@@ -174,6 +174,7 @@ disponible sur `/api-docs`, et la spec brute est servie par `/openapi.yaml`.
 
 Routes principales:
 
+- `GET /api/version`
 - `POST /api/session`
 - `GET /api/me`
 - `POST /api/me/api-key`

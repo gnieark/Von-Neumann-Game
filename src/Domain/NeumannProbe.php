@@ -18,7 +18,6 @@ final class NeumannProbe
         public ProbeDirection $direction,
         public ProbeStatus $status,
         public float $integrityPercent,
-        public float $damagePercent,
         public float $energyStored,
         public float $deuteriumStock,
         public float $metalsStock,

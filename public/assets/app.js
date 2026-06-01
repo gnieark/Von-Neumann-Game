@@ -234,8 +234,8 @@
         if (manny.currentTask === 'repair') {
             return '<section class="manny-task-panel">'
                 + '<h4>' + escapeHtml(t('repairInProgress', 'Repair in progress')) + '</h4>'
-                + '<p>' + escapeHtml(formatText(t('repairTaskDetail', '{percent}% damage scheduled, {metals} metal containers committed.'), {
-                    percent: numberValue(payload.damagePercent),
+                + '<p>' + escapeHtml(formatText(t('repairTaskDetail', '{percent}% integrity scheduled, {metals} metal containers committed.'), {
+                    percent: numberValue(payload.integrityPercent),
                     metals: numberValue(payload.metalsCost),
                 })) + '</p>'
                 + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
@@ -264,7 +264,7 @@
         + '<section class="manny-action-section">'
         + '<h4>' + escapeHtml(t('repairActionTitle', 'Repair')) + '</h4>'
         + '<form class="manny-repair-form manny-form">'
-        + '<label>' + escapeHtml(t('repairPercent', 'Damage to repair')) + '<input name="percent" type="number" min="1" max="100" step="1" value="1"></label>'
+        + '<label>' + escapeHtml(t('repairPercent', 'Integrity to restore')) + '<input name="integrityPercent" type="number" min="1" max="100" step="1" value="1"></label>'
         + '<button type="submit">' + escapeHtml(t('repair', 'Repair')) + '</button>'
         + '</form>'
         + '</section>'
@@ -702,8 +702,7 @@
             ].join('');
             bindMetricDetails();
             document.getElementById('systems-summary').innerHTML = [
-                metric(t('integrity', 'Integrity'), systems.integrityPercent ? systems.integrityPercent + '%' : '-'),
-                metric(t('damage', 'Damage'), numberValue(systems.damagePercent, '%')),
+                metric(t('integrity', 'Integrity'), numberValue(systems.integrityPercent, '%')),
                 metric(t('energy', 'Energy'), systems.energyStored),
                 metric(t('internalClock', 'Internal clock'), systems.internalClockRate),
                 metric(t('task', 'Task'), systems.currentTask || t('noTask', 'None')),
@@ -990,7 +989,7 @@
             } else if (event.target.classList.contains('manny-repair-form')) {
                 await api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/repair', {
                     method: 'POST',
-                    body: JSON.stringify({percent: Number.parseFloat(form.get('percent'))}),
+                    body: JSON.stringify({integrityPercent: Number.parseFloat(form.get('integrityPercent'))}),
                 });
             } else if (event.target.classList.contains('manny-mine-form')) {
                 const resourceSelect = event.target.querySelector('.manny-mine-resources');

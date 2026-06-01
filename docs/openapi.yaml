@@ -1,13 +1,28 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: 0.1.0
+  version: '1'
 servers:
   - url: /
     description: Current host
 security:
   - bearerAuth: []
 paths:
+  /api/version:
+    get:
+      security: []
+      summary: Get API version
+      responses:
+        '200':
+          description: Current API version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiVersionResponse'
+              example:
+                apiVersion: 1
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
     post:
       security: []
@@ -399,7 +414,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/repair:
     post:
-      summary: Start repairing probe damage with a Manny
+      summary: Start restoring probe integrity with a Manny
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -409,7 +424,7 @@ paths:
             schema:
               $ref: '#/components/schemas/MannyRepairRequest'
             example:
-              percent: 2
+              integrityPercent: 2
       responses:
         '202':
           description: Repair task accepted
@@ -685,9 +700,17 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, no_probe_damage, insufficient_metals, invalid_mining_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_mining_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, internal_error]
             message:
               type: string
+    ApiVersionResponse:
+      type: object
+      required: [apiVersion]
+      properties:
+        apiVersion:
+          type: integer
+          minimum: 1
+          description: Monotonic public API version. Increment it when the API contract changes.
     SessionRequest:
       type: object
       required: [username, password]
@@ -824,10 +847,6 @@ components:
           type: object
           properties:
             integrityPercent:
-              type: number
-              minimum: 0
-              maximum: 100
-            damagePercent:
               type: number
               minimum: 0
               maximum: 100
@@ -999,14 +1018,21 @@ components:
           maxLength: 40
     MannyRepairRequest:
       type: object
-      required: [percent]
+      required: [integrityPercent]
       properties:
+        integrityPercent:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 100
+          description: Integrity percentage to restore. Each percent takes 10 real minutes and consumes 0.01 containers of metals.
         percent:
           type: number
           minimum: 0
           exclusiveMinimum: true
           maximum: 100
-          description: Damage percentage to repair. Each percent takes 10 real minutes and consumes 0.01 containers of metals.
+          deprecated: true
+          description: Legacy alias for integrityPercent.
     MannyMineRequest:
       type: object
       required: [objectId, targetAmount]

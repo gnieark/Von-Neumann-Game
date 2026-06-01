@@ -69,7 +69,6 @@ final class SchemaInitializer
                 direction_z $decimal NOT NULL DEFAULT 0,
                 status $text NOT NULL,
                 integrity_percent $decimal NOT NULL DEFAULT 100,
-                damage_percent $decimal NOT NULL DEFAULT 0,
                 energy_stored $decimal NOT NULL DEFAULT 0,
                 deuterium_stock $decimal NOT NULL DEFAULT 100,
                 metals_stock $decimal NOT NULL DEFAULT 0,
@@ -196,6 +195,7 @@ final class SchemaInitializer
     {
         if ($this->driver === 'sqlite') {
             $this->ensureSqliteMannyProbeIdNullable($pdo);
+            $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
             if (!in_array('entered_current_sector_at', $names, true)) {
@@ -205,30 +205,33 @@ final class SchemaInitializer
             if (!in_array('deuterium_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock REAL NOT NULL DEFAULT 100');
             }
-            if (!in_array('damage_percent', $names, true)) {
-                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN damage_percent REAL NOT NULL DEFAULT 0');
-            }
             if (!in_array('metals_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock REAL NOT NULL DEFAULT 0');
             }
             if (!in_array('other_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock REAL NOT NULL DEFAULT 0');
             }
+            if (in_array('damage_percent', $names, true)) {
+                $pdo->exec('UPDATE neumann_probes SET integrity_percent = min(100.0, max(0.0, 100.0 - damage_percent))');
+                $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
+            }
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlMannyProbeIdNullable($pdo);
+            $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
             if (!in_array('deuterium_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock DOUBLE NOT NULL DEFAULT 100 AFTER energy_stored');
-            }
-            if (!in_array('damage_percent', $names, true)) {
-                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN damage_percent DOUBLE NOT NULL DEFAULT 0 AFTER integrity_percent');
             }
             if (!in_array('metals_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock DOUBLE NOT NULL DEFAULT 0 AFTER deuterium_stock');
             }
             if (!in_array('other_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock DOUBLE NOT NULL DEFAULT 0 AFTER metals_stock');
+            }
+            if (in_array('damage_percent', $names, true)) {
+                $pdo->exec('UPDATE neumann_probes SET integrity_percent = LEAST(100.0, GREATEST(0.0, 100.0 - damage_percent))');
+                $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
         }
     }
@@ -304,5 +307,28 @@ final class SchemaInitializer
         }
 
         $pdo->exec('ALTER TABLE mannies MODIFY probe_id INTEGER NULL');
+    }
+
+    private function migrateRepairTaskPayloads(PDO $pdo): void
+    {
+        $stmt = $pdo->query("SELECT id, task_payload_json FROM mannies WHERE current_task = 'repair'");
+        if ($stmt === false) {
+            return;
+        }
+
+        $update = $pdo->prepare('UPDATE mannies SET task_payload_json = :payload WHERE id = :id');
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $payload = json_decode((string) $row['task_payload_json'], true);
+            if (!is_array($payload) || !array_key_exists('damagePercent', $payload) || array_key_exists('integrityPercent', $payload)) {
+                continue;
+            }
+
+            $payload['integrityPercent'] = $payload['damagePercent'];
+            unset($payload['damagePercent']);
+            $update->execute([
+                'id' => (int) $row['id'],
+                'payload' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            ]);
+        }
     }
 }

@@ -19,8 +19,8 @@ use VonNeumannGame\Sector\UniverseObject;
 
 final class MannyService
 {
-    public const REPAIR_SECONDS_PER_DAMAGE_PERCENT = 600;
-    public const REPAIR_METALS_PER_DAMAGE_PERCENT = 0.01;
+    public const REPAIR_SECONDS_PER_INTEGRITY_PERCENT = 600;
+    public const REPAIR_METALS_PER_INTEGRITY_PERCENT = 0.01;
     public const MINING_TRAVEL_SECONDS = 900;
     public const MINING_AMOUNT_PER_TICK = 0.01;
     public const MINING_TICK_SECONDS = 300;
@@ -63,7 +63,7 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
-    public function startRepair(NeumannProbe $probe, string $uid, float $damagePercent): Manny
+    public function startRepair(NeumannProbe $probe, string $uid, float $integrityPercent): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
@@ -73,16 +73,17 @@ final class MannyService
             throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to repair it.');
         }
 
-        $damagePercent = round($damagePercent, 2);
-        if ($damagePercent <= 0) {
+        $integrityPercent = round($integrityPercent, 2);
+        if ($integrityPercent <= 0) {
             throw new MannyActionException(400, 'bad_request', 'Repair percent must be greater than zero.');
         }
-        if ($probe->damagePercent <= 0.0001) {
-            throw new MannyActionException(409, 'no_probe_damage', 'The probe has no damage to repair.');
+        $missingIntegrity = round(max(0.0, 100.0 - $probe->integrityPercent), 2);
+        if ($missingIntegrity <= 0.0001) {
+            throw new MannyActionException(409, 'probe_integrity_full', 'The probe integrity is already full.');
         }
 
-        $damagePercent = min($damagePercent, $probe->damagePercent);
-        $metalsCost = round($damagePercent * self::REPAIR_METALS_PER_DAMAGE_PERCENT, 4);
+        $integrityPercent = min($integrityPercent, $missingIntegrity);
+        $metalsCost = round($integrityPercent * self::REPAIR_METALS_PER_INTEGRITY_PERCENT, 4);
         if ($probe->metalsStock + 0.00001 < $metalsCost) {
             throw new MannyActionException(422, 'insufficient_metals', 'Insufficient metals in probe inventory for this repair.');
         }
@@ -93,9 +94,9 @@ final class MannyService
 
         $manny->currentTask = Manny::TASK_REPAIR;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . (int) ceil($damagePercent * self::REPAIR_SECONDS_PER_DAMAGE_PERCENT) . ' seconds')->format('c');
+        $manny->taskEndsAt = $now->modify('+' . (int) ceil($integrityPercent * self::REPAIR_SECONDS_PER_INTEGRITY_PERCENT) . ' seconds')->format('c');
         $manny->taskPayload = [
-            'damagePercent' => $damagePercent,
+            'integrityPercent' => $integrityPercent,
             'metalsCost' => $metalsCost,
         ];
         $this->mannies->save($manny);
@@ -286,9 +287,8 @@ final class MannyService
             return $manny;
         }
 
-        $damagePercent = (float) ($manny->taskPayload['damagePercent'] ?? 0);
-        $probe->damagePercent = round(max(0.0, $probe->damagePercent - $damagePercent), 2);
-        $probe->integrityPercent = round(max(0.0, 100.0 - $probe->damagePercent), 2);
+        $integrityPercent = (float) ($manny->taskPayload['integrityPercent'] ?? 0);
+        $probe->integrityPercent = round(min(100.0, $probe->integrityPercent + $integrityPercent), 2);
         $this->probes->save($probe);
 
         $this->clearTask($manny);
