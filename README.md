@@ -1,130 +1,40 @@
 # Von Neumann Game
 
-Persistent PHP 8 prototype for a procedural Von Neumann probe game.
+Prototype PHP 8.2 d'un jeu persistant autour d'une sonde de Von Neumann dans un
+univers procedural. Cette documentation est volontairement technique: elle sert a
+retrouver vite les responsabilites du code, les points d'entree et les
+invariants du domaine.
 
-## Development status: 
+## Etat Du Projet
 
-ongoing
+Le projet est en iteration active. L'application expose a la fois une interface
+web simple et une API JSON. La documentation utilisateur n'est pas maintenue ici:
+le contrat REST vit dans [docs/openapi.yaml](docs/openapi.yaml), et une future
+documentation de jeu pourra etre faite ailleurs.
 
-## Setup
-
-Install Composer dependencies and generate the autoloader:
+## Demarrage Local
 
 ```bash
 composer install
-```
-
-Create the local SQLite database:
-
-```bash
 php scripts/init-db.php
-```
-
-Create a first player and its initial probe:
-
-```bash
 php scripts/create-user.php remi secret "Remi"
+php -S 127.0.0.1:8000 -t public
 ```
 
-Optional OAuth sign-in uses Google and Discord OpenID. Copy the example file,
-fill your provider client IDs and secrets, and register these callback URLs in
-the provider consoles:
+Puis creer une session API:
 
 ```bash
-cp config/oauth.example.json config/oauth.json
-```
-
-```text
-http://localhost:8000/auth/provider/google
-http://localhost:8000/auth/provider/discord
-```
-
-Only the provider name and OpenID `sub` are stored. On first sign-in, the player
-chooses a pseudonym; the account and initial Von Neumann probe are then created.
-
-Run the built-in PHP server:
-
-```bash
-php -S localhost:8000 -t public
-```
-
-Create a session:
-
-```bash
-curl -s -X POST http://localhost:8000/api/session \
+curl -s -X POST http://127.0.0.1:8000/api/session \
   -H 'Content-Type: application/json' \
   -d '{"username":"remi","password":"secret"}'
 ```
 
-Use the returned token:
-
-```bash
-curl -s http://localhost:8000/api/probe \
-  -H "Authorization: Bearer <token>"
-```
-
-Read the current sector:
-
-```bash
-curl -s http://localhost:8000/api/probe/sector \
-  -H "Authorization: Bearer <token>"
-```
-
-Initiate an asynchronous intersector movement with player-relative FCC
-coordinates:
-
-```bash
-curl -s -X POST http://localhost:8000/api/probe/move \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer <token>" \
-  -d '{"target":{"x":1,"y":1,"z":0}}'
-```
-
-Follow the movement. The server derives the current phase from timestamps, so no
-cron task is required for movement progression:
-
-```bash
-curl -s http://localhost:8000/api/probe \
-  -H "Authorization: Bearer <token>"
-```
-
-After arrival, consult the new current sector:
-
-```bash
-curl -s http://localhost:8000/api/probe/sector \
-  -H "Authorization: Bearer <token>"
-```
-
-The current-sector response also includes the probe inventory. A new probe has
-1 `earth_container_equivalent` of transport capacity and starts with:
-
-- 1 atomic 3D printer, occupying 0.3 containers, with no current task
-- 4 persisted Mannies, named `manny-1` through `manny-4`, each occupying
-  0.05 containers while onboard
-
-The probe uses nuclear fusion and also starts with a full external deuterium
-tank. This special tank is mounted outside cargo storage, so it does not consume
-the available container capacity. Each intersector movement currently consumes
-2% of the probe's current deuterium stock and adds 0 to 3% hull damage per
-traversed sector.
-
-List Manny robots and use their generated `id` for orders:
-
-```bash
-curl -s http://localhost:8000/api/probe/mannies \
-  -H "Authorization: Bearer <token>"
-```
-
-Observe another sector with player-relative coordinates:
-
-```bash
-curl -s 'http://localhost:8000/api/sector?x=1&y=1&z=0' \
-  -H "Authorization: Bearer <token>"
-```
+Les routes protegees utilisent ensuite `Authorization: Bearer <token>`.
 
 ## Configuration
 
-SQLite is configured in [config/database.json](config/database.json):
+`config/database.json` configure la base relationnelle. SQLite est le defaut
+local:
 
 ```json
 {
@@ -133,25 +43,186 @@ SQLite is configured in [config/database.json](config/database.json):
 }
 ```
 
-MariaDB can be configured with:
+Le code accepte aussi `mysql` via PDO avec `host`, `port`, `database`,
+`username`, `password` et `charset`.
+
+`config/app.json` contient les parametres applicatifs:
 
 ```json
 {
-  "driver": "mysql",
-  "host": "localhost",
-  "port": 3306,
-  "database": "von_neumann_game",
-  "username": "user",
-  "password": "password",
-  "charset": "utf8mb4"
+  "worldSeed": "local-development-world",
+  "universePath": "data/universe",
+  "sessionTtlDays": 7
 }
 ```
 
-## Tests
+L'authentification OAuth est optionnelle. Copier `config/oauth.example.json` vers
+`config/oauth.json`, renseigner Google et/ou Discord, puis declarer les callbacks
+`/auth/provider/google` et `/auth/provider/discord` cote fournisseur. Le serveur
+ne conserve que le nom du fournisseur et le `sub` OpenID.
+
+## Organisation Du Code
+
+```text
+public/index.php        Point d'entree HTTP: routes web, auth web, delegation API.
+public/assets/          JavaScript et CSS sans pipeline de build.
+templates/home.html     Template HTML principal, rendu avec class/TplBlock.php.
+src/AppFactory.php      Composition des dependances applicatives.
+src/Http/               ApiKernel et format des reponses JSON.
+src/Auth/               Authentification mot de passe, OAuth, sessions.
+src/Database/           Lecture config PDO, schema et migrations legeres.
+src/Repository/         Acces aux tables relationnelles.
+src/Domain/             Objets metier persistants et DTO de reponse.
+src/Service/            Cas d'usage: mouvement, observation, Mannies, scheduler.
+class/                  Moteur de secteurs/univers sous VonNeumannGame\Sector.
+scripts/                Outils CLI: init-db, create-user, scheduler.
+tests/                  Tests API/integration.
+docs/openapi.yaml       Contrat REST.
+```
+
+Composer charge deux espaces de noms: `VonNeumannGame\` depuis `src/` et
+`VonNeumannGame\Sector\` depuis `class/`. Le dossier `class/` est historique,
+mais il contient encore le moteur de generation de secteurs et le helper de
+template legacy.
+
+## Vue D'Architecture
+
+`AppFactory` assemble l'application a partir de la configuration locale. Pour
+l'API, il cree les repositories PDO, le service d'authentification, le service de
+secteurs base sur fichiers JSON, puis les services metier injectes dans
+`ApiKernel`.
+
+Le stockage est hybride:
+
+- les joueurs, sondes, sessions, mouvements, Mannies, secteurs visites et
+  evenements planifies sont en base SQL;
+- le contenu procedural des secteurs est persiste en JSON sous
+  `data/universe/sectors/...`;
+- `var/database.sqlite` et `data/` sont des donnees locales ignorees par Git.
+
+## Domaine Principal
+
+Lors d'une inscription, `AuthService` cree un joueur, un secteur d'origine
+absolu aleatoire valide, une sonde initiale, quatre Mannies par defaut et marque
+le secteur de depart comme visite. Les coordonnees absolues restent internes:
+l'API expose des coordonnees relatives au secteur d'origine du joueur.
+
+Une sonde neuve demarre avec:
+
+- une capacite cargo de `1 earth_container_equivalent`;
+- une imprimante 3D atomique occupant `0.3`;
+- quatre Mannies occupant chacun `0.05` quand ils sont a bord;
+- une cuve externe de deuterium pleine, hors capacite cargo.
+
+`MannyService` gere le renommage, la reparation, le minage et le rappel des
+Mannies. Les taches sont temporelles: leur progression est derivee des timestamps
+stockes, comme pour les mouvements de sonde.
+
+## Secteurs Et Coordonnees
+
+Le moteur de secteurs vit dans `class/` avec le namespace
+`VonNeumannGame\Sector`.
+
+Les coordonnees utilisent un reseau FCC:
+
+- un secteur est valide si `x + y + z` est pair;
+- chaque secteur a 12 voisins directs: `(+-1,+-1,0)`, `(+-1,0,+-1)` et
+  `(0,+-1,+-1)`;
+- la distance entre secteurs est `max(abs(dx), abs(dy), abs(dz))`;
+- `SectorCoordinates` est immutable et serialisable en cle `x:y:z`.
+
+`SectorService` cree les secteurs a la demande. Quand un secteur manque, il est
+genere deterministiquement par `SectorContentGenerator` avec `worldSeed`, puis
+sauvegarde par `SectorFileRepository`. Les voisins manquants immediats sont aussi
+crees pour donner du contexte local a la generation. Les objets possibles
+incluent systemes stellaires, etoiles, planetes, asteroides, nuages de poussiere
+et trous noirs.
+
+## Observation Et Mouvement
+
+`SectorObservationService` transforme les coordonnees relatives en coordonnees
+absolues, calcule la distance depuis la sonde, puis renvoie un niveau de
+connaissance:
+
+- `detailed` pour le secteur courant ou deja visite;
+- `neighbor_scan` a distance 1 apres assez de residence passive;
+- `distant_scan` a distance 2;
+- `long_range_estimation` au-dela.
+
+`ProbeMovementService` lance et rafraichit les mouvements intersecteurs. Un
+mouvement consomme 2% du deuterium courant et suit la timeline:
+
+- 10 minutes de preparation;
+- 20 minutes par secteur d'acceleration;
+- 30 minutes par secteur de croisiere;
+- 20 minutes par secteur de deceleration.
+
+L'etat courant est derive des timestamps a chaque lecture. Le scheduler CLI
+(`php scripts/scheduler.php`) traite aussi les evenements planifies utiles aux
+transitions et aux pieges de trous noirs. Pendant un mouvement, les capteurs sont
+`normal`, `degraded` ou `blind` selon la phase. La croisiere longue peut detruire
+la sonde, et l'arrivee applique des degats de poussiere intersectorielle.
+
+## API
+
+Toutes les routes API sont dans `src/Http/ApiKernel.php`; le detail des schemas
+est dans [docs/openapi.yaml](docs/openapi.yaml).
+
+Routes principales:
+
+- `POST /api/session`
+- `GET /api/me`
+- `GET /api/probe`
+- `GET /api/probe/sector`
+- `POST /api/probe/move`
+- `GET /api/probe/inventory/{itemId}`
+- `GET /api/probe/mannies`
+- `PATCH /api/probe/mannies/{mannyId}`
+- `POST /api/probe/mannies/{mannyId}/repair`
+- `POST /api/probe/mannies/{mannyId}/mine`
+- `POST /api/probe/mannies/{mannyId}/recall`
+- `GET /api/sector?x=...&y=...&z=...`
+
+Les coordonnees envoyees par l'API sont toujours relatives au joueur et doivent
+respecter la parite FCC.
+
+## Base De Donnees
+
+Le schema est initialise par `src/Database/SchemaInitializer.php`. Les tables
+actuelles couvrent:
+
+- `players`
+- `player_auth_methods`
+- `neumann_probes`
+- `mannies`
+- `probe_movements`
+- `scheduled_events`
+- `visited_sectors`
+- `sessions`
+
+Les migrations sont legeres et codees dans l'initializer pour SQLite et MySQL.
+Elles couvrent seulement les colonnes ajoutees pendant les iterations recentes.
+
+## Tests Et Verification
 
 ```bash
 composer test
 php class/Tests.php
 ```
 
-The REST contract is documented in [docs/openapi.yaml](docs/openapi.yaml).
+`composer test` execute les tests API/integration dans `tests/ApiTests.php`.
+`php class/Tests.php` verifie le moteur de secteurs historique: coordonnees FCC,
+voisinage, generation et persistance fichier.
+
+Un scenario manuel contre un serveur lance existe aussi:
+
+```bash
+php tests/normalusetest.php http://127.0.0.1:8000 remi secret
+```
+
+Le scheduler peut etre lance manuellement:
+
+```bash
+php scripts/scheduler.php
+php scripts/scheduler.php --limit=25
+```
