@@ -1,11 +1,14 @@
 # Von Neumann Game
 
+https://neumann-probe.net/
+
 Prototype PHP 8.2 d'un jeu persistant autour d'une sonde de Von Neumann dans un
 univers procedural. Cette documentation est volontairement technique: elle sert a
 retrouver vite les responsabilites du code, les points d'entree et les
 invariants du domaine.
 
 ## Etat Du Projet
+
 
 Le projet est en iteration active. L'application expose a la fois une interface
 web simple et une API JSON. La documentation utilisateur n'est pas maintenue ici:
