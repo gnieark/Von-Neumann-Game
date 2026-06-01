@@ -61,6 +61,11 @@ final class SectorContent
             }
 
             if ($object instanceof SolarSystem) {
+                foreach ($object->getStars() as $star) {
+                    if ($star->getId() === $id) {
+                        return $star;
+                    }
+                }
                 foreach ($object->getOrbitalBodies() as $body) {
                     if ($body->getObject()->getId() === $id) {
                         return $body->getObject();
@@ -149,8 +154,19 @@ final class SectorContent
 
     private function replaceObjectInSystem(SolarSystem $system, UniverseObject $replacement): ?SolarSystem
     {
+        $primaryStar = $system->getPrimaryStar();
+        $secondaryStar = $system->getSecondaryStar();
         $updatedBodies = [];
         $replaced = false;
+
+        if ($replacement instanceof Star && $primaryStar->getId() === $replacement->getId()) {
+            $primaryStar = $replacement;
+            $replaced = true;
+        }
+        if ($replacement instanceof Star && $secondaryStar !== null && $secondaryStar->getId() === $replacement->getId()) {
+            $secondaryStar = $replacement;
+            $replaced = true;
+        }
 
         foreach ($system->getOrbitalBodies() as $body) {
             if ($body->getObject()->getId() === $replacement->getId()) {
@@ -169,12 +185,13 @@ final class SectorContent
         return new SolarSystem(
             $system->getId(),
             $system->getName(),
-            $system->getPrimaryStar(),
-            $system->getSecondaryStar(),
+            $primaryStar,
+            $secondaryStar,
             $updatedBodies,
             $system->getMass(),
             $system->getRadius(),
             $system->getDescription(),
+            $system->getWaypointBookmarks(),
         );
     }
 

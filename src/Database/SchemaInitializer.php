@@ -106,6 +106,20 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_mannies_probe_id ON mannies(probe_id)",
             "CREATE INDEX IF NOT EXISTS idx_mannies_uid ON mannies(uid)",
             "CREATE INDEX IF NOT EXISTS idx_mannies_sector ON mannies(sector_x, sector_y, sector_z)",
+            "CREATE TABLE IF NOT EXISTS probe_items (
+                id $id,
+                uid $text NOT NULL UNIQUE,
+                probe_id INTEGER NOT NULL,
+                type $text NOT NULL,
+                name $text NOT NULL,
+                container_space $decimal NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_items_probe_id ON probe_items(probe_id)",
+            "CREATE INDEX IF NOT EXISTS idx_probe_items_uid ON probe_items(uid)",
             "CREATE TABLE IF NOT EXISTS probe_movements (
                 id $id,
                 probe_id INTEGER NOT NULL,

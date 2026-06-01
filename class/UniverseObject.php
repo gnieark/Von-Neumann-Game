@@ -13,6 +13,7 @@ abstract class UniverseObject
         private readonly float $mass,
         private readonly float $radius,
         private readonly ?string $description = null,
+        private readonly array $waypointBookmarks = [],
     ) {}
 
     public function getId(): string
@@ -45,9 +46,23 @@ abstract class UniverseObject
         return $this->description;
     }
 
+    public function getWaypointBookmarks(): array
+    {
+        return $this->waypointBookmarks;
+    }
+
+    public function withWaypointBookmark(string $name, array $bookmark): self
+    {
+        $data = $this->toArray();
+        $data['name'] = $name;
+        $data['waypointBookmarks'] = [...$this->waypointBookmarks, $bookmark];
+
+        return self::fromArray($data);
+    }
+
     public function toArray(): array
     {
-        return [
+        $data = [
             'id' => $this->id,
             'name' => $this->name,
             'type' => $this->type->value,
@@ -55,6 +70,12 @@ abstract class UniverseObject
             'radius' => $this->radius,
             'description' => $this->description,
         ];
+
+        if ($this->waypointBookmarks !== []) {
+            $data['waypointBookmarks'] = $this->waypointBookmarks;
+        }
+
+        return $data;
     }
 
     public static function fromArray(array $data): self

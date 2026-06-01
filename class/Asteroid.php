@@ -23,11 +23,12 @@ final class Asteroid extends UniverseObject
         float $radius,
         ?string $description = null,
         ?array $resourceAmounts = null,
+        array $waypointBookmarks = [],
     ) {
-        parent::__construct($id, $name, UniverseObjectType::Asteroid, $mass, $radius, $description);
+        parent::__construct($id, $name, UniverseObjectType::Asteroid, $mass, $radius, $description, $waypointBookmarks);
         $this->resourceAmounts = $resourceAmounts === null
             ? self::initialResourceAmounts($estimatedResources, $mass)
-            : self::normalizeResourceAmounts($resourceAmounts);
+            : self::normalizeResourceAmounts($resourceAmounts, $estimatedResources);
     }
 
     /**
@@ -50,6 +51,7 @@ final class Asteroid extends UniverseObject
             $this->getRadius(),
             $this->getDescription(),
             $resourceAmounts,
+            $this->getWaypointBookmarks(),
         );
     }
 
@@ -77,6 +79,7 @@ final class Asteroid extends UniverseObject
             isset($data['resourceAmounts']) && is_array($data['resourceAmounts'])
                 ? $data['resourceAmounts']
                 : null,
+            is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );
     }
 
@@ -88,8 +91,17 @@ final class Asteroid extends UniverseObject
     {
         $composition = ResourceComposition::fromHints($estimatedResources);
         $amount = round(max(0.0, $mass) * self::RESOURCE_CONTAINERS_PER_EARTH_MASS, 4);
+        return self::resourceAmountsForTotal($amount, $composition);
+    }
+
+    /**
+     * @param array<string, float> $composition
+     * @return array<string, float>
+     */
+    private static function resourceAmountsForTotal(float $amount, array $composition): array
+    {
         $amounts = array_fill_keys(ResourceComposition::TYPES, 0.0);
-        $remaining = $amount;
+        $remaining = round(max(0.0, $amount), 4);
         $positiveTypes = array_values(array_filter(
             ResourceComposition::TYPES,
             static fn(string $type): bool => (float) ($composition[$type] ?? 0.0) > 0.0,
@@ -112,13 +124,19 @@ final class Asteroid extends UniverseObject
 
     /**
      * @param array<string, mixed> $amounts
+     * @param array<mixed> $estimatedResources
      * @return array<string, float>
      */
-    private static function normalizeResourceAmounts(array $amounts): array
+    private static function normalizeResourceAmounts(array $amounts, array $estimatedResources): array
     {
         if (isset($amounts[self::LEGACY_OTHER])) {
-            $amounts[ResourceComposition::CARBON_COMPOUNDS] = (float) ($amounts[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0)
-                + (float) $amounts[self::LEGACY_OTHER];
+            $total = 0.0;
+            foreach (ResourceComposition::TYPES as $type) {
+                $total += max(0.0, (float) ($amounts[$type] ?? 0.0));
+            }
+            $total += max(0.0, (float) $amounts[self::LEGACY_OTHER]);
+
+            return self::resourceAmountsForTotal($total, ResourceComposition::fromHints($estimatedResources));
         }
 
         $normalized = array_fill_keys(ResourceComposition::TYPES, 0.0);

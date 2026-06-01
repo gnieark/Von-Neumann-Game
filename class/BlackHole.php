@@ -14,8 +14,9 @@ final class BlackHole extends UniverseObject
         private readonly bool $accretionDisk,
         private readonly float $dangerRadius,
         ?string $description = null,
+        array $waypointBookmarks = [],
     ) {
-        parent::__construct($id, $name, UniverseObjectType::BlackHole, $mass, $schwarzschildRadius, $description);
+        parent::__construct($id, $name, UniverseObjectType::BlackHole, $mass, $schwarzschildRadius, $description, $waypointBookmarks);
     }
 
     public function toArray(): array
@@ -37,6 +38,7 @@ final class BlackHole extends UniverseObject
             (bool) $data['accretionDisk'],
             (float) $data['dangerRadius'],
             $data['description'] ?? null,
+            is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );
     }
 }

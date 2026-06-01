@@ -16,8 +16,9 @@ final class Planet extends UniverseObject
         private readonly float $habitabilityScore,
         private readonly array $resourceHints = [],
         ?string $description = null,
+        array $waypointBookmarks = [],
     ) {
-        parent::__construct($id, $name, UniverseObjectType::Planet, $mass, $radius, $description);
+        parent::__construct($id, $name, UniverseObjectType::Planet, $mass, $radius, $description, $waypointBookmarks);
     }
 
     public function getCategory(): string
@@ -52,6 +53,7 @@ final class Planet extends UniverseObject
             (float) $data['habitabilityScore'],
             $data['resourceHints'] ?? [],
             $data['description'] ?? null,
+            is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );
     }
 }

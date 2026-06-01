@@ -63,6 +63,8 @@
     const alreadyMovingMessage = 'The probe is already moving between sectors.';
     let probeAlreadyMoving = false;
     let currentMannyMineTargets = [];
+    let currentInventory = null;
+    let currentSectorObjects = [];
     const miningResourceTypes = ['deuterium', 'metals', 'ice', 'carbon_compounds'];
     const setText = (id, value) => {
         const node = document.getElementById(id);
@@ -123,6 +125,12 @@
         other: t('otherResources', 'Other'),
     }[type] || type);
     const objectTypeLabel = (type) => ({
+        star: t('starObject', 'Star'),
+        planet: t('planetObject', 'Planet'),
+        asteroid: t('asteroidObject', 'Asteroid'),
+        dust_cloud: t('dustCloudObject', 'Dust cloud'),
+        black_hole: t('blackHoleObject', 'Black hole'),
+        solar_system: t('solarSystemObject', 'Solar system'),
         manny: t('mannyObject', 'Manny'),
     }[type] || type);
     const mannyStateLabel = (state) => ({
@@ -200,6 +208,7 @@
     const taskLabel = (task) => ({
         repair: t('repair', 'Repair'),
         mining: t('mine', 'Mine'),
+        crafting: t('craft', 'Craft'),
         returning: t('returning', 'Returning'),
         waiting_for_space: t('waitingForSpace', 'Waiting for space'),
     }[task] || task || t('noTask', 'None'));
@@ -261,6 +270,17 @@
                 + '<button class="manny-recall-button" type="button">' + escapeHtml(t('recall', 'Recall')) + '</button>'
                 + '</section>';
         }
+        if (manny.currentTask === 'crafting') {
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('craftingInProgress', 'Crafting in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('craftingTaskDetail', '{recipe}, {metals} metal containers committed.'), {
+                    recipe: payload.recipeName || t('waypointBookmark', 'Waypoint bookmark'),
+                    metals: numberValue(payload.metalsCost),
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+                + '<button class="manny-recall-button" type="button">' + escapeHtml(t('cancelCrafting', 'Cancel crafting')) + '</button>'
+                + '</section>';
+        }
 
         return '<section class="manny-task-panel">'
             + '<h4>' + escapeHtml(taskLabel(manny.currentTask)) + '</h4>'
@@ -285,6 +305,15 @@
         + '</select></label>'
         + '<label>' + escapeHtml(t('targetAmount', 'Amount')) + '<input name="targetAmount" type="number" min="0.01" max="0.55" step="0.01" value="0.01"></label>'
         + '<button type="submit">' + escapeHtml(t('mine', 'Mine')) + '</button>'
+        + '</form>'
+        + '</section>'
+        + '<section class="manny-action-section">'
+        + '<h4>' + escapeHtml(t('craftingActionTitle', 'Craft')) + '</h4>'
+        + '<form class="manny-craft-form manny-form">'
+        + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select name="recipe">'
+        + '<option value="waypoint_bookmark">' + escapeHtml(t('waypointBookmark', 'Waypoint bookmark')) + '</option>'
+        + '</select></label>'
+        + '<button type="submit">' + escapeHtml(t('craft', 'Craft')) + '</button>'
         + '</form>'
         + '</section>'
         + '</div>'
@@ -434,6 +463,72 @@
 
         return direct.concat(nested).filter((target) => target.id);
     });
+    const bookmarkTargetsFromObjects = (objects) => objects.flatMap((object) => {
+        const direct = object.type !== 'manny' ? [{
+            id: object.id,
+            type: object.type || 'object',
+            name: object.name || object.id || '',
+        }] : [];
+        const nested = Array.isArray(object.bookmarkTargets)
+            ? object.bookmarkTargets.map((target) => ({
+                id: target.id,
+                type: target.type || 'object',
+                name: target.name || target.id || '',
+            }))
+            : [];
+
+        return direct.concat(nested).filter((target) => target.id);
+    });
+    const bookmarkItems = () => (
+        Array.isArray(currentInventory && currentInventory.items)
+            ? currentInventory.items.filter((item) => item.type === 'waypoint_bookmark')
+            : []
+    );
+    const inventoryItemName = (item) => (
+        item && item.type === 'waypoint_bookmark'
+            ? t('waypointBookmark', 'Waypoint bookmark')
+            : (item && (item.name || item.type || item.id)) || '-'
+    );
+    const bookmarkTargetLabel = (target) => (
+        [objectTypeLabel(target.type || 'object'), target.name || target.id].filter(Boolean).join(' ')
+    );
+    const renderBookmarkAction = () => {
+        const node = document.getElementById('bookmark-action');
+        if (!node) {
+            return;
+        }
+
+        const items = bookmarkItems();
+        const targets = bookmarkTargetsFromObjects(currentSectorObjects);
+        if (items.length === 0) {
+            node.innerHTML = '<section class="bookmark-action-panel">'
+                + '<h3>' + escapeHtml(t('bookmarkActionTitle', 'Place a waypoint bookmark')) + '</h3>'
+                + '<p>' + escapeHtml(t('noWaypointBookmark', 'No waypoint bookmark in inventory.')) + '</p>'
+                + '</section>';
+            return;
+        }
+        if (targets.length === 0) {
+            node.innerHTML = '<section class="bookmark-action-panel">'
+                + '<h3>' + escapeHtml(t('bookmarkActionTitle', 'Place a waypoint bookmark')) + '</h3>'
+                + '<p>' + escapeHtml(t('noBookmarkTarget', 'No celestial target available in the current sector.')) + '</p>'
+                + '</section>';
+            return;
+        }
+
+        node.innerHTML = '<section class="bookmark-action-panel">'
+            + '<h3>' + escapeHtml(t('bookmarkActionTitle', 'Place a waypoint bookmark')) + '</h3>'
+            + '<form id="bookmark-form" class="bookmark-form">'
+            + '<label>' + escapeHtml(t('bookmarkItem', 'Bookmark')) + '<select name="itemId">'
+            + items.map((item) => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(inventoryItemName(item)) + '</option>').join('')
+            + '</select></label>'
+            + '<label>' + escapeHtml(t('bookmarkTarget', 'Target')) + '<select name="objectId">'
+            + targets.map((target) => '<option value="' + escapeHtml(target.id) + '">' + escapeHtml(bookmarkTargetLabel(target)) + '</option>').join('')
+            + '</select></label>'
+            + '<label>' + escapeHtml(t('bookmarkName', 'Name')) + '<input name="name" maxlength="80" required></label>'
+            + '<button type="submit">' + escapeHtml(t('deployBookmark', 'Place')) + '</button>'
+            + '</form>'
+            + '</section>';
+    };
     const renderSectorObjects = (sector, options = {}) => {
         const node = document.getElementById('sector-objects');
         if (!node) {
@@ -447,6 +542,7 @@
         const syncMannyTargets = options.syncMannyTargets ?? (Boolean(sector) && Number.isFinite(distance) && distance === 0);
         if (syncMannyTargets) {
             currentMannyMineTargets = mineTargetsFromObjects(objects);
+            currentSectorObjects = objects;
         }
         node.innerHTML = objects.map((object) => {
             const danger = object.dangerLevel || 'unknown';
@@ -468,6 +564,7 @@
         }).join('');
         if (syncMannyTargets) {
             updateMannyTargetOptions();
+            renderBookmarkAction();
         }
     };
 
@@ -548,6 +645,8 @@
         if (!node) {
             return;
         }
+        currentInventory = inventory && typeof inventory === 'object' ? inventory : null;
+        renderBookmarkAction();
         if (!inventory || typeof inventory !== 'object') {
             node.innerHTML = '';
             return;
@@ -579,7 +678,7 @@
                 && item.location.type === 'probe'
                 && item.currentTask === null;
             return '<article class="inventory-card">'
-                + '<div><span>' + escapeHtml(t('inventoryItem', 'Equipment')) + '</span><b>' + escapeHtml(item.name || item.type || item.id) + '</b></div>'
+                + '<div><span>' + escapeHtml(t('inventoryItem', 'Equipment')) + '</span><b>' + escapeHtml(inventoryItemName(item)) + '</b></div>'
                 + '<p>' + escapeHtml(inventoryEntryDetail(item)) + '</p>'
                 + renderJettisonForm(item.id, 0, false, !isOnboardIdleManny)
                 + '</article>';
@@ -948,6 +1047,41 @@
         }
     });
 
+    document.getElementById('actions-panel')?.addEventListener('submit', async (event) => {
+        if (event.target.id !== 'bookmark-form') {
+            return;
+        }
+
+        event.preventDefault();
+        const form = new FormData(event.target);
+        const itemId = String(form.get('itemId') || '');
+        if (!itemId) {
+            return;
+        }
+        setText('action-status', t('orderSent', 'Order transmitted...'));
+        try {
+            const data = await api('/api/probe/waypoint-bookmarks/' + encodeURIComponent(itemId) + '/deploy', {
+                method: 'POST',
+                body: JSON.stringify({
+                    objectId: form.get('objectId'),
+                    name: form.get('name'),
+                }),
+            });
+            setText('action-status', t('bookmarkAccepted', 'Waypoint bookmark placed.'));
+            setText('movement-json', pretty(data));
+            if (data.inventory) {
+                renderInventory(data.inventory);
+                setText('inventory-json', pretty(data.inventory));
+            }
+            if (data.sector) {
+                renderSectorObjects(data.sector);
+                setText('sector-json', pretty({sector: data.sector}));
+            }
+        } catch (error) {
+            setText('action-status', error.message);
+        }
+    });
+
     document.getElementById('systems-panel')?.addEventListener('submit', async (event) => {
         if (!event.target.classList.contains('inventory-jettison-form')) {
             return;
@@ -1015,6 +1149,11 @@
                         resources,
                         targetAmount: Number.parseFloat(form.get('targetAmount')),
                     }),
+                });
+            } else if (event.target.classList.contains('manny-craft-form')) {
+                await api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/craft', {
+                    method: 'POST',
+                    body: JSON.stringify({recipe: form.get('recipe')}),
                 });
             }
             setText('manny-status', t('mannyOrderAccepted', 'Manny order accepted.'));

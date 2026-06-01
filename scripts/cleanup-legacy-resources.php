@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use VonNeumannGame\AppFactory;
+use VonNeumannGame\Domain\ResourceComposition;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -36,6 +37,7 @@ if (!$options['databaseOnly']) {
     echo '- files scanned: ' . $stats['filesScanned'] . "\n";
     echo '- files updated: ' . $stats['filesUpdated'] . "\n";
     echo '- resource maps migrated: ' . $stats['resourceMapsMigrated'] . "\n";
+    echo '- asteroid resource maps resynced: ' . $stats['asteroidMapsResynced'] . "\n";
 }
 
 /**
@@ -92,7 +94,7 @@ function usage(): string
 Usage: php scripts/cleanup-legacy-resources.php [--dry-run] [--database-only|--sectors-only] [--universe=path]
 
 Removes legacy probe/Manny inventory "other" amounts from the database and rewrites
-legacy sector JSON resourceAmounts.other into resourceAmounts.carbon_compounds.
+legacy sector JSON resourceAmounts.other into the current resource categories.
 
 TEXT;
 }
@@ -187,7 +189,7 @@ function mannyTaskPayloadUpdates(PDO $pdo): array
 }
 
 /**
- * @return array{filesScanned: int, filesUpdated: int, resourceMapsMigrated: int}
+ * @return array{filesScanned: int, filesUpdated: int, resourceMapsMigrated: int, asteroidMapsResynced: int}
  */
 function cleanupSectorFiles(string $universePath, bool $dryRun): array
 {
@@ -195,6 +197,7 @@ function cleanupSectorFiles(string $universePath, bool $dryRun): array
         'filesScanned' => 0,
         'filesUpdated' => 0,
         'resourceMapsMigrated' => 0,
+        'asteroidMapsResynced' => 0,
     ];
     $sectorsPath = rtrim($universePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'sectors';
     if (!is_dir($sectorsPath)) {
@@ -221,13 +224,16 @@ function cleanupSectorFiles(string $universePath, bool $dryRun): array
             continue;
         }
 
-        $fileStats = ['resourceMapsMigrated' => 0];
-        if (!migrateLegacyOtherResource($data, null, $fileStats)) {
+        $fileStats = ['resourceMapsMigrated' => 0, 'asteroidMapsResynced' => 0];
+        $changed = migrateLegacyAsteroidResources($data, $fileStats);
+        $changed = migrateLegacyOtherResource($data, null, $fileStats) || $changed;
+        if (!$changed) {
             continue;
         }
 
         $stats['filesUpdated']++;
         $stats['resourceMapsMigrated'] += $fileStats['resourceMapsMigrated'];
+        $stats['asteroidMapsResynced'] += $fileStats['asteroidMapsResynced'];
         if ($dryRun) {
             continue;
         }
@@ -248,7 +254,53 @@ function cleanupSectorFiles(string $universePath, bool $dryRun): array
 
 /**
  * @param mixed $value
- * @param array{resourceMapsMigrated: int} $stats
+ * @param array{resourceMapsMigrated: int, asteroidMapsResynced: int} $stats
+ */
+function migrateLegacyAsteroidResources(mixed &$value, array &$stats): bool
+{
+    if (!is_array($value)) {
+        return false;
+    }
+
+    $changed = false;
+    if (
+        ($value['type'] ?? null) === 'asteroid'
+        && isset($value['resourceAmounts']) && is_array($value['resourceAmounts'])
+        && isset($value['estimatedResources']) && is_array($value['estimatedResources'])
+    ) {
+        $amounts = $value['resourceAmounts'];
+        $composition = ResourceComposition::fromHints($value['estimatedResources']);
+        $normalized = normalizedResourceAmounts($amounts);
+        $total = array_sum($normalized) + max(0.0, (float) ($amounts['other'] ?? 0.0));
+        $shouldResync = array_key_exists('other', $amounts);
+
+        foreach (ResourceComposition::TYPES as $type) {
+            if ((float) ($normalized[$type] ?? 0.0) > 0.0 && (float) ($composition[$type] ?? 0.0) <= 0.0) {
+                $shouldResync = true;
+                break;
+            }
+        }
+
+        if ($total > 0.0 && $shouldResync) {
+            $value['resourceAmounts'] = resourceAmountsForTotal((float) $total, $composition);
+            $stats['asteroidMapsResynced']++;
+            $changed = true;
+        }
+    }
+
+    foreach ($value as &$childValue) {
+        if (migrateLegacyAsteroidResources($childValue, $stats)) {
+            $changed = true;
+        }
+    }
+    unset($childValue);
+
+    return $changed;
+}
+
+/**
+ * @param mixed $value
+ * @param array{resourceMapsMigrated: int, asteroidMapsResynced?: int} $stats
  */
 function migrateLegacyOtherResource(mixed &$value, ?string $key, array &$stats): bool
 {
@@ -297,6 +349,53 @@ function migrateLegacyOtherResource(mixed &$value, ?string $key, array &$stats):
     unset($childValue);
 
     return $changed;
+}
+
+/**
+ * @param array<string, mixed> $amounts
+ * @return array<string, float>
+ */
+function normalizedResourceAmounts(array $amounts): array
+{
+    $normalized = array_fill_keys(ResourceComposition::TYPES, 0.0);
+    foreach (ResourceComposition::TYPES as $type) {
+        $normalized[$type] = round(max(0.0, (float) ($amounts[$type] ?? 0.0)), 4);
+    }
+
+    return $normalized;
+}
+
+/**
+ * @param array<string, float> $composition
+ * @return array<string, float>
+ */
+function resourceAmountsForTotal(float $amount, array $composition): array
+{
+    $amount = round(max(0.0, $amount), 4);
+    $amounts = array_fill_keys(ResourceComposition::TYPES, 0.0);
+    $positiveTypes = array_values(array_filter(
+        ResourceComposition::TYPES,
+        static fn(string $type): bool => (float) ($composition[$type] ?? 0.0) > 0.0,
+    ));
+
+    if ($positiveTypes === []) {
+        return $amounts;
+    }
+
+    $remaining = $amount;
+    $lastIndex = count($positiveTypes) - 1;
+    foreach ($positiveTypes as $index => $type) {
+        if ($index === $lastIndex) {
+            $amounts[$type] = round(max(0.0, $remaining), 4);
+            break;
+        }
+
+        $resourceAmount = round($amount * (float) ($composition[$type] ?? 0.0), 4);
+        $amounts[$type] = $resourceAmount;
+        $remaining = round($remaining - $resourceAmount, 4);
+    }
+
+    return $amounts;
 }
 
 function absolutePath(string $root, string $path): string

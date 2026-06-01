@@ -21,8 +21,9 @@ final class SectorManny extends UniverseObject
         private readonly string $state,
         private readonly array $cargo = [],
         ?string $description = null,
+        array $waypointBookmarks = [],
     ) {
-        parent::__construct($id, $name, UniverseObjectType::Manny, 0.0, 0.0, $description);
+        parent::__construct($id, $name, UniverseObjectType::Manny, 0.0, 0.0, $description, $waypointBookmarks);
     }
 
     public function getMannyUid(): string
@@ -58,6 +59,7 @@ final class SectorManny extends UniverseObject
             (string) ($data['state'] ?? self::STATE_ABANDONED),
             is_array($data['cargo'] ?? null) ? $data['cargo'] : [],
             $data['description'] ?? null,
+            is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );
     }
 }

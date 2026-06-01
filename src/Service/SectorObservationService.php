@@ -167,6 +167,7 @@ final class SectorObservationService
             $data['starCount'] = count($object->getStars());
             $data['planetCount'] = $planetCount;
             $data['orbitalBodyCount'] = count($object->getOrbitalBodies());
+            $data['bookmarkTargets'] = $this->bookmarkTargets($object);
             $data['minableTargets'] = $this->minableTargets($object);
         }
 
@@ -194,6 +195,10 @@ final class SectorObservationService
             $data['mannyState'] = $object->getState();
             $data['mannyUid'] = $object->getMannyUid();
             $data['cargo'] = $object->getCargo();
+        }
+
+        if ($object->getWaypointBookmarks() !== []) {
+            $data['waypointBookmarks'] = $object->getWaypointBookmarks();
         }
 
         return $data;
@@ -236,6 +241,9 @@ final class SectorObservationService
                 'resourceTypes' => ResourceComposition::availableTypes($composition),
                 'resourceComposition' => $composition,
             ];
+            if ($object->getWaypointBookmarks() !== []) {
+                $target['waypointBookmarks'] = $object->getWaypointBookmarks();
+            }
             if ($object instanceof Asteroid) {
                 $target['resourceAmounts'] = $object->getResourceAmounts();
             }
@@ -243,6 +251,35 @@ final class SectorObservationService
         }
 
         return $targets;
+    }
+
+    private function bookmarkTargets(SolarSystem $system): array
+    {
+        $targets = [];
+        foreach ($system->getStars() as $star) {
+            $targets[] = $this->bookmarkTargetArray($star);
+        }
+        foreach ($system->getOrbitalBodies() as $body) {
+            $targets[] = $this->bookmarkTargetArray($body->getObject());
+        }
+
+        return $targets;
+    }
+
+    private function bookmarkTargetArray(UniverseObject $object): array
+    {
+        $target = [
+            'id' => $object->getId(),
+            'type' => $object->getType()->value,
+            'name' => $object->getName(),
+            'mass' => $object->getMass(),
+            'radius' => $object->getRadius(),
+        ];
+        if ($object->getWaypointBookmarks() !== []) {
+            $target['waypointBookmarks'] = $object->getWaypointBookmarks();
+        }
+
+        return $target;
     }
 
     private function objectResourceHints(UniverseObject $object): array
@@ -266,8 +303,8 @@ final class SectorObservationService
 
     private function isMannyMineable(UniverseObject $object): bool
     {
-        return ($object instanceof Planet || $object instanceof Asteroid)
-            && $object->getMass() <= self::MANNY_MINEABLE_MAX_MASS;
+        return $object instanceof Asteroid
+            || ($object instanceof Planet && $object->getMass() <= self::MANNY_MINEABLE_MAX_MASS);
     }
 
     private function neighborEstimate(SectorContent $content, float $quality): array

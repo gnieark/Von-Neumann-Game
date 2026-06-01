@@ -6,11 +6,13 @@ namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorManny;
@@ -27,11 +29,15 @@ final class MannyService
     public const MANNY_CARGO_CAPACITY = 0.3;
     public const MANNY_CONTAINER_SPACE = 0.05;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
+    public const WAYPOINT_BOOKMARK_METALS_COST = 0.01;
+    public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = 0.01;
+    public const WAYPOINT_BOOKMARK_CRAFTING_SECONDS = 600;
 
     public function __construct(
         private readonly MannyRepository $mannies,
         private readonly NeumannProbeRepository $probes,
         private readonly SectorService $sectors,
+        private readonly ProbeItemRepository $items,
     ) {}
 
     /**
@@ -177,13 +183,54 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
+    public function startCrafting(NeumannProbe $probe, string $uid, string $recipe): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to craft.');
+        }
+
+        $recipe = strtolower(str_replace([' ', '-'], '_', trim($recipe)));
+        if ($recipe !== ProbeItem::TYPE_WAYPOINT_BOOKMARK) {
+            throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
+        }
+        if ($probe->metalsStock + 0.00001 < self::WAYPOINT_BOOKMARK_METALS_COST) {
+            throw new MannyActionException(422, 'insufficient_metals', 'Insufficient metals in probe inventory for this recipe.');
+        }
+        $freeAfterCost = round($this->freeCargoCapacity($probe) + self::WAYPOINT_BOOKMARK_METALS_COST, 4);
+        if ($freeAfterCost + 0.00001 < self::WAYPOINT_BOOKMARK_CONTAINER_SPACE) {
+            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.');
+        }
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $probe->metalsStock = round($probe->metalsStock - self::WAYPOINT_BOOKMARK_METALS_COST, 4);
+        $this->probes->save($probe);
+
+        $manny->currentTask = Manny::TASK_CRAFTING;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . self::WAYPOINT_BOOKMARK_CRAFTING_SECONDS . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'recipe' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
+            'recipeName' => ProbeItem::WAYPOINT_BOOKMARK_NAME,
+            'metalsCost' => self::WAYPOINT_BOOKMARK_METALS_COST,
+            'containerSpace' => self::WAYPOINT_BOOKMARK_CONTAINER_SPACE,
+        ];
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
     public function recallManny(NeumannProbe $probe, string $uid): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
         $this->ensureMannyInRange($manny, $probe);
 
-        if ($manny->currentTask === Manny::TASK_REPAIR) {
+        if ($manny->currentTask === Manny::TASK_REPAIR || $manny->currentTask === Manny::TASK_CRAFTING) {
             $metalsCost = round(max(0.0, (float) ($manny->taskPayload['metalsCost'] ?? 0.0)), 4);
             if ($metalsCost > 0.0) {
                 $this->transferResourceToProbe($probe, 'metals', $metalsCost);
@@ -249,6 +296,9 @@ final class MannyService
         if ($manny->currentTask === Manny::TASK_MINING) {
             return $this->refreshMining($manny, $probe, $now);
         }
+        if ($manny->currentTask === Manny::TASK_CRAFTING) {
+            return $this->refreshCrafting($manny, $probe, $now);
+        }
         if ($manny->currentTask === Manny::TASK_RETURNING) {
             return $this->refreshReturning($manny, $probe, $now);
         }
@@ -290,6 +340,34 @@ final class MannyService
         $integrityPercent = (float) ($manny->taskPayload['integrityPercent'] ?? 0);
         $probe->integrityPercent = round(min(100.0, $probe->integrityPercent + $integrityPercent), 2);
         $this->probes->save($probe);
+
+        $this->clearTask($manny);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function refreshCrafting(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        $recipe = (string) ($manny->taskPayload['recipe'] ?? '');
+        if ($recipe === ProbeItem::TYPE_WAYPOINT_BOOKMARK) {
+            $this->items->create(
+                $probe->id,
+                ProbeItem::TYPE_WAYPOINT_BOOKMARK,
+                ProbeItem::WAYPOINT_BOOKMARK_NAME,
+                self::WAYPOINT_BOOKMARK_CONTAINER_SPACE,
+                [
+                    'recipe' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
+                    'craftedByMannyId' => $manny->uid,
+                    'craftedByMannyName' => $manny->name,
+                    'craftedAt' => $now->format('c'),
+                ],
+            );
+        }
 
         $this->clearTask($manny);
         $this->mannies->save($manny);
@@ -472,8 +550,8 @@ final class MannyService
 
     private function isMineableObject(UniverseObject $object): bool
     {
-        return ($object instanceof Asteroid || $object instanceof Planet)
-            && $object->getMass() <= self::MOON_MASS_EARTH_UNITS;
+        return $object instanceof Asteroid
+            || ($object instanceof Planet && $object->getMass() <= self::MOON_MASS_EARTH_UNITS);
     }
 
     /**
@@ -757,7 +835,11 @@ final class MannyService
 
     private function freeCargoCapacity(NeumannProbe $probe): float
     {
-        $used = ProbeInventory::defaultForProbe($probe, $this->mannies->findByProbeId($probe->id))->usedCapacity();
+        $used = ProbeInventory::defaultForProbe(
+            $probe,
+            $this->mannies->findByProbeId($probe->id),
+            $this->items->findByProbeId($probe->id),
+        )->usedCapacity();
 
         return max(0.0, round(1.0 - $used, 4));
     }

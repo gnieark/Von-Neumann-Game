@@ -451,6 +451,16 @@ if ($solarSystemSector !== null) {
     foreach ($solarSystemSector->getObjects() as $object) {
         if ($object instanceof SolarSystem) {
             $test->assert($object->getPrimaryStar() instanceof Star, 'a solar system contains at least one star');
+            $primaryStar = $object->getPrimaryStar();
+            $test->assertEquals($primaryStar->getId(), $solarSystemSector->findObjectById($primaryStar->getId())?->getId(), 'solar system primary star can be found by object id');
+            $renamedStar = $primaryStar->withWaypointBookmark('Beacon star', [
+                'name' => 'Beacon star',
+                'playerId' => 1,
+                'playerName' => 'tester',
+                'createdAt' => '2026-06-01T00:00:00+00:00',
+            ]);
+            $test->assert($solarSystemSector->replaceObject($renamedStar), 'solar system primary star can be replaced in sector content');
+            $test->assertEquals('Beacon star', $solarSystemSector->findObjectById($primaryStar->getId())?->getName(), 'replacing a solar system star persists its bookmark name');
             break;
         }
     }

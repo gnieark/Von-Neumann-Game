@@ -15,8 +15,9 @@ final class Star extends UniverseObject
         float $mass,
         float $radius,
         ?string $description = null,
+        array $waypointBookmarks = [],
     ) {
-        parent::__construct($id, $name, UniverseObjectType::Star, $mass, $radius, $description);
+        parent::__construct($id, $name, UniverseObjectType::Star, $mass, $radius, $description, $waypointBookmarks);
     }
 
     public function getSpectralType(): string
@@ -44,6 +45,7 @@ final class Star extends UniverseObject
             (float) $data['mass'],
             (float) $data['radius'],
             $data['description'] ?? null,
+            is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );
     }
 }

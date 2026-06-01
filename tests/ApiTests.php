@@ -14,6 +14,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
+use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
@@ -23,6 +24,7 @@ use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
+use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\SectorContent;
@@ -142,6 +144,7 @@ $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
+$items = new ProbeItemRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
 $scheduledEvents = new ScheduledEventRepository($pdo);
 $sessions = new SessionRepository($pdo);
@@ -151,13 +154,14 @@ $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSect
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: 'api-test-world');
-$mannyService = new MannyService($mannies, $probes, $sectorService);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items);
+$bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService, $items, $bookmarkService);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(3, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(5, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -321,10 +325,12 @@ if ($createdProbe !== null) {
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+        new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
     ]));
     $mineableSector = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('mine-rock', $mineableSector->body['sector']['objects'][0]['id'] ?? null, 'sector observation exposes object ids for Manny mining orders');
     $test->assertEquals(true, $mineableSector->body['sector']['objects'][0]['mannyMineable'] ?? null, 'small asteroids are marked as Manny-mineable');
+    $test->assertEquals(true, $mineableSector->body['sector']['objects'][1]['mannyMineable'] ?? null, 'all asteroids are marked as Manny-mineable');
     $test->assertEquals(['metals'], $mineableSector->body['sector']['objects'][0]['resourceTypes'] ?? null, 'sector observation exposes mineable resource categories');
     $test->assertEquals(1.0, $mineableSector->body['sector']['objects'][0]['resourceComposition']['metals'] ?? null, 'sector observation exposes resource composition shares');
 
@@ -403,6 +409,52 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $cancelRepair->status, 'POST /api/probe/mannies/{id}/recall cancels an active repair task');
     $test->assertEquals(null, $cancelRepair->body['manny']['currentTask'] ?? null, 'cancelled repair returns the Manny to idle');
     $test->assertEquals(0.2, $probes->findByPlayerId($player->id)?->metalsStock, 'cancelled repair refunds committed metals when capacity is available');
+
+    $craftManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/craft', $headers, json_encode([
+        'recipe' => 'waypoint_bookmark',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $craftManny->status, 'POST /api/probe/mannies/{id}/craft starts a crafting task');
+    $test->assertEquals('crafting', $craftManny->body['manny']['currentTask'] ?? null, 'crafting task is exposed on Manny');
+    $test->assertEquals('waypoint_bookmark', $craftManny->body['manny']['task']['recipe'] ?? null, 'crafting task stores its recipe');
+    $test->assertEquals(0.19, $probes->findByPlayerId($player->id)?->metalsStock, 'waypoint bookmark crafting consumes 0.01 metal containers');
+
+    $craftRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $craftRow->execute(['uid' => $firstMannyId]);
+    $craftMannyDbId = (int) $craftRow->fetchColumn();
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $craftedProbe = $kernel->handle('GET', '/api/probe', $headers);
+    $craftedItems = array_values(array_filter(
+        $craftedProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === 'waypoint_bookmark',
+    ));
+    $test->assertEquals(1, count($craftedItems), 'completed crafting adds a waypoint bookmark to inventory');
+    $test->assertEquals(0.01, $craftedItems[0]['containerSpace'] ?? null, 'waypoint bookmark occupies 0.01 containers');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('bookmark-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+    ]));
+    $deployBookmark = $kernel->handle('POST', '/api/probe/waypoint-bookmarks/' . rawurlencode((string) ($craftedItems[0]['id'] ?? 'missing')) . '/deploy', $headers, json_encode([
+        'objectId' => 'bookmark-rock',
+        'name' => 'Balise test',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $deployBookmark->status, 'POST /api/probe/waypoint-bookmarks/{itemId}/deploy places a bookmark');
+    $test->assertEquals('Balise test', $deployBookmark->body['object']['name'] ?? null, 'bookmark deployment renames the celestial object');
+    $test->assertEquals('Remi', $deployBookmark->body['object']['waypointBookmarks'][0]['playerName'] ?? null, 'bookmark history stores the player display name');
+    $remainingBookmarks = array_values(array_filter(
+        $deployBookmark->body['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === 'waypoint_bookmark',
+    ));
+    $test->assertEquals(0, count($remainingBookmarks), 'bookmark deployment consumes the waypoint bookmark item');
+    $bookmarkedSector = $sectorRepository->load($createdProbe->currentSector);
+    $bookmarkedObject = $bookmarkedSector->findObjectById('bookmark-rock');
+    $bookmarkedData = $bookmarkedObject?->toArray() ?? [];
+    $test->assertEquals('Balise test', $bookmarkedObject?->getName(), 'bookmark deployment persists the celestial object name in the sector file');
+    $test->assert(isset($bookmarkedData['waypointBookmarks'][0]['createdAt']), 'bookmark deployment persists a timestamped history entry');
+    $test->assertEquals('Balise test', $deployBookmark->body['sector']['objects'][0]['waypointBookmarks'][0]['name'] ?? null, 'sector observation exposes bookmark history');
 
     $fourthRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $fourthRow->execute(['uid' => $fourthMannyId]);

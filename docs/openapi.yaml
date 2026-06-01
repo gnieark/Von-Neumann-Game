@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '3'
+  version: '5'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 3
+                apiVersion: 5
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -358,6 +358,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/waypoint-bookmarks/{itemId}/deploy:
+    post:
+      summary: Place a waypoint bookmark on a celestial object in the current sector
+      description: >
+        Consumes one waypoint bookmark inventory item, renames the target
+        celestial object, and appends a timestamped history entry containing the
+        player name that placed it.
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: itm_8d4a2c1f5a91b334
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WaypointBookmarkDeployRequest'
+            example:
+              objectId: asteroid-abc123
+              name: North ice marker
+      responses:
+        '200':
+          description: Waypoint bookmark placed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaypointBookmarkDeployResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Bookmark item or target object not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Probe is already moving or no longer operational
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Target is not a celestial object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies:
     get:
       summary: List persisted Manny robots for the current probe
@@ -490,6 +542,46 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Invalid target, unavailable resource, or insufficient cargo capacity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/craft:
+    post:
+      summary: Start crafting an inventory item with a Manny
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyCraftRequest'
+            example:
+              recipe: waypoint_bookmark
+      responses:
+        '202':
+          description: Crafting task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Insufficient metals or cargo capacity
           content:
             application/json:
               schema:
@@ -700,7 +792,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_mining_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -961,6 +1053,30 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/Manny'
+    WaypointBookmarkDeployRequest:
+      type: object
+      required: [objectId, name]
+      properties:
+        objectId:
+          type: string
+          description: Celestial object id in the probe current sector. Solar-system orbital bodies can be targeted by their object id.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Player-facing name to assign to the target object.
+    WaypointBookmarkDeployResponse:
+      type: object
+      required: [object, sector, inventory]
+      properties:
+        object:
+          type: object
+          additionalProperties: true
+          description: Updated raw celestial object data, including waypointBookmarks.
+        sector:
+          $ref: '#/components/schemas/SectorObservation'
+        inventory:
+          $ref: '#/components/schemas/ProbeInventory'
     ProbeInventoryItem:
       type: object
       required: [id, type, name, containerSpace, currentTask, taskProgressPercent]
@@ -969,7 +1085,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark]
         name:
           type: string
         containerSpace:
@@ -986,6 +1102,9 @@ components:
           $ref: '#/components/schemas/MannyLocation'
         cargo:
           $ref: '#/components/schemas/MannyCargo'
+        metadata:
+          type: object
+          additionalProperties: true
     ProbeInventoryItemTask:
       type: object
       required: [id, type, name, currentTask, taskProgressPercent]
@@ -994,7 +1113,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark]
         name:
           type: string
         currentTask:
@@ -1008,6 +1127,9 @@ components:
           $ref: '#/components/schemas/MannyLocation'
         cargo:
           $ref: '#/components/schemas/MannyCargo'
+        metadata:
+          type: object
+          additionalProperties: true
     MannyRenameRequest:
       type: object
       required: [name]
@@ -1060,6 +1182,17 @@ components:
           minimum: 0
           exclusiveMinimum: true
           description: Amount to mine in equivalent earth containers. Manny cargo capacity is 0.3 per trip.
+    MannyCraftRequest:
+      type: object
+      required: [recipe]
+      properties:
+        recipe:
+          type: string
+          enum: [waypoint_bookmark]
+          description: >
+            Crafting recipe to start. The initial recipe, waypoint_bookmark,
+            consumes 0.01 containers of metals, takes 10 real minutes, and
+            creates an inventory item occupying 0.01 containers.
     Manny:
       type: object
       required: [id, name, location, currentTask, taskProgressPercent, task, cargo, canReceiveOrders]
@@ -1076,7 +1209,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, returning, waiting_for_space]
+          enum: [repair, mining, crafting, returning, waiting_for_space]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -1203,6 +1336,15 @@ components:
         dangerLevel:
           type: string
           enum: [low, moderate, extreme]
+        waypointBookmarks:
+          type: array
+          items:
+            $ref: '#/components/schemas/WaypointBookmarkHistory'
+        bookmarkTargets:
+          type: array
+          description: Present on solar systems; lists nested stars and orbital bodies that can receive a waypoint bookmark.
+          items:
+            $ref: '#/components/schemas/WaypointBookmarkTarget'
         mannyState:
           type: string
           enum: [abandoned, forgotten]
@@ -1213,3 +1355,36 @@ components:
         cargo:
           type: object
           additionalProperties: true
+    WaypointBookmarkTarget:
+      type: object
+      required: [id, type, name]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system]
+        name:
+          type: string
+          nullable: true
+        mass:
+          type: number
+        radius:
+          type: number
+        waypointBookmarks:
+          type: array
+          items:
+            $ref: '#/components/schemas/WaypointBookmarkHistory'
+    WaypointBookmarkHistory:
+      type: object
+      required: [name, playerId, playerName, createdAt]
+      properties:
+        name:
+          type: string
+        playerId:
+          type: integer
+        playerName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

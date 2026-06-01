@@ -22,8 +22,9 @@ final class ProbeInventory
 
     /**
      * @param array<Manny>|null $mannies
+     * @param array<ProbeItem>|null $probeItems
      */
-    public static function defaultForProbe(NeumannProbe $probe, ?array $mannies = null): self
+    public static function defaultForProbe(NeumannProbe $probe, ?array $mannies = null, ?array $probeItems = null): self
     {
         $items = [
             new ProbeInventoryItem(
@@ -62,6 +63,10 @@ final class ProbeInventory
                     $manny->cargoArray(),
                 );
             }
+        }
+
+        foreach ($probeItems ?? [] as $probeItem) {
+            $items[] = $probeItem->inventoryItem();
         }
 
         $externalTanks = [

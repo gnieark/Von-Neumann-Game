@@ -853,6 +853,30 @@ button:disabled {
     pointer-events: none;
 }
 
+.bookmark-action-panel {
+    display: grid;
+    gap: 12px;
+    margin: 12px 0 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,.1);
+}
+
+.bookmark-action-panel h3,
+.bookmark-action-panel p {
+    margin: 0;
+}
+
+.bookmark-action-panel p {
+    color: var(--muted);
+}
+
+.bookmark-form {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(160px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+}
+
 @media (max-width: 760px) {
     .topbar {
         flex-wrap: wrap;
@@ -889,6 +913,7 @@ button:disabled {
     .console-grid,
     .coordinate-form,
     .action-panel,
+    .bookmark-form,
     .manny-form,
     .inventory-card,
     .inventory-jettison-form {

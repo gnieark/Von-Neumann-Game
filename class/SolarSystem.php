@@ -18,8 +18,9 @@ final class SolarSystem extends UniverseObject
         float $mass,
         float $radius,
         ?string $description = null,
+        array $waypointBookmarks = [],
     ) {
-        parent::__construct($id, $name, UniverseObjectType::SolarSystem, $mass, $radius, $description);
+        parent::__construct($id, $name, UniverseObjectType::SolarSystem, $mass, $radius, $description, $waypointBookmarks);
     }
 
     public function getPrimaryStar(): Star
@@ -71,6 +72,7 @@ final class SolarSystem extends UniverseObject
             (float) $data['mass'],
             (float) $data['radius'],
             $data['description'] ?? null,
+            is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );
     }
 }

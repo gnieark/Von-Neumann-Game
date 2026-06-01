@@ -13,6 +13,7 @@ final class Manny
 
     public const TASK_REPAIR = 'repair';
     public const TASK_MINING = 'mining';
+    public const TASK_CRAFTING = 'crafting';
     public const TASK_RETURNING = 'returning';
     public const TASK_WAITING_FOR_SPACE = 'waiting_for_space';
 
