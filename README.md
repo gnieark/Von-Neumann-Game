@@ -181,6 +181,7 @@ Routes principales:
 - `GET /api/probe/sector`
 - `POST /api/probe/move`
 - `GET /api/probe/inventory/{itemId}`
+- `POST /api/probe/inventory/{itemId}/jettison`
 - `GET /api/probe/mannies`
 - `PATCH /api/probe/mannies/{mannyId}`
 - `POST /api/probe/mannies/{mannyId}/repair`
@@ -190,6 +191,8 @@ Routes principales:
 
 Les coordonnees envoyees par l'API sont toujours relatives au joueur et doivent
 respecter la parite FCC.
+Les Mannys abandonnees ou oubliees apparaissent dans les objets detectes
+uniquement pour le secteur ou se trouve actuellement la sonde.
 
 Les endpoints proteges acceptent un Bearer token de session ou une clef API
 generee par `POST /api/me/api-key`. Les clefs API sont affichees une seule fois

@@ -26,6 +26,7 @@ require_once __DIR__ . '/Planet.php';
 require_once __DIR__ . '/Asteroid.php';
 require_once __DIR__ . '/DustCloud.php';
 require_once __DIR__ . '/BlackHole.php';
+require_once __DIR__ . '/SectorManny.php';
 require_once __DIR__ . '/OrbitDescriptor.php';
 require_once __DIR__ . '/OrbitingBody.php';
 require_once __DIR__ . '/SolarSystem.php';

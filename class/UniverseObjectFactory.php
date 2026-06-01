@@ -17,6 +17,7 @@ final class UniverseObjectFactory
             UniverseObjectType::DustCloud => DustCloud::fromArray($data),
             UniverseObjectType::BlackHole => BlackHole::fromArray($data),
             UniverseObjectType::SolarSystem => SolarSystem::fromArray($data),
+            UniverseObjectType::Manny => SectorManny::fromArray($data),
         };
     }
 }

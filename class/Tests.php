@@ -15,6 +15,7 @@ use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorService;
+use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SolarSystem;
 use VonNeumannGame\Sector\Star;
 
@@ -441,6 +442,14 @@ $repository->save($roundTripSector);
 $loadedRoundTrip = $repository->load($negativeCoordinates);
 $expectedLoadedRoundTrip = SectorContent::fromArray($roundTripSector->toArray(), 'loaded');
 $test->assertEquals($expectedLoadedRoundTrip->toArray(), $loadedRoundTrip->toArray(), 'JSON write then read restores the same sector data');
+
+$mannySector = new SectorContent($coord000, [
+    new SectorManny(SectorManny::objectIdForUid('mny_test'), 'manny-test', 'mny_test', SectorManny::STATE_FORGOTTEN),
+]);
+$repository->save($mannySector);
+$loadedMannySector = $repository->load($coord000);
+$expectedLoadedMannySector = SectorContent::fromArray($mannySector->toArray(), 'loaded');
+$test->assertEquals($expectedLoadedMannySector->toArray(), $loadedMannySector->toArray(), 'sector storage preserves abandoned or forgotten Manny objects');
 
 $serviceBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_sector_service_tests_' . bin2hex(random_bytes(4));
 $serviceRepository = new SectorFileRepository($serviceBase);

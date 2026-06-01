@@ -62,6 +62,41 @@ final class ResourceComposition
     }
 
     /**
+     * @param array<string, float|int> $amounts
+     * @return array<string, float>
+     */
+    public static function fromAmounts(array $amounts): array
+    {
+        $normalized = [];
+        $total = 0.0;
+        foreach (self::TYPES as $type) {
+            $amount = max(0.0, (float) ($amounts[$type] ?? 0.0));
+            $normalized[$type] = $amount;
+            $total += $amount;
+        }
+
+        if ($total <= 0.0) {
+            return array_fill_keys(self::TYPES, 0.0);
+        }
+
+        $composition = [];
+        $remaining = 1.0;
+        $lastIndex = count(self::TYPES) - 1;
+        foreach (self::TYPES as $index => $type) {
+            if ($index === $lastIndex) {
+                $composition[$type] = round(max(0.0, $remaining), 4);
+                break;
+            }
+
+            $share = round($normalized[$type] / $total, 4);
+            $composition[$type] = $share;
+            $remaining = round($remaining - $share, 4);
+        }
+
+        return $composition;
+    }
+
+    /**
      * @param array<string, float|int> $composition
      * @return array<string>
      */

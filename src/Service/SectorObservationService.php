@@ -18,6 +18,7 @@ use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
+use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SolarSystem;
 use VonNeumannGame\Sector\Star;
@@ -55,7 +56,7 @@ final class SectorObservationService
                 $distance,
                 SectorKnowledgeLevel::Detailed,
                 1.0,
-                ['objects' => array_map(fn(UniverseObject $object): array => $this->detailedObject($object), $content->getObjects())],
+                ['objects' => $this->detailedObjects($content, $current)],
                 $scan,
             );
         }
@@ -175,20 +176,44 @@ final class SectorObservationService
 
         if ($object instanceof Planet || $object instanceof Asteroid) {
             $resources = $this->objectResourceHints($object);
-            $composition = ResourceComposition::fromHints($resources);
+            $composition = $this->objectResourceComposition($object);
             $data['resources'] = $resources;
             $data['resourceTypes'] = ResourceComposition::availableTypes($composition);
             $data['resourceComposition'] = $composition;
             $data['mannyMineable'] = $this->isMannyMineable($object);
             if ($object instanceof Asteroid) {
                 $data['composition'] = $object->toArray()['composition'] ?? null;
+                $data['resourceAmounts'] = $object->getResourceAmounts();
             }
             if ($object instanceof Planet) {
                 $data['category'] = $object->getCategory();
             }
         }
 
+        if ($object instanceof SectorManny) {
+            $data['mannyState'] = $object->getState();
+            $data['mannyUid'] = $object->getMannyUid();
+            $data['cargo'] = $object->getCargo();
+        }
+
         return $data;
+    }
+
+    /**
+     * @return array<array<string, mixed>>
+     */
+    private function detailedObjects(SectorContent $content, bool $isCurrentSector): array
+    {
+        $objects = [];
+        foreach ($content->getObjects() as $object) {
+            if ($object instanceof SectorManny && !$isCurrentSector) {
+                continue;
+            }
+
+            $objects[] = $this->detailedObject($object);
+        }
+
+        return $objects;
     }
 
     private function minableTargets(SolarSystem $system): array
@@ -201,8 +226,8 @@ final class SectorObservationService
             }
 
             $resources = $this->objectResourceHints($object);
-            $composition = ResourceComposition::fromHints($resources);
-            $targets[] = [
+            $composition = $this->objectResourceComposition($object);
+            $target = [
                 'id' => $object->getId(),
                 'type' => $object->getType()->value,
                 'name' => $object->getName(),
@@ -211,6 +236,10 @@ final class SectorObservationService
                 'resourceTypes' => ResourceComposition::availableTypes($composition),
                 'resourceComposition' => $composition,
             ];
+            if ($object instanceof Asteroid) {
+                $target['resourceAmounts'] = $object->getResourceAmounts();
+            }
+            $targets[] = $target;
         }
 
         return $targets;
@@ -221,6 +250,18 @@ final class SectorObservationService
         $data = $object->toArray();
 
         return $data['resourceHints'] ?? $data['estimatedResources'] ?? [];
+    }
+
+    /**
+     * @return array<string, float>
+     */
+    private function objectResourceComposition(UniverseObject $object): array
+    {
+        if ($object instanceof Asteroid) {
+            return ResourceComposition::fromAmounts($object->getResourceAmounts());
+        }
+
+        return ResourceComposition::fromHints($this->objectResourceHints($object));
     }
 
     private function isMannyMineable(UniverseObject $object): bool
@@ -304,6 +345,10 @@ final class SectorObservationService
             $object instanceof Asteroid => 'Wandering asteroid body.',
             $object instanceof DustCloud => 'Diffuse dust cloud with sensor interference.',
             $object instanceof BlackHole => 'Dangerous compact object detected.',
+            $object instanceof SectorManny => match ($object->getState()) {
+                SectorManny::STATE_FORGOTTEN => 'Manny left behind by a probe.',
+                default => 'Abandoned Manny drifting in this sector.',
+            },
             default => 'Unknown astronomical object.',
         };
     }

@@ -29,6 +29,7 @@ use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorGrid;
+use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -148,7 +149,7 @@ $visitedSectors = new VisitedSectorRepository($pdo);
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys);
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, worldSeed: 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: 'api-test-world');
 $mannyService = new MannyService($mannies, $probes, $sectorService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService);
@@ -254,6 +255,8 @@ $test->assertEquals(0.3, $printer['containerSpace'] ?? null, 'atomic 3D printer 
 $mannyItems = array_values(array_filter($inventoryItems, static fn(array $item): bool => ($item['type'] ?? null) === 'manny'));
 $test->assertEquals(4, count($mannyItems), 'default inventory contains four mannies');
 $test->assertEquals(0.05, $mannyItems[0]['containerSpace'] ?? null, 'each manny occupies 0.05 containers');
+$resourceStocks = $sector->body['inventory']['resourceStocks'] ?? [];
+$test->assert(is_string($resourceStocks[0]['id'] ?? null), 'resource stocks expose stable inventory ids for jettison orders');
 
 $printerTask = $kernel->handle('GET', '/api/probe/inventory/' . rawurlencode((string) ($printer['id'] ?? 'missing')), $headers);
 $test->assertEquals(200, $printerTask->status, 'inventory item id endpoint returns printer task state');
@@ -332,6 +335,19 @@ if ($createdProbe !== null) {
     $minedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(0.04, $minedProbe?->metalsStock, 'completed Manny mining transfers metals to the probe inventory');
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'completed mining returns the Manny to the probe');
+    $depletedSector = $sectorRepository->load($createdProbe->currentSector);
+    $depletedAsteroid = $depletedSector->getObjects()[0] ?? null;
+    $test->assertEquals(0.99, $depletedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'completed Manny mining subtracts the mined metals from the asteroid');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('thin-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.005]),
+    ]));
+    $oversizedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'thin-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.01,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $oversizedMine->status, 'Manny mining refuses an order larger than the asteroid material reserve');
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('mixed-rock', null, 'mixed', ['iron', 'water_ice', 'silicates'], 'small', 0.000001, 0.001),
@@ -360,6 +376,10 @@ if ($createdProbe !== null) {
     $mixedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(0.05, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
     $test->assertEquals(0.01, $mixedProbe?->otherStock, 'completed multi-resource mining transfers the other-materials share');
+    $mixedSector = $sectorRepository->load($createdProbe->currentSector);
+    $mixedAsteroid = $mixedSector->getObjects()[0] ?? null;
+    $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'multi-resource mining subtracts the metals share from the asteroid');
+    $test->assertEquals(0.3234, $mixedAsteroid?->toArray()['resourceAmounts']['other'] ?? null, 'multi-resource mining subtracts the other-materials share from the asteroid');
 
     $pdo->prepare('UPDATE neumann_probes SET damage_percent = 4, integrity_percent = 96, metals_stock = 0.2 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/repair', $headers, json_encode(['percent' => 1], JSON_THROW_ON_ERROR));
@@ -368,6 +388,66 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $cancelRepair->status, 'POST /api/probe/mannies/{id}/recall cancels an active repair task');
     $test->assertEquals(null, $cancelRepair->body['manny']['currentTask'] ?? null, 'cancelled repair returns the Manny to idle');
     $test->assertEquals(0.2, $probes->findByPlayerId($player->id)?->metalsStock, 'cancelled repair refunds committed metals when capacity is available');
+
+    $fourthRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $fourthRow->execute(['uid' => $fourthMannyId]);
+    $fourthMannyDbId = (int) $fourthRow->fetchColumn();
+    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.55, other_stock = 0 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $pdo->prepare(
+        'UPDATE mannies
+         SET location_type = :location_type,
+             sector_x = :sector_x,
+             sector_y = :sector_y,
+             sector_z = :sector_z,
+             current_task = :current_task,
+             task_started_at = :started,
+             task_ends_at = :ended,
+             task_payload_json = :payload
+         WHERE id = :id'
+    )->execute([
+        'id' => $fourthMannyDbId,
+        'location_type' => 'sector',
+        'sector_x' => $createdProbe->currentSector->getX(),
+        'sector_y' => $createdProbe->currentSector->getY(),
+        'sector_z' => $createdProbe->currentSector->getZ(),
+        'current_task' => 'returning',
+        'started' => gmdate('c', time() - 1800),
+        'ended' => gmdate('c', time() - 1),
+        'payload' => json_encode(['reason' => 'test_return'], JSON_THROW_ON_ERROR),
+    ]);
+    $waitingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $waitingFourth = array_values(array_filter(
+        $waitingMannies->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $fourthMannyId,
+    ))[0] ?? null;
+    $test->assertEquals('waiting_for_space', $waitingFourth['currentTask'] ?? null, 'returning Manny waits outside when the probe has no storage slot');
+    $test->assertEquals('sector', $waitingFourth['location']['type'] ?? null, 'waiting Manny remains in the sector');
+
+    $jettisonMetals = $kernel->handle('POST', '/api/probe/inventory/probe-' . $createdProbe->id . '-stock-metals/jettison', $headers, json_encode([
+        'amount' => 0.05,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $jettisonMetals->status, 'POST /api/probe/inventory/{itemId}/jettison discards stored resources');
+    $test->assertEquals(0.5, $probes->findByPlayerId($player->id)?->metalsStock, 'jettisoning metals lowers the probe stock');
+    $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->locationType, 'freeing storage lets a waiting Manny enter the probe');
+    $test->assertEquals(null, $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->currentTask, 'Manny waiting for storage returns to idle after docking');
+
+    $jettisonManny = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($fourthMannyId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $jettisonManny->status, 'POST /api/probe/inventory/{itemId}/jettison can eject an idle onboard Manny');
+    $jettisonedManny = $mannies->findByUid($fourthMannyId);
+    $test->assertEquals(null, $jettisonedManny?->probeId, 'jettisoned Manny has no owner probe link in the database');
+    $test->assertEquals('sector', $jettisonedManny?->locationType, 'jettisoned Manny is moved outside the probe');
+    $test->assertEquals(0.05, $jettisonManny->body['inventory']['freeCapacity'] ?? null, 'jettisoning an onboard Manny frees its storage slot');
+    $jettisonedSector = $sectorRepository->load($createdProbe->currentSector);
+    $jettisonedSectorManny = $jettisonedSector->findObjectById(SectorManny::objectIdForUid($fourthMannyId));
+    $test->assertEquals('manny', $jettisonedSectorManny?->getType()->value, 'jettisoned Manny is registered as a sector object');
+    $test->assertEquals(SectorManny::STATE_ABANDONED, $jettisonedSectorManny?->toArray()['state'] ?? null, 'jettisoned sector Manny is marked abandoned');
+    $scanWithAbandonedManny = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $scanMannyObjects = array_values(array_filter(
+        $scanWithAbandonedManny->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'manny'
+    ));
+    $test->assertEquals(SectorManny::STATE_ABANDONED, $scanMannyObjects[0]['mannyState'] ?? null, 'current-sector scan exposes abandoned Mannys');
+
     $pdo->prepare('UPDATE neumann_probes SET damage_percent = 3, integrity_percent = 97 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 }
 
@@ -434,7 +514,27 @@ if ($moveProbe !== null) {
     $noFuel = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(422, $noFuel->status, 'POST /api/probe/move rejects insufficient deuterium');
 
+    $originBeforeMove = $moveProbe->currentSector;
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $pdo->prepare(
+        'UPDATE mannies
+         SET location_type = :location_type,
+             sector_x = :sector_x,
+             sector_y = :sector_y,
+             sector_z = :sector_z,
+             current_task = NULL,
+             task_started_at = NULL,
+             task_ends_at = NULL,
+             task_payload_json = :payload
+         WHERE uid = :uid'
+    )->execute([
+        'uid' => $firstMannyId,
+        'location_type' => 'sector',
+        'sector_x' => $originBeforeMove->getX(),
+        'sector_y' => $originBeforeMove->getY(),
+        'sector_z' => $originBeforeMove->getZ(),
+        'payload' => '{}',
+    ]);
     $startMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $startMove->status, 'POST /api/probe/move starts movement with 202');
     $test->assertEquals('preparing', $startMove->body['movement']['status'] ?? null, 'new movement starts in preparing status');
@@ -446,6 +546,10 @@ if ($moveProbe !== null) {
     $test->assertEquals(98.0, $afterStartProbe?->deuteriumStock, 'probe deuterium stock is persisted after movement start');
     $test->assertEquals('preparing', $afterStartProbe?->status->value, 'probe status becomes preparing');
     $test->assertEquals(4, $scheduledEvents->countByStatus('pending'), 'starting a movement schedules its phase events');
+    $forgottenSector = $sectorRepository->load($originBeforeMove);
+    $forgottenSectorManny = $forgottenSector->findObjectById(SectorManny::objectIdForUid($firstMannyId));
+    $test->assertEquals(SectorManny::STATE_FORGOTTEN, $forgottenSectorManny?->toArray()['state'] ?? null, 'movement registers outside owned Mannys as forgotten sector objects');
+    $test->assertEquals($moveProbe->id, $mannies->findByUid($firstMannyId)?->probeId, 'forgotten Manny keeps its owner probe link in the database');
 
     $secondMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 2, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(409, $secondMove->status, 'second movement cannot start while active movement exists');
@@ -520,6 +624,13 @@ if ($moveProbe !== null) {
         if ($arrivedProbeEntity !== null) {
             $test->assert($visitedSectors->hasVisited($player, $arrivedProbeEntity->currentSector), 'arrival marks target sector as visited');
             $test->assertEquals('normal', $arrivedProbe->body['probe']['sensorMode'] ?? null, 'idle sensor mode is normal after arrival');
+            $originRelativeAfterArrival = $originBeforeMove->subtract($player->homeSector);
+            $oldSectorResponse = $kernel->handle('GET', '/api/sector?x=' . $originRelativeAfterArrival['x'] . '&y=' . $originRelativeAfterArrival['y'] . '&z=' . $originRelativeAfterArrival['z'], $moveHeaders);
+            $oldSectorMannyObjects = array_values(array_filter(
+                $oldSectorResponse->body['sector']['objects'] ?? [],
+                static fn(array $object): bool => ($object['type'] ?? null) === 'manny'
+            ));
+            $test->assertEquals(0, count($oldSectorMannyObjects), 'visited-sector scan hides abandoned and forgotten Mannys when the probe is no longer in that sector');
         }
     }
 }

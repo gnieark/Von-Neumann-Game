@@ -68,7 +68,7 @@ final class AppFactory
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
         $observations = new SectorObservationService($sectorService, $visitedSectors);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
         $mannyService = new MannyService($mannies, $probes, $sectorService);
 
         return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService);

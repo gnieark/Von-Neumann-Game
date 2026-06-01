@@ -86,7 +86,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS mannies (
                 id $id,
                 uid $text NOT NULL UNIQUE,
-                probe_id INTEGER NOT NULL,
+                probe_id INTEGER NULL,
                 name $text NOT NULL,
                 location_type $text NOT NULL,
                 sector_x INTEGER NULL,
@@ -195,6 +195,7 @@ final class SchemaInitializer
     private function applyLightweightMigrations(PDO $pdo): void
     {
         if ($this->driver === 'sqlite') {
+            $this->ensureSqliteMannyProbeIdNullable($pdo);
             $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
             if (!in_array('entered_current_sector_at', $names, true)) {
@@ -214,6 +215,7 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock REAL NOT NULL DEFAULT 0');
             }
         } elseif ($this->driver === 'mysql') {
+            $this->ensureMysqlMannyProbeIdNullable($pdo);
             $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
             if (!in_array('deuterium_stock', $names, true)) {
@@ -229,5 +231,78 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock DOUBLE NOT NULL DEFAULT 0 AFTER metals_stock');
             }
         }
+    }
+
+    private function ensureSqliteMannyProbeIdNullable(PDO $pdo): void
+    {
+        $columns = $pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC);
+        $probeId = null;
+        foreach ($columns as $column) {
+            if (($column['name'] ?? null) === 'probe_id') {
+                $probeId = $column;
+                break;
+            }
+        }
+
+        if ($probeId === null || (int) ($probeId['notnull'] ?? 0) === 0) {
+            return;
+        }
+
+        $pdo->exec('PRAGMA foreign_keys=OFF');
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec('ALTER TABLE mannies RENAME TO mannies_nullable_probe_backup');
+            $pdo->exec(
+                "CREATE TABLE mannies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uid TEXT NOT NULL UNIQUE,
+                    probe_id INTEGER NULL,
+                    name TEXT NOT NULL,
+                    location_type TEXT NOT NULL,
+                    sector_x INTEGER NULL,
+                    sector_y INTEGER NULL,
+                    sector_z INTEGER NULL,
+                    current_task TEXT NULL,
+                    task_started_at TEXT NULL,
+                    task_ends_at TEXT NULL,
+                    task_payload_json TEXT NOT NULL,
+                    cargo_deuterium REAL NOT NULL DEFAULT 0,
+                    cargo_metals REAL NOT NULL DEFAULT 0,
+                    cargo_other REAL NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(probe_id, name),
+                    FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+                )"
+            );
+            $pdo->exec(
+                'INSERT INTO mannies
+                 (id, uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_other, created_at, updated_at)
+                 SELECT id, uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_other, created_at, updated_at
+                 FROM mannies_nullable_probe_backup'
+            );
+            $pdo->exec('DROP TABLE mannies_nullable_probe_backup');
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            $pdo->exec('PRAGMA foreign_keys=ON');
+            throw $e;
+        }
+
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_probe_id ON mannies(probe_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_uid ON mannies(uid)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_sector ON mannies(sector_x, sector_y, sector_z)');
+        $pdo->exec('PRAGMA foreign_keys=ON');
+    }
+
+    private function ensureMysqlMannyProbeIdNullable(PDO $pdo): void
+    {
+        $stmt = $pdo->query("SHOW COLUMNS FROM mannies WHERE Field = 'probe_id'");
+        $column = $stmt !== false ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        if (!is_array($column) || strtoupper((string) ($column['Null'] ?? 'YES')) === 'YES') {
+            return;
+        }
+
+        $pdo->exec('ALTER TABLE mannies MODIFY probe_id INTEGER NULL');
     }
 }

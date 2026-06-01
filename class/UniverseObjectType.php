@@ -12,4 +12,5 @@ enum UniverseObjectType: string
     case DustCloud = 'dust_cloud';
     case BlackHole = 'black_hole';
     case SolarSystem = 'solar_system';
+    case Manny = 'manny';
 }

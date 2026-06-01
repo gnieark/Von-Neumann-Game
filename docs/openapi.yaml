@@ -158,7 +158,8 @@ paths:
                         other: 0
                         capacityUnit: earth_container_equivalent
                   resourceStocks:
-                    - type: metals
+                    - id: probe-1-stock-metals
+                      type: metals
                       name: Métaux
                       amount: 0
                       containerSpace: 0
@@ -286,6 +287,62 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/probe/inventory/{itemId}/jettison:
+    post:
+      summary: Jettison an inventory entry into space
+      description: >
+        Discards stored metals/other materials by amount, vents deuterium from
+        the external tank by percentage points, or ejects an idle onboard Manny
+        into the current sector. Non-persisted core equipment cannot be
+        jettisoned.
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+          examples:
+            metals:
+              value: probe-1-stock-metals
+            manny:
+              value: mny_8d4a2c1f5a91b334
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeInventoryJettisonRequest'
+            examples:
+              partialStock:
+                value:
+                  amount: 0.05
+              wholeItem:
+                value: {}
+      responses:
+        '200':
+          description: Inventory entry jettisoned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeInventoryJettisonResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The requested Manny cannot be ejected now
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entry cannot be jettisoned or requested amount is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies:
     get:
       summary: List persisted Manny robots for the current probe
@@ -628,7 +685,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, no_probe_damage, insufficient_metals, invalid_mining_target, resource_unavailable, insufficient_cargo_capacity, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, no_probe_damage, insufficient_metals, invalid_mining_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, internal_error]
             message:
               type: string
     SessionRequest:
@@ -815,8 +872,12 @@ components:
             $ref: '#/components/schemas/ProbeExternalTank'
     ProbeResourceStock:
       type: object
-      required: [type, name, amount, containerSpace, capacityUnit]
+      required: [id, type, name, amount, containerSpace, capacityUnit]
       properties:
+        id:
+          type: string
+          description: Stable inventory id used for jettison orders.
+          example: probe-1-stock-metals
         type:
           type: string
           enum: [metals, other]
@@ -851,6 +912,36 @@ components:
         usesCargoCapacity:
           type: boolean
           enum: [false]
+    ProbeInventoryJettisonRequest:
+      type: object
+      properties:
+        amount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: >
+            Amount to discard. For stored metals/other materials this uses
+            equivalent earth containers; for the deuterium tank this uses tank
+            percentage points. Omit it to discard the full selected stock.
+    ProbeInventoryJettisonResponse:
+      type: object
+      required: [inventory]
+      properties:
+        inventory:
+          $ref: '#/components/schemas/ProbeInventory'
+        jettisoned:
+          type: object
+          nullable: true
+          properties:
+            type:
+              type: string
+              enum: [deuterium, metals, other]
+            amount:
+              type: number
+        manny:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Manny'
     ProbeInventoryItem:
       type: object
       required: [id, type, name, containerSpace, currentTask, taskProgressPercent]
@@ -959,7 +1050,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, returning]
+          enum: [repair, mining, returning, waiting_for_space]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -1011,17 +1102,9 @@ components:
               $ref: '#/components/schemas/Vector'
         objects:
           type: array
+          description: Detailed current or visited sector objects. Abandoned or forgotten Manny objects are included only when the observed sector is the probe current sector.
           items:
-            type: object
-            required: [type, name, summary]
-            properties:
-              type:
-                type: string
-              name:
-                type: string
-                nullable: true
-              summary:
-                type: string
+            $ref: '#/components/schemas/SectorObject'
     SectorObservation:
       type: object
       required: [relativeCoordinates, distance, knowledgeLevel, confidence, scan]
@@ -1039,8 +1122,9 @@ components:
           maximum: 1
         objects:
           type: array
+          description: Detailed current or visited sector objects. Abandoned or forgotten Manny objects are included only when the observed sector is the probe current sector.
           items:
-            type: object
+            $ref: '#/components/schemas/SectorObject'
         estimatedObjects:
           type: object
           additionalProperties: true
@@ -1070,3 +1154,36 @@ components:
               type: number
               minimum: 0
               maximum: 1
+    SectorObject:
+      type: object
+      required: [type, name, summary]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny]
+        name:
+          type: string
+          nullable: true
+        estimated:
+          type: boolean
+        summary:
+          type: string
+        mass:
+          type: number
+        radius:
+          type: number
+        dangerLevel:
+          type: string
+          enum: [low, moderate, extreme]
+        mannyState:
+          type: string
+          enum: [abandoned, forgotten]
+          description: Present only for detected Manny objects in the current sector.
+        mannyUid:
+          type: string
+          description: Present only for detected Manny objects.
+        cargo:
+          type: object
+          additionalProperties: true

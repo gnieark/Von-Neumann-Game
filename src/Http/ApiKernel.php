@@ -44,6 +44,9 @@ final class ApiKernel
         }
 
         try {
+            if (preg_match('#^/api/probe/inventory/([^/]+)/jettison$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeInventoryJettisonResponse($player, rawurldecode($matches[1]), $body));
+            }
             if (preg_match('#^/api/probe/inventory/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeInventoryItemResponse($player, rawurldecode($matches[1])));
             }
@@ -225,6 +228,103 @@ final class ApiKernel
         }
 
         return new ApiResponse(200, ['item' => $item->taskArray()]);
+    }
+
+    private function probeInventoryJettisonResponse(Player $player, string $itemId, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $data = $this->decodeJsonBody($body) ?? [];
+        if (isset($data['amount']) && !is_numeric($data['amount'])) {
+            return ApiResponse::error(400, 'bad_request', 'Jettison amount must be numeric.');
+        }
+
+        $amount = isset($data['amount']) ? round((float) $data['amount'], 4) : null;
+        if ($amount !== null && $amount <= 0.0) {
+            return ApiResponse::error(400, 'bad_request', 'Jettison amount must be greater than zero.');
+        }
+
+        $inventory = $this->inventoryForProbe($probe);
+        $item = $inventory->findItem($itemId);
+        if ($item !== null) {
+            if ($item->type !== 'manny') {
+                return ApiResponse::error(422, 'item_not_jettisonable', 'This inventory item cannot be jettisoned.');
+            }
+
+            $manny = $this->mannies->jettisonMannyFromProbe($probe, $itemId);
+            $this->mannies->manniesForProbe($probe);
+            $probe = $this->requiredProbe($player);
+
+            return new ApiResponse(200, [
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+                'manny' => $this->mannyArray($player, $probe, $manny),
+            ]);
+        }
+
+        $resourceType = $this->inventoryResourceType($probe, $itemId);
+        if ($resourceType !== null) {
+            $available = $resourceType === 'metals' ? $probe->metalsStock : $probe->otherStock;
+            $discarded = $this->jettisonAmount($amount, $available);
+            if ($discarded instanceof ApiResponse) {
+                return $discarded;
+            }
+
+            if ($resourceType === 'metals') {
+                $probe->metalsStock = round($probe->metalsStock - $discarded, 4);
+            } else {
+                $probe->otherStock = round($probe->otherStock - $discarded, 4);
+            }
+            $this->probes->save($probe);
+            $this->mannies->manniesForProbe($probe);
+            $probe = $this->requiredProbe($player);
+
+            return new ApiResponse(200, [
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+                'jettisoned' => ['type' => $resourceType, 'amount' => $discarded],
+            ]);
+        }
+
+        if ($itemId === 'probe-' . $probe->id . '-deuterium-tank' || $itemId === 'deuterium') {
+            $discarded = $this->jettisonAmount($amount, $probe->deuteriumStock);
+            if ($discarded instanceof ApiResponse) {
+                return $discarded;
+            }
+
+            $probe->deuteriumStock = round($probe->deuteriumStock - $discarded, 4);
+            $this->probes->save($probe);
+            $this->mannies->manniesForProbe($probe);
+            $probe = $this->requiredProbe($player);
+
+            return new ApiResponse(200, [
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+                'jettisoned' => ['type' => 'deuterium', 'amount' => $discarded],
+            ]);
+        }
+
+        return ApiResponse::error(404, 'not_found', 'Inventory item not found.');
+    }
+
+    private function inventoryResourceType(NeumannProbe $probe, string $itemId): ?string
+    {
+        return match ($itemId) {
+            'metals', 'probe-' . $probe->id . '-stock-metals' => 'metals',
+            'other', 'probe-' . $probe->id . '-stock-other' => 'other',
+            default => null,
+        };
+    }
+
+    private function jettisonAmount(?float $requested, float $available): float|ApiResponse
+    {
+        $available = round(max(0.0, $available), 4);
+        $amount = $requested === null ? $available : round($requested, 4);
+        if ($amount <= 0.0 || $available <= 0.0) {
+            return ApiResponse::error(422, 'nothing_to_jettison', 'There is nothing to jettison for this inventory entry.');
+        }
+        if ($amount > $available + 0.00001) {
+            return ApiResponse::error(422, 'insufficient_inventory_amount', 'The requested jettison amount is not available.');
+        }
+
+        return min($amount, $available);
     }
 
     private function sectorResponse(Player $player, array $query): ApiResponse

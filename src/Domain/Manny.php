@@ -14,11 +14,12 @@ final class Manny
     public const TASK_REPAIR = 'repair';
     public const TASK_MINING = 'mining';
     public const TASK_RETURNING = 'returning';
+    public const TASK_WAITING_FOR_SPACE = 'waiting_for_space';
 
     public function __construct(
         public readonly int $id,
         public readonly string $uid,
-        public readonly int $probeId,
+        public ?int $probeId,
         public string $name,
         public string $locationType,
         public ?SectorCoordinates $sector,

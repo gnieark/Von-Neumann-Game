@@ -8,11 +8,13 @@ use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
@@ -30,6 +32,7 @@ final class ProbeMovementService
         private readonly VisitedSectorRepository $visitedSectors,
         private readonly ?ScheduledEventRepository $scheduledEvents = null,
         private readonly ?SectorService $sectors = null,
+        private readonly ?MannyRepository $mannies = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -70,6 +73,7 @@ final class ProbeMovementService
             $this->durations->timeline($startedAt, $distance),
             $fuelCost,
         );
+        $this->registerForgottenMannies($probe);
 
         $probe->deuteriumStock = round($probe->deuteriumStock - $fuelCost, 4);
         $probe->status = ProbeStatus::Preparing;
@@ -296,6 +300,39 @@ final class ProbeMovementService
         }
 
         $this->movements->save($movement);
+    }
+
+    private function registerForgottenMannies(NeumannProbe $probe): void
+    {
+        if ($this->mannies === null || $this->sectors === null) {
+            return;
+        }
+
+        $sector = null;
+        $changed = false;
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->isOnProbe() || $manny->sector === null || !$manny->sector->equals($probe->currentSector)) {
+                continue;
+            }
+
+            $sector ??= $this->sectors->getOrCreateSector($probe->currentSector);
+            $object = new SectorManny(
+                SectorManny::objectIdForUid($manny->uid),
+                $manny->name,
+                $manny->uid,
+                SectorManny::STATE_FORGOTTEN,
+                $manny->cargoArray(),
+                'Manny left behind by its probe.',
+            );
+            if (!$sector->replaceObject($object)) {
+                $sector->addObject($object);
+            }
+            $changed = true;
+        }
+
+        if ($changed && $sector !== null) {
+            $this->sectors->saveSector($sector);
+        }
     }
 
     private function directionBetween(SectorCoordinates $origin, SectorCoordinates $target): ProbeDirection

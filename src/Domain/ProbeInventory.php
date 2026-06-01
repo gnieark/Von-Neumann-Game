@@ -21,9 +21,9 @@ final class ProbeInventory
     ) {}
 
     /**
-     * @param array<Manny> $mannies
+     * @param array<Manny>|null $mannies
      */
-    public static function defaultForProbe(NeumannProbe $probe, array $mannies = []): self
+    public static function defaultForProbe(NeumannProbe $probe, ?array $mannies = null): self
     {
         $items = [
             new ProbeInventoryItem(
@@ -36,7 +36,7 @@ final class ProbeInventory
             ),
         ];
 
-        if ($mannies === []) {
+        if ($mannies === null) {
             for ($i = 1; $i <= 4; $i++) {
                 $items[] = new ProbeInventoryItem(
                     'probe-' . $probe->id . '-manny-' . $i,
@@ -75,6 +75,7 @@ final class ProbeInventory
 
         $resourceStocks = [
             [
+                'id' => 'probe-' . $probe->id . '-stock-metals',
                 'type' => 'metals',
                 'name' => 'Métaux',
                 'amount' => $probe->metalsStock,
@@ -82,6 +83,7 @@ final class ProbeInventory
                 'capacityUnit' => self::CAPACITY_UNIT,
             ],
             [
+                'id' => 'probe-' . $probe->id . '-stock-other',
                 'type' => 'other',
                 'name' => 'Autres matériaux',
                 'amount' => $probe->otherStock,

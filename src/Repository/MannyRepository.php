@@ -74,6 +74,15 @@ final class MannyRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    public function findByUid(string $uid): ?Manny
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM mannies WHERE uid = :uid');
+        $stmt->execute(['uid' => $uid]);
+        $row = $stmt->fetch();
+
+        return $row ? $this->hydrate($row) : null;
+    }
+
     public function findById(int $id): ?Manny
     {
         $stmt = $this->pdo->prepare('SELECT * FROM mannies WHERE id = :id');
@@ -105,6 +114,7 @@ final class MannyRepository
         $manny->updatedAt = gmdate('c');
         $stmt = $this->pdo->prepare(
             'UPDATE mannies SET
+                probe_id = :probe_id,
                 name = :name,
                 location_type = :location_type,
                 sector_x = :sector_x,
@@ -122,6 +132,7 @@ final class MannyRepository
         );
         $stmt->execute([
             'id' => $manny->id,
+            'probe_id' => $manny->probeId,
             'name' => $manny->name,
             'location_type' => $manny->locationType,
             'sector_x' => $manny->sector?->getX(),
@@ -152,7 +163,7 @@ final class MannyRepository
         return new Manny(
             (int) $row['id'],
             (string) $row['uid'],
-            (int) $row['probe_id'],
+            $row['probe_id'] !== null ? (int) $row['probe_id'] : null,
             (string) $row['name'],
             (string) $row['location_type'],
             $sector,

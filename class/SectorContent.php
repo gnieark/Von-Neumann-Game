@@ -53,10 +53,67 @@ final class SectorContent
         return $this->objects;
     }
 
+    public function findObjectById(string $id): ?UniverseObject
+    {
+        foreach ($this->objects as $object) {
+            if ($object->getId() === $id) {
+                return $object;
+            }
+
+            if ($object instanceof SolarSystem) {
+                foreach ($object->getOrbitalBodies() as $body) {
+                    if ($body->getObject()->getId() === $id) {
+                        return $body->getObject();
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
     public function addObject(UniverseObject $object): void
     {
         $this->objects[] = $object;
         $this->updatedAt = $this->updatedAt === '' ? $this->createdAt : $this->updatedAt;
+    }
+
+    public function replaceObject(UniverseObject $replacement): bool
+    {
+        foreach ($this->objects as $index => $object) {
+            if ($object->getId() === $replacement->getId()) {
+                $this->objects[$index] = $replacement;
+                $this->touch();
+
+                return true;
+            }
+
+            if ($object instanceof SolarSystem) {
+                $updatedSystem = $this->replaceObjectInSystem($object, $replacement);
+                if ($updatedSystem !== null) {
+                    $this->objects[$index] = $updatedSystem;
+                    $this->touch();
+
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public function removeObjectById(string $id): bool
+    {
+        foreach ($this->objects as $index => $object) {
+            if ($object->getId() === $id) {
+                array_splice($this->objects, $index, 1);
+                $this->touch();
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function getSource(): string
@@ -88,5 +145,41 @@ final class SectorContent
             (int) ($data['generationVersion'] ?? 1),
             $source,
         );
+    }
+
+    private function replaceObjectInSystem(SolarSystem $system, UniverseObject $replacement): ?SolarSystem
+    {
+        $updatedBodies = [];
+        $replaced = false;
+
+        foreach ($system->getOrbitalBodies() as $body) {
+            if ($body->getObject()->getId() === $replacement->getId()) {
+                $updatedBodies[] = new OrbitingBody($replacement, $body->getOrbit());
+                $replaced = true;
+                continue;
+            }
+
+            $updatedBodies[] = $body;
+        }
+
+        if (!$replaced) {
+            return null;
+        }
+
+        return new SolarSystem(
+            $system->getId(),
+            $system->getName(),
+            $system->getPrimaryStar(),
+            $system->getSecondaryStar(),
+            $updatedBodies,
+            $system->getMass(),
+            $system->getRadius(),
+            $system->getDescription(),
+        );
+    }
+
+    private function touch(): void
+    {
+        $this->updatedAt = gmdate('c');
     }
 }

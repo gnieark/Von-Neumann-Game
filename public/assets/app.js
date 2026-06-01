@@ -120,6 +120,13 @@
         metals: t('metals', 'Metals'),
         other: t('otherResources', 'Other'),
     }[type] || type);
+    const objectTypeLabel = (type) => ({
+        manny: t('mannyObject', 'Manny'),
+    }[type] || type);
+    const mannyStateLabel = (state) => ({
+        abandoned: t('abandonedManny', 'abandoned'),
+        forgotten: t('forgottenManny', 'forgotten'),
+    }[state] || state || '-');
     const resourceTypeFromHint = (hint) => {
         const value = String(hint || '').toLowerCase();
         if (value.includes('water') || value.includes('ice') || value.includes('volatile') || value.includes('hydrogen')) {
@@ -186,6 +193,7 @@
         repair: t('repair', 'Repair'),
         mining: t('mine', 'Mine'),
         returning: t('returning', 'Returning'),
+        waiting_for_space: t('waitingForSpace', 'Waiting for space'),
     }[task] || task || t('noTask', 'None'));
     const selectedResourceLabels = (types) => {
         const resources = Array.isArray(types) ? types : (types ? [types] : []);
@@ -402,6 +410,7 @@
             resources: object.resources || [],
             resourceTypes: object.resourceTypes || [],
             resourceComposition: object.resourceComposition || {},
+            resourceAmounts: object.resourceAmounts || {},
         }] : [];
         const nested = Array.isArray(object.minableTargets)
             ? object.minableTargets.map((target) => ({
@@ -411,6 +420,7 @@
                 resources: target.resources || [],
                 resourceTypes: target.resourceTypes || [],
                 resourceComposition: target.resourceComposition || {},
+                resourceAmounts: target.resourceAmounts || {},
             }))
             : [];
 
@@ -438,9 +448,13 @@
                     + escapeHtml(duration(Number(object.noReturnCountdown.secondsRemaining)))
                     + '</p>'
                 : '';
+            const mannyDetail = object.type === 'manny'
+                ? '<p>' + escapeHtml(t('mannyState', 'State') + ' ' + mannyStateLabel(object.mannyState)) + '</p>'
+                : '';
             return '<article class="' + classes + '">'
-                + '<div><span>' + escapeHtml(object.type || 'unknown') + '</span><b>' + escapeHtml(danger) + '</b></div>'
+                + '<div><span>' + escapeHtml(objectTypeLabel(object.type || 'unknown')) + '</span><b>' + escapeHtml(danger) + '</b></div>'
                 + '<p>' + escapeHtml(object.summary || '') + '</p>'
+                + mannyDetail
                 + countdown
                 + '</article>';
         }).join('');
@@ -486,6 +500,84 @@
         button.disabled = probeAlreadyMoving;
         button.title = probeAlreadyMoving ? alreadyMovingMessage : '';
         button.setAttribute('aria-disabled', probeAlreadyMoving ? 'true' : 'false');
+    }
+
+    const inventoryEntryDetail = (entry) => {
+        const details = [
+            t('containerSpace', 'Space') + ' ' + numberValue(entry.containerSpace || 0),
+        ];
+        if (entry.location && entry.location.type) {
+            details.push(t('location', 'Location') + ' ' + entry.location.type);
+        }
+        if (entry.currentTask) {
+            details.push(t('task', 'Task') + ' ' + taskLabel(entry.currentTask));
+        }
+
+        return details.join(' · ');
+    };
+
+    const resourceStockDetail = (stock) => [
+        t('storedAmount', 'Amount') + ' ' + numberValue(stock.amount),
+        t('containerSpace', 'Space') + ' ' + numberValue(stock.containerSpace),
+    ].join(' · ');
+
+    const renderJettisonForm = (itemId, amount, withAmount, disabled) => {
+        if (disabled) {
+            return '<span class="inventory-muted">' + escapeHtml(t('notJettisonable', 'Not jettisonable')) + '</span>';
+        }
+
+        return '<form class="inventory-jettison-form' + (withAmount ? '' : ' inventory-jettison-form-simple') + '" data-item-id="' + escapeHtml(itemId) + '">'
+            + (withAmount
+                ? '<label>' + escapeHtml(t('jettisonAmount', 'Amount to jettison'))
+                    + '<input name="amount" type="number" min="0.0001" max="' + escapeHtml(String(amount || 0)) + '" step="0.0001" value="' + escapeHtml(String(amount || 0)) + '"></label>'
+                : '')
+            + '<button type="submit">' + escapeHtml(t('jettison', 'Jettison')) + '</button>'
+            + '</form>';
+    };
+
+    function renderInventory(inventory) {
+        const node = document.getElementById('inventory-list');
+        if (!node) {
+            return;
+        }
+        if (!inventory || typeof inventory !== 'object') {
+            node.innerHTML = '';
+            return;
+        }
+
+        const stockCards = (Array.isArray(inventory.resourceStocks) ? inventory.resourceStocks : [])
+            .filter((stock) => Number(stock.amount) > 0)
+            .map((stock) => (
+                '<article class="inventory-card">'
+                + '<div><span>' + escapeHtml(t('inventoryStock', 'Stock')) + '</span><b>' + escapeHtml(resourceTypeLabel(stock.type)) + '</b></div>'
+                + '<p>' + escapeHtml(resourceStockDetail(stock)) + '</p>'
+                + renderJettisonForm(stock.id || stock.type, Number(stock.amount), true, false)
+                + '</article>'
+            ));
+
+        const tankCards = (Array.isArray(inventory.externalTanks) ? inventory.externalTanks : [])
+            .filter((tank) => Number(tank.fillPercent) > 0)
+            .map((tank) => (
+                '<article class="inventory-card">'
+                + '<div><span>' + escapeHtml(t('externalTank', 'External tank')) + '</span><b>' + escapeHtml(resourceTypeLabel(tank.type)) + '</b></div>'
+                + '<p>' + escapeHtml(t('storedAmount', 'Amount') + ' ' + numberValue(tank.fillPercent, '%')) + '</p>'
+                + renderJettisonForm(tank.id || tank.type, Number(tank.fillPercent), true, false)
+                + '</article>'
+            ));
+
+        const itemCards = (Array.isArray(inventory.items) ? inventory.items : []).map((item) => {
+            const isOnboardIdleManny = item.type === 'manny'
+                && item.location
+                && item.location.type === 'probe'
+                && item.currentTask === null;
+            return '<article class="inventory-card">'
+                + '<div><span>' + escapeHtml(t('inventoryItem', 'Equipment')) + '</span><b>' + escapeHtml(item.name || item.type || item.id) + '</b></div>'
+                + '<p>' + escapeHtml(inventoryEntryDetail(item)) + '</p>'
+                + renderJettisonForm(item.id, 0, false, !isOnboardIdleManny)
+                + '</article>';
+        });
+
+        node.innerHTML = stockCards.concat(tankCards, itemCards).join('');
     }
 
     async function api(path, options) {
@@ -618,10 +710,12 @@
             ].join('');
             setText('probe-json', pretty(data));
             setText('inventory-json', pretty(probe.inventory || {}));
+            renderInventory(probe.inventory || {});
         } catch (error) {
             updateMoveButtonState(null);
             setText('probe-json', error.message);
             setText('inventory-json', error.message);
+            renderInventory(null);
         }
     }
 
@@ -844,6 +938,37 @@
         } catch (error) {
             setText('action-status', error.message);
             setText('movement-json', '');
+        }
+    });
+
+    document.getElementById('systems-panel')?.addEventListener('submit', async (event) => {
+        if (!event.target.classList.contains('inventory-jettison-form')) {
+            return;
+        }
+
+        event.preventDefault();
+        const itemId = event.target.dataset.itemId;
+        if (!itemId) {
+            return;
+        }
+
+        const form = new FormData(event.target);
+        const body = form.has('amount') ? {amount: Number.parseFloat(form.get('amount'))} : {};
+        setText('inventory-status', t('orderSent', 'Order transmitted...'));
+        try {
+            const data = await api('/api/probe/inventory/' + encodeURIComponent(itemId) + '/jettison', {
+                method: 'POST',
+                body: JSON.stringify(body),
+            });
+            setText('inventory-status', t('jettisonAccepted', 'Inventory entry jettisoned into space.'));
+            if (data.inventory) {
+                renderInventory(data.inventory);
+                setText('inventory-json', pretty(data.inventory));
+            }
+            loadProbe();
+            loadMannies();
+        } catch (error) {
+            setText('inventory-status', error.message);
         }
     });
 
