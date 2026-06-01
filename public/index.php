@@ -80,6 +80,16 @@ if ($routePath === '/about' && in_array($method, ['GET', 'HEAD'], true)) {
     return;
 }
 
+if ($routePath === '/api-docs' && in_array($method, ['GET', 'HEAD'], true)) {
+    renderApiDocs($projectRoot, $translator, currentPlayer($factory));
+    return;
+}
+
+if ($routePath === '/openapi.yaml' && in_array($method, ['GET', 'HEAD'], true)) {
+    renderOpenApiSpec($projectRoot, $method);
+    return;
+}
+
 if ($routePath !== '/' || $method !== 'GET') {
     http_response_code(404);
     header('Content-Type: text/plain; charset=utf-8');
@@ -127,9 +137,7 @@ function renderHome(string $projectRoot, Translator $translator, ?Player $player
         $tpl->addSubBlock($loginView);
     } else {
         $displayName = e($player->displayName ?? $player->username);
-        $tpl->addSubBlock((new TplBlock('sessionbar'))->addVars([
-            'displayName' => $displayName,
-        ]));
+        addAuthenticatedUi($tpl, $displayName);
         $tpl->addSubBlock((new TplBlock('consoleview'))->addVars([
             'displayName' => $displayName,
         ]));
@@ -200,8 +208,8 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
     $tpl = new TplBlock();
     $tpl->addVars([
         'pageTitle' => 'Von Neumann Game - ' . $translator->get('aboutFooterLink'),
-        'bodyClass' => 'is-guest',
-        'authenticated' => '0',
+        'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
+        'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
@@ -211,13 +219,52 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
     $tpl->addSubBlock(new TplBlock('aboutview'));
 
     if ($player !== null) {
-        $tpl->addSubBlock((new TplBlock('sessionbar'))->addVars([
-            'displayName' => e($player->displayName ?? $player->username),
-        ]));
+        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
     }
 
     header('Content-Type: text/html; charset=utf-8');
     echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function renderApiDocs(string $projectRoot, Translator $translator, ?Player $player): void
+{
+    $tpl = new TplBlock();
+    $tpl->addVars([
+        'pageTitle' => 'Von Neumann Game - API',
+        'bodyClass' => $player === null ? 'is-api-docs is-guest' : 'is-api-docs is-authenticated',
+        'authenticated' => $player === null ? '0' : '1',
+        'language' => $translator->language(),
+        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
+        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
+    ]);
+    $tpl->addPrefixedVars('t', $translator->allEscaped());
+    $tpl->addSubBlock(new TplBlock('swaggerassets'));
+    $tpl->addSubBlock(new TplBlock('apidocsview'));
+
+    if ($player !== null) {
+        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
+    }
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function renderOpenApiSpec(string $projectRoot, string $method): void
+{
+    $path = $projectRoot . '/docs/openapi.yaml';
+    if (!is_file($path)) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'OpenAPI specification not found';
+        return;
+    }
+
+    header('Content-Type: application/yaml; charset=utf-8');
+    header('Cache-Control: no-store');
+    if ($method !== 'HEAD') {
+        readfile($path);
+    }
 }
 
 function renderOAuthPseudo(string $projectRoot, Translator $translator, string $csrf, ?string $error = null, string $pseudonym = ''): void
@@ -270,6 +317,7 @@ function handleOAuthProvider(AppFactory $factory, string $projectRoot, Translato
     if (!isset($_GET['code'])) {
         $authorizationUrl = $provider->getAuthorizationUrl($oauth->authorizationOptions($providerName));
         $_SESSION['oauth2state'][$providerName] = $provider->getState();
+        $_SESSION['oauth_remember'][$providerName] = (string) ($_GET['remember'] ?? '') === '1';
         header('Location: ' . $authorizationUrl);
         return;
     }
@@ -291,7 +339,7 @@ function handleOAuthProvider(AppFactory $factory, string $projectRoot, Translato
         $player = $auth->authenticateWithExternal($providerName, $providerUserId);
         if ($player !== null) {
             unset($_SESSION['pending_oauth']);
-            issueSessionCookie($auth, $player);
+            issueSessionCookie($auth, $player, oauthRememberChoice($providerName));
             redirect('/');
             return;
         }
@@ -300,6 +348,7 @@ function handleOAuthProvider(AppFactory $factory, string $projectRoot, Translato
             'provider' => $providerName,
             'providerUserId' => $providerUserId,
             'csrf' => randomToken(),
+            'remember' => oauthRememberChoice($providerName),
         ];
         redirect('/auth/pseudo');
     } catch (Throwable) {
@@ -339,7 +388,7 @@ function handleOAuthPseudo(AppFactory $factory, string $projectRoot, Translator 
     try {
         $player = $auth->registerPlayerWithExternalAuth($pseudonym, $pending['provider'], $pending['providerUserId']);
         unset($_SESSION['pending_oauth']);
-        issueSessionCookie($auth, $player);
+        issueSessionCookie($auth, $player, (bool) ($pending['remember'] ?? false));
         redirect('/');
     } catch (InvalidArgumentException $exception) {
         $message = $exception->getMessage() === 'Pseudonym already exists.'
@@ -350,7 +399,7 @@ function handleOAuthPseudo(AppFactory $factory, string $projectRoot, Translator 
         $player = $auth->authenticateWithExternal($pending['provider'], $pending['providerUserId']);
         if ($player !== null) {
             unset($_SESSION['pending_oauth']);
-            issueSessionCookie($auth, $player);
+            issueSessionCookie($auth, $player, (bool) ($pending['remember'] ?? false));
             redirect('/');
             return;
         }
@@ -398,7 +447,28 @@ function pendingOAuthIdentity(): ?array
         return null;
     }
 
-    return $pending;
+    return [
+        'provider' => $pending['provider'],
+        'providerUserId' => $pending['providerUserId'],
+        'csrf' => $pending['csrf'],
+        'remember' => (bool) ($pending['remember'] ?? false),
+    ];
+}
+
+function oauthRememberChoice(string $providerName): bool
+{
+    $remember = (bool) ($_SESSION['oauth_remember'][$providerName] ?? false);
+    unset($_SESSION['oauth_remember'][$providerName]);
+
+    return $remember;
+}
+
+function addAuthenticatedUi(TplBlock $tpl, string $displayName): void
+{
+    $tpl->addSubBlock((new TplBlock('sessionbar'))->addVars([
+        'displayName' => $displayName,
+    ]));
+    $tpl->addSubBlock(new TplBlock('apikeydialog'));
 }
 
 function issueSessionCookie(VonNeumannGame\Auth\AuthService $auth, Player $player, bool $remember = false): void

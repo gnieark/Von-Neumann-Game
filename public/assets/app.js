@@ -4,17 +4,49 @@
     document.querySelector('.language-form select')?.addEventListener('change', (event) => {
         event.currentTarget.form?.submit();
     });
-    const body = document.body;
-    if (!body || body.dataset.authenticated !== '1') {
-        return;
-    }
-
     const cookieValue = (name) => document.cookie
         .split('; ')
         .find((row) => row.startsWith(name + '='))
         ?.split('=')
         .slice(1)
         .join('=') || '';
+    const syncOAuthRememberLinks = () => {
+        const remember = document.getElementById('oauth-remember');
+        document.querySelectorAll('[data-oauth-url]').forEach((link) => {
+            const url = new URL(link.dataset.oauthUrl || link.getAttribute('href') || '', window.location.origin);
+            if (remember && remember.checked) {
+                url.searchParams.set('remember', '1');
+            } else {
+                url.searchParams.delete('remember');
+            }
+            link.setAttribute('href', url.pathname + url.search);
+        });
+    };
+    document.getElementById('oauth-remember')?.addEventListener('change', syncOAuthRememberLinks);
+    syncOAuthRememberLinks();
+
+    if (document.getElementById('swagger-ui') && window.SwaggerUIBundle) {
+        window.SwaggerUIBundle({
+            url: '/openapi.yaml',
+            dom_id: '#swagger-ui',
+            persistAuthorization: true,
+            tryItOutEnabled: true,
+            requestInterceptor: (request) => {
+                const sessionToken = decodeURIComponent(cookieValue('vn_session'));
+                request.headers = request.headers || {};
+                if (sessionToken && !request.headers.Authorization) {
+                    request.headers.Authorization = 'Bearer ' + sessionToken;
+                }
+
+                return request;
+            },
+        });
+    }
+
+    const body = document.body;
+    if (!body || body.dataset.authenticated !== '1') {
+        return;
+    }
 
     const token = decodeURIComponent(cookieValue('vn_session'));
     const headers = () => ({
@@ -470,6 +502,87 @@
         return data;
     }
 
+    const closeAccountMenus = () => {
+        document.querySelectorAll('.account-menu-button[aria-expanded="true"]').forEach((button) => {
+            button.setAttribute('aria-expanded', 'false');
+            button.closest('.account-menu')?.querySelector('.account-menu-panel')?.setAttribute('hidden', '');
+        });
+    };
+
+    document.querySelectorAll('.account-menu-button').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const panel = button.closest('.account-menu')?.querySelector('.account-menu-panel');
+            const willOpen = button.getAttribute('aria-expanded') !== 'true';
+            closeAccountMenus();
+            button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            if (panel) {
+                panel.hidden = !willOpen;
+            }
+        });
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.account-menu')) {
+            closeAccountMenus();
+        }
+    });
+
+    document.querySelector('[data-api-key-action]')?.addEventListener('click', async () => {
+        closeAccountMenus();
+        const dialog = document.getElementById('api-key-dialog');
+        const value = document.getElementById('api-key-value');
+        const status = document.getElementById('api-key-status');
+        if (status) {
+            status.textContent = t('apiKeyGenerating', 'Generating API key...');
+        }
+        try {
+            const data = await api('/api/me/api-key', {method: 'POST', body: JSON.stringify({})});
+            if (value) {
+                value.value = data.apiKey && data.apiKey.token ? data.apiKey.token : '';
+                value.focus();
+                value.select();
+            }
+            if (status) {
+                status.textContent = t('apiKeyReady', 'API key ready. It is shown only once.');
+            }
+            if (dialog && typeof dialog.showModal === 'function' && !dialog.open) {
+                dialog.showModal();
+            } else if (dialog) {
+                dialog.hidden = false;
+            }
+        } catch (error) {
+            if (status) {
+                status.textContent = error.message;
+            }
+            if (dialog && typeof dialog.showModal === 'function' && !dialog.open) {
+                dialog.showModal();
+            } else if (dialog) {
+                dialog.hidden = false;
+            }
+        }
+    });
+
+    document.getElementById('copy-api-key')?.addEventListener('click', async () => {
+        const value = document.getElementById('api-key-value');
+        const status = document.getElementById('api-key-status');
+        if (!value || !value.value) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(value.value);
+            if (status) {
+                status.textContent = t('apiKeyCopied', 'API key copied.');
+            }
+        } catch (error) {
+            value.focus();
+            value.select();
+            if (status) {
+                status.textContent = t('apiKeyCopyFallback', 'Select the key and copy it manually.');
+            }
+        }
+    });
+
     async function loadProbe() {
         try {
             const data = await api('/api/probe');
@@ -827,7 +940,9 @@
         }
     });
 
-    loadProbe();
-    loadCurrentSector();
-    loadMannies();
+    if (document.querySelector('.console-grid')) {
+        loadProbe();
+        loadCurrentSector();
+        loadMannies();
+    }
 })();

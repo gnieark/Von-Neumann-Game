@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{pageTitle}}</title>
     <link rel="stylesheet" href="/assets/app.css">
+    <!-- BEGIN swaggerassets -->
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" defer></script>
+    <!-- END swaggerassets -->
     <script src="/assets/app.js" defer></script>
 </head>
 <body class="{{bodyClass}}" data-authenticated="{{authenticated}}">
@@ -25,10 +29,20 @@
             <button type="submit">OK</button>
         </form>
         <!-- BEGIN sessionbar -->
-        <form class="logout-form" method="post" action="/logout">
-            <span class="operator">{{sessionbar.displayName}}</span>
+        <div class="sessionbar">
+            <div class="account-menu">
+                <button class="account-menu-button" type="button" aria-expanded="false">
+                    <span class="operator">{{sessionbar.displayName}}</span>
+                    <span aria-hidden="true">▾</span>
+                </button>
+                <div class="account-menu-panel" hidden>
+                    <button data-api-key-action type="button">{{t.retrieveApiKey}}</button>
+                </div>
+            </div>
+            <form class="logout-form" method="post" action="/logout">
             <button type="submit">{{t.logout}}</button>
-        </form>
+            </form>
+        </div>
         <!-- END sessionbar -->
     </header>
 
@@ -43,12 +57,16 @@
                 <!-- BEGIN loginview.loginerror -->
                 <p class="form-error">{{loginview.loginerror.message}}</p>
                 <!-- END loginview.loginerror -->
+                <label class="remember">
+                    <input id="oauth-remember" name="remember" type="checkbox" value="1">
+                    <span>{{t.rememberMe}}</span>
+                </label>
                 <!-- BEGIN loginview.oauthsection -->
                 <div class="oauth-section">
                     <p>{{t.oauthSeparator}}</p>
                     <div class="oauth-buttons">
                         <!-- BEGIN loginview.oauthsection.oauthprovider -->
-                        <a class="oauth-button {{loginview.oauthsection.oauthprovider.class}}" href="{{loginview.oauthsection.oauthprovider.url}}">{{loginview.oauthsection.oauthprovider.label}}</a>
+                        <a class="oauth-button {{loginview.oauthsection.oauthprovider.class}}" href="{{loginview.oauthsection.oauthprovider.url}}" data-oauth-url="{{loginview.oauthsection.oauthprovider.url}}">{{loginview.oauthsection.oauthprovider.label}}</a>
                         <!-- END loginview.oauthsection.oauthprovider -->
                     </div>
                 </div>
@@ -151,6 +169,19 @@
         </section>
         <!-- END aboutview -->
 
+        <!-- BEGIN apidocsview -->
+        <section class="api-docs-page">
+            <div class="api-docs-heading">
+                <div>
+                    <p class="eyebrow">{{t.apiDocsEyebrow}}</p>
+                    <h1>{{t.apiDocsTitle}}</h1>
+                </div>
+                <a class="openapi-raw-link" href="/openapi.yaml">{{t.rawOpenApi}}</a>
+            </div>
+            <div id="swagger-ui" class="swagger-host">{{t.loading}}</div>
+        </section>
+        <!-- END apidocsview -->
+
         <!-- BEGIN consoleview -->
         <section class="console-grid">
             <aside class="nav-panel">
@@ -243,8 +274,27 @@
         </section>
         <!-- END consoleview -->
     </main>
+    <!-- BEGIN apikeydialog -->
+    <dialog id="api-key-dialog" class="api-key-dialog">
+        <form method="dialog">
+            <button class="dialog-close icon-button" value="close" aria-label="{{t.close}}" type="submit">×</button>
+        </form>
+        <p class="eyebrow">{{t.apiKeyEyebrow}}</p>
+        <h2>{{t.apiKeyTitle}}</h2>
+        <p>{{t.apiKeyHelp}}</p>
+        <textarea id="api-key-value" readonly rows="3"></textarea>
+        <div class="api-key-actions">
+            <button id="copy-api-key" type="button">{{t.copyApiKey}}</button>
+            <form method="dialog">
+                <button type="submit">{{t.close}}</button>
+            </form>
+        </div>
+        <p id="api-key-status" class="action-status"></p>
+    </dialog>
+    <!-- END apikeydialog -->
     <footer class="site-footer">
         <a href="/about">{{t.aboutFooterLink}}</a>
+        <a href="/api-docs">{{t.apiDocsFooterLink}}</a>
     </footer>
 </body>
 </html>

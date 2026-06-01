@@ -3,7 +3,8 @@ info:
   title: Von Neumann Game API
   version: 0.1.0
 servers:
-  - url: http://localhost:8000
+  - url: /
+    description: Current host
 security:
   - bearerAuth: []
 paths:
@@ -59,6 +60,29 @@ paths:
                   id: 1
                   username: remi
                   displayName: Remi
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/me/api-key:
+    post:
+      summary: Create an API key for the authenticated player
+      description: >
+        Returns a new API key that can be used as a Bearer token on protected
+        API endpoints. The clear token is shown only in this response; only its
+        hash is stored server-side.
+      responses:
+        '201':
+          description: API key created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyResponse'
+              example:
+                apiKey:
+                  id: 1
+                  token: vng_exampleGeneratedSecret
+                  label: default
+                  lastFour: cret
+                  createdAt: '2026-06-01T12:00:00+00:00'
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe:
@@ -555,6 +579,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+      description: Use a session token from /api/session or an API key generated from /api/me/api-key.
   parameters:
     MannyId:
       name: mannyId
@@ -637,6 +662,28 @@ components:
         displayName:
           type: string
           nullable: true
+    ApiKeyResponse:
+      type: object
+      required: [apiKey]
+      properties:
+        apiKey:
+          $ref: '#/components/schemas/ApiKey'
+    ApiKey:
+      type: object
+      required: [id, token, label, lastFour, createdAt]
+      properties:
+        id:
+          type: integer
+        token:
+          type: string
+          description: Clear API key shown only once. Use it as the Bearer token.
+        label:
+          type: string
+        lastFour:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
     Vector:
       type: object
       required: [x, y, z]

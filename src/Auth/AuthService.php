@@ -6,6 +6,7 @@ namespace VonNeumannGame\Auth;
 
 use VonNeumannGame\Domain\AuthProvider;
 use VonNeumannGame\Domain\Player;
+use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
@@ -26,6 +27,7 @@ final class AuthService
         private readonly VisitedSectorRepository $visitedSectors,
         private readonly int $sessionTtlDays = 7,
         private readonly ?MannyRepository $mannies = null,
+        private readonly ?ApiKeyRepository $apiKeys = null,
     ) {}
 
     public function registerPlayerWithPassword(string $username, string $password, ?string $displayName = null, ?string $probeName = null): Player
@@ -101,13 +103,43 @@ final class AuthService
         }
 
         $session = $this->sessions->findValidSessionByToken($token);
-        if ($session === null) {
-            return null;
+        if ($session !== null) {
+            $this->sessions->touchSession($session);
+
+            return $this->players->findById($session->playerId);
         }
 
-        $this->sessions->touchSession($session);
+        if ($this->apiKeys !== null) {
+            $apiKey = $this->apiKeys->findValidByToken($token);
+            if ($apiKey !== null) {
+                $this->apiKeys->touch($apiKey);
 
-        return $this->players->findById($session->playerId);
+                return $this->players->findById($apiKey->playerId);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{id:int, token:string, label:string, lastFour:string, createdAt:string}
+     */
+    public function createApiKeyForPlayer(Player $player): array
+    {
+        if ($this->apiKeys === null) {
+            throw new \RuntimeException('API key storage is not configured.');
+        }
+
+        $token = 'vng_' . rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $apiKey = $this->apiKeys->createKey($player->id, $token, 'default');
+
+        return [
+            'id' => $apiKey->id,
+            'token' => $token,
+            'label' => $apiKey->label,
+            'lastFour' => $apiKey->lastFour,
+            'createdAt' => $apiKey->createdAt,
+        ];
     }
 
     private function extractBearerToken(?string $authorizationHeader): ?string

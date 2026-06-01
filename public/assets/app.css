@@ -295,17 +295,121 @@ button:disabled {
     color: var(--cold);
 }
 
+.api-docs-page {
+    min-height: 720px;
+}
+
+.api-docs-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: center;
+    margin-bottom: 18px;
+}
+
+.openapi-raw-link {
+    color: var(--cold);
+    white-space: nowrap;
+}
+
+.swagger-host {
+    overflow: hidden;
+    border: 1px solid rgba(210, 220, 220, .14);
+    background: #f7f7f7;
+    color: #1b1f23;
+}
+
+.api-key-dialog {
+    width: min(560px, calc(100% - 28px));
+    border: 1px solid rgba(143, 182, 189, .45);
+    background: #111416;
+    color: var(--text);
+    padding: 24px;
+    box-shadow: 0 22px 56px rgba(0,0,0,.6);
+}
+
+.api-key-dialog::backdrop {
+    background: rgba(0,0,0,.62);
+}
+
+.api-key-dialog h2 {
+    margin-bottom: 12px;
+}
+
+.api-key-dialog p {
+    line-height: 1.55;
+}
+
+.dialog-close {
+    float: right;
+}
+
+.api-key-dialog textarea {
+    width: 100%;
+    min-height: 96px;
+    margin: 12px 0;
+    border: 1px solid var(--line);
+    background: #0f1112;
+    color: #dce9eb;
+    padding: 12px;
+    resize: vertical;
+}
+
+.api-key-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
 .site-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 16px;
     width: min(1180px, calc(100% - 32px));
     margin: -22px auto 24px;
     text-align: right;
     font-size: .78rem;
 }
 
-.logout-form {
+.sessionbar {
     display: flex;
     align-items: center;
     gap: 14px;
+}
+
+.logout-form {
+    display: flex;
+    align-items: center;
+}
+
+.account-menu {
+    position: relative;
+}
+
+.account-menu-button {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 40px;
+    padding: 0 11px;
+}
+
+.account-menu-panel {
+    position: absolute;
+    z-index: 12;
+    right: 0;
+    top: calc(100% + 8px);
+    min-width: 220px;
+    padding: 8px;
+    border: 1px solid rgba(143, 182, 189, .4);
+    background: #101314;
+    box-shadow: 0 18px 34px rgba(0,0,0,.45);
+}
+
+.account-menu-panel button {
+    width: 100%;
+    padding: 0 12px;
+    text-align: left;
 }
 
 .language-form {
@@ -708,11 +812,21 @@ button:disabled {
     .site-footer {
         width: min(100% - 20px, 1180px);
         margin-top: -28px;
+        justify-content: center;
         text-align: center;
     }
 
     .language-form {
         margin-left: 0;
+    }
+
+    .sessionbar {
+        flex-wrap: wrap;
+    }
+
+    .api-docs-heading {
+        align-items: start;
+        flex-direction: column;
     }
 
     .game-brief,

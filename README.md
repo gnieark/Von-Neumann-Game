@@ -169,12 +169,14 @@ la sonde, et l'arrivee applique des degats de poussiere intersectorielle.
 ## API
 
 Toutes les routes API sont dans `src/Http/ApiKernel.php`; le detail des schemas
-est dans [docs/openapi.yaml](docs/openapi.yaml).
+est dans [docs/openapi.yaml](docs/openapi.yaml). Une interface Swagger UI est
+disponible sur `/api-docs`, et la spec brute est servie par `/openapi.yaml`.
 
 Routes principales:
 
 - `POST /api/session`
 - `GET /api/me`
+- `POST /api/me/api-key`
 - `GET /api/probe`
 - `GET /api/probe/sector`
 - `POST /api/probe/move`
@@ -189,6 +191,10 @@ Routes principales:
 Les coordonnees envoyees par l'API sont toujours relatives au joueur et doivent
 respecter la parite FCC.
 
+Les endpoints proteges acceptent un Bearer token de session ou une clef API
+generee par `POST /api/me/api-key`. Les clefs API sont affichees une seule fois
+au joueur et stockees uniquement sous forme de hash.
+
 ## Base De Donnees
 
 Le schema est initialise par `src/Database/SchemaInitializer.php`. Les tables
@@ -202,6 +208,7 @@ actuelles couvrent:
 - `scheduled_events`
 - `visited_sectors`
 - `sessions`
+- `api_keys`
 
 Les migrations sont legeres et codees dans l'initializer pour SQLite et MySQL.
 Elles couvrent seulement les colonnes ajoutees pendant les iterations recentes.

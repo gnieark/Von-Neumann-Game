@@ -176,6 +176,19 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_sessions_player_id ON sessions(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)",
+            "CREATE TABLE IF NOT EXISTS api_keys (
+                id $id,
+                player_id INTEGER NOT NULL,
+                token_hash $text NOT NULL UNIQUE,
+                label $text NOT NULL,
+                last_four $text NOT NULL,
+                created_at $text NOT NULL,
+                last_used_at $nullableText,
+                revoked_at $nullableText,
+                FOREIGN KEY(player_id) REFERENCES players(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_api_keys_player_id ON api_keys(player_id)",
+            "CREATE INDEX IF NOT EXISTS idx_api_keys_token_hash ON api_keys(token_hash)",
         ];
     }
 
