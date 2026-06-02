@@ -65,6 +65,9 @@
     let currentMannyMineTargets = [];
     let currentInventory = null;
     let currentSectorObjects = [];
+    let mannyProgressTickTimer = null;
+    let mannyCompletionRefreshPending = false;
+    let mannyCompletionTimers = [];
     const miningResourceTypes = ['deuterium', 'metals', 'ice', 'carbon_compounds'];
     const setText = (id, value) => {
         const node = document.getElementById(id);
@@ -82,6 +85,25 @@
 
     const coordinate = (value) => value ? value.x + ':' + value.y + ':' + value.z : '-';
     const numberValue = (value, suffix) => Number.isFinite(Number(value)) ? Number(value).toFixed(2).replace(/\.?0+$/, '') + (suffix || '') : '-';
+    const mannyProgressText = (manny) => numberValue(manny.taskProgressPercent, '%');
+    const mannyProgressDataAttributes = (manny, observedAt) => {
+        const progress = Number(manny.taskProgressPercent);
+        const endAt = Date.parse(manny.taskEstimatedEndTime || '');
+        if (!manny.currentTask || !Number.isFinite(progress) || !Number.isFinite(endAt)) {
+            return '';
+        }
+
+        return 'data-progress-start="' + escapeHtml(Math.max(0, Math.min(100, progress))) + '"'
+            + ' data-progress-observed-at="' + escapeHtml(observedAt) + '"'
+            + ' data-progress-end-at="' + escapeHtml(endAt) + '"';
+    };
+    const mannyProgressValueHtml = (manny, observedAt) => {
+        const attributes = mannyProgressDataAttributes(manny, observedAt);
+
+        return '<span class="manny-task-progress-value"' + (attributes ? ' ' + attributes : '') + '>'
+            + escapeHtml(mannyProgressText(manny))
+            + '</span>';
+    };
     const duration = (seconds) => {
         if (!Number.isFinite(seconds) || seconds < 0) {
             return '-';
@@ -245,9 +267,9 @@
 
         return currentMannyMineTargets.find((target) => target.id === (payload && payload.objectId)) || null;
     };
-    const renderMannyTaskPanel = (manny) => {
+    const renderMannyTaskPanel = (manny, observedAt) => {
         const payload = manny.task || {};
-        const progress = numberValue(manny.taskProgressPercent, '%');
+        const progress = mannyProgressValueHtml(manny, observedAt);
         if (manny.currentTask === 'repair') {
             return '<section class="manny-task-panel">'
                 + '<h4>' + escapeHtml(t('repairInProgress', 'Repair in progress')) + '</h4>'
@@ -255,7 +277,7 @@
                     percent: numberValue(payload.integrityPercent),
                     metals: numberValue(payload.metalsCost),
                 })) + '</p>'
-                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
                 + '<button class="manny-recall-button" type="button">' + escapeHtml(t('cancelRepair', 'Cancel repairs')) + '</button>'
                 + '</section>';
         }
@@ -266,7 +288,7 @@
                     resources: selectedResourceLabels(payload.resourceTypes || payload.resourceType),
                     target: miningTargetDetails(miningTaskTarget(payload)),
                 })) + '</p>'
-                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
                 + '<button class="manny-recall-button" type="button">' + escapeHtml(t('recall', 'Recall')) + '</button>'
                 + '</section>';
         }
@@ -277,14 +299,14 @@
                     recipe: payload.recipeName || t('waypointBookmark', 'Waypoint bookmark'),
                     metals: numberValue(payload.metalsCost),
                 })) + '</p>'
-                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
                 + '<button class="manny-recall-button" type="button">' + escapeHtml(t('cancelCrafting', 'Cancel crafting')) + '</button>'
                 + '</section>';
         }
 
         return '<section class="manny-task-panel">'
             + '<h4>' + escapeHtml(taskLabel(manny.currentTask)) + '</h4>'
-            + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + escapeHtml(progress) + '</p>'
+            + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
             + '</section>';
     };
     const renderMannyActionForms = () => (
@@ -568,9 +590,10 @@
         }
     };
 
-    const metric = (label, value, detail, valueClass) => {
+    const metric = (label, value, detail, valueClass, valueAttributes) => {
         const classAttribute = valueClass ? ' class="' + escapeHtml(valueClass) + '"' : '';
-        const content = '<span>' + escapeHtml(label) + '</span><b' + classAttribute + '>' + escapeHtml(String(value ?? '-')) + '</b>';
+        const extraAttributes = valueAttributes ? ' ' + valueAttributes : '';
+        const content = '<span>' + escapeHtml(label) + '</span><b' + classAttribute + extraAttributes + '>' + escapeHtml(String(value ?? '-')) + '</b>';
         if (!detail) {
             return '<div class="metric">' + content + '</div>';
         }
@@ -911,38 +934,119 @@
         });
     }
 
+    function clearMannyProgressTimers() {
+        if (mannyProgressTickTimer !== null) {
+            window.clearTimeout(mannyProgressTickTimer);
+            mannyProgressTickTimer = null;
+        }
+        mannyCompletionTimers.forEach((timer) => window.clearTimeout(timer));
+        mannyCompletionTimers = [];
+    }
+
+    function updateLiveMannyProgressValues() {
+        const progressNodes = Array.from(document.querySelectorAll('#manny-list .manny-task-progress-value[data-progress-end-at]'));
+        const now = Date.now();
+        let hasPendingProgress = false;
+        progressNodes.forEach((node) => {
+            const startProgress = Number(node.dataset.progressStart);
+            const observedAt = Number(node.dataset.progressObservedAt);
+            const endAt = Number(node.dataset.progressEndAt);
+            if (!Number.isFinite(startProgress) || !Number.isFinite(observedAt) || !Number.isFinite(endAt)) {
+                return;
+            }
+
+            const remainingDuration = Math.max(1, endAt - observedAt);
+            const ratio = Math.max(0, Math.min(1, (now - observedAt) / remainingDuration));
+            const progress = Math.max(startProgress, Math.min(100, startProgress + ((100 - startProgress) * ratio)));
+            node.textContent = numberValue(progress, '%');
+            if (progress < 100 && now < endAt) {
+                hasPendingProgress = true;
+            }
+        });
+
+        mannyProgressTickTimer = hasPendingProgress
+            ? window.setTimeout(updateLiveMannyProgressValues, 1000)
+            : null;
+    }
+
+    function refreshManniesAfterTaskEnd() {
+        if (mannyCompletionRefreshPending) {
+            return;
+        }
+        mannyCompletionRefreshPending = true;
+        window.setTimeout(async () => {
+            try {
+                await loadMannies();
+                await loadProbe();
+                await loadCurrentSector();
+            } finally {
+                mannyCompletionRefreshPending = false;
+            }
+        }, 150);
+    }
+
+    function scheduleMannyProgressUpdates() {
+        const endTimes = new Set(Array.from(document.querySelectorAll('#manny-list .manny-task-progress-value[data-progress-end-at]'))
+            .map((node) => Number(node.dataset.progressEndAt))
+            .filter((endAt) => Number.isFinite(endAt)));
+        if (endTimes.size === 0) {
+            return;
+        }
+
+        updateLiveMannyProgressValues();
+        endTimes.forEach((endAt) => {
+            mannyCompletionTimers.push(window.setTimeout(refreshManniesAfterTaskEnd, Math.max(0, endAt - Date.now()) + 500));
+        });
+    }
+
     function renderMannyList(mannies) {
         const node = document.getElementById('manny-list');
         if (!node) {
             return;
         }
+        clearMannyProgressTimers();
+        const openMannyIds = new Set(Array.from(node.querySelectorAll('.manny-card[data-manny-id] .manny-accordion-trigger[aria-expanded="true"]'))
+            .map((button) => button.closest('.manny-card')?.dataset.mannyId)
+            .filter(Boolean));
         if (!Array.isArray(mannies) || mannies.length === 0) {
             node.innerHTML = '';
             return;
         }
 
+        const observedAt = Date.now();
         node.innerHTML = mannies.map((manny) => {
             const busy = manny.currentTask !== null;
+            const mannyId = String(manny.id ?? '');
+            const taskName = manny.currentTask || t('noTask', 'None');
+            const panelId = 'manny-panel-' + mannyId.replace(/[^a-zA-Z0-9_-]/g, '-');
+            const expanded = openMannyIds.has(mannyId);
+            const buttonTitle = manny.name + ' - ' + taskName;
+            const progressAttributes = busy ? mannyProgressDataAttributes(manny, observedAt) : '';
             return '<article class="manny-card" data-manny-id="' + escapeHtml(manny.id) + '">'
-                + '<div class="manny-card-head">'
-                + '<div class="manny-title">'
+                + '<button class="manny-accordion-trigger" type="button" aria-expanded="' + (expanded ? 'true' : 'false') + '" aria-controls="' + escapeHtml(panelId) + '" title="' + escapeHtml(buttonTitle) + '" aria-label="' + escapeHtml(buttonTitle) + '">'
+                + '<span class="manny-accordion-title">'
                 + '<b>' + escapeHtml(manny.name) + '</b>'
+                + '<span class="manny-accordion-task">' + escapeHtml(taskName) + '</span>'
+                + '</span>'
+                + '</button>'
+                + '<div id="' + escapeHtml(panelId) + '" class="manny-accordion-panel"' + (expanded ? '' : ' hidden') + '>'
+                + '<div class="manny-card-tools">'
                 + '<button class="manny-settings-button icon-button" type="button" aria-expanded="false" title="' + escapeHtml(t('mannySettings', 'Manny settings')) + '" aria-label="' + escapeHtml(t('mannySettings', 'Manny settings')) + '">&#9881;</button>'
-                + '</div>'
-                + '<span>' + escapeHtml(manny.currentTask || t('noTask', 'None')) + '</span>'
                 + '</div>'
                 + '<div class="manny-metrics">'
                 + metric(t('location', 'Location'), mannyLocation(manny))
                 + metric(t('cargo', 'Cargo'), mannyCargo(manny), null, 'manny-cargo-value')
-                + metric(t('task', 'Task'), busy ? numberValue(manny.taskProgressPercent, '%') : t('noTask', 'None'))
+                + metric(t('task', 'Task'), busy ? mannyProgressText(manny) : t('noTask', 'None'), null, busy ? 'manny-task-progress-value' : null, progressAttributes)
                 + '</div>'
                 + '<form class="manny-rename-form manny-form" hidden>'
                 + '<label>' + escapeHtml(t('rename', 'Rename')) + '<input name="name" value="' + escapeHtml(manny.name) + '" maxlength="40"></label>'
                 + '<button type="submit">' + escapeHtml(t('rename', 'Rename')) + '</button>'
                 + '</form>'
-                + (busy ? renderMannyTaskPanel(manny) : renderMannyActionForms())
+                + (busy ? renderMannyTaskPanel(manny, observedAt) : renderMannyActionForms())
+                + '</div>'
                 + '</article>';
         }).join('');
+        scheduleMannyProgressUpdates();
     }
 
     async function loadMannies() {
@@ -1183,6 +1287,31 @@
     });
 
     document.getElementById('manny-list')?.addEventListener('click', async (event) => {
+        const accordionButton = event.target.closest('.manny-accordion-trigger');
+        if (accordionButton) {
+            const card = accordionButton.closest('.manny-card');
+            const panel = card ? card.querySelector('.manny-accordion-panel') : null;
+            if (!panel) {
+                return;
+            }
+
+            const willOpen = accordionButton.getAttribute('aria-expanded') !== 'true';
+            event.currentTarget.querySelectorAll('.manny-accordion-trigger[aria-expanded="true"]').forEach((openButton) => {
+                if (openButton === accordionButton) {
+                    return;
+                }
+                openButton.setAttribute('aria-expanded', 'false');
+                const openCard = openButton.closest('.manny-card');
+                const openPanel = openCard ? openCard.querySelector('.manny-accordion-panel') : null;
+                if (openPanel) {
+                    openPanel.hidden = true;
+                }
+            });
+            accordionButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            panel.hidden = !willOpen;
+            return;
+        }
+
         const settingsButton = event.target.closest('.manny-settings-button');
         if (settingsButton) {
             const card = settingsButton.closest('.manny-card');

@@ -320,6 +320,7 @@ final class MannyService
                 : ['type' => Manny::LOCATION_SECTOR, 'sector' => ['relative' => $relativeSector]],
             'currentTask' => $manny->currentTask,
             'taskProgressPercent' => $manny->taskProgressPercent(),
+            'taskEstimatedEndTime' => $manny->taskEndsAt,
             'task' => $manny->taskPayload,
             'cargo' => $manny->cargoArray(),
             'canReceiveOrders' => $manny->probeId === $probe->id && $manny->isInSameSectorAs($probe) && $manny->currentTask === null,

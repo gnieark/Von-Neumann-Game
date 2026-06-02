@@ -175,7 +175,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(7, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(8, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -318,6 +318,7 @@ $thirdMannyId = (string) ($mannyList->body['mannies'][2]['id'] ?? '');
 $fourthMannyId = (string) ($mannyList->body['mannies'][3]['id'] ?? '');
 $test->assert(str_starts_with($firstMannyId, 'mny_'), 'Manny public API id is a stable generated uid');
 $test->assertEquals('manny-1', $mannyList->body['mannies'][0]['name'] ?? null, 'default Manny names are player-facing names');
+$test->assert(array_key_exists('taskEstimatedEndTime', $mannyList->body['mannies'][0] ?? []) && $mannyList->body['mannies'][0]['taskEstimatedEndTime'] === null, 'idle Manny exposes a null task estimated end time');
 
 $renameManny = $kernel->handle('PATCH', '/api/probe/mannies/' . rawurlencode($firstMannyId), $headers, json_encode(['name' => 'atelier'], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $renameManny->status, 'PATCH /api/probe/mannies/{id} renames a Manny');
@@ -330,6 +331,7 @@ if ($createdProbe !== null) {
     $repairManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 2], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $repairManny->status, 'POST /api/probe/mannies/{id}/repair starts a real-time repair task');
     $test->assertEquals('repair', $repairManny->body['manny']['currentTask'] ?? null, 'repair task is exposed on Manny');
+    $test->assert(is_string($repairManny->body['manny']['taskEstimatedEndTime'] ?? null), 'active repair exposes a task estimated end time');
     $test->assertEquals(0.03, $probes->findByPlayerId($player->id)?->metalsStock, 'repair consumes 0.01 containers of metals per integrity percent');
     $test->assertEquals(2, $repairManny->body['manny']['task']['integrityPercent'] ?? null, 'repair task stores planned integrity restoration');
     $repairRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');

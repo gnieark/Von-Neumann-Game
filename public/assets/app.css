@@ -677,28 +677,73 @@ button:disabled {
 
 .manny-card {
     display: grid;
-    gap: 12px;
-    padding: 14px;
+    overflow: hidden;
     border: 1px solid rgba(255,255,255,.12);
     background: rgba(0,0,0,.18);
 }
 
-.manny-card-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+.manny-accordion-trigger {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 58px;
+    padding: 12px 14px;
+    border: 0;
+    border-radius: 0;
+    background: rgba(255,255,255,.035);
+    text-align: left;
 }
 
-.manny-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.manny-accordion-trigger:hover {
+    background: rgba(143, 182, 189, .08);
+}
+
+.manny-accordion-trigger::after {
+    content: "+";
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border: 1px solid rgba(143, 182, 189, .45);
+    color: var(--cold);
+    font-weight: 700;
+}
+
+.manny-accordion-trigger[aria-expanded="true"]::after {
+    content: "-";
+}
+
+.manny-accordion-title {
+    display: grid;
+    gap: 4px;
     min-width: 0;
 }
 
-.manny-title b {
+.manny-accordion-title b {
     overflow-wrap: anywhere;
+}
+
+.manny-accordion-task {
+    color: var(--muted);
+    font-size: .88rem;
+}
+
+.manny-accordion-panel {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.manny-accordion-panel[hidden] {
+    display: none;
+}
+
+.manny-card-tools {
+    display: flex;
+    justify-content: flex-end;
 }
 
 .manny-settings-button {
@@ -706,10 +751,6 @@ button:disabled {
     width: 34px;
     min-height: 34px;
     font-size: 1rem;
-}
-
-.manny-card-head span {
-    color: var(--muted);
 }
 
 .manny-metrics {

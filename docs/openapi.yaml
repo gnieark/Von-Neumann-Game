@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '7'
+  version: '8'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 7
+                apiVersion: 8
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1208,7 +1208,7 @@ components:
             creates an inventory item occupying 0.01 containers.
     Manny:
       type: object
-      required: [id, name, location, currentTask, taskProgressPercent, task, cargo, canReceiveOrders]
+      required: [id, name, location, currentTask, taskProgressPercent, taskEstimatedEndTime, task, cargo, canReceiveOrders]
       properties:
         id:
           type: string
@@ -1227,6 +1227,11 @@ components:
           type: number
           minimum: 0
           maximum: 100
+        taskEstimatedEndTime:
+          type: string
+          format: date-time
+          nullable: true
+          description: Estimated ISO-8601 completion time for the current task, or null when idle.
         task:
           type: object
           additionalProperties: true
