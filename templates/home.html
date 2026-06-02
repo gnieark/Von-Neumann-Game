@@ -198,19 +198,25 @@
                 <article id="probe-panel" class="data-panel active">
                     <div class="panel-heading">
                         <div>
-                            <p class="eyebrow">GET /api/probe</p>
+                            <div class="endpoint-toggle-row">
+                                <p class="eyebrow">GET /api/probe</p>
+                                <button class="icon-button json-toggle-button" data-toggle-json="probe-json" data-open-label="{{t.showJson}}" data-close-label="{{t.hideJson}}" type="button" aria-expanded="false" aria-controls="probe-json" title="{{t.showJson}}" aria-label="{{t.showJson}}">+</button>
+                            </div>
                             <h2>{{t.tabProbe}}</h2>
                         </div>
                         <button class="icon-button" data-refresh="probe" type="button" title="{{t.refresh}}">⟳</button>
                     </div>
                     <div id="probe-summary" class="metrics"></div>
-                    <pre id="probe-json" class="json-dump">{{t.loading}}</pre>
+                    <pre id="probe-json" class="json-dump" hidden>{{t.loading}}</pre>
                 </article>
 
                 <article id="environment-panel" class="data-panel">
                     <div class="panel-heading">
                         <div>
-                            <p class="eyebrow">GET /api/probe/sector</p>
+                            <div class="endpoint-toggle-row">
+                                <p class="eyebrow">GET /api/probe/sector</p>
+                                <button class="icon-button json-toggle-button" data-toggle-json="sector-json" data-open-label="{{t.showJson}}" data-close-label="{{t.hideJson}}" type="button" aria-expanded="false" aria-controls="sector-json" title="{{t.showJson}}" aria-label="{{t.showJson}}">+</button>
+                            </div>
                             <h2>{{t.tabEnvironment}}</h2>
                         </div>
                         <button class="icon-button" data-refresh="sector" type="button" title="{{t.refresh}}">⟳</button>
@@ -223,14 +229,18 @@
                     </form>
                     <p id="sector-context" class="sector-context">{{t.loading}}</p>
                     <p id="sector-summary" class="sector-summary">{{t.loading}}</p>
+                    <p id="sector-bookmark-alert" class="sector-bookmark-alert" hidden></p>
                     <div id="sector-objects" class="sector-objects"></div>
-                    <pre id="sector-json" class="json-dump">{{t.loading}}</pre>
+                    <pre id="sector-json" class="json-dump" hidden>{{t.loading}}</pre>
                 </article>
 
                 <article id="systems-panel" class="data-panel">
                     <div class="panel-heading">
                         <div>
-                            <p class="eyebrow">GET /api/probe</p>
+                            <div class="endpoint-toggle-row">
+                                <p class="eyebrow">GET /api/probe</p>
+                                <button class="icon-button json-toggle-button" data-toggle-json="inventory-json" data-open-label="{{t.showJson}}" data-close-label="{{t.hideJson}}" type="button" aria-expanded="false" aria-controls="inventory-json" title="{{t.showJson}}" aria-label="{{t.showJson}}">+</button>
+                            </div>
                             <h2>{{t.tabSystems}}</h2>
                         </div>
                         <button class="icon-button" data-refresh="probe" type="button" title="{{t.refresh}}">⟳</button>
@@ -238,20 +248,23 @@
                     <div id="systems-summary" class="metrics"></div>
                     <div id="inventory-list" class="inventory-list"></div>
                     <p id="inventory-status" class="action-status"></p>
-                    <pre id="inventory-json" class="json-dump">{{t.loading}}</pre>
+                    <pre id="inventory-json" class="json-dump" hidden>{{t.loading}}</pre>
                 </article>
 
                 <article id="mannies-panel" class="data-panel">
                     <div class="panel-heading">
                         <div>
-                            <p class="eyebrow">GET /api/probe/mannies</p>
+                            <div class="endpoint-toggle-row">
+                                <p class="eyebrow">GET /api/probe/mannies</p>
+                                <button class="icon-button json-toggle-button" data-toggle-json="manny-json" data-open-label="{{t.showMannyJson}}" data-close-label="{{t.hideMannyJson}}" type="button" aria-expanded="false" aria-controls="manny-json" title="{{t.showMannyJson}}" aria-label="{{t.showMannyJson}}">+</button>
+                            </div>
                             <h2>{{t.mannyManagement}}</h2>
                         </div>
                         <button class="icon-button" data-refresh="mannies" type="button" title="{{t.refresh}}">⟳</button>
                     </div>
                     <div id="manny-list" class="manny-list"></div>
                     <p id="manny-status" class="action-status"></p>
-                    <pre id="manny-json" class="json-dump">{{t.loading}}</pre>
+                    <pre id="manny-json" class="json-dump" hidden>{{t.loading}}</pre>
                 </article>
 
                 <article id="actions-panel" class="data-panel">

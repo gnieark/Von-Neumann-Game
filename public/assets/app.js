@@ -448,6 +448,54 @@
 
         return t('sectorSummaryLongRange', 'Long-range estimate: not enough detail for a reliable inventory.');
     };
+    const bookmarkedSectorObjects = (sector) => {
+        const distance = Number(sector && sector.distance);
+        if (!Number.isFinite(distance) || distance !== 0 || !Array.isArray(sector && sector.objects)) {
+            return [];
+        }
+
+        const result = [];
+        const seen = new Set();
+        const collect = (object) => {
+            if (!object || typeof object !== 'object') {
+                return;
+            }
+            if (Array.isArray(object.waypointBookmarks) && object.waypointBookmarks.length > 0) {
+                const label = [objectTypeLabel(object.type || 'object'), object.name || object.id].filter(Boolean).join(' ');
+                const key = String(object.id || object.name || label);
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    result.push(label || key);
+                }
+            }
+            ['bookmarkTargets', 'minableTargets'].forEach((childKey) => {
+                if (Array.isArray(object[childKey])) {
+                    object[childKey].forEach(collect);
+                }
+            });
+        };
+        sector.objects.forEach(collect);
+
+        return result;
+    };
+    const renderSectorBookmarkAlert = (sector) => {
+        const node = document.getElementById('sector-bookmark-alert');
+        if (!node) {
+            return;
+        }
+
+        const bookmarkedObjects = bookmarkedSectorObjects(sector);
+        if (bookmarkedObjects.length === 0) {
+            node.hidden = true;
+            node.textContent = '';
+            return;
+        }
+
+        node.textContent = formatText(t('sectorWaypointBookmarkAlert', 'Waypoint bookmark detected on object(s): {objects}'), {
+            objects: bookmarkedObjects.join(', '),
+        });
+        node.hidden = false;
+    };
     const syncSectorForm = (sector) => {
         const relative = sector && sector.relativeCoordinates;
         const form = document.getElementById('sector-form');
@@ -559,6 +607,7 @@
 
         setText('sector-context', sectorContext(sector));
         setText('sector-summary', sectorSummary(sector));
+        renderSectorBookmarkAlert(sector);
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         const distance = Number(sector && sector.distance);
         const syncMannyTargets = options.syncMannyTargets ?? (Boolean(sector) && Number.isFinite(distance) && distance === 0);
@@ -1092,6 +1141,25 @@
                 return;
             }
             loadProbe();
+        });
+    });
+
+    document.querySelectorAll('[data-toggle-json]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const target = document.getElementById(button.dataset.toggleJson || '');
+            if (!target) {
+                return;
+            }
+
+            const willOpen = target.hidden;
+            target.hidden = !willOpen;
+            button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            button.textContent = willOpen ? '-' : '+';
+            const label = willOpen ? button.dataset.closeLabel : button.dataset.openLabel;
+            if (label) {
+                button.setAttribute('title', label);
+                button.setAttribute('aria-label', label);
+            }
         });
     });
 

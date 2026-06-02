@@ -492,6 +492,24 @@ button:disabled {
     margin-bottom: 18px;
 }
 
+.endpoint-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.endpoint-toggle-row .eyebrow {
+    margin: 0;
+}
+
+.icon-button.json-toggle-button {
+    width: 26px;
+    min-height: 26px;
+    font-size: 1rem;
+    line-height: 1;
+}
+
 .icon-button {
     width: 42px;
     padding: 0;
@@ -624,6 +642,33 @@ button:disabled {
     background: rgba(143, 182, 189, .08);
     color: #dce9eb;
     font-weight: 700;
+}
+
+.sector-bookmark-alert {
+    margin: -2px 0 12px;
+    padding: 10px 12px;
+    border: 1px solid #20ff84;
+    background: rgba(12, 255, 119, .18);
+    color: #75ffad;
+    font-weight: 800;
+    text-transform: uppercase;
+    animation: sector-bookmark-alert-blink .8s steps(2, start) infinite;
+    box-shadow: 0 0 0 1px rgba(32, 255, 132, .28), 0 0 20px rgba(32, 255, 132, .32);
+}
+
+@keyframes sector-bookmark-alert-blink {
+    0%,
+    100% {
+        background: rgba(12, 255, 119, .28);
+        color: #d8ffe6;
+        box-shadow: 0 0 0 1px rgba(32, 255, 132, .55), 0 0 28px rgba(32, 255, 132, .58);
+    }
+
+    50% {
+        background: rgba(12, 255, 119, .05);
+        color: #20ff84;
+        box-shadow: 0 0 0 1px rgba(32, 255, 132, .22), 0 0 6px rgba(32, 255, 132, .18);
+    }
 }
 
 .sector-object {
