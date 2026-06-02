@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '8'
+  version: '9'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 8
+                apiVersion: 9
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -98,6 +98,39 @@ paths:
                   label: default
                   lastFour: cret
                   createdAt: '2026-06-01T12:00:00+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/crafting-recipes:
+    get:
+      summary: List available crafting recipes
+      responses:
+        '200':
+          description: Available crafting recipes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recipes]
+                properties:
+                  recipes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CraftingRecipe'
+              example:
+                recipes:
+                  - id: waypoint_bookmark
+                    name: Waypoint bookmark
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: metals
+                        quantity: 0.01
+                        unit: earth_container_equivalent
+                    durationSeconds: 600
+                    output:
+                      type: waypoint_bookmark
+                      name: Waypoint bookmark
+                      containerSpace: 0.01
+                      containerSpaceUnit: earth_container_equivalent
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe:
@@ -869,6 +902,60 @@ components:
         createdAt:
           type: string
           format: date-time
+    CraftingRecipe:
+      type: object
+      required: [id, name, craftableBy, ingredients, durationSeconds, output]
+      properties:
+        id:
+          type: string
+          enum: [waypoint_bookmark]
+        name:
+          type: string
+        craftableBy:
+          type: array
+          description: Inventory item types that can start this recipe.
+          items:
+            type: string
+            enum: [manny, atomic_3d_printer]
+        ingredients:
+          type: array
+          items:
+            $ref: '#/components/schemas/CraftingRecipeIngredient'
+        durationSeconds:
+          type: integer
+          minimum: 0
+          description: Real seconds needed to complete the crafting task.
+        output:
+          $ref: '#/components/schemas/CraftingRecipeOutput'
+    CraftingRecipeIngredient:
+      type: object
+      required: [type, quantity, unit]
+      properties:
+        type:
+          type: string
+          enum: [deuterium, metals, ice, carbon_compounds]
+        quantity:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        unit:
+          type: string
+          enum: [earth_container_equivalent]
+    CraftingRecipeOutput:
+      type: object
+      required: [type, name, containerSpace, containerSpaceUnit]
+      properties:
+        type:
+          type: string
+          enum: [waypoint_bookmark]
+        name:
+          type: string
+        containerSpace:
+          type: number
+          minimum: 0
+        containerSpaceUnit:
+          type: string
+          enum: [earth_container_equivalent]
     Vector:
       type: object
       required: [x, y, z]

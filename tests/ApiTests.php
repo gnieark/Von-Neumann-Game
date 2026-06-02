@@ -175,7 +175,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(8, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(9, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -227,6 +227,8 @@ $test->assert(is_string($token) && strlen($token) >= 40, 'POST /api/session retu
 
 $badSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'remi', 'password' => 'wrong'], JSON_THROW_ON_ERROR));
 $test->assertEquals(401, $badSession->status, 'POST /api/session with bad password returns 401');
+$recipesWithoutToken = $kernel->handle('GET', '/api/crafting-recipes');
+$test->assertEquals(401, $recipesWithoutToken->status, 'GET /api/crafting-recipes requires authentication');
 
 $plainStored = $pdo->prepare('SELECT COUNT(*) FROM sessions WHERE token_hash = :token');
 $plainStored->execute(['token' => $token]);
@@ -240,6 +242,16 @@ $headers = ['Authorization' => 'Bearer ' . $token];
 $me = $kernel->handle('GET', '/api/me', $headers);
 $test->assertEquals(200, $me->status, 'valid token allows GET /api/me');
 $test->assertEquals('remi', $me->body['player']['username'] ?? null, 'GET /api/me returns the player');
+
+$craftingRecipes = $kernel->handle('GET', '/api/crafting-recipes', $headers);
+$test->assertEquals(200, $craftingRecipes->status, 'valid token allows GET /api/crafting-recipes');
+$test->assertEquals('waypoint_bookmark', $craftingRecipes->body['recipes'][0]['id'] ?? null, 'crafting recipes expose waypoint bookmark');
+$test->assertEquals(['manny'], $craftingRecipes->body['recipes'][0]['craftableBy'] ?? null, 'waypoint bookmark is craftable by Manny');
+$test->assertEquals('metals', $craftingRecipes->body['recipes'][0]['ingredients'][0]['type'] ?? null, 'waypoint bookmark recipe uses metals');
+$test->assertEquals(0.01, $craftingRecipes->body['recipes'][0]['ingredients'][0]['quantity'] ?? null, 'waypoint bookmark recipe consumes 0.01 metal containers');
+$test->assertEquals('earth_container_equivalent', $craftingRecipes->body['recipes'][0]['ingredients'][0]['unit'] ?? null, 'waypoint bookmark ingredient quantity uses cargo units');
+$test->assertEquals(600, $craftingRecipes->body['recipes'][0]['durationSeconds'] ?? null, 'waypoint bookmark takes ten real minutes to craft');
+$test->assertEquals('waypoint_bookmark', $craftingRecipes->body['recipes'][0]['output']['type'] ?? null, 'waypoint bookmark recipe exposes its output item');
 
 $apiKeyResponse = $kernel->handle('POST', '/api/me/api-key', $headers, json_encode([], JSON_THROW_ON_ERROR));
 $test->assertEquals(201, $apiKeyResponse->status, 'POST /api/me/api-key creates an API key');

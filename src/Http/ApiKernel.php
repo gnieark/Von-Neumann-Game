@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Http;
 
 use VonNeumannGame\Auth\AuthService;
+use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
@@ -28,7 +29,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 8;
+    public const API_VERSION = 9;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -72,6 +73,7 @@ final class ApiKernel
                 '/api/session' => $this->routeSession($method, $body),
                 '/api/me' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => new ApiResponse(200, ['player' => $player->publicArray()])),
                 '/api/me/api-key' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->apiKeyResponse($player)),
+                '/api/crafting-recipes' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $_player): ApiResponse => $this->craftingRecipesResponse()),
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
@@ -143,6 +145,11 @@ final class ApiKernel
     private function apiKeyResponse(Player $player): ApiResponse
     {
         return new ApiResponse(201, ['apiKey' => $this->auth->createApiKeyForPlayer($player)]);
+    }
+
+    private function craftingRecipesResponse(): ApiResponse
+    {
+        return new ApiResponse(200, ['recipes' => CraftingRecipeCatalog::all()]);
     }
 
     private function probeResponse(Player $player): ApiResponse

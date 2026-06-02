@@ -178,6 +178,7 @@ Routes principales:
 - `POST /api/session`
 - `GET /api/me`
 - `POST /api/me/api-key`
+- `GET /api/crafting-recipes`
 - `GET /api/probe`
 - `GET /api/probe/sector`
 - `POST /api/probe/move`
@@ -187,6 +188,7 @@ Routes principales:
 - `PATCH /api/probe/mannies/{mannyId}`
 - `POST /api/probe/mannies/{mannyId}/repair`
 - `POST /api/probe/mannies/{mannyId}/mine`
+- `POST /api/probe/mannies/{mannyId}/craft`
 - `POST /api/probe/mannies/{mannyId}/recall`
 - `GET /api/sector?x=...&y=...&z=...`
 

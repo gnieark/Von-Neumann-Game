@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
+use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeItem;
@@ -29,9 +30,9 @@ final class MannyService
     public const MANNY_CARGO_CAPACITY = 0.3;
     public const MANNY_CONTAINER_SPACE = 0.05;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
-    public const WAYPOINT_BOOKMARK_METALS_COST = 0.01;
-    public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = 0.01;
-    public const WAYPOINT_BOOKMARK_CRAFTING_SECONDS = 600;
+    public const WAYPOINT_BOOKMARK_METALS_COST = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_METALS_COST;
+    public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CONTAINER_SPACE;
+    public const WAYPOINT_BOOKMARK_CRAFTING_SECONDS = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CRAFTING_SECONDS;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -195,8 +196,13 @@ final class MannyService
             throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to craft.');
         }
 
-        $recipe = strtolower(str_replace([' ', '-'], '_', trim($recipe)));
-        if ($recipe !== ProbeItem::TYPE_WAYPOINT_BOOKMARK) {
+        $recipe = CraftingRecipeCatalog::normalizeId($recipe);
+        $recipeDefinition = CraftingRecipeCatalog::find($recipe);
+        if (
+            $recipeDefinition === null
+            || $recipe !== ProbeItem::TYPE_WAYPOINT_BOOKMARK
+            || !in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $recipeDefinition['craftableBy'] ?? [], true)
+        ) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
         }
         if ($probe->metalsStock + 0.00001 < self::WAYPOINT_BOOKMARK_METALS_COST) {
@@ -216,7 +222,7 @@ final class MannyService
         $manny->taskEndsAt = $now->modify('+' . self::WAYPOINT_BOOKMARK_CRAFTING_SECONDS . ' seconds')->format('c');
         $manny->taskPayload = [
             'recipe' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
-            'recipeName' => ProbeItem::WAYPOINT_BOOKMARK_NAME,
+            'recipeName' => (string) $recipeDefinition['name'],
             'metalsCost' => self::WAYPOINT_BOOKMARK_METALS_COST,
             'containerSpace' => self::WAYPOINT_BOOKMARK_CONTAINER_SPACE,
         ];
