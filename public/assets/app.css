@@ -55,6 +55,11 @@ select {
     background: linear-gradient(160deg, #30363a, #141617);
     color: var(--cold);
     font-weight: 700;
+    text-decoration: none;
+}
+
+.sigil:hover {
+    border-color: var(--cold);
 }
 
 .system-name,
