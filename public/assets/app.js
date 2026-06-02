@@ -64,6 +64,7 @@
     let probeAlreadyMoving = false;
     let currentMannyMineTargets = [];
     let currentInventory = null;
+    let currentCraftingRecipes = [];
     let currentSectorObjects = [];
     let mannyProgressTickTimer = null;
     let mannyCompletionRefreshPending = false;
@@ -144,7 +145,13 @@
         metals: t('metals', 'Metals'),
         ice: t('ice', 'Ice'),
         carbon_compounds: t('carbonCompounds', 'Carbon compounds'),
+        organic_compounds: t('carbonCompounds', 'Carbon compounds'),
         other: t('carbonCompounds', 'Carbon compounds'),
+    }[type] || type);
+    const normalizeResourceType = (type) => ({
+        organic_compounds: 'carbon_compounds',
+        organicCompounds: 'carbon_compounds',
+        other: 'carbon_compounds',
     }[type] || type);
     const objectTypeLabel = (type) => ({
         star: t('starObject', 'Star'),
@@ -332,10 +339,11 @@
         + '<section class="manny-action-section">'
         + '<h4>' + escapeHtml(t('craftingActionTitle', 'Craft')) + '</h4>'
         + '<form class="manny-craft-form manny-form">'
-        + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select name="recipe">'
-        + '<option value="waypoint_bookmark">' + escapeHtml(t('waypointBookmark', 'Waypoint bookmark')) + '</option>'
-        + '</select></label>'
-        + '<button type="submit">' + escapeHtml(t('craft', 'Craft')) + '</button>'
+        + '<div class="manny-craft-picker">'
+        + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select class="manny-craft-recipe" name="recipe">' + craftRecipeOptions('') + '</select></label>'
+        + '<div class="manny-craft-ingredients" aria-live="polite"></div>'
+        + '</div>'
+        + '<button class="manny-craft-button" type="submit">' + escapeHtml(t('craft', 'Craft')) + '</button>'
         + '</form>'
         + '</section>'
         + '</div>'
@@ -555,10 +563,16 @@
             : []
     );
     const inventoryItemName = (item) => (
-        item && item.type === 'waypoint_bookmark'
-            ? t('waypointBookmark', 'Waypoint bookmark')
-            : (item && (item.name || item.type || item.id)) || '-'
+        item && item.type
+            ? inventoryItemTypeLabel(item.type, item.name || item.type)
+            : (item && (item.name || item.id)) || '-'
     );
+    const inventoryItemTypeLabel = (type, fallback) => ({
+        waypoint_bookmark: t('waypointBookmark', 'Waypoint bookmark'),
+        steel_bar: t('steelBar', 'Steel bar'),
+        steel_plate: t('steelPlate', 'Steel plate'),
+        additional_container: t('additionalContainer', 'Additional container'),
+    }[type] || fallback || type);
     const bookmarkTargetLabel = (target) => (
         [objectTypeLabel(target.type || 'object'), target.name || target.id].filter(Boolean).join(' ')
     );
@@ -720,6 +734,7 @@
         }
         currentInventory = inventory && typeof inventory === 'object' ? inventory : null;
         renderBookmarkAction();
+        updateMannyCraftForms();
         if (!inventory || typeof inventory !== 'object') {
             node.innerHTML = '';
             return;
@@ -928,6 +943,269 @@
         ].join('\n');
     };
 
+    function fallbackMannyCraftingRecipes() {
+        return [{
+            id: 'waypoint_bookmark',
+            name: t('waypointBookmark', 'Waypoint bookmark'),
+            craftableBy: ['manny'],
+            ingredients: [{
+                type: 'metals',
+                quantity: 0.01,
+                unit: 'earth_container_equivalent',
+            }],
+        }];
+    }
+
+    function mannyCraftingRecipes() {
+        const recipes = currentCraftingRecipes.filter((recipe) => (
+            recipe && typeof recipe === 'object' && Array.isArray(recipe.craftableBy) && recipe.craftableBy.includes('manny')
+        ));
+
+        return recipes.length > 0 ? recipes : fallbackMannyCraftingRecipes();
+    }
+
+    function craftingRecipeName(recipe) {
+        if (!recipe) {
+            return '-';
+        }
+
+        return inventoryItemTypeLabel(recipe.id, recipe.name || recipe.id || '-');
+    }
+
+    function craftingRecipeById(id) {
+        return mannyCraftingRecipes().find((recipe) => recipe.id === id) || null;
+    }
+
+    function craftingRecipeOutputType(recipe) {
+        const output = recipe && recipe.output && typeof recipe.output === 'object' ? recipe.output : {};
+
+        return String(output.type || (recipe && recipe.id) || '');
+    }
+
+    function craftingRecipeByOutputType(type) {
+        return mannyCraftingRecipes().find((recipe) => (
+            craftingRecipeOutputType(recipe) === type || recipe.id === type
+        )) || null;
+    }
+
+    function craftRecipeOptions(selected) {
+        const recipes = mannyCraftingRecipes();
+        if (recipes.length === 0) {
+            return '<option value="">' + escapeHtml(t('noCraftingRecipes', 'No recipes available.')) + '</option>';
+        }
+
+        return recipes.map((recipe, index) => {
+            const recipeId = String(recipe.id || '');
+            const isSelected = recipeId === selected || (!selected && index === 0);
+
+            return '<option value="' + escapeHtml(recipeId) + '"' + (isSelected ? ' selected' : '') + '>'
+                + escapeHtml(craftingRecipeName(recipe))
+                + '</option>';
+        }).join('');
+    }
+
+    function inventoryResourceAmount(type) {
+        if (!currentInventory || !Array.isArray(currentInventory.resourceStocks)) {
+            return 0;
+        }
+
+        const normalizedType = normalizeResourceType(type);
+        return currentInventory.resourceStocks.reduce((total, stock) => (
+            normalizeResourceType(stock.type) === normalizedType
+                ? total + numericCount(stock.amount)
+                : total
+        ), 0);
+    }
+
+    function inventoryItemCount(type) {
+        return Array.isArray(currentInventory && currentInventory.items)
+            ? currentInventory.items.filter((item) => item.type === type).length
+            : 0;
+    }
+
+    function craftIngredientKind(ingredient) {
+        if (ingredient && ingredient.kind) {
+            return String(ingredient.kind);
+        }
+
+        return ingredient && ingredient.unit === 'item' ? 'item' : 'resource';
+    }
+
+    function addCraftPlanResourceCost(resourceCosts, type, quantity) {
+        const normalizedType = normalizeResourceType(type);
+        const amount = Number(quantity);
+        if (!normalizedType || !Number.isFinite(amount) || amount <= 0) {
+            return;
+        }
+
+        resourceCosts[normalizedType] = Math.round(((resourceCosts[normalizedType] || 0) + amount) * 10000) / 10000;
+    }
+
+    function directResourceCostsForRecipe(recipe) {
+        if (!recipe || !Array.isArray(recipe.ingredients)) {
+            return null;
+        }
+
+        return recipe.ingredients.reduce((resourceCosts, ingredient) => {
+            if (resourceCosts === null || craftIngredientKind(ingredient) !== 'resource') {
+                return null;
+            }
+            addCraftPlanResourceCost(resourceCosts, ingredient.type, craftIngredientAmount(ingredient));
+
+            return resourceCosts;
+        }, {});
+    }
+
+    function craftIngredientAmount(ingredient) {
+        const quantity = Number(ingredient && ingredient.quantity);
+        return Number.isFinite(quantity) ? quantity : 0;
+    }
+
+    function craftAvailability(recipe) {
+        const result = {
+            canCraft: false,
+            durationSeconds: 0,
+            itemStatuses: [],
+            resourceStatuses: [],
+        };
+        if (!recipe) {
+            return result;
+        }
+
+        const ingredients = Array.isArray(recipe.ingredients) ? recipe.ingredients : [];
+        const resourceCosts = {};
+        let canCraft = true;
+        let durationSeconds = Number(recipe.durationSeconds);
+        durationSeconds = Number.isFinite(durationSeconds) ? Math.max(0, durationSeconds) : 0;
+        ingredients.forEach((ingredient) => {
+            if (craftIngredientKind(ingredient) !== 'item') {
+                addCraftPlanResourceCost(resourceCosts, ingredient.type, craftIngredientAmount(ingredient));
+                return;
+            }
+
+            const type = String(ingredient.type || '');
+            const required = Math.ceil(Math.max(0, craftIngredientAmount(ingredient)));
+            const available = inventoryItemCount(type);
+            const missing = Math.max(0, required - available);
+            let craftedFromResources = 0;
+            if (missing > 0) {
+                const componentRecipe = craftingRecipeByOutputType(type);
+                const componentResourceCosts = directResourceCostsForRecipe(componentRecipe);
+                if (!componentRecipe || componentResourceCosts === null) {
+                    canCraft = false;
+                } else {
+                    Object.entries(componentResourceCosts).forEach(([resourceType, quantity]) => {
+                        addCraftPlanResourceCost(resourceCosts, resourceType, Number(quantity) * missing);
+                    });
+                    durationSeconds += Math.max(0, Number(componentRecipe.durationSeconds) || 0) * missing;
+                    craftedFromResources = missing;
+                }
+            }
+
+            result.itemStatuses.push({
+                type,
+                required,
+                available,
+                missing,
+                craftedFromResources,
+                canResolve: missing === 0 || craftedFromResources === missing,
+            });
+        });
+
+        result.resourceStatuses = Object.entries(resourceCosts).map(([type, required]) => {
+            const available = inventoryResourceAmount(type);
+            const hasEnough = available + 0.00001 >= Number(required);
+            canCraft = canCraft && hasEnough;
+
+            return {
+                type,
+                required: Number(required),
+                available,
+                hasEnough,
+            };
+        });
+        canCraft = canCraft && result.itemStatuses.every((status) => status.canResolve);
+        result.canCraft = canCraft;
+        result.durationSeconds = durationSeconds;
+
+        return result;
+    }
+
+    function canCraftRecipe(recipe) {
+        return craftAvailability(recipe).canCraft;
+    }
+
+    function renderCraftIngredients(recipe) {
+        const availability = craftAvailability(recipe);
+        if (availability.itemStatuses.length === 0 && availability.resourceStatuses.length === 0) {
+            return '<span class="manny-craft-ingredients-title">' + escapeHtml(t('craftIngredientsRequired', 'Required ingredients')) + '</span>'
+                + '<p>' + escapeHtml(t('noCraftIngredients', 'No ingredients required.')) + '</p>';
+        }
+
+        return '<span class="manny-craft-ingredients-title">' + escapeHtml(t('craftIngredientsRequired', 'Required ingredients')) + '</span>'
+            + '<ul>'
+            + availability.itemStatuses.map((status) => {
+                const detail = status.craftedFromResources > 0
+                    ? formatText(t('ingredientItemCraftedLine', '{required} required · {available} available · {crafted} crafted from resources'), {
+                        required: status.required,
+                        available: status.available,
+                        crafted: status.craftedFromResources,
+                    })
+                    : formatText(t('ingredientItemStockLine', '{required} required · {available} available'), {
+                        required: status.required,
+                        available: status.available,
+                    });
+
+                return '<li class="' + (status.canResolve ? 'available' : 'missing') + '">'
+                    + '<span>' + escapeHtml(inventoryItemTypeLabel(status.type, status.type)) + '</span>'
+                    + '<b>' + escapeHtml(detail) + '</b>'
+                    + '</li>';
+            }).join('')
+            + availability.resourceStatuses.map((status) => {
+                const detail = formatText(t('ingredientStockLine', '{required} required · {available} available'), {
+                    required: numberValue(status.required) + ' ' + t('containerUnit', 'containers'),
+                    available: numberValue(status.available) + ' ' + t('containerUnit', 'containers'),
+                });
+
+                return '<li class="' + (status.hasEnough ? 'available' : 'missing') + '">'
+                    + '<span>' + escapeHtml(resourceTypeLabel(normalizeResourceType(status.type))) + '</span>'
+                    + '<b>' + escapeHtml(detail) + '</b>'
+                    + '</li>';
+            }).join('')
+            + '</ul>'
+            + '<p class="manny-craft-duration">' + escapeHtml(t('craftingDuration', 'Duration') + ' ' + duration(availability.durationSeconds)) + '</p>';
+    }
+
+    function updateMannyCraftForm(form) {
+        if (!form) {
+            return;
+        }
+
+        const select = form.querySelector('.manny-craft-recipe');
+        const ingredientsNode = form.querySelector('.manny-craft-ingredients');
+        const button = form.querySelector('.manny-craft-button');
+        if (!select) {
+            return;
+        }
+
+        const selected = select.value;
+        select.innerHTML = craftRecipeOptions(selected);
+        const recipe = craftingRecipeById(select.value);
+        const canCraft = craftAvailability(recipe).canCraft;
+        if (ingredientsNode) {
+            ingredientsNode.innerHTML = renderCraftIngredients(recipe);
+        }
+        if (button) {
+            button.disabled = !canCraft;
+            button.title = canCraft ? '' : t('missingCraftIngredients', 'Insufficient ingredients.');
+            button.setAttribute('aria-disabled', canCraft ? 'false' : 'true');
+        }
+    }
+
+    function updateMannyCraftForms() {
+        document.querySelectorAll('.manny-craft-form').forEach(updateMannyCraftForm);
+    }
+
     function mineTargetOptions(selected) {
         if (currentMannyMineTargets.length === 0) {
             return '<option value="">-</option>';
@@ -1096,6 +1374,17 @@
                 + '</article>';
         }).join('');
         scheduleMannyProgressUpdates();
+        updateMannyCraftForms();
+    }
+
+    async function loadCraftingRecipes() {
+        try {
+            const data = await api('/api/crafting-recipes');
+            currentCraftingRecipes = Array.isArray(data.recipes) ? data.recipes : [];
+        } catch (error) {
+            currentCraftingRecipes = [];
+        }
+        updateMannyCraftForms();
     }
 
     async function loadMannies() {
@@ -1335,6 +1624,12 @@
                     }),
                 });
             } else if (event.target.classList.contains('manny-craft-form')) {
+                const recipe = craftingRecipeById(String(form.get('recipe') || ''));
+                if (!canCraftRecipe(recipe)) {
+                    updateMannyCraftForm(event.target);
+                    setText('manny-status', t('missingCraftIngredients', 'Insufficient ingredients.'));
+                    return;
+                }
                 await api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/craft', {
                     method: 'POST',
                     body: JSON.stringify({recipe: form.get('recipe')}),
@@ -1351,6 +1646,9 @@
     document.getElementById('manny-list')?.addEventListener('change', (event) => {
         if (event.target.classList.contains('manny-mine-target')) {
             updateMannyResourceOptions(event.target.closest('.manny-mine-form'));
+        }
+        if (event.target.classList.contains('manny-craft-recipe')) {
+            updateMannyCraftForm(event.target.closest('.manny-craft-form'));
         }
     });
 
@@ -1423,6 +1721,7 @@
     if (document.querySelector('.console-grid')) {
         loadProbe();
         loadCurrentSector();
+        loadCraftingRecipes();
         loadMannies();
     }
 })();

@@ -7,7 +7,13 @@ namespace VonNeumannGame\Domain;
 final class ProbeItem
 {
     public const TYPE_WAYPOINT_BOOKMARK = 'waypoint_bookmark';
+    public const TYPE_STEEL_BAR = 'steel_bar';
+    public const TYPE_STEEL_PLATE = 'steel_plate';
+    public const TYPE_ADDITIONAL_CONTAINER = 'additional_container';
     public const WAYPOINT_BOOKMARK_NAME = 'Waypoint bookmark';
+    public const STEEL_BAR_NAME = 'Steel bar';
+    public const STEEL_PLATE_NAME = 'Steel plate';
+    public const ADDITIONAL_CONTAINER_NAME = 'Additional container';
 
     public function __construct(
         public readonly int $id,

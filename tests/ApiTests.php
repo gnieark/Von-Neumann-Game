@@ -252,6 +252,85 @@ $test->assertEquals(0.01, $craftingRecipes->body['recipes'][0]['ingredients'][0]
 $test->assertEquals('earth_container_equivalent', $craftingRecipes->body['recipes'][0]['ingredients'][0]['unit'] ?? null, 'waypoint bookmark ingredient quantity uses cargo units');
 $test->assertEquals(600, $craftingRecipes->body['recipes'][0]['durationSeconds'] ?? null, 'waypoint bookmark takes ten real minutes to craft');
 $test->assertEquals('waypoint_bookmark', $craftingRecipes->body['recipes'][0]['output']['type'] ?? null, 'waypoint bookmark recipe exposes its output item');
+$recipesById = [];
+foreach ($craftingRecipes->body['recipes'] ?? [] as $recipe) {
+    $recipesById[$recipe['id'] ?? ''] = $recipe;
+}
+$test->assert(isset($recipesById['steel_bar']), 'crafting recipes expose steel bars');
+$test->assertEquals(0.02, $recipesById['steel_bar']['ingredients'][0]['quantity'] ?? null, 'steel bar recipe consumes 0.02 metal containers');
+$test->assertEquals(300, $recipesById['steel_bar']['durationSeconds'] ?? null, 'steel bar takes five real minutes to craft');
+$test->assertEquals(0.01, $recipesById['steel_bar']['output']['containerSpace'] ?? null, 'steel bar occupies 0.01 containers');
+$test->assert(isset($recipesById['steel_plate']), 'crafting recipes expose steel plates');
+$test->assertEquals(0.02, $recipesById['steel_plate']['ingredients'][0]['quantity'] ?? null, 'steel plate recipe consumes 0.02 metal containers');
+$test->assertEquals(300, $recipesById['steel_plate']['durationSeconds'] ?? null, 'steel plate takes five real minutes to craft');
+$test->assertEquals(0.01, $recipesById['steel_plate']['output']['containerSpace'] ?? null, 'steel plate occupies 0.01 containers');
+$test->assert(isset($recipesById['additional_container']), 'crafting recipes expose additional containers');
+$test->assertEquals('steel_plate', $recipesById['additional_container']['ingredients'][0]['type'] ?? null, 'additional container requires steel plates');
+$test->assertEquals(12, $recipesById['additional_container']['ingredients'][0]['quantity'] ?? null, 'additional container requires twelve steel plates');
+$test->assertEquals('steel_bar', $recipesById['additional_container']['ingredients'][1]['type'] ?? null, 'additional container requires steel bars');
+$test->assertEquals(15, $recipesById['additional_container']['ingredients'][1]['quantity'] ?? null, 'additional container requires fifteen steel bars');
+$test->assertEquals(180, $recipesById['additional_container']['durationSeconds'] ?? null, 'additional container base assembly takes three real minutes');
+$test->assertEquals(0.0, $recipesById['additional_container']['output']['containerSpace'] ?? null, 'additional container occupies no storage');
+$test->assertEquals(1.0, $recipesById['additional_container']['output']['capacityBonus'] ?? null, 'additional container adds one container of storage');
+
+$craftPlayer = $auth->registerPlayerWithPassword('crafter', 'secret', 'Crafter');
+$craftProbeEntity = $probes->findByPlayerId($craftPlayer->id);
+$craftSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'crafter', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$craftHeaders = ['Authorization' => 'Bearer ' . (string) ($craftSession->body['token'] ?? '')];
+$craftMannyList = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+$craftMannyId = (string) ($craftMannyList->body['mannies'][0]['id'] ?? '');
+$test->assert($craftProbeEntity !== null && $craftMannyId !== '', 'crafting test probe has a Manny');
+
+if ($craftProbeEntity !== null && $craftMannyId !== '') {
+    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.54 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $rawContainerCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'additional_container',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $rawContainerCraft->status, 'Manny can start an additional-container craft from raw metals');
+    $test->assertEquals('additional_container', $rawContainerCraft->body['manny']['task']['recipe'] ?? null, 'additional-container task stores its recipe');
+    $test->assertEquals(0.54, $rawContainerCraft->body['manny']['task']['metalsCost'] ?? null, 'raw additional-container craft consumes all component metal costs');
+    $test->assertEquals(8280, $rawContainerCraft->body['manny']['task']['durationSeconds'] ?? null, 'raw additional-container craft includes virtual component fabrication time');
+    $test->assertEquals(0.0, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'raw additional-container craft commits the raw metals immediately');
+
+    $craftMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $craftMannyRow->execute(['uid' => $craftMannyId]);
+    $craftMannyDbId = (int) $craftMannyRow->fetchColumn();
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $containerProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $additionalContainers = array_values(array_filter(
+        $containerProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === 'additional_container',
+    ));
+    $test->assertEquals(1, count($additionalContainers), 'completed additional-container craft adds a container item');
+    $test->assertEquals(0.0, $additionalContainers[0]['containerSpace'] ?? null, 'additional container item occupies no storage');
+    $test->assertEquals(1.0, (float) ($additionalContainers[0]['metadata']['capacityBonus'] ?? 0), 'additional container item carries its capacity bonus');
+    $test->assertEquals(2.0, $containerProbe->body['probe']['inventory']['capacity'] ?? null, 'additional container increases probe storage capacity');
+
+    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.02 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $steelBarCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'steel_bar',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $steelBarCraft->status, 'Manny can start a steel-bar craft');
+    $test->assertEquals(300, $steelBarCraft->body['manny']['task']['durationSeconds'] ?? null, 'steel-bar craft task lasts five minutes');
+    $test->assertEquals(0.0, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'steel-bar craft commits its metals immediately');
+
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $steelBarProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $steelBars = array_values(array_filter(
+        $steelBarProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === 'steel_bar',
+    ));
+    $test->assertEquals(1, count($steelBars), 'completed steel-bar craft adds a steel bar item');
+    $test->assertEquals(0.01, $steelBars[0]['containerSpace'] ?? null, 'steel bar item occupies 0.01 containers');
+}
 
 $apiKeyResponse = $kernel->handle('POST', '/api/me/api-key', $headers, json_encode([], JSON_THROW_ON_ERROR));
 $test->assertEquals(201, $apiKeyResponse->status, 'POST /api/me/api-key creates an API key');

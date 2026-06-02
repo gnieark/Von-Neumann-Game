@@ -69,6 +69,12 @@ final class ProbeInventory
             $items[] = $probeItem->inventoryItem();
         }
 
+        $capacity = round(1.0 + array_reduce(
+            $items,
+            static fn(float $total, ProbeInventoryItem $item): float => $total + self::capacityBonusForItem($item),
+            0.0,
+        ), 4);
+
         $externalTanks = [
             new ProbeExternalTank(
                 'probe-' . $probe->id . '-deuterium-tank',
@@ -105,7 +111,17 @@ final class ProbeInventory
             ],
         ];
 
-        return new self(1, $items, $externalTanks, $resourceStocks);
+        return new self($capacity, $items, $externalTanks, $resourceStocks);
+    }
+
+    private static function capacityBonusForItem(ProbeInventoryItem $item): float
+    {
+        $capacityBonus = $item->metadata['capacityBonus'] ?? 0.0;
+        if (!is_numeric($capacityBonus)) {
+            return 0.0;
+        }
+
+        return round(max(0.0, (float) $capacityBonus), 4);
     }
 
     public function usedCapacity(): float

@@ -200,31 +200,37 @@ final class MannyService
         $recipeDefinition = CraftingRecipeCatalog::find($recipe);
         if (
             $recipeDefinition === null
-            || $recipe !== ProbeItem::TYPE_WAYPOINT_BOOKMARK
             || !in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $recipeDefinition['craftableBy'] ?? [], true)
         ) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
         }
-        if ($probe->metalsStock + 0.00001 < self::WAYPOINT_BOOKMARK_METALS_COST) {
-            throw new MannyActionException(422, 'insufficient_metals', 'Insufficient metals in probe inventory for this recipe.');
-        }
-        $freeAfterCost = round($this->freeCargoCapacity($probe) + self::WAYPOINT_BOOKMARK_METALS_COST, 4);
-        if ($freeAfterCost + 0.00001 < self::WAYPOINT_BOOKMARK_CONTAINER_SPACE) {
+        $craftingPlan = $this->craftingPlan($probe, $recipeDefinition);
+        $freeAfterConsumption = round(
+            $this->freeCargoCapacity($probe)
+            + $this->cargoSpaceFreedByResourceCosts($craftingPlan['resourceCosts'])
+            + $this->cargoSpaceFreedByConsumedItems($craftingPlan['consumedItems']),
+            4,
+        );
+        if ($freeAfterConsumption + 0.00001 < (float) ($craftingPlan['output']['containerSpace'] ?? 0.0)) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.');
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $probe->metalsStock = round($probe->metalsStock - self::WAYPOINT_BOOKMARK_METALS_COST, 4);
+        $this->consumeCraftingPlan($probe, $craftingPlan);
         $this->probes->save($probe);
 
         $manny->currentTask = Manny::TASK_CRAFTING;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . self::WAYPOINT_BOOKMARK_CRAFTING_SECONDS . ' seconds')->format('c');
+        $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
         $manny->taskPayload = [
-            'recipe' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
-            'recipeName' => (string) $recipeDefinition['name'],
-            'metalsCost' => self::WAYPOINT_BOOKMARK_METALS_COST,
-            'containerSpace' => self::WAYPOINT_BOOKMARK_CONTAINER_SPACE,
+            'recipe' => $recipe,
+            'recipeName' => (string) ($recipeDefinition['name'] ?? $recipe),
+            'durationSeconds' => (int) $craftingPlan['durationSeconds'],
+            'resourceCosts' => $craftingPlan['resourceCosts'],
+            'metalsCost' => round((float) ($craftingPlan['resourceCosts']['metals'] ?? 0.0), 4),
+            'consumedItems' => $craftingPlan['consumedItems'],
+            'output' => $craftingPlan['output'],
+            'containerSpace' => (float) ($craftingPlan['output']['containerSpace'] ?? 0.0),
         ];
         $this->mannies->save($manny);
 
@@ -237,12 +243,19 @@ final class MannyService
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
         $this->ensureMannyInRange($manny, $probe);
 
-        if ($manny->currentTask === Manny::TASK_REPAIR || $manny->currentTask === Manny::TASK_CRAFTING) {
+        if ($manny->currentTask === Manny::TASK_REPAIR) {
             $metalsCost = round(max(0.0, (float) ($manny->taskPayload['metalsCost'] ?? 0.0)), 4);
             if ($metalsCost > 0.0) {
                 $this->transferResourceToProbe($probe, 'metals', $metalsCost);
                 $this->probes->save($probe);
             }
+            $this->clearTask($manny);
+            $this->mannies->save($manny);
+
+            return $this->requiredManny($probe, $uid);
+        }
+        if ($manny->currentTask === Manny::TASK_CRAFTING) {
+            $this->refundCraftingCommitment($probe, $manny);
             $this->clearTask($manny);
             $this->mannies->save($manny);
 
@@ -361,26 +374,355 @@ final class MannyService
             return $manny;
         }
 
-        $recipe = (string) ($manny->taskPayload['recipe'] ?? '');
-        if ($recipe === ProbeItem::TYPE_WAYPOINT_BOOKMARK) {
-            $this->items->create(
-                $probe->id,
-                ProbeItem::TYPE_WAYPOINT_BOOKMARK,
-                ProbeItem::WAYPOINT_BOOKMARK_NAME,
-                self::WAYPOINT_BOOKMARK_CONTAINER_SPACE,
-                [
-                    'recipe' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
-                    'craftedByMannyId' => $manny->uid,
-                    'craftedByMannyName' => $manny->name,
-                    'craftedAt' => $now->format('c'),
-                ],
-            );
-        }
+        $this->createCraftingOutput($probe, $manny, $now);
 
         $this->clearTask($manny);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    /**
+     * @param array<string, mixed> $recipeDefinition
+     * @return array<string, mixed>
+     */
+    private function craftingPlan(NeumannProbe $probe, array $recipeDefinition): array
+    {
+        $output = $recipeDefinition['output'] ?? null;
+        if (!is_array($output) || !isset($output['type'])) {
+            throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
+        }
+
+        $resourceCosts = [];
+        $itemsToConsume = [];
+        $consumedItems = [];
+        $durationSeconds = max(0, (int) ($recipeDefinition['durationSeconds'] ?? 0));
+        $itemsByType = $this->probeItemsByType($probe);
+        $ingredients = is_array($recipeDefinition['ingredients'] ?? null) ? $recipeDefinition['ingredients'] : [];
+
+        foreach ($ingredients as $ingredient) {
+            if (!is_array($ingredient)) {
+                continue;
+            }
+            $type = (string) ($ingredient['type'] ?? '');
+            if ($type === '') {
+                continue;
+            }
+
+            if ($this->craftingIngredientKind($ingredient) === 'item') {
+                $requiredCount = (int) ceil(max(0.0, (float) ($ingredient['quantity'] ?? 0)));
+                $availableItems = $itemsByType[$type] ?? [];
+                $consumedCount = min($requiredCount, count($availableItems));
+                for ($index = 0; $index < $consumedCount; $index++) {
+                    $item = array_shift($availableItems);
+                    if (!$item instanceof ProbeItem) {
+                        continue;
+                    }
+                    $itemsToConsume[] = $item;
+                    $consumedItems[] = $this->consumedItemPayload($item);
+                }
+                $itemsByType[$type] = $availableItems;
+
+                $missingCount = $requiredCount - $consumedCount;
+                if ($missingCount > 0) {
+                    $componentRecipe = CraftingRecipeCatalog::find($type);
+                    $componentResourceCosts = $componentRecipe !== null
+                        ? $this->directResourceCostsForRecipe($componentRecipe)
+                        : null;
+                    if ($componentRecipe === null || $componentResourceCosts === null) {
+                        throw new MannyActionException(422, 'insufficient_crafting_ingredients', 'Insufficient crafting ingredients for this recipe.');
+                    }
+
+                    foreach ($componentResourceCosts as $resourceType => $quantity) {
+                        $this->addResourceCost($resourceCosts, $resourceType, $quantity * $missingCount);
+                    }
+                    $durationSeconds += max(0, (int) ($componentRecipe['durationSeconds'] ?? 0)) * $missingCount;
+                }
+
+                continue;
+            }
+
+            $this->addResourceCost(
+                $resourceCosts,
+                $this->normalizeCraftResourceType($type),
+                max(0.0, (float) ($ingredient['quantity'] ?? 0)),
+            );
+        }
+
+        $this->ensureResourceCostsAvailable($probe, $resourceCosts);
+
+        return [
+            'durationSeconds' => $durationSeconds,
+            'resourceCosts' => $resourceCosts,
+            'itemsToConsume' => $itemsToConsume,
+            'consumedItems' => $consumedItems,
+            'output' => $output,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $ingredient
+     */
+    private function craftingIngredientKind(array $ingredient): string
+    {
+        if (isset($ingredient['kind'])) {
+            return (string) $ingredient['kind'];
+        }
+
+        return ($ingredient['unit'] ?? null) === 'item' ? 'item' : 'resource';
+    }
+
+    /**
+     * @param array<string, mixed> $recipeDefinition
+     * @return array<string, float>|null
+     */
+    private function directResourceCostsForRecipe(array $recipeDefinition): ?array
+    {
+        if (!in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $recipeDefinition['craftableBy'] ?? [], true)) {
+            return null;
+        }
+
+        $resourceCosts = [];
+        $ingredients = is_array($recipeDefinition['ingredients'] ?? null) ? $recipeDefinition['ingredients'] : [];
+        foreach ($ingredients as $ingredient) {
+            if (!is_array($ingredient) || $this->craftingIngredientKind($ingredient) !== 'resource') {
+                return null;
+            }
+            $type = (string) ($ingredient['type'] ?? '');
+            if ($type === '') {
+                return null;
+            }
+
+            $this->addResourceCost(
+                $resourceCosts,
+                $this->normalizeCraftResourceType($type),
+                max(0.0, (float) ($ingredient['quantity'] ?? 0)),
+            );
+        }
+
+        return $resourceCosts;
+    }
+
+    /**
+     * @return array<string, array<ProbeItem>>
+     */
+    private function probeItemsByType(NeumannProbe $probe): array
+    {
+        $itemsByType = [];
+        foreach ($this->items->findByProbeId($probe->id) as $item) {
+            $itemsByType[$item->type] ??= [];
+            $itemsByType[$item->type][] = $item;
+        }
+
+        return $itemsByType;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function consumedItemPayload(ProbeItem $item): array
+    {
+        return [
+            'type' => $item->type,
+            'name' => $item->name,
+            'containerSpace' => $item->containerSpace,
+            'metadata' => $item->metadata,
+        ];
+    }
+
+    /**
+     * @param array<string, float> $resourceCosts
+     */
+    private function addResourceCost(array &$resourceCosts, string $type, float $quantity): void
+    {
+        $quantity = round(max(0.0, $quantity), 4);
+        if ($quantity <= 0.0) {
+            return;
+        }
+
+        $resourceCosts[$type] = round((float) ($resourceCosts[$type] ?? 0.0) + $quantity, 4);
+    }
+
+    private function normalizeCraftResourceType(string $type): string
+    {
+        try {
+            return ResourceComposition::normalizeSelection($type)[0];
+        } catch (\InvalidArgumentException) {
+            return $type;
+        }
+    }
+
+    /**
+     * @param array<string, float> $resourceCosts
+     */
+    private function ensureResourceCostsAvailable(NeumannProbe $probe, array $resourceCosts): void
+    {
+        foreach ($resourceCosts as $type => $quantity) {
+            if ($this->resourceStock($probe, $type) + 0.00001 < $quantity) {
+                throw new MannyActionException(422, 'insufficient_' . $type, 'Insufficient resources in probe inventory for this recipe.');
+            }
+        }
+    }
+
+    private function resourceStock(NeumannProbe $probe, string $type): float
+    {
+        return match ($type) {
+            ResourceComposition::METALS => $probe->metalsStock,
+            ResourceComposition::ICE => $probe->iceStock,
+            ResourceComposition::CARBON_COMPOUNDS => $probe->organicCompoundsStock,
+            ResourceComposition::DEUTERIUM => $probe->deuteriumStock,
+            default => 0.0,
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $craftingPlan
+     */
+    private function consumeCraftingPlan(NeumannProbe $probe, array $craftingPlan): void
+    {
+        $resourceCosts = is_array($craftingPlan['resourceCosts'] ?? null) ? $craftingPlan['resourceCosts'] : [];
+        foreach ($resourceCosts as $type => $quantity) {
+            $this->subtractResourceFromProbe($probe, (string) $type, (float) $quantity);
+        }
+
+        $itemsToConsume = is_array($craftingPlan['itemsToConsume'] ?? null) ? $craftingPlan['itemsToConsume'] : [];
+        foreach ($itemsToConsume as $item) {
+            if ($item instanceof ProbeItem) {
+                $this->items->delete($item);
+            }
+        }
+    }
+
+    private function subtractResourceFromProbe(NeumannProbe $probe, string $type, float $quantity): void
+    {
+        $quantity = round(max(0.0, $quantity), 4);
+        if ($quantity <= 0.0) {
+            return;
+        }
+
+        if ($type === ResourceComposition::METALS) {
+            $probe->metalsStock = round(max(0.0, $probe->metalsStock - $quantity), 4);
+        } elseif ($type === ResourceComposition::ICE) {
+            $probe->iceStock = round(max(0.0, $probe->iceStock - $quantity), 4);
+        } elseif ($type === ResourceComposition::CARBON_COMPOUNDS) {
+            $probe->organicCompoundsStock = round(max(0.0, $probe->organicCompoundsStock - $quantity), 4);
+        } elseif ($type === ResourceComposition::DEUTERIUM) {
+            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - $quantity), 4);
+        }
+    }
+
+    /**
+     * @param array<string, float> $resourceCosts
+     */
+    private function cargoSpaceFreedByResourceCosts(array $resourceCosts): float
+    {
+        $freed = 0.0;
+        foreach ($resourceCosts as $type => $quantity) {
+            if ($type !== ResourceComposition::DEUTERIUM) {
+                $freed += max(0.0, (float) $quantity);
+            }
+        }
+
+        return round($freed, 4);
+    }
+
+    /**
+     * @param array<array<string, mixed>> $consumedItems
+     */
+    private function cargoSpaceFreedByConsumedItems(array $consumedItems): float
+    {
+        return round(array_reduce(
+            $consumedItems,
+            static fn(float $total, array $item): float => $total + max(0.0, (float) ($item['containerSpace'] ?? 0.0)),
+            0.0,
+        ), 4);
+    }
+
+    private function createCraftingOutput(NeumannProbe $probe, Manny $manny, \DateTimeImmutable $now): void
+    {
+        $output = $manny->taskPayload['output'] ?? null;
+        if (!is_array($output)) {
+            $recipeDefinition = CraftingRecipeCatalog::find((string) ($manny->taskPayload['recipe'] ?? ''));
+            $output = is_array($recipeDefinition) && is_array($recipeDefinition['output'] ?? null)
+                ? $recipeDefinition['output']
+                : null;
+        }
+        if (!is_array($output)) {
+            return;
+        }
+
+        $type = (string) ($output['type'] ?? '');
+        if ($type === '') {
+            return;
+        }
+
+        $metadata = [
+            'recipe' => (string) ($manny->taskPayload['recipe'] ?? $type),
+            'craftedByMannyId' => $manny->uid,
+            'craftedByMannyName' => $manny->name,
+            'craftedAt' => $now->format('c'),
+        ];
+        $capacityBonus = round(max(0.0, (float) ($output['capacityBonus'] ?? 0.0)), 4);
+        if ($capacityBonus > 0.0) {
+            $metadata['capacityBonus'] = $capacityBonus;
+            $metadata['capacityBonusUnit'] = ProbeInventory::CAPACITY_UNIT;
+        }
+
+        $this->items->create(
+            $probe->id,
+            $type,
+            (string) ($output['name'] ?? $type),
+            round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
+            $metadata,
+        );
+    }
+
+    private function refundCraftingCommitment(NeumannProbe $probe, Manny $manny): void
+    {
+        $consumedItems = is_array($manny->taskPayload['consumedItems'] ?? null) ? $manny->taskPayload['consumedItems'] : [];
+        foreach ($consumedItems as $item) {
+            if (is_array($item)) {
+                $this->restoreConsumedItem($probe, $item);
+            }
+        }
+
+        $resourceCosts = is_array($manny->taskPayload['resourceCosts'] ?? null) ? $manny->taskPayload['resourceCosts'] : [];
+        if ($resourceCosts === [] && (float) ($manny->taskPayload['metalsCost'] ?? 0.0) > 0.0) {
+            $resourceCosts = [ResourceComposition::METALS => (float) $manny->taskPayload['metalsCost']];
+        }
+
+        $refundedResources = false;
+        foreach ($resourceCosts as $type => $quantity) {
+            if ((float) $quantity <= 0.0) {
+                continue;
+            }
+
+            $this->transferResourceToProbe($probe, (string) $type, (float) $quantity);
+            $refundedResources = true;
+        }
+        if ($refundedResources) {
+            $this->probes->save($probe);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    private function restoreConsumedItem(NeumannProbe $probe, array $item): void
+    {
+        $type = (string) ($item['type'] ?? '');
+        if ($type === '') {
+            return;
+        }
+
+        $metadata = $item['metadata'] ?? [];
+        $this->items->create(
+            $probe->id,
+            $type,
+            (string) ($item['name'] ?? $type),
+            round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4),
+            is_array($metadata) ? $metadata : [],
+        );
     }
 
     private function refreshMining(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
@@ -852,13 +1194,13 @@ final class MannyService
 
     private function freeCargoCapacity(NeumannProbe $probe): float
     {
-        $used = ProbeInventory::defaultForProbe(
+        $inventory = ProbeInventory::defaultForProbe(
             $probe,
             $this->mannies->findByProbeId($probe->id),
             $this->items->findByProbeId($probe->id),
-        )->usedCapacity();
+        );
 
-        return max(0.0, round(1.0 - $used, 4));
+        return max(0.0, round($inventory->capacity - $inventory->usedCapacity(), 4));
     }
 
     /**

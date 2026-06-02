@@ -591,8 +591,8 @@ button:disabled {
 
 .metric-detail div {
     display: grid;
-    grid-template-columns: minmax(105px, .8fr) minmax(0, 1fr);
-    gap: 10px;
+    grid-template-columns: 1fr;
+    gap: 2px;
 }
 
 .metric-detail dt {
@@ -602,6 +602,7 @@ button:disabled {
 .metric-detail dd {
     margin: 0;
     color: var(--text);
+    overflow-wrap: anywhere;
 }
 
 .interactive-metric:hover .metric-detail,
@@ -858,6 +859,72 @@ button:disabled {
 
 .manny-form select[multiple] {
     min-height: 96px;
+}
+
+.manny-craft-picker {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.manny-craft-ingredients {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: .85rem;
+    line-height: 1.4;
+}
+
+.manny-craft-ingredients-title {
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.manny-craft-ingredients ul {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.manny-craft-ingredients li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 8px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 2px;
+    background: rgba(255,255,255,.04);
+}
+
+.manny-craft-ingredients li.missing {
+    border-color: rgba(255,116,116,.45);
+    color: #ffb5b5;
+}
+
+.manny-craft-ingredients b {
+    color: var(--text);
+    font-size: .8rem;
+    font-weight: 600;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+
+.manny-craft-ingredients li.missing b {
+    color: #ffd0d0;
+}
+
+.manny-craft-ingredients p {
+    margin: 0;
+}
+
+.manny-craft-button:disabled {
+    cursor: not-allowed;
+    opacity: .55;
 }
 
 .manny-recall-button {
