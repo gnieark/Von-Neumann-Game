@@ -70,6 +70,7 @@
     let mannyCompletionRefreshPending = false;
     let mannyCompletionTimers = [];
     const miningResourceTypes = ['deuterium', 'metals', 'ice', 'carbon_compounds'];
+    const mannyMiningAmountMax = 0.55;
     const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) {
@@ -316,38 +317,48 @@
             + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
             + '</section>';
     };
-    const renderMannyActionForms = () => (
-        '<div class="manny-action-grid">'
-        + '<section class="manny-action-section">'
-        + '<h4>' + escapeHtml(t('repairActionTitle', 'Repair')) + '</h4>'
-        + '<form class="manny-repair-form manny-form">'
-        + '<label>' + escapeHtml(t('repairPercent', 'Integrity to restore')) + '<input name="integrityPercent" type="number" min="1" max="100" step="1" value="1"></label>'
-        + '<button type="submit">' + escapeHtml(t('repair', 'Repair')) + '</button>'
-        + '</form>'
-        + '</section>'
-        + '<section class="manny-action-section">'
-        + '<h4>' + escapeHtml(t('miningActionTitle', 'Mine')) + '</h4>'
-        + '<form class="manny-mine-form manny-form">'
-        + '<label>' + escapeHtml(t('mineTarget', 'Object')) + '<select class="manny-mine-target" name="objectId">' + mineTargetOptions('') + '</select></label>'
-        + '<label>' + escapeHtml(t('resources', 'Resources')) + '<select class="manny-mine-resources" name="resources" multiple size="4">'
-        + mineResourceOptions(currentMannyMineTargets[0] || null, [])
-        + '</select></label>'
-        + '<label>' + escapeHtml(t('targetAmount', 'Amount')) + '<input name="targetAmount" type="number" min="0.01" max="0.55" step="0.01" value="0.01"></label>'
-        + '<button type="submit">' + escapeHtml(t('mine', 'Mine')) + '</button>'
-        + '</form>'
-        + '</section>'
-        + '<section class="manny-action-section">'
-        + '<h4>' + escapeHtml(t('craftingActionTitle', 'Craft')) + '</h4>'
-        + '<form class="manny-craft-form manny-form">'
-        + '<div class="manny-craft-picker">'
-        + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select class="manny-craft-recipe" name="recipe">' + craftRecipeOptions('') + '</select></label>'
-        + '<div class="manny-craft-ingredients" aria-live="polite"></div>'
+    const renderMannyActionAccordion = (id, title, formHtml) => (
+        '<section class="manny-action-section manny-action-accordion">'
+        + '<button class="manny-action-accordion-trigger" type="button" aria-expanded="false" aria-controls="' + escapeHtml(id) + '">'
+        + '<span>' + escapeHtml(title) + '</span>'
+        + '</button>'
+        + '<div id="' + escapeHtml(id) + '" class="manny-action-accordion-panel" hidden>'
+        + formHtml
         + '</div>'
-        + '<button class="manny-craft-button" type="submit">' + escapeHtml(t('craft', 'Craft')) + '</button>'
-        + '</form>'
         + '</section>'
-        + '</div>'
     );
+    const renderMannyActionForms = (idPrefix) => {
+        const prefix = String(idPrefix || 'manny-actions').replace(/[^a-zA-Z0-9_-]/g, '-');
+        const repairForm = '<form class="manny-repair-form manny-form">'
+            + '<label>' + escapeHtml(t('repairPercent', 'Integrity to restore')) + '<input name="integrityPercent" type="number" min="1" max="100" step="1" value="1"></label>'
+            + '<button type="submit">' + escapeHtml(t('repair', 'Repair')) + '</button>'
+            + '</form>';
+        const mineTarget = currentMannyMineTargets[0] || null;
+        const mineAmountMax = mineTargetMaxAmount(mineTarget, resourceTypesForTarget(mineTarget));
+        const mineForm = '<form class="manny-mine-form manny-form">'
+            + '<label>' + escapeHtml(t('mineTarget', 'Object')) + '<select class="manny-mine-target" name="objectId">' + mineTargetOptions('') + '</select></label>'
+            + '<label>' + escapeHtml(t('mineResourcesSelection', 'Select resources to extract')) + '<select class="manny-mine-resources" name="resources" multiple size="4">'
+            + mineResourceOptions(mineTarget, [])
+            + '</select></label>'
+            + '<label class="manny-mine-amount-label"><span class="manny-mine-amount-text">' + escapeHtml(miningAmountLabel(mineAmountMax)) + '</span><input name="targetAmount" type="number" min="0.01" max="' + escapeHtml(String(mineAmountMax)) + '" step="0.01" value="' + escapeHtml(mineAmountMax >= 0.01 ? '0.01' : '0') + '"></label>'
+            + '<button class="manny-mine-button" type="submit"' + (mineTarget ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('mine', 'Mine')) + '</button>'
+            + '<p class="manny-mine-hint">' + escapeHtml(t('mannyMiningHint', 'A Manny can carry 0.05 ECE (Earth container equivalent). If you ask it to mine more, it will make round trips between the mined object and the probe.')) + '</p>'
+            + '</form>';
+        const craftForm = '<form class="manny-craft-form manny-form">'
+            + '<div class="manny-craft-picker">'
+            + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select class="manny-craft-recipe" name="recipe">' + craftRecipeOptions('') + '</select></label>'
+            + '<div class="manny-craft-ingredients" aria-live="polite"></div>'
+            + '</div>'
+            + '<button class="manny-craft-button" type="submit">' + escapeHtml(t('craft', 'Craft')) + '</button>'
+            + '</form>';
+
+        return '<div class="manny-action-grid">'
+            + '<h4 class="manny-action-heading">' + escapeHtml(t('assignMannyTask', 'Assign a task to this Manny')) + '</h4>'
+            + renderMannyActionAccordion(prefix + '-repair', t('repairActionTitle', 'Repair'), repairForm)
+            + renderMannyActionAccordion(prefix + '-mine', t('miningActionTitle', 'Mine'), mineForm)
+            + renderMannyActionAccordion(prefix + '-craft', t('craftingActionTitle', 'Craft'), craftForm)
+            + '</div>';
+    };
     const sectorContext = (sector) => {
         const distance = Number(sector && sector.distance);
         if (!Number.isFinite(distance)) {
@@ -1218,6 +1229,56 @@
         )).join('');
     }
 
+    function resourceProfileForMineSelection(target, selectedResources) {
+        const available = resourceTypesForTarget(target);
+        const selected = selectedResources.filter((type) => available.includes(type));
+        const effectiveSelection = selected.length > 0 ? selected : available;
+        const composition = resourceCompositionForTarget(target);
+        const total = effectiveSelection.reduce((sum, type) => sum + Math.max(0, Number(composition[type]) || 0), 0);
+        if (total <= 0) {
+            return {};
+        }
+
+        return effectiveSelection.reduce((profile, type) => {
+            profile[type] = Math.max(0, Number(composition[type]) || 0) / total;
+            return profile;
+        }, {});
+    }
+
+    function mineTargetMaxAmount(target, selectedResources) {
+        if (!target) {
+            return mannyMiningAmountMax;
+        }
+
+        const amounts = target.resourceAmounts && typeof target.resourceAmounts === 'object'
+            ? target.resourceAmounts
+            : null;
+        if (!amounts) {
+            return mannyMiningAmountMax;
+        }
+
+        const profile = resourceProfileForMineSelection(target, selectedResources);
+        const limits = Object.entries(profile)
+            .filter(([, share]) => Number(share) > 0)
+            .map(([type, share]) => {
+                const available = Number(amounts[type]);
+                return Number.isFinite(available) ? Math.max(0, available) / Number(share) : null;
+            })
+            .filter((value) => value !== null && Number.isFinite(value));
+        if (limits.length === 0) {
+            return mannyMiningAmountMax;
+        }
+
+        const capped = Math.min(mannyMiningAmountMax, ...limits);
+        return Math.max(0, Math.floor(capped * 100) / 100);
+    }
+
+    function miningAmountLabel(maxAmount) {
+        return formatText(t('targetAmountWithMax', 'Amount (max. {max})'), {
+            max: numberValue(maxAmount),
+        });
+    }
+
     function mineResourceOptions(target, selectedResources) {
         const available = resourceTypesForTarget(target);
         const selected = selectedResources.filter((type) => available.includes(type));
@@ -1234,6 +1295,45 @@
         }).join('');
     }
 
+    function updateMannyMineFormState(form) {
+        if (!form) {
+            return;
+        }
+
+        const targetSelect = form.querySelector('.manny-mine-target');
+        const resourceSelect = form.querySelector('.manny-mine-resources');
+        const amountInput = form.querySelector('input[name="targetAmount"]');
+        const amountText = form.querySelector('.manny-mine-amount-text');
+        const mineButton = form.querySelector('.manny-mine-button');
+        if (!targetSelect || !resourceSelect) {
+            return;
+        }
+
+        const target = currentMannyMineTargets.find((item) => item.id === targetSelect.value) || null;
+        const selectedResources = Array.from(resourceSelect.selectedOptions)
+            .filter((option) => !option.disabled)
+            .map((option) => option.value);
+        const maxAmount = mineTargetMaxAmount(target, selectedResources);
+        if (amountText) {
+            amountText.textContent = miningAmountLabel(maxAmount);
+        }
+        if (amountInput) {
+            amountInput.max = String(maxAmount);
+            const currentAmount = Number(amountInput.value);
+            if (!Number.isFinite(currentAmount) || currentAmount <= 0) {
+                amountInput.value = maxAmount >= 0.01 ? '0.01' : '0';
+            } else if (currentAmount > maxAmount) {
+                amountInput.value = String(maxAmount);
+            }
+        }
+        if (mineButton) {
+            const disabled = !target || maxAmount < 0.01;
+            mineButton.disabled = disabled;
+            mineButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            mineButton.title = !target ? t('noMiningTargetSelected', 'Select a mining target.') : '';
+        }
+    }
+
     function updateMannyResourceOptions(form) {
         if (!form) {
             return;
@@ -1248,6 +1348,7 @@
         const target = currentMannyMineTargets.find((item) => item.id === targetSelect.value) || null;
         const selectedResources = Array.from(resourceSelect.selectedOptions).map((option) => option.value);
         resourceSelect.innerHTML = mineResourceOptions(target, selectedResources);
+        updateMannyMineFormState(form);
     }
 
     function updateMannyTargetOptions() {
@@ -1369,7 +1470,7 @@
                 + '<label>' + escapeHtml(t('rename', 'Rename')) + '<input name="name" value="' + escapeHtml(manny.name) + '" maxlength="40"></label>'
                 + '<button type="submit">' + escapeHtml(t('rename', 'Rename')) + '</button>'
                 + '</form>'
-                + (busy ? renderMannyTaskPanel(manny, observedAt) : renderMannyActionForms())
+                + (busy ? renderMannyTaskPanel(manny, observedAt) : renderMannyActionForms(panelId))
                 + '</div>'
                 + '</article>';
         }).join('');
@@ -1607,6 +1708,12 @@
                     body: JSON.stringify({integrityPercent: Number.parseFloat(form.get('integrityPercent'))}),
                 });
             } else if (event.target.classList.contains('manny-mine-form')) {
+                const targetSelect = event.target.querySelector('.manny-mine-target');
+                if (!targetSelect || !targetSelect.value) {
+                    updateMannyMineFormState(event.target);
+                    setText('manny-status', t('noMiningTargetSelected', 'Select a mining target.'));
+                    return;
+                }
                 const resourceSelect = event.target.querySelector('.manny-mine-resources');
                 const resources = resourceSelect
                     ? Array.from(resourceSelect.selectedOptions).filter((option) => !option.disabled).map((option) => option.value)
@@ -1647,6 +1754,9 @@
         if (event.target.classList.contains('manny-mine-target')) {
             updateMannyResourceOptions(event.target.closest('.manny-mine-form'));
         }
+        if (event.target.classList.contains('manny-mine-resources')) {
+            updateMannyMineFormState(event.target.closest('.manny-mine-form'));
+        }
         if (event.target.classList.contains('manny-craft-recipe')) {
             updateMannyCraftForm(event.target.closest('.manny-craft-form'));
         }
@@ -1675,6 +1785,32 @@
             });
             accordionButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
             panel.hidden = !willOpen;
+            return;
+        }
+
+        const actionAccordionButton = event.target.closest('.manny-action-accordion-trigger');
+        if (actionAccordionButton) {
+            const actionSection = actionAccordionButton.closest('.manny-action-accordion');
+            const actionPanel = actionSection ? actionSection.querySelector('.manny-action-accordion-panel') : null;
+            if (!actionPanel) {
+                return;
+            }
+
+            const willOpen = actionAccordionButton.getAttribute('aria-expanded') !== 'true';
+            const actionGrid = actionAccordionButton.closest('.manny-action-grid');
+            actionGrid?.querySelectorAll('.manny-action-accordion-trigger[aria-expanded="true"]').forEach((openButton) => {
+                if (openButton === actionAccordionButton) {
+                    return;
+                }
+                openButton.setAttribute('aria-expanded', 'false');
+                const openSection = openButton.closest('.manny-action-accordion');
+                const openPanel = openSection ? openSection.querySelector('.manny-action-accordion-panel') : null;
+                if (openPanel) {
+                    openPanel.hidden = true;
+                }
+            });
+            actionAccordionButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            actionPanel.hidden = !willOpen;
             return;
         }
 

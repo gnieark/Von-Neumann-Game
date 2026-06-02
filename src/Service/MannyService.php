@@ -27,8 +27,8 @@ final class MannyService
     public const MINING_TRAVEL_SECONDS = 900;
     public const MINING_AMOUNT_PER_TICK = 0.01;
     public const MINING_TICK_SECONDS = 300;
-    public const MANNY_CARGO_CAPACITY = 0.3;
-    public const MANNY_CONTAINER_SPACE = 0.05;
+    public const MANNY_CARGO_CAPACITY = Manny::CARGO_CAPACITY;
+    public const MANNY_CONTAINER_SPACE = Manny::CONTAINER_SPACE;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
     public const WAYPOINT_BOOKMARK_METALS_COST = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_METALS_COST;
     public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CONTAINER_SPACE;
@@ -151,7 +151,7 @@ final class MannyService
             $this->ensureAsteroidHasResources($availableAmounts, $resourceProfile, $targetAmount);
         }
         $storedAmount = $this->cargoAmountForResourceProfile($targetAmount, $resourceProfile);
-        if ($storedAmount > $this->freeCargoCapacity($probe) + ($manny->isOnProbe() ? 0.05 : 0.0) + 0.00001) {
+        if ($storedAmount > $this->freeCargoCapacity($probe) + ($manny->isOnProbe() ? self::MANNY_CONTAINER_SPACE : 0.0) + 0.00001) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this mining target.');
         }
 

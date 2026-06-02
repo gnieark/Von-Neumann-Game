@@ -16,6 +16,8 @@ final class Manny
     public const TASK_CRAFTING = 'crafting';
     public const TASK_RETURNING = 'returning';
     public const TASK_WAITING_FOR_SPACE = 'waiting_for_space';
+    public const CARGO_CAPACITY = 0.05;
+    public const CONTAINER_SPACE = 0.05;
 
     public function __construct(
         public readonly int $id,
@@ -63,7 +65,7 @@ final class Manny
     public function cargoArray(): array
     {
         return [
-            'capacity' => 0.3,
+            'capacity' => self::CARGO_CAPACITY,
             'deuterium' => $this->cargoDeuterium,
             'metals' => $this->cargoMetals,
             'ice' => $this->cargoIce,

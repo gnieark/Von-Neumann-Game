@@ -379,6 +379,7 @@ $mannyItems = array_values(array_filter($inventoryItems, static fn(array $item):
 $test->assertEquals(4, count($mannyItems), 'default inventory contains four mannies');
 $test->assertEquals(0.05, $mannyItems[0]['containerSpace'] ?? null, 'each manny occupies 0.05 containers');
 $defaultMannyCargo = $mannyItems[0]['cargo'] ?? [];
+$test->assertEquals(0.05, $defaultMannyCargo['capacity'] ?? null, 'each Manny can carry 0.05 containers of mined resources');
 $test->assertEquals(0.0, $defaultMannyCargo['ice'] ?? null, 'default Manny cargo exposes ice');
 $test->assertEquals(0.0, $defaultMannyCargo['organicCompounds'] ?? null, 'default Manny cargo exposes organic compounds');
 $test->assert(!array_key_exists('other', $defaultMannyCargo), 'default Manny cargo no longer exposes generic other');
@@ -529,6 +530,35 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'multi-resource mining subtracts the metals share from the asteroid');
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['ice'] ?? null, 'multi-resource mining subtracts the ice share from the asteroid');
     $test->assertEquals(0.3234, $mixedAsteroid?->toArray()['resourceAmounts']['carbon_compounds'] ?? null, 'multi-resource mining subtracts the carbon-compound share from the asteroid');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('haul-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+    ]));
+    $multiTripMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'haul-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.06,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $multiTripMine->status, 'Manny mining accepts an order larger than one cargo trip');
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started WHERE id = :id')->execute([
+        'id' => $mineMannyDbId,
+        'started' => gmdate('c', time() - 3500),
+    ]);
+    $haulingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $haulingSecondManny = array_values(array_filter(
+        $haulingMannies->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $secondMannyId,
+    ))[0] ?? null;
+    $test->assertEquals(2, $haulingSecondManny['task']['tripIndex'] ?? null, 'Manny mining starts a second trip after carrying 0.05 containers');
+    $test->assertEquals(0.05, $haulingSecondManny['task']['depositedAmount'] ?? null, 'Manny deposits one 0.05-container cargo before the next trip');
+    $test->assertEquals(0.0, $haulingSecondManny['cargo']['metals'] ?? null, 'Manny begins the second trip without cargo');
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $mineMannyDbId,
+        'started' => gmdate('c', time() - 6000),
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'Manny returns to the probe after completing all mining trips');
 
     $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 96, metals_stock = 0.2 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 1], JSON_THROW_ON_ERROR));

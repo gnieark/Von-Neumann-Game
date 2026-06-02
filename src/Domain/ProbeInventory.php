@@ -43,11 +43,11 @@ final class ProbeInventory
                     'probe-' . $probe->id . '-manny-' . $i,
                     'manny',
                     'manny-' . $i,
-                    0.05,
+                    Manny::CONTAINER_SPACE,
                     null,
                     0,
                     ['type' => Manny::LOCATION_PROBE],
-                    ['capacity' => 0.3, 'deuterium' => 0.0, 'metals' => 0.0, 'ice' => 0.0, 'organicCompounds' => 0.0, 'capacityUnit' => self::CAPACITY_UNIT],
+                    ['capacity' => Manny::CARGO_CAPACITY, 'deuterium' => 0.0, 'metals' => 0.0, 'ice' => 0.0, 'organicCompounds' => 0.0, 'capacityUnit' => self::CAPACITY_UNIT],
                 );
             }
         } else {
@@ -56,7 +56,7 @@ final class ProbeInventory
                     $manny->uid,
                     'manny',
                     $manny->name,
-                    $manny->isOnProbe() ? 0.05 : 0.0,
+                    $manny->isOnProbe() ? Manny::CONTAINER_SPACE : 0.0,
                     $manny->currentTask,
                     $manny->taskProgressPercent(),
                     ['type' => $manny->locationType],

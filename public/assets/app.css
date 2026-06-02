@@ -841,6 +841,58 @@ button:disabled {
     color: var(--text);
 }
 
+.manny-action-heading {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text);
+}
+
+.manny-action-accordion {
+    gap: 0;
+}
+
+.manny-action-accordion-trigger {
+    position: relative;
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 36px 10px 12px;
+    border-color: rgba(255,255,255,.12);
+    background: rgba(255,255,255,.04);
+    color: var(--text);
+    text-align: left;
+}
+
+.manny-action-accordion-trigger:hover {
+    border-color: rgba(143,182,189,.45);
+}
+
+.manny-action-accordion-trigger::after {
+    content: "+";
+    position: absolute;
+    right: 13px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--cold);
+    font-weight: 700;
+}
+
+.manny-action-accordion-trigger[aria-expanded="true"]::after {
+    content: "-";
+}
+
+.manny-action-accordion-panel {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-top: 0;
+    background: rgba(0,0,0,.12);
+}
+
+.manny-action-accordion-panel[hidden] {
+    display: none;
+}
+
 .manny-task-panel p {
     margin: 0;
     color: var(--muted);
@@ -859,6 +911,14 @@ button:disabled {
 
 .manny-form select[multiple] {
     min-height: 96px;
+}
+
+.manny-mine-hint {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.4;
 }
 
 .manny-craft-picker {
