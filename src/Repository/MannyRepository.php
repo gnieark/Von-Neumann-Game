@@ -38,8 +38,8 @@ final class MannyRepository
         $uid = $this->uniqueUid();
         $stmt = $this->pdo->prepare(
             'INSERT INTO mannies
-             (uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_other, created_at, updated_at)
-             VALUES (:uid, :probe_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, 0, 0, 0, :created_at, :updated_at)'
+             (uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
+             VALUES (:uid, :probe_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, 0, 0, 0, 0, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
@@ -126,7 +126,8 @@ final class MannyRepository
                 task_payload_json = :task_payload_json,
                 cargo_deuterium = :cargo_deuterium,
                 cargo_metals = :cargo_metals,
-                cargo_other = :cargo_other,
+                cargo_ice = :cargo_ice,
+                cargo_organic_compounds = :cargo_organic_compounds,
                 updated_at = :updated_at
              WHERE id = :id'
         );
@@ -144,7 +145,8 @@ final class MannyRepository
             'task_payload_json' => json_encode($manny->taskPayload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'cargo_deuterium' => $manny->cargoDeuterium,
             'cargo_metals' => $manny->cargoMetals,
-            'cargo_other' => $manny->cargoOther,
+            'cargo_ice' => $manny->cargoIce,
+            'cargo_organic_compounds' => $manny->cargoOrganicCompounds,
             'updated_at' => $manny->updatedAt,
         ]);
     }
@@ -173,7 +175,8 @@ final class MannyRepository
             $payload,
             (float) ($row['cargo_deuterium'] ?? 0),
             (float) ($row['cargo_metals'] ?? 0),
-            (float) ($row['cargo_other'] ?? 0),
+            (float) ($row['cargo_ice'] ?? 0),
+            (float) ($row['cargo_organic_compounds'] ?? 0),
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );

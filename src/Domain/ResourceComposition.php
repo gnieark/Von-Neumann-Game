@@ -168,7 +168,7 @@ final class ResourceComposition
             self::DEUTERIUM => self::DEUTERIUM,
             self::METALS, 'metal' => self::METALS,
             self::ICE, 'water', 'water_ice', 'volatile', 'volatiles' => self::ICE,
-            self::CARBON_COMPOUNDS, 'carbon', 'organic', 'organics', 'organic_compounds', self::LEGACY_OTHER => self::CARBON_COMPOUNDS,
+            self::CARBON_COMPOUNDS, 'carbon', 'organic', 'organics', 'organic_compounds', 'organiccompounds', self::LEGACY_OTHER => self::CARBON_COMPOUNDS,
             default => $type,
         };
     }

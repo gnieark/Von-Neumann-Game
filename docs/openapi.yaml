@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '5'
+  version: '7'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 5
+                apiVersion: 7
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -170,12 +170,25 @@ paths:
                         capacity: 0.3
                         deuterium: 0
                         metals: 0
-                        other: 0
+                        ice: 0
+                        organicCompounds: 0
                         capacityUnit: earth_container_equivalent
                   resourceStocks:
                     - id: probe-1-stock-metals
                       type: metals
                       name: Métaux
+                      amount: 0
+                      containerSpace: 0
+                      capacityUnit: earth_container_equivalent
+                    - id: probe-1-stock-ice
+                      type: ice
+                      name: Glace
+                      amount: 0
+                      containerSpace: 0
+                      capacityUnit: earth_container_equivalent
+                    - id: probe-1-stock-organic-compounds
+                      type: carbon_compounds
+                      name: Composés organiques
                       amount: 0
                       containerSpace: 0
                       capacityUnit: earth_container_equivalent
@@ -991,7 +1004,7 @@ components:
           example: probe-1-stock-metals
         type:
           type: string
-          enum: [metals, other]
+          enum: [metals, ice, carbon_compounds]
         name:
           type: string
         amount:
@@ -1046,7 +1059,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, other]
+              enum: [deuterium, metals, ice, carbon_compounds]
             amount:
               type: number
         manny:
@@ -1236,7 +1249,7 @@ components:
               $ref: '#/components/schemas/Vector'
     MannyCargo:
       type: object
-      required: [capacity, deuterium, metals, other, capacityUnit]
+      required: [capacity, deuterium, metals, ice, organicCompounds, capacityUnit]
       properties:
         capacity:
           type: number
@@ -1245,7 +1258,9 @@ components:
           type: number
         metals:
           type: number
-        other:
+        ice:
+          type: number
+        organicCompounds:
           type: number
         capacityUnit:
           type: string
@@ -1353,8 +1368,7 @@ components:
           type: string
           description: Present only for detected Manny objects.
         cargo:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/MannyCargo'
     WaypointBookmarkTarget:
       type: object
       required: [id, type, name]

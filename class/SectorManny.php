@@ -9,6 +9,8 @@ final class SectorManny extends UniverseObject
     public const STATE_ABANDONED = 'abandoned';
     public const STATE_FORGOTTEN = 'forgotten';
 
+    private readonly array $cargo;
+
     public static function objectIdForUid(string $uid): string
     {
         return 'manny-' . $uid;
@@ -19,11 +21,12 @@ final class SectorManny extends UniverseObject
         ?string $name,
         private readonly string $mannyUid,
         private readonly string $state,
-        private readonly array $cargo = [],
+        array $cargo = [],
         ?string $description = null,
         array $waypointBookmarks = [],
     ) {
         parent::__construct($id, $name, UniverseObjectType::Manny, 0.0, 0.0, $description, $waypointBookmarks);
+        $this->cargo = self::normalizeCargo($cargo);
     }
 
     public function getMannyUid(): string
@@ -61,5 +64,23 @@ final class SectorManny extends UniverseObject
             $data['description'] ?? null,
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );
+    }
+
+    private static function normalizeCargo(array $cargo): array
+    {
+        return [
+            'capacity' => (float) ($cargo['capacity'] ?? 0.3),
+            'deuterium' => (float) ($cargo['deuterium'] ?? 0.0),
+            'metals' => (float) ($cargo['metals'] ?? 0.0),
+            'ice' => (float) ($cargo['ice'] ?? 0.0),
+            'organicCompounds' => (float) (
+                $cargo['organicCompounds']
+                ?? $cargo['organic_compounds']
+                ?? $cargo['carbon_compounds']
+                ?? $cargo['other']
+                ?? 0.0
+            ),
+            'capacityUnit' => (string) ($cargo['capacityUnit'] ?? 'earth_container_equivalent'),
+        ];
     }
 }

@@ -522,6 +522,13 @@ button:disabled {
     color: #f0f3f3;
 }
 
+.metric b.manny-cargo-value {
+    font-size: .78rem;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: pre-line;
+}
+
 .interactive-metric {
     width: 100%;
     border-radius: 0;

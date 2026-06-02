@@ -47,7 +47,7 @@ final class ProbeInventory
                     null,
                     0,
                     ['type' => Manny::LOCATION_PROBE],
-                    ['capacity' => 0.3, 'deuterium' => 0.0, 'metals' => 0.0, 'other' => 0.0, 'capacityUnit' => self::CAPACITY_UNIT],
+                    ['capacity' => 0.3, 'deuterium' => 0.0, 'metals' => 0.0, 'ice' => 0.0, 'organicCompounds' => 0.0, 'capacityUnit' => self::CAPACITY_UNIT],
                 );
             }
         } else {
@@ -88,11 +88,19 @@ final class ProbeInventory
                 'capacityUnit' => self::CAPACITY_UNIT,
             ],
             [
-                'id' => 'probe-' . $probe->id . '-stock-other',
-                'type' => 'other',
-                'name' => 'Matériaux non métalliques',
-                'amount' => $probe->otherStock,
-                'containerSpace' => $probe->otherStock,
+                'id' => 'probe-' . $probe->id . '-stock-ice',
+                'type' => 'ice',
+                'name' => 'Glace',
+                'amount' => $probe->iceStock,
+                'containerSpace' => $probe->iceStock,
+                'capacityUnit' => self::CAPACITY_UNIT,
+            ],
+            [
+                'id' => 'probe-' . $probe->id . '-stock-organic-compounds',
+                'type' => 'carbon_compounds',
+                'name' => 'Composés organiques',
+                'amount' => $probe->organicCompoundsStock,
+                'containerSpace' => $probe->organicCompoundsStock,
                 'capacityUnit' => self::CAPACITY_UNIT,
             ],
         ];

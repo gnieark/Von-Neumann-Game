@@ -104,11 +104,13 @@ TEXT;
  */
 function cleanupDatabase(PDO $pdo, bool $dryRun): array
 {
+    $hasProbeOtherStock = tableColumnExists($pdo, 'neumann_probes', 'other_stock');
+    $hasMannyCargoOther = tableColumnExists($pdo, 'mannies', 'cargo_other');
     $stats = [
-        'probeRows' => countRows($pdo, 'SELECT COUNT(*) FROM neumann_probes WHERE other_stock <> 0'),
-        'probeAmount' => sumAmount($pdo, 'SELECT COALESCE(SUM(other_stock), 0) FROM neumann_probes WHERE other_stock <> 0'),
-        'mannyRows' => countRows($pdo, 'SELECT COUNT(*) FROM mannies WHERE cargo_other <> 0'),
-        'mannyAmount' => sumAmount($pdo, 'SELECT COALESCE(SUM(cargo_other), 0) FROM mannies WHERE cargo_other <> 0'),
+        'probeRows' => $hasProbeOtherStock ? countRows($pdo, 'SELECT COUNT(*) FROM neumann_probes WHERE other_stock <> 0') : 0,
+        'probeAmount' => $hasProbeOtherStock ? sumAmount($pdo, 'SELECT COALESCE(SUM(other_stock), 0) FROM neumann_probes WHERE other_stock <> 0') : 0.0,
+        'mannyRows' => $hasMannyCargoOther ? countRows($pdo, 'SELECT COUNT(*) FROM mannies WHERE cargo_other <> 0') : 0,
+        'mannyAmount' => $hasMannyCargoOther ? sumAmount($pdo, 'SELECT COALESCE(SUM(cargo_other), 0) FROM mannies WHERE cargo_other <> 0') : 0.0,
         'payloadRows' => 0,
     ];
 
@@ -121,8 +123,12 @@ function cleanupDatabase(PDO $pdo, bool $dryRun): array
 
     $pdo->beginTransaction();
     try {
-        $pdo->exec('UPDATE neumann_probes SET other_stock = 0 WHERE other_stock <> 0');
-        $pdo->exec('UPDATE mannies SET cargo_other = 0 WHERE cargo_other <> 0');
+        if ($hasProbeOtherStock) {
+            $pdo->exec('UPDATE neumann_probes SET other_stock = 0 WHERE other_stock <> 0');
+        }
+        if ($hasMannyCargoOther) {
+            $pdo->exec('UPDATE mannies SET cargo_other = 0 WHERE cargo_other <> 0');
+        }
 
         if ($payloadUpdates !== []) {
             $update = $pdo->prepare('UPDATE mannies SET task_payload_json = :payload WHERE id = :id');
@@ -141,6 +147,22 @@ function cleanupDatabase(PDO $pdo, bool $dryRun): array
     }
 
     return $stats;
+}
+
+function tableColumnExists(PDO $pdo, string $table, string $column): bool
+{
+    $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+    if ($driver === 'sqlite') {
+        $quotedTable = str_replace("'", "''", $table);
+        $columns = $pdo->query("PRAGMA table_info('$quotedTable')")?->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return in_array($column, array_map(static fn(array $row): string => (string) $row['name'], $columns), true);
+    }
+
+    $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` WHERE Field = :column");
+    $stmt->execute(['column' => $column]);
+
+    return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
 }
 
 function countRows(PDO $pdo, string $query): int
@@ -314,6 +336,22 @@ function migrateLegacyOtherResource(mixed &$value, ?string $key, array &$stats):
 
     if (!is_array($value)) {
         return false;
+    }
+
+    if ($key === 'cargo') {
+        $organic = (float) (
+            $value['organicCompounds']
+            ?? $value['organic_compounds']
+            ?? $value['carbon_compounds']
+            ?? 0
+        );
+        $legacy = (float) ($value['other'] ?? 0);
+        if (array_key_exists('other', $value) || array_key_exists('organic_compounds', $value) || array_key_exists('carbon_compounds', $value)) {
+            $value['organicCompounds'] = round($organic + $legacy, 4);
+            unset($value['other'], $value['organic_compounds'], $value['carbon_compounds']);
+            $stats['resourceMapsMigrated']++;
+            $changed = true;
+        }
     }
 
     if (in_array($key, ['resourceAmounts', 'resourceComposition', 'resourceProfile', 'extractedResources', 'depositedResources'], true)) {

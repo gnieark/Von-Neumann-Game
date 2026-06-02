@@ -176,7 +176,8 @@ final class MannyService
         ];
         $manny->cargoDeuterium = 0.0;
         $manny->cargoMetals = 0.0;
-        $manny->cargoOther = 0.0;
+        $manny->cargoIce = 0.0;
+        $manny->cargoOrganicCompounds = 0.0;
         $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
 
@@ -472,7 +473,7 @@ final class MannyService
         }
 
         $this->transferMannyCargoToProbe($manny, $probe);
-        if ($manny->cargoDeuterium <= 0.0001 && $manny->cargoMetals <= 0.0001 && $manny->cargoOther <= 0.0001) {
+        if ($this->mannyCargoIsEmpty($manny)) {
             $this->removeMannyFromSector($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
@@ -493,7 +494,7 @@ final class MannyService
         }
 
         $this->transferMannyCargoToProbe($manny, $probe);
-        if ($manny->cargoDeuterium <= 0.0001 && $manny->cargoMetals <= 0.0001 && $manny->cargoOther <= 0.0001) {
+        if ($this->mannyCargoIsEmpty($manny)) {
             $this->removeMannyFromSector($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
@@ -753,7 +754,13 @@ final class MannyService
 
     private function canAcceptMannyDocking(NeumannProbe $probe, Manny $manny): bool
     {
-        $requiredStorage = round(self::MANNY_CONTAINER_SPACE + $manny->cargoMetals + $manny->cargoOther, 4);
+        $requiredStorage = round(
+            self::MANNY_CONTAINER_SPACE
+            + $manny->cargoMetals
+            + $manny->cargoIce
+            + $manny->cargoOrganicCompounds,
+            4,
+        );
 
         return $this->freeCargoCapacity($probe) + 0.00001 >= $requiredStorage;
     }
@@ -795,7 +802,8 @@ final class MannyService
     {
         $manny->cargoDeuterium = round($manny->cargoDeuterium - $this->transferResourceToProbe($probe, 'deuterium', $manny->cargoDeuterium), 4);
         $manny->cargoMetals = round($manny->cargoMetals - $this->transferResourceToProbe($probe, 'metals', $manny->cargoMetals), 4);
-        $manny->cargoOther = round($manny->cargoOther - $this->transferResourceToProbe($probe, 'other', $manny->cargoOther), 4);
+        $manny->cargoIce = round($manny->cargoIce - $this->transferResourceToProbe($probe, 'ice', $manny->cargoIce), 4);
+        $manny->cargoOrganicCompounds = round($manny->cargoOrganicCompounds - $this->transferResourceToProbe($probe, 'carbon_compounds', $manny->cargoOrganicCompounds), 4);
     }
 
     private function transferResourceToProbe(NeumannProbe $probe, string $resourceType, float $amount): float
@@ -815,8 +823,10 @@ final class MannyService
         $accepted = min($amount, $this->freeCargoCapacity($probe));
         if ($resourceType === 'metals') {
             $probe->metalsStock = round($probe->metalsStock + $accepted, 4);
+        } elseif ($resourceType === 'ice') {
+            $probe->iceStock = round($probe->iceStock + $accepted, 4);
         } else {
-            $probe->otherStock = round($probe->otherStock + $accepted, 4);
+            $probe->organicCompoundsStock = round($probe->organicCompoundsStock + $accepted, 4);
         }
 
         return round($accepted, 4);
@@ -853,11 +863,8 @@ final class MannyService
         $amounts = $this->resourceAmountsForTotal($amount, $profile);
         $manny->cargoDeuterium = $amounts[ResourceComposition::DEUTERIUM] ?? 0.0;
         $manny->cargoMetals = $amounts[ResourceComposition::METALS] ?? 0.0;
-        $manny->cargoOther = round(
-            ($amounts[ResourceComposition::ICE] ?? 0.0)
-            + ($amounts[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0),
-            4,
-        );
+        $manny->cargoIce = $amounts[ResourceComposition::ICE] ?? 0.0;
+        $manny->cargoOrganicCompounds = $amounts[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0;
     }
 
     /**
@@ -955,7 +962,16 @@ final class MannyService
     {
         $manny->cargoDeuterium = 0.0;
         $manny->cargoMetals = 0.0;
-        $manny->cargoOther = 0.0;
+        $manny->cargoIce = 0.0;
+        $manny->cargoOrganicCompounds = 0.0;
+    }
+
+    private function mannyCargoIsEmpty(Manny $manny): bool
+    {
+        return $manny->cargoDeuterium <= 0.0001
+            && $manny->cargoMetals <= 0.0001
+            && $manny->cargoIce <= 0.0001
+            && $manny->cargoOrganicCompounds <= 0.0001;
     }
 
     private function registerMannyInSector(Manny $manny, string $state): void

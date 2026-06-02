@@ -72,7 +72,8 @@ final class SchemaInitializer
                 energy_stored $decimal NOT NULL DEFAULT 0,
                 deuterium_stock $decimal NOT NULL DEFAULT 100,
                 metals_stock $decimal NOT NULL DEFAULT 0,
-                other_stock $decimal NOT NULL DEFAULT 0,
+                ice_stock $decimal NOT NULL DEFAULT 0,
+                organic_compounds_stock $decimal NOT NULL DEFAULT 0,
                 internal_clock_rate $decimal NOT NULL DEFAULT 1,
                 current_task $nullableText,
                 entered_current_sector_at $text NOT NULL,
@@ -97,7 +98,8 @@ final class SchemaInitializer
                 task_payload_json TEXT NOT NULL,
                 cargo_deuterium $decimal NOT NULL DEFAULT 0,
                 cargo_metals $decimal NOT NULL DEFAULT 0,
-                cargo_other $decimal NOT NULL DEFAULT 0,
+                cargo_ice $decimal NOT NULL DEFAULT 0,
+                cargo_organic_compounds $decimal NOT NULL DEFAULT 0,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
                 UNIQUE(probe_id, name),
@@ -208,6 +210,7 @@ final class SchemaInitializer
     private function applyLightweightMigrations(PDO $pdo): void
     {
         if ($this->driver === 'sqlite') {
+            $this->ensureSqliteMannyCargoColumns($pdo);
             $this->ensureSqliteMannyProbeIdNullable($pdo);
             $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
@@ -222,15 +225,14 @@ final class SchemaInitializer
             if (!in_array('metals_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock REAL NOT NULL DEFAULT 0');
             }
-            if (!in_array('other_stock', $names, true)) {
-                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock REAL NOT NULL DEFAULT 0');
-            }
             if (in_array('damage_percent', $names, true)) {
                 $pdo->exec('UPDATE neumann_probes SET integrity_percent = min(100.0, max(0.0, 100.0 - damage_percent))');
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
+            $this->ensureSqliteProbeResourceStockColumns($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlMannyProbeIdNullable($pdo);
+            $this->ensureMysqlMannyCargoColumns($pdo);
             $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
@@ -240,14 +242,322 @@ final class SchemaInitializer
             if (!in_array('metals_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock DOUBLE NOT NULL DEFAULT 0 AFTER deuterium_stock');
             }
-            if (!in_array('other_stock', $names, true)) {
-                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN other_stock DOUBLE NOT NULL DEFAULT 0 AFTER metals_stock');
-            }
             if (in_array('damage_percent', $names, true)) {
                 $pdo->exec('UPDATE neumann_probes SET integrity_percent = LEAST(100.0, GREATEST(0.0, 100.0 - damage_percent))');
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
+            $this->ensureMysqlProbeResourceStockColumns($pdo);
         }
+    }
+
+    private function ensureSqliteProbeResourceStockColumns(PDO $pdo): void
+    {
+        $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
+        $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
+        if (
+            in_array('ice_stock', $names, true)
+            && in_array('organic_compounds_stock', $names, true)
+            && !in_array('other_stock', $names, true)
+        ) {
+            return;
+        }
+
+        $rows = $pdo->query('SELECT * FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
+        $pdo->exec('PRAGMA foreign_keys=OFF');
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec('ALTER TABLE neumann_probes RENAME TO neumann_probes_resource_backup');
+            $pdo->exec(
+                "CREATE TABLE neumann_probes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player_id INTEGER NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    sector_x INTEGER NOT NULL,
+                    sector_y INTEGER NOT NULL,
+                    sector_z INTEGER NOT NULL,
+                    velocity_c REAL NOT NULL DEFAULT 0,
+                    acceleration_c_per_day REAL NOT NULL DEFAULT 0,
+                    direction_x REAL NOT NULL DEFAULT 0,
+                    direction_y REAL NOT NULL DEFAULT 0,
+                    direction_z REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL,
+                    integrity_percent REAL NOT NULL DEFAULT 100,
+                    energy_stored REAL NOT NULL DEFAULT 0,
+                    deuterium_stock REAL NOT NULL DEFAULT 100,
+                    metals_stock REAL NOT NULL DEFAULT 0,
+                    ice_stock REAL NOT NULL DEFAULT 0,
+                    organic_compounds_stock REAL NOT NULL DEFAULT 0,
+                    internal_clock_rate REAL NOT NULL DEFAULT 1,
+                    current_task TEXT NULL,
+                    entered_current_sector_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(player_id) REFERENCES players(id)
+                )"
+            );
+
+            $insert = $pdo->prepare(
+                'INSERT INTO neumann_probes
+                 (id, player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
+                 VALUES (:id, :player_id, :name, :sector_x, :sector_y, :sector_z, :velocity_c, :acceleration_c_per_day, :direction_x, :direction_y, :direction_z, :status, :integrity_percent, :energy_stored, :deuterium_stock, :metals_stock, :ice_stock, :organic_compounds_stock, :internal_clock_rate, :current_task, :entered_current_sector_at, :created_at, :updated_at)'
+            );
+            foreach ($rows as $row) {
+                $insert->execute([
+                    'id' => (int) $row['id'],
+                    'player_id' => (int) $row['player_id'],
+                    'name' => (string) $row['name'],
+                    'sector_x' => (int) $row['sector_x'],
+                    'sector_y' => (int) $row['sector_y'],
+                    'sector_z' => (int) $row['sector_z'],
+                    'velocity_c' => (float) ($row['velocity_c'] ?? 0.0),
+                    'acceleration_c_per_day' => (float) ($row['acceleration_c_per_day'] ?? 0.0),
+                    'direction_x' => (float) ($row['direction_x'] ?? 0.0),
+                    'direction_y' => (float) ($row['direction_y'] ?? 0.0),
+                    'direction_z' => (float) ($row['direction_z'] ?? 0.0),
+                    'status' => (string) $row['status'],
+                    'integrity_percent' => max(0.0, min(100.0, (float) ($row['integrity_percent'] ?? 100.0))),
+                    'energy_stored' => (float) ($row['energy_stored'] ?? 0.0),
+                    'deuterium_stock' => (float) ($row['deuterium_stock'] ?? 100.0),
+                    'metals_stock' => (float) ($row['metals_stock'] ?? 0.0),
+                    'ice_stock' => round(max(0.0, (float) ($row['ice_stock'] ?? 0.0)), 4),
+                    'organic_compounds_stock' => round(
+                        max(0.0, (float) ($row['organic_compounds_stock'] ?? 0.0))
+                        + max(0.0, (float) ($row['other_stock'] ?? 0.0)),
+                        4,
+                    ),
+                    'internal_clock_rate' => (float) ($row['internal_clock_rate'] ?? 1.0),
+                    'current_task' => $row['current_task'] !== null ? (string) $row['current_task'] : null,
+                    'entered_current_sector_at' => (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
+                    'created_at' => (string) $row['created_at'],
+                    'updated_at' => (string) $row['updated_at'],
+                ]);
+            }
+
+            $pdo->exec('DROP TABLE neumann_probes_resource_backup');
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            $pdo->exec('PRAGMA foreign_keys=ON');
+            throw $e;
+        }
+
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_sector ON neumann_probes(sector_x, sector_y, sector_z)');
+        $pdo->exec('PRAGMA foreign_keys=ON');
+    }
+
+    private function ensureMysqlProbeResourceStockColumns(PDO $pdo): void
+    {
+        $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
+        $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
+        if (!in_array('ice_stock', $names, true)) {
+            $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN ice_stock DOUBLE NOT NULL DEFAULT 0 AFTER metals_stock');
+            $names[] = 'ice_stock';
+        }
+        if (!in_array('organic_compounds_stock', $names, true)) {
+            $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN organic_compounds_stock DOUBLE NOT NULL DEFAULT 0 AFTER ice_stock');
+            $names[] = 'organic_compounds_stock';
+        }
+        if (!in_array('other_stock', $names, true)) {
+            return;
+        }
+
+        $pdo->exec('UPDATE neumann_probes SET organic_compounds_stock = organic_compounds_stock + other_stock WHERE other_stock <> 0');
+        $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN other_stock');
+    }
+
+    private function ensureSqliteMannyCargoColumns(PDO $pdo): void
+    {
+        $columns = $pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC);
+        $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
+        if (
+            in_array('cargo_ice', $names, true)
+            && in_array('cargo_organic_compounds', $names, true)
+            && !in_array('cargo_other', $names, true)
+        ) {
+            return;
+        }
+
+        $rows = $pdo->query('SELECT * FROM mannies')->fetchAll(PDO::FETCH_ASSOC);
+        $pdo->exec('PRAGMA foreign_keys=OFF');
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec('ALTER TABLE mannies RENAME TO mannies_cargo_backup');
+            $pdo->exec(
+                "CREATE TABLE mannies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uid TEXT NOT NULL UNIQUE,
+                    probe_id INTEGER NULL,
+                    name TEXT NOT NULL,
+                    location_type TEXT NOT NULL,
+                    sector_x INTEGER NULL,
+                    sector_y INTEGER NULL,
+                    sector_z INTEGER NULL,
+                    current_task TEXT NULL,
+                    task_started_at TEXT NULL,
+                    task_ends_at TEXT NULL,
+                    task_payload_json TEXT NOT NULL,
+                    cargo_deuterium REAL NOT NULL DEFAULT 0,
+                    cargo_metals REAL NOT NULL DEFAULT 0,
+                    cargo_ice REAL NOT NULL DEFAULT 0,
+                    cargo_organic_compounds REAL NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(probe_id, name),
+                    FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+                )"
+            );
+
+            $insert = $pdo->prepare(
+                'INSERT INTO mannies
+                 (id, uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
+                 VALUES (:id, :uid, :probe_id, :name, :location_type, :sector_x, :sector_y, :sector_z, :current_task, :task_started_at, :task_ends_at, :task_payload_json, :cargo_deuterium, :cargo_metals, :cargo_ice, :cargo_organic_compounds, :created_at, :updated_at)'
+            );
+            foreach ($rows as $row) {
+                $cargo = $this->migratedMannyCargoAmounts($row);
+                $insert->execute([
+                    'id' => (int) $row['id'],
+                    'uid' => (string) $row['uid'],
+                    'probe_id' => $row['probe_id'] !== null ? (int) $row['probe_id'] : null,
+                    'name' => (string) $row['name'],
+                    'location_type' => (string) $row['location_type'],
+                    'sector_x' => $row['sector_x'] !== null ? (int) $row['sector_x'] : null,
+                    'sector_y' => $row['sector_y'] !== null ? (int) $row['sector_y'] : null,
+                    'sector_z' => $row['sector_z'] !== null ? (int) $row['sector_z'] : null,
+                    'current_task' => $row['current_task'] !== null ? (string) $row['current_task'] : null,
+                    'task_started_at' => $row['task_started_at'] !== null ? (string) $row['task_started_at'] : null,
+                    'task_ends_at' => $row['task_ends_at'] !== null ? (string) $row['task_ends_at'] : null,
+                    'task_payload_json' => (string) ($row['task_payload_json'] ?? '{}'),
+                    'cargo_deuterium' => max(0.0, (float) ($row['cargo_deuterium'] ?? 0.0)),
+                    'cargo_metals' => max(0.0, (float) ($row['cargo_metals'] ?? 0.0)),
+                    'cargo_ice' => $cargo['ice'],
+                    'cargo_organic_compounds' => $cargo['organicCompounds'],
+                    'created_at' => (string) $row['created_at'],
+                    'updated_at' => (string) $row['updated_at'],
+                ]);
+            }
+
+            $pdo->exec('DROP TABLE mannies_cargo_backup');
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            $pdo->exec('PRAGMA foreign_keys=ON');
+            throw $e;
+        }
+
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_probe_id ON mannies(probe_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_uid ON mannies(uid)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_sector ON mannies(sector_x, sector_y, sector_z)');
+        $pdo->exec('PRAGMA foreign_keys=ON');
+    }
+
+    private function ensureMysqlMannyCargoColumns(PDO $pdo): void
+    {
+        $columns = $pdo->query('SHOW COLUMNS FROM mannies')->fetchAll(PDO::FETCH_ASSOC);
+        $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
+        if (!in_array('cargo_ice', $names, true)) {
+            $pdo->exec('ALTER TABLE mannies ADD COLUMN cargo_ice DOUBLE NOT NULL DEFAULT 0 AFTER cargo_metals');
+            $names[] = 'cargo_ice';
+        }
+        if (!in_array('cargo_organic_compounds', $names, true)) {
+            $pdo->exec('ALTER TABLE mannies ADD COLUMN cargo_organic_compounds DOUBLE NOT NULL DEFAULT 0 AFTER cargo_ice');
+            $names[] = 'cargo_organic_compounds';
+        }
+        if (!in_array('cargo_other', $names, true)) {
+            return;
+        }
+
+        $rows = $pdo->query('SELECT id, task_payload_json, cargo_other, cargo_ice, cargo_organic_compounds FROM mannies')->fetchAll(PDO::FETCH_ASSOC);
+        $update = $pdo->prepare('UPDATE mannies SET cargo_ice = :ice, cargo_organic_compounds = :organic WHERE id = :id');
+        foreach ($rows as $row) {
+            $cargo = $this->migratedMannyCargoAmounts($row);
+            $update->execute([
+                'id' => (int) $row['id'],
+                'ice' => $cargo['ice'],
+                'organic' => $cargo['organicCompounds'],
+            ]);
+        }
+
+        $pdo->exec('ALTER TABLE mannies DROP COLUMN cargo_other');
+    }
+
+    /**
+     * @return array{ice: float, organicCompounds: float}
+     */
+    private function migratedMannyCargoAmounts(array $row): array
+    {
+        $existingIce = round(max(0.0, (float) ($row['cargo_ice'] ?? 0.0)), 4);
+        $existingOrganic = round(max(0.0, (float) ($row['cargo_organic_compounds'] ?? 0.0)), 4);
+        $legacyOther = round(max(0.0, (float) ($row['cargo_other'] ?? 0.0)), 4);
+        if ($existingIce + $existingOrganic > 0.0 || $legacyOther <= 0.0) {
+            return ['ice' => $existingIce, 'organicCompounds' => $existingOrganic];
+        }
+
+        $payload = json_decode((string) ($row['task_payload_json'] ?? '{}'), true);
+        if (!is_array($payload)) {
+            $payload = [];
+        }
+
+        return $this->splitLegacyMannyOtherCargo($legacyOther, $payload);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array{ice: float, organicCompounds: float}
+     */
+    private function splitLegacyMannyOtherCargo(float $amount, array $payload): array
+    {
+        $extracted = is_array($payload['extractedResources'] ?? null) ? $payload['extractedResources'] : null;
+        $deposited = is_array($payload['depositedResources'] ?? null) ? $payload['depositedResources'] : null;
+        if ($extracted !== null || $deposited !== null) {
+            $ice = $this->resourceDelta($extracted, $deposited, 'ice');
+            $organic = $this->resourceDelta($extracted, $deposited, 'carbon_compounds')
+                + $this->resourceDelta($extracted, $deposited, 'other');
+
+            return $this->scaledLegacyMannyOtherCargo($amount, $ice, $organic);
+        }
+
+        $profile = is_array($payload['resourceProfile'] ?? null) ? $payload['resourceProfile'] : null;
+        if ($profile !== null) {
+            return $this->scaledLegacyMannyOtherCargo(
+                $amount,
+                max(0.0, (float) ($profile['ice'] ?? 0.0)),
+                max(0.0, (float) ($profile['carbon_compounds'] ?? 0.0)) + max(0.0, (float) ($profile['other'] ?? 0.0)),
+            );
+        }
+
+        $resourceType = strtolower(str_replace(['-', ' '], '_', (string) ($payload['resourceType'] ?? '')));
+        if ($resourceType === 'ice' || $resourceType === 'water' || $resourceType === 'water_ice') {
+            return ['ice' => $amount, 'organicCompounds' => 0.0];
+        }
+
+        return ['ice' => 0.0, 'organicCompounds' => $amount];
+    }
+
+    private function resourceDelta(?array $extracted, ?array $deposited, string $type): float
+    {
+        return max(
+            0.0,
+            (float) ($extracted[$type] ?? 0.0) - (float) ($deposited[$type] ?? 0.0),
+        );
+    }
+
+    /**
+     * @return array{ice: float, organicCompounds: float}
+     */
+    private function scaledLegacyMannyOtherCargo(float $amount, float $ice, float $organic): array
+    {
+        $total = max(0.0, $ice) + max(0.0, $organic);
+        if ($total <= 0.0) {
+            return ['ice' => 0.0, 'organicCompounds' => $amount];
+        }
+
+        $iceAmount = round($amount * (max(0.0, $ice) / $total), 4);
+
+        return [
+            'ice' => $iceAmount,
+            'organicCompounds' => round(max(0.0, $amount - $iceAmount), 4),
+        ];
     }
 
     private function ensureSqliteMannyProbeIdNullable(PDO $pdo): void
@@ -285,7 +595,8 @@ final class SchemaInitializer
                     task_payload_json TEXT NOT NULL,
                     cargo_deuterium REAL NOT NULL DEFAULT 0,
                     cargo_metals REAL NOT NULL DEFAULT 0,
-                    cargo_other REAL NOT NULL DEFAULT 0,
+                    cargo_ice REAL NOT NULL DEFAULT 0,
+                    cargo_organic_compounds REAL NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(probe_id, name),
@@ -294,8 +605,8 @@ final class SchemaInitializer
             );
             $pdo->exec(
                 'INSERT INTO mannies
-                 (id, uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_other, created_at, updated_at)
-                 SELECT id, uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_other, created_at, updated_at
+                 (id, uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
+                 SELECT id, uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at
                  FROM mannies_nullable_probe_backup'
             );
             $pdo->exec('DROP TABLE mannies_nullable_probe_backup');

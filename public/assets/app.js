@@ -122,7 +122,7 @@
         metals: t('metals', 'Metals'),
         ice: t('ice', 'Ice'),
         carbon_compounds: t('carbonCompounds', 'Carbon compounds'),
-        other: t('otherResources', 'Other'),
+        other: t('carbonCompounds', 'Carbon compounds'),
     }[type] || type);
     const objectTypeLabel = (type) => ({
         star: t('starObject', 'Star'),
@@ -568,8 +568,9 @@
         }
     };
 
-    const metric = (label, value, detail) => {
-        const content = '<span>' + escapeHtml(label) + '</span><b>' + escapeHtml(String(value ?? '-')) + '</b>';
+    const metric = (label, value, detail, valueClass) => {
+        const classAttribute = valueClass ? ' class="' + escapeHtml(valueClass) + '"' : '';
+        const content = '<span>' + escapeHtml(label) + '</span><b' + classAttribute + '>' + escapeHtml(String(value ?? '-')) + '</b>';
         if (!detail) {
             return '<div class="metric">' + content + '</div>';
         }
@@ -835,13 +836,24 @@
             : t('sector', 'Sector');
     };
 
-    const mannyCargo = (manny) => {
+    const mannyCargoAmounts = (manny) => {
         const cargo = manny.cargo || {};
+        return {
+            deuterium: cargo.deuterium,
+            metals: cargo.metals,
+            ice: cargo.ice,
+            organicCompounds: cargo.organicCompounds,
+        };
+    };
+
+    const mannyCargo = (manny) => {
+        const cargo = mannyCargoAmounts(manny);
         return [
-            'D ' + numberValue(cargo.deuterium),
-            'M ' + numberValue(cargo.metals),
-            'O ' + numberValue(cargo.other),
-        ].join(' / ');
+            resourceTypeLabel('deuterium') + ': ' + numberValue(cargo.deuterium),
+            resourceTypeLabel('metals') + ': ' + numberValue(cargo.metals),
+            resourceTypeLabel('ice') + ': ' + numberValue(cargo.ice),
+            resourceTypeLabel('carbon_compounds') + ': ' + numberValue(cargo.organicCompounds),
+        ].join('\n');
     };
 
     function mineTargetOptions(selected) {
@@ -921,7 +933,7 @@
                 + '</div>'
                 + '<div class="manny-metrics">'
                 + metric(t('location', 'Location'), mannyLocation(manny))
-                + metric(t('cargo', 'Cargo'), mannyCargo(manny))
+                + metric(t('cargo', 'Cargo'), mannyCargo(manny), null, 'manny-cargo-value')
                 + metric(t('task', 'Task'), busy ? numberValue(manny.taskProgressPercent, '%') : t('noTask', 'None'))
                 + '</div>'
                 + '<form class="manny-rename-form manny-form" hidden>'

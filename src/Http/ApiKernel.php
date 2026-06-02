@@ -28,7 +28,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 5;
+    public const API_VERSION = 7;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -281,7 +281,11 @@ final class ApiKernel
 
         $resourceType = $this->inventoryResourceType($probe, $itemId);
         if ($resourceType !== null) {
-            $available = $resourceType === 'metals' ? $probe->metalsStock : $probe->otherStock;
+            $available = match ($resourceType) {
+                'metals' => $probe->metalsStock,
+                'ice' => $probe->iceStock,
+                'carbon_compounds' => $probe->organicCompoundsStock,
+            };
             $discarded = $this->jettisonAmount($amount, $available);
             if ($discarded instanceof ApiResponse) {
                 return $discarded;
@@ -289,8 +293,10 @@ final class ApiKernel
 
             if ($resourceType === 'metals') {
                 $probe->metalsStock = round($probe->metalsStock - $discarded, 4);
-            } else {
-                $probe->otherStock = round($probe->otherStock - $discarded, 4);
+            } elseif ($resourceType === 'ice') {
+                $probe->iceStock = round($probe->iceStock - $discarded, 4);
+            } elseif ($resourceType === 'carbon_compounds') {
+                $probe->organicCompoundsStock = round($probe->organicCompoundsStock - $discarded, 4);
             }
             $this->probes->save($probe);
             $this->mannies->manniesForProbe($probe);
@@ -352,7 +358,8 @@ final class ApiKernel
     {
         return match ($itemId) {
             'metals', 'probe-' . $probe->id . '-stock-metals' => 'metals',
-            'other', 'probe-' . $probe->id . '-stock-other' => 'other',
+            'ice', 'probe-' . $probe->id . '-stock-ice' => 'ice',
+            'carbon_compounds', 'organic_compounds', 'organicCompounds', 'probe-' . $probe->id . '-stock-organic-compounds' => 'carbon_compounds',
             default => null,
         };
     }

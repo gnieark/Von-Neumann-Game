@@ -30,7 +30,8 @@ final class Manny
         public array $taskPayload,
         public float $cargoDeuterium,
         public float $cargoMetals,
-        public float $cargoOther,
+        public float $cargoIce,
+        public float $cargoOrganicCompounds,
         public readonly string $createdAt,
         public string $updatedAt,
     ) {}
@@ -65,7 +66,8 @@ final class Manny
             'capacity' => 0.3,
             'deuterium' => $this->cargoDeuterium,
             'metals' => $this->cargoMetals,
-            'other' => $this->cargoOther,
+            'ice' => $this->cargoIce,
+            'organicCompounds' => $this->cargoOrganicCompounds,
             'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
         ];
     }

@@ -139,6 +139,20 @@ $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath)
 $pdo = $dbFactory->create();
 $dbFactory->initializeSchema($pdo);
 $test->assert(is_file($dbPath), 'temporary SQLite database is created');
+$probeSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('ice_stock', $probeSchemaColumns, true), 'Probe table stores ice stock explicitly');
+$test->assert(in_array('organic_compounds_stock', $probeSchemaColumns, true), 'Probe table stores organic-compound stock explicitly');
+$test->assert(!in_array('other_stock', $probeSchemaColumns, true), 'Probe table no longer stores generic other_stock');
+$mannySchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('cargo_ice', $mannySchemaColumns, true), 'Manny table stores ice cargo explicitly');
+$test->assert(in_array('cargo_organic_compounds', $mannySchemaColumns, true), 'Manny table stores organic-compound cargo explicitly');
+$test->assert(!in_array('cargo_other', $mannySchemaColumns, true), 'Manny table no longer stores generic cargo_other');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -161,7 +175,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(5, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(7, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -273,8 +287,14 @@ $test->assertEquals(0.3, $printer['containerSpace'] ?? null, 'atomic 3D printer 
 $mannyItems = array_values(array_filter($inventoryItems, static fn(array $item): bool => ($item['type'] ?? null) === 'manny'));
 $test->assertEquals(4, count($mannyItems), 'default inventory contains four mannies');
 $test->assertEquals(0.05, $mannyItems[0]['containerSpace'] ?? null, 'each manny occupies 0.05 containers');
+$defaultMannyCargo = $mannyItems[0]['cargo'] ?? [];
+$test->assertEquals(0.0, $defaultMannyCargo['ice'] ?? null, 'default Manny cargo exposes ice');
+$test->assertEquals(0.0, $defaultMannyCargo['organicCompounds'] ?? null, 'default Manny cargo exposes organic compounds');
+$test->assert(!array_key_exists('other', $defaultMannyCargo), 'default Manny cargo no longer exposes generic other');
 $resourceStocks = $sector->body['inventory']['resourceStocks'] ?? [];
 $test->assert(is_string($resourceStocks[0]['id'] ?? null), 'resource stocks expose stable inventory ids for jettison orders');
+$resourceStockTypes = array_column($resourceStocks, 'type');
+$test->assertEquals(['metals', 'ice', 'carbon_compounds'], $resourceStockTypes, 'resource stocks expose metals, ice and organic compounds separately');
 
 $printerTask = $kernel->handle('GET', '/api/probe/inventory/' . rawurlencode((string) ($printer['id'] ?? 'missing')), $headers);
 $test->assertEquals(200, $printerTask->status, 'inventory item id endpoint returns printer task state');
@@ -387,6 +407,20 @@ if ($createdProbe !== null) {
     $mixedRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $mixedRow->execute(['uid' => $thirdMannyId]);
     $mixedMannyDbId = (int) $mixedRow->fetchColumn();
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started WHERE id = :id')->execute([
+        'id' => $mixedMannyDbId,
+        'started' => gmdate('c', time() - 1500),
+    ]);
+    $haulingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $haulingMixedManny = array_values(array_filter(
+        $haulingMannies->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $thirdMannyId,
+    ))[0] ?? null;
+    $haulingCargo = $haulingMixedManny['cargo'] ?? [];
+    $test->assertEquals(0.0067, $haulingCargo['metals'] ?? null, 'active multi-resource mining exposes Manny metals cargo');
+    $test->assertEquals(0.0067, $haulingCargo['ice'] ?? null, 'active multi-resource mining exposes Manny ice cargo');
+    $test->assertEquals(0.0066, $haulingCargo['organicCompounds'] ?? null, 'active multi-resource mining exposes Manny organic-compound cargo');
+    $test->assert(!array_key_exists('other', $haulingCargo), 'active Manny cargo no longer exposes generic other');
     $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $mixedMannyDbId,
         'started' => gmdate('c', time() - 3000),
@@ -395,7 +429,8 @@ if ($createdProbe !== null) {
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $mixedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(0.05, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
-    $test->assertEquals(0.02, $mixedProbe?->otherStock, 'completed multi-resource mining transfers the ice and carbon-compound shares to generic cargo');
+    $test->assertEquals(0.01, $mixedProbe?->iceStock, 'completed multi-resource mining transfers the ice share');
+    $test->assertEquals(0.01, $mixedProbe?->organicCompoundsStock, 'completed multi-resource mining transfers the organic-compound share');
     $mixedSector = $sectorRepository->load($createdProbe->currentSector);
     $mixedAsteroid = $mixedSector->getObjects()[0] ?? null;
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'multi-resource mining subtracts the metals share from the asteroid');
@@ -459,7 +494,7 @@ if ($createdProbe !== null) {
     $fourthRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $fourthRow->execute(['uid' => $fourthMannyId]);
     $fourthMannyDbId = (int) $fourthRow->fetchColumn();
-    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.55, other_stock = 0 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.55, ice_stock = 0, organic_compounds_stock = 0 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $pdo->prepare(
         'UPDATE mannies
          SET location_type = :location_type,
