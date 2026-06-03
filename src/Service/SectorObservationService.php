@@ -195,6 +195,7 @@ final class SectorObservationService
             $data['mannyState'] = $object->getState();
             $data['mannyUid'] = $object->getMannyUid();
             $data['cargo'] = $object->getCargo();
+            $data['salvageable'] = $object->getState() === SectorManny::STATE_ABANDONED;
         }
 
         if ($object->getWaypointBookmarks() !== []) {

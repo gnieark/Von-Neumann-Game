@@ -16,6 +16,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\UniverseObject;
@@ -27,6 +28,7 @@ final class MannyService
     public const MINING_TRAVEL_SECONDS = 900;
     public const MINING_AMOUNT_PER_TICK = 0.01;
     public const MINING_TICK_SECONDS = 300;
+    public const SALVAGE_SECONDS = 300;
     public const MANNY_CARGO_CAPACITY = Manny::CARGO_CAPACITY;
     public const MANNY_CONTAINER_SPACE = Manny::CONTAINER_SPACE;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
@@ -237,6 +239,37 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
+    public function startSalvage(NeumannProbe $probe, string $uid, string $objectId): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+
+        $target = $this->findObjectInCurrentSector($probe, $objectId);
+        if ($target === null || !$this->isSalvageableObject($target)) {
+            throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
+        }
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manny->locationType = Manny::LOCATION_SECTOR;
+        $manny->sector = $probe->currentSector;
+        $manny->currentTask = Manny::TASK_SALVAGE;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . self::SALVAGE_SECONDS . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'objectId' => $objectId,
+            'durationSeconds' => self::SALVAGE_SECONDS,
+            'target' => $this->salvageTargetArray($target),
+            'result' => 'pending',
+        ];
+        $this->removeMannyFromSector($manny);
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
     public function recallManny(NeumannProbe $probe, string $uid): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
@@ -319,6 +352,9 @@ final class MannyService
         if ($manny->currentTask === Manny::TASK_CRAFTING) {
             return $this->refreshCrafting($manny, $probe, $now);
         }
+        if ($manny->currentTask === Manny::TASK_SALVAGE) {
+            return $this->refreshSalvage($manny, $probe, $now);
+        }
         if ($manny->currentTask === Manny::TASK_RETURNING) {
             return $this->refreshReturning($manny, $probe, $now);
         }
@@ -377,6 +413,41 @@ final class MannyService
         $this->createCraftingOutput($probe, $manny, $now);
 
         $this->clearTask($manny);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function refreshSalvage(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
+        $sectorCoordinates = $manny->sector ?? $probe->currentSector;
+        $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
+        $target = $objectId !== '' ? $sector->findObjectById($objectId) : null;
+        $result = [
+            'lastTask' => Manny::TASK_SALVAGE,
+            'objectId' => $objectId,
+            'target' => $manny->taskPayload['target'] ?? null,
+        ];
+
+        if ($target === null || !$this->isSalvageableObject($target)) {
+            $result['result'] = 'failed';
+            $result['failureReason'] = 'target_unavailable';
+            $this->finishSalvageActor($manny, $probe, $result);
+            $this->probes->save($probe);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+
+        $salvageResult = $this->completeSalvageTarget($probe, $sector, $target);
+        $result = array_merge($result, $salvageResult);
+        $this->finishSalvageActor($manny, $probe, $result);
+        $this->probes->save($probe);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -904,6 +975,107 @@ final class MannyService
             || ($object instanceof Planet && $object->getMass() <= self::MOON_MASS_EARTH_UNITS);
     }
 
+    private function isSalvageableObject(UniverseObject $object): bool
+    {
+        return $object instanceof SectorManny && $object->getState() === SectorManny::STATE_ABANDONED;
+    }
+
+    private function salvageTargetArray(UniverseObject $object): array
+    {
+        return [
+            'id' => $object->getId(),
+            'type' => $object->getType()->value,
+            'name' => $object->getName(),
+        ] + ($object instanceof SectorManny ? [
+            'mannyUid' => $object->getMannyUid(),
+            'mannyState' => $object->getState(),
+        ] : []);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function completeSalvageTarget(NeumannProbe $probe, SectorContent $sector, UniverseObject $target): array
+    {
+        if (!$target instanceof SectorManny || $target->getState() !== SectorManny::STATE_ABANDONED) {
+            return [
+                'result' => 'failed',
+                'failureReason' => 'target_unavailable',
+            ];
+        }
+
+        $recovered = $this->mannies->findByUid($target->getMannyUid());
+        if (
+            $recovered === null
+            || $recovered->probeId !== null
+            || $recovered->sector === null
+            || !$recovered->sector->equals($sector->getCoordinates())
+        ) {
+            return [
+                'result' => 'failed',
+                'failureReason' => 'target_unavailable',
+            ];
+        }
+
+        if (!$sector->removeObjectById($target->getId())) {
+            return [
+                'result' => 'failed',
+                'failureReason' => 'target_unavailable',
+            ];
+        }
+        $this->sectors->saveSector($sector);
+
+        $recovered->probeId = $probe->id;
+        $recovered->name = $this->uniqueMannyNameForProbe($probe, $recovered->name, $recovered->id);
+        $recovered->locationType = Manny::LOCATION_SECTOR;
+        $recovered->sector = $sector->getCoordinates();
+        $this->clearTask($recovered);
+        $this->mannies->save($recovered);
+
+        return [
+            'result' => 'success',
+            'salvaged' => [
+                'type' => 'manny',
+                'id' => $recovered->uid,
+                'name' => $recovered->name,
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $resultPayload
+     */
+    private function finishSalvageActor(Manny $manny, NeumannProbe $probe, array $resultPayload): void
+    {
+        if (!$this->canAcceptMannyDocking($probe, $manny)) {
+            $this->waitForStorageSpace($manny, ['reason' => 'salvage_return'] + $resultPayload);
+            return;
+        }
+
+        $this->transferMannyCargoToProbe($manny, $probe);
+        $this->removeMannyFromSector($manny);
+        $manny->locationType = Manny::LOCATION_PROBE;
+        $manny->sector = null;
+        $this->clearTask($manny, $resultPayload);
+    }
+
+    private function uniqueMannyNameForProbe(NeumannProbe $probe, string $name, int $exceptId): string
+    {
+        $base = trim($name) !== '' ? trim($name) : 'Manny récupérée';
+        if (!$this->mannies->nameExistsForProbe($probe->id, $base, $exceptId)) {
+            return $base;
+        }
+
+        for ($index = 2; $index <= 999; $index++) {
+            $candidate = $base . ' ' . $index;
+            if (!$this->mannies->nameExistsForProbe($probe->id, $candidate, $exceptId)) {
+                return $candidate;
+            }
+        }
+
+        return $base . ' ' . bin2hex(random_bytes(3));
+    }
+
     /**
      * @return array<string, float>
      */
@@ -1359,12 +1531,12 @@ final class MannyService
         }
     }
 
-    private function clearTask(Manny $manny): void
+    private function clearTask(Manny $manny, array $payload = []): void
     {
         $manny->currentTask = null;
         $manny->taskStartedAt = null;
         $manny->taskEndsAt = null;
-        $manny->taskPayload = [];
+        $manny->taskPayload = $payload;
     }
 
     private function isAtOrAfter(\DateTimeImmutable $now, ?string $date): bool

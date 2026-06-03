@@ -175,7 +175,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(10, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(11, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -704,6 +704,75 @@ if ($createdProbe !== null) {
         static fn(array $object): bool => ($object['type'] ?? null) === 'manny'
     ));
     $test->assertEquals(SectorManny::STATE_ABANDONED, $scanMannyObjects[0]['mannyState'] ?? null, 'current-sector scan exposes abandoned Mannys');
+    $test->assertEquals(true, $scanMannyObjects[0]['salvageable'] ?? null, 'abandoned Mannys are exposed as salvageable sector objects');
+
+    $salvageManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
+        'objectId' => SectorManny::objectIdForUid($fourthMannyId),
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $salvageManny->status, 'POST /api/probe/mannies/{id}/salvage starts salvage of an abandoned Manny');
+    $test->assertEquals('salvage', $salvageManny->body['manny']['currentTask'] ?? null, 'salvage task is exposed on Manny');
+    $test->assertEquals(300, $salvageManny->body['manny']['task']['durationSeconds'] ?? null, 'Manny salvage takes five minutes');
+
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+        'uid' => $firstMannyId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $afterSalvageList = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $recoveredManny = $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId);
+    $test->assert($recoveredManny !== null, 'salvaged abandoned Manny is attached to the recovering probe');
+    $test->assertEquals('sector', $recoveredManny?->locationType, 'salvaged Manny joins the owner list outside the probe');
+    $sectorAfterSalvage = $sectorRepository->load($createdProbe->currentSector);
+    $test->assertEquals(null, $sectorAfterSalvage->findObjectById(SectorManny::objectIdForUid($fourthMannyId)), 'salvaged Manny disappears from the sector definition');
+    $salvageActor = array_values(array_filter(
+        $afterSalvageList->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $firstMannyId,
+    ))[0] ?? null;
+    $test->assertEquals(null, $salvageActor['currentTask'] ?? null, 'salvage actor returns to idle after successful recovery');
+    $test->assertEquals('success', $salvageActor['task']['result'] ?? null, 'successful salvage records its result');
+
+    $raceManny = $mannies->createForProbe($createdProbe->id, 'race-manny');
+    $raceManny->probeId = null;
+    $raceManny->locationType = 'sector';
+    $raceManny->sector = $createdProbe->currentSector;
+    $mannies->save($raceManny);
+    $raceSector = $sectorRepository->load($createdProbe->currentSector);
+    $raceObject = new SectorManny(
+        SectorManny::objectIdForUid($raceManny->uid),
+        $raceManny->name,
+        $raceManny->uid,
+        SectorManny::STATE_ABANDONED,
+        $raceManny->cargoArray(),
+        'Manny abandoned in open space.',
+    );
+    if (!$raceSector->replaceObject($raceObject)) {
+        $raceSector->addObject($raceObject);
+    }
+    $sectorRepository->save($raceSector);
+
+    $firstRaceSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
+        'objectId' => SectorManny::objectIdForUid($raceManny->uid),
+    ], JSON_THROW_ON_ERROR));
+    $secondRaceSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/salvage', $headers, json_encode([
+        'objectId' => SectorManny::objectIdForUid($raceManny->uid),
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $firstRaceSalvage->status, 'first concurrent salvage order can start');
+    $test->assertEquals(202, $secondRaceSalvage->status, 'second concurrent salvage order can start before the object is gone');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+        'uid' => $firstMannyId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+        'uid' => $secondMannyId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $afterFailedRace = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $failedRaceActor = array_values(array_filter(
+        $afterFailedRace->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $secondMannyId,
+    ))[0] ?? null;
+    $test->assertEquals('failed', $failedRaceActor['task']['result'] ?? null, 'salvage fails if another order already recovered the object');
+    $test->assertEquals('target_unavailable', $failedRaceActor['task']['failureReason'] ?? null, 'failed salvage exposes the unavailable target reason');
 
     $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 97 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 }

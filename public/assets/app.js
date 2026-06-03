@@ -61,8 +61,10 @@
     const t = (key, fallback) => i18n[key] || fallback;
     const invalidCoordinateMessage = t('invalidCoordinates', 'Invalid relative coordinates: x + y + z must be even.');
     const alreadyMovingMessage = 'The probe is already moving between sectors.';
+    const sectorAlertAcknowledgementsStorageKey = 'vng:sector-alert-acknowledgements:v1';
     let probeAlreadyMoving = false;
     let currentMannyMineTargets = [];
+    let currentMannySalvageTargets = [];
     let currentInventory = null;
     let currentCraftingRecipes = [];
     let currentSectorObjects = [];
@@ -133,6 +135,79 @@
         (text, [key, value]) => text.replaceAll('{' + key + '}', String(value)),
         template
     );
+    const sectorAlertRelativeCoordinates = (sector) => {
+        const relative = sector && sector.relativeCoordinates;
+        if (!relative || !Number.isFinite(Number(relative.x)) || !Number.isFinite(Number(relative.y)) || !Number.isFinite(Number(relative.z))) {
+            return null;
+        }
+
+        return {
+            x: Number(relative.x),
+            y: Number(relative.y),
+            z: Number(relative.z),
+        };
+    };
+    const readSectorAlertAcknowledgements = () => {
+        try {
+            const stored = JSON.parse(localStorage.getItem(sectorAlertAcknowledgementsStorageKey) || '{}');
+            return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+        } catch (error) {
+            return {};
+        }
+    };
+    const writeSectorAlertAcknowledgements = (acknowledgements) => {
+        try {
+            localStorage.setItem(sectorAlertAcknowledgementsStorageKey, JSON.stringify(acknowledgements));
+        } catch (error) {
+            // Ignore storage errors; acknowledgement is a browser-side convenience only.
+        }
+    };
+    const sectorAlertAcknowledgementKey = (type, sector, signature) => {
+        const relative = sectorAlertRelativeCoordinates(sector);
+        if (!relative || !signature) {
+            return null;
+        }
+
+        return JSON.stringify([type, relative.x, relative.y, relative.z, signature]);
+    };
+    const isSectorAlertAcknowledged = (type, sector, signature) => {
+        const key = sectorAlertAcknowledgementKey(type, sector, signature);
+        return key !== null && Boolean(readSectorAlertAcknowledgements()[key]);
+    };
+    const acknowledgeSectorAlert = (type, sector, signature) => {
+        const key = sectorAlertAcknowledgementKey(type, sector, signature);
+        const relative = sectorAlertRelativeCoordinates(sector);
+        if (key === null || relative === null) {
+            return;
+        }
+
+        const acknowledgements = readSectorAlertAcknowledgements();
+        acknowledgements[key] = {
+            type,
+            relativeCoordinates: relative,
+            signature,
+            acknowledgedAt: new Date().toISOString(),
+        };
+        writeSectorAlertAcknowledgements(acknowledgements);
+    };
+    const renderAcknowledgableSectorAlert = (node, message, type, sector, signature) => {
+        const acknowledged = isSectorAlertAcknowledged(type, sector, signature);
+        node.classList.toggle('acknowledged', acknowledged);
+        node.innerHTML = '<span class="sector-alert-message">' + escapeHtml(message) + '</span>'
+            + '<button class="sector-alert-acknowledge" type="button">'
+            + escapeHtml(acknowledged ? t('acknowledgedAlert', 'Acknowledged') : t('acknowledgeAlert', 'Acknowledge'))
+            + '</button>';
+        const button = node.querySelector('.sector-alert-acknowledge');
+        if (button) {
+            button.disabled = acknowledged;
+            button.setAttribute('aria-disabled', acknowledged ? 'true' : 'false');
+            button.addEventListener('click', () => {
+                acknowledgeSectorAlert(type, sector, signature);
+                renderAcknowledgableSectorAlert(node, message, type, sector, signature);
+            });
+        }
+        node.hidden = false;
+    };
     const pluralWord = (count, singularKey, singularFallback, pluralKey, pluralFallback) => (
         Number(count) === 1 ? t(singularKey, singularFallback) : t(pluralKey, pluralFallback)
     );
@@ -239,6 +314,7 @@
         repair: t('repair', 'Repair'),
         mining: t('mine', 'Mine'),
         crafting: t('craft', 'Craft'),
+        salvage: t('salvage', 'Salvage'),
         returning: t('returning', 'Returning'),
         waiting_for_space: t('waitingForSpace', 'Waiting for space'),
     }[task] || task || t('noTask', 'None'));
@@ -311,6 +387,16 @@
                 + '<button class="manny-recall-button" type="button">' + escapeHtml(t('cancelCrafting', 'Cancel crafting')) + '</button>'
                 + '</section>';
         }
+        if (manny.currentTask === 'salvage') {
+            const target = payload.target || {};
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('salvageInProgress', 'Recovery in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('salvageTaskDetail', '{target} will be checked and recovered after the delay.'), {
+                    target: salvageTargetLabel(target),
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
+                + '</section>';
+        }
 
         return '<section class="manny-task-panel">'
             + '<h4>' + escapeHtml(taskLabel(manny.currentTask)) + '</h4>'
@@ -344,6 +430,12 @@
             + '<button class="manny-mine-button" type="submit"' + (mineTarget ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('mine', 'Mine')) + '</button>'
             + '<p class="manny-mine-hint">' + escapeHtml(t('mannyMiningHint', 'A Manny can carry 0.05 ECE (Earth container equivalent). If you ask it to mine more, it will make round trips between the mined object and the probe.')) + '</p>'
             + '</form>';
+        const salvageTarget = currentMannySalvageTargets[0] || null;
+        const salvageForm = '<form class="manny-salvage-form manny-form">'
+            + '<label>' + escapeHtml(t('salvageTarget', 'Drifting object')) + '<select class="manny-salvage-target" name="objectId">' + salvageTargetOptions('') + '</select></label>'
+            + '<button class="manny-salvage-button" type="submit"' + (salvageTarget ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('salvage', 'Salvage')) + '</button>'
+            + '<p class="manny-salvage-hint">' + escapeHtml(t('mannySalvageHint', 'A recovered object is checked again at the end of the five-minute recovery delay.')) + '</p>'
+            + '</form>';
         const craftForm = '<form class="manny-craft-form manny-form">'
             + '<div class="manny-craft-picker">'
             + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select class="manny-craft-recipe" name="recipe">' + craftRecipeOptions('') + '</select></label>'
@@ -356,6 +448,7 @@
             + '<h4 class="manny-action-heading">' + escapeHtml(t('assignMannyTask', 'Assign a task to this Manny')) + '</h4>'
             + renderMannyActionAccordion(prefix + '-repair', t('repairActionTitle', 'Repair'), repairForm)
             + renderMannyActionAccordion(prefix + '-mine', t('miningActionTitle', 'Mine'), mineForm)
+            + renderMannyActionAccordion(prefix + '-salvage', t('salvageActionTitle', 'Recover a drifting object'), salvageForm)
             + renderMannyActionAccordion(prefix + '-craft', t('craftingActionTitle', 'Craft'), craftForm)
             + '</div>';
     };
@@ -484,7 +577,7 @@
                 const key = String(object.id || object.name || label);
                 if (!seen.has(key)) {
                     seen.add(key);
-                    result.push(label || key);
+                    result.push({ key, label: label || key });
                 }
             }
             ['bookmarkTargets', 'minableTargets'].forEach((childKey) => {
@@ -507,13 +600,48 @@
         if (bookmarkedObjects.length === 0) {
             node.hidden = true;
             node.textContent = '';
+            node.classList.remove('acknowledged');
             return;
         }
 
-        node.textContent = formatText(t('sectorWaypointBookmarkAlert', 'Waypoint bookmark detected on object(s): {objects}'), {
-            objects: bookmarkedObjects.join(', '),
+        const message = formatText(t('sectorWaypointBookmarkAlert', 'Waypoint bookmark detected on object(s): {objects}'), {
+            objects: bookmarkedObjects.map((object) => object.label).join(', '),
         });
-        node.hidden = false;
+        const signature = bookmarkedObjects.map((object) => object.key).sort().join('|');
+        renderAcknowledgableSectorAlert(node, message, 'bookmark', sector, signature);
+    };
+    const renderSectorProbeAlert = (sector) => {
+        const node = document.getElementById('sector-probe-alert');
+        if (!node) {
+            return;
+        }
+
+        const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
+        if (probes.length === 0) {
+            node.hidden = true;
+            node.textContent = '';
+            node.classList.remove('acknowledged');
+            return;
+        }
+
+        const labels = probes.map((probe) => formatText(t('sectorProbeAlertEntry', '{name} ({movement})'), {
+            name: probe && probe.name ? probe.name : t('unknownProbe', 'Unknown probe'),
+            movement: probe && probe.moving
+                ? t('probeMovementActive', 'movement in progress')
+                : t('probeMovementInactive', 'no movement in progress'),
+        }));
+        const message = formatText(t('sectorProbeAlert', 'Probe detected in sector: {probes}'), {
+            probes: labels.join(', '),
+        });
+        const signature = probes
+            .map((probe) => [
+                probe && probe.id ? probe.id : 'unknown',
+                probe && probe.name ? probe.name : t('unknownProbe', 'Unknown probe'),
+                probe && probe.moving ? 'moving' : 'idle',
+            ].join(':'))
+            .sort()
+            .join('|');
+        renderAcknowledgableSectorAlert(node, message, 'probe', sector, signature);
     };
     const syncSectorForm = (sector) => {
         const relative = sector && sector.relativeCoordinates;
@@ -552,6 +680,21 @@
 
         return direct.concat(nested).filter((target) => target.id);
     });
+    const salvageTargetLabel = (target) => {
+        const type = objectTypeLabel(target && target.type ? target.type : 'object');
+        const name = target && (target.name || target.id) ? (target.name || target.id) : t('unknownObject', 'Unknown object');
+        const state = target && target.mannyState ? ' - ' + mannyStateLabel(target.mannyState) : '';
+
+        return type + ' ' + name + state;
+    };
+    const salvageTargetsFromObjects = (objects) => objects.filter((object) => (
+        object && object.salvageable && object.id
+    )).map((object) => ({
+        id: object.id,
+        type: object.type || 'object',
+        name: object.name || object.id || '',
+        mannyState: object.mannyState || null,
+    }));
     const bookmarkTargetsFromObjects = (objects) => objects.flatMap((object) => {
         const direct = object.type !== 'manny' ? [{
             id: object.id,
@@ -633,11 +776,13 @@
         setText('sector-context', sectorContext(sector));
         setText('sector-summary', sectorSummary(sector));
         renderSectorBookmarkAlert(sector);
+        renderSectorProbeAlert(sector);
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         const distance = Number(sector && sector.distance);
         const syncMannyTargets = options.syncMannyTargets ?? (Boolean(sector) && Number.isFinite(distance) && distance === 0);
         if (syncMannyTargets) {
             currentMannyMineTargets = mineTargetsFromObjects(objects);
+            currentMannySalvageTargets = salvageTargetsFromObjects(objects);
             currentSectorObjects = objects;
         }
         node.innerHTML = objects.map((object) => {
@@ -1229,6 +1374,18 @@
         )).join('');
     }
 
+    function salvageTargetOptions(selected) {
+        if (currentMannySalvageTargets.length === 0) {
+            return '<option value="">-</option>';
+        }
+
+        return currentMannySalvageTargets.map((target) => (
+            '<option value="' + escapeHtml(target.id) + '"' + (target.id === selected ? ' selected' : '') + '>'
+            + escapeHtml(salvageTargetLabel(target))
+            + '</option>'
+        )).join('');
+    }
+
     function resourceProfileForMineSelection(target, selectedResources) {
         const available = resourceTypesForTarget(target);
         const selected = selectedResources.filter((type) => available.includes(type));
@@ -1359,6 +1516,20 @@
                 select.value = currentMannyMineTargets[0] ? currentMannyMineTargets[0].id : '';
             }
             updateMannyResourceOptions(select.closest('.manny-mine-form'));
+        });
+        document.querySelectorAll('.manny-salvage-target').forEach((select) => {
+            const selected = select.value;
+            select.innerHTML = salvageTargetOptions(selected);
+            if (!currentMannySalvageTargets.some((target) => target.id === select.value)) {
+                select.value = currentMannySalvageTargets[0] ? currentMannySalvageTargets[0].id : '';
+            }
+            const form = select.closest('.manny-salvage-form');
+            const button = form ? form.querySelector('.manny-salvage-button') : null;
+            if (button) {
+                const hasTarget = currentMannySalvageTargets.some((target) => target.id === select.value);
+                button.disabled = !hasTarget;
+                button.setAttribute('aria-disabled', hasTarget ? 'false' : 'true');
+            }
         });
     }
 
@@ -1730,6 +1901,16 @@
                         targetAmount: Number.parseFloat(form.get('targetAmount')),
                     }),
                 });
+            } else if (event.target.classList.contains('manny-salvage-form')) {
+                const targetSelect = event.target.querySelector('.manny-salvage-target');
+                if (!targetSelect || !targetSelect.value) {
+                    setText('manny-status', t('noSalvageTargetSelected', 'Select a drifting object to recover.'));
+                    return;
+                }
+                await api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/salvage', {
+                    method: 'POST',
+                    body: JSON.stringify({objectId: form.get('objectId')}),
+                });
             } else if (event.target.classList.contains('manny-craft-form')) {
                 const recipe = craftingRecipeById(String(form.get('recipe') || ''));
                 if (!canCraftRecipe(recipe)) {
@@ -1756,6 +1937,9 @@
         }
         if (event.target.classList.contains('manny-mine-resources')) {
             updateMannyMineFormState(event.target.closest('.manny-mine-form'));
+        }
+        if (event.target.classList.contains('manny-salvage-target')) {
+            updateMannyTargetOptions();
         }
         if (event.target.classList.contains('manny-craft-recipe')) {
             updateMannyCraftForm(event.target.closest('.manny-craft-form'));

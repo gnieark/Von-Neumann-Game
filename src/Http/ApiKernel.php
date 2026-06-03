@@ -30,7 +30,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 10;
+    public const API_VERSION = 11;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -62,7 +62,7 @@ final class ApiKernel
             if (preg_match('#^/api/probe/inventory/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeInventoryItemResponse($player, rawurldecode($matches[1])));
             }
-            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|recall)$#', $routePath, $matches) === 1) {
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
@@ -531,6 +531,16 @@ final class ApiKernel
             }
 
             $manny = $this->mannies->startCrafting($probe, $uid, $data['recipe']);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        if ($action === 'salvage') {
+            if (!isset($data['objectId']) || !is_string($data['objectId'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
+            }
+
+            $manny = $this->mannies->startSalvage($probe, $uid, $data['objectId']);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }

@@ -189,6 +189,7 @@ Routes principales:
 - `POST /api/probe/mannies/{mannyId}/repair`
 - `POST /api/probe/mannies/{mannyId}/mine`
 - `POST /api/probe/mannies/{mannyId}/craft`
+- `POST /api/probe/mannies/{mannyId}/salvage`
 - `POST /api/probe/mannies/{mannyId}/recall`
 - `GET /api/sector?x=...&y=...&z=...`
 

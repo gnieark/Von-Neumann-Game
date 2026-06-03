@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '10'
+  version: '11'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 10
+                apiVersion: 11
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -636,6 +636,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/salvage:
+    post:
+      summary: Recover a drifting sector object with a Manny
+      description: >
+        Starts a five-minute recovery task. The target is checked again when
+        the delay ends; if another player has already recovered it, the task
+        completes with a failed result and no object is transferred.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannySalvageRequest'
+            example:
+              objectId: manny-mny_abandoned
+      responses:
+        '202':
+          description: Recovery task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Object is not recoverable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/recall:
     post:
       summary: Recall an exterior Manny to the probe
@@ -842,7 +886,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, invalid_salvage_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -1297,6 +1341,13 @@ components:
             Crafting recipe to start. The initial recipe, waypoint_bookmark,
             consumes 0.01 containers of metals, takes 10 real minutes, and
             creates an inventory item occupying 0.01 containers.
+    MannySalvageRequest:
+      type: object
+      required: [objectId]
+      properties:
+        objectId:
+          type: string
+          description: Current-sector object id to recover. Abandoned Manny objects are recoverable.
     Manny:
       type: object
       required: [id, name, location, currentTask, taskProgressPercent, taskEstimatedEndTime, task, cargo, canReceiveOrders]
@@ -1313,7 +1364,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, returning, waiting_for_space]
+          enum: [repair, mining, crafting, salvage, returning, waiting_for_space]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -1462,6 +1513,9 @@ components:
         dangerLevel:
           type: string
           enum: [low, moderate, extreme]
+        salvageable:
+          type: boolean
+          description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage.
         waypointBookmarks:
           type: array
           items:
