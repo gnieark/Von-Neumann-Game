@@ -119,6 +119,14 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
     };
 
     const salvageTargetLabel = (target) => {
+        if (target && target.type === 'drifting_item') {
+            const name = target.name || target.itemType || t('unknownObject', 'Unknown object');
+            const quantity = Number(target.quantity);
+
+            return objectTypeLabel('drifting_item') + ' ' + name
+                + (Number.isFinite(quantity) && quantity > 0 ? ' x' + String(quantity) : '');
+        }
+
         const type = objectTypeLabel(target && target.type ? target.type : 'object');
         const name = target && (target.name || target.id) ? (target.name || target.id) : t('unknownObject', 'Unknown object');
         const targetState = target && target.mannyState ? ' - ' + mannyStateLabel(target.mannyState) : '';
@@ -451,10 +459,13 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
         type: object.type || 'object',
         name: object.name || object.id || '',
         mannyState: object.mannyState || null,
+        itemType: object.itemType || null,
+        quantity: object.quantity || null,
+        containerSpace: object.containerSpace || null,
     }));
 
     const bookmarkTargetsFromObjects = (objects) => objects.flatMap((object) => {
-        const direct = object.type !== 'manny' ? [{
+        const direct = !['manny', 'drifting_item'].includes(object.type) ? [{
             id: object.id,
             type: object.type || 'object',
             name: object.name || object.id || '',
@@ -499,10 +510,14 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
             const mannyDetail = object.type === 'manny'
                 ? '<p>' + escapeHtml(t('mannyState', 'State') + ' ' + mannyStateLabel(object.mannyState)) + '</p>'
                 : '';
+            const driftingItemDetail = object.type === 'drifting_item'
+                ? '<p>' + escapeHtml(t('quantity', 'Quantity') + ' ' + String(object.quantity || 0)) + '</p>'
+                : '';
             return '<article class="' + classes + '">'
                 + '<div><span>' + escapeHtml(objectTypeLabel(object.type || 'unknown')) + '</span><b>' + escapeHtml(danger) + '</b></div>'
                 + '<p>' + escapeHtml(object.summary || '') + '</p>'
                 + mannyDetail
+                + driftingItemDetail
                 + countdown
                 + '</article>';
         }).join('');

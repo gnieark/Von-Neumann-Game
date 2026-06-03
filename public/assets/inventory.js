@@ -85,6 +85,16 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
         t('containerSpace', 'Space') + ' ' + numberValue(stock.containerSpace),
     ].join(' · ');
 
+    const isJettisonableItem = (item) => {
+        if (item.type === 'manny') {
+            return item.location
+                && item.location.type === 'probe'
+                && item.currentTask === null;
+        }
+
+        return ['waypoint_bookmark', 'steel_bar', 'steel_plate'].includes(item.type);
+    };
+
     const renderJettisonForm = (itemId, amount, withAmount, disabled) => {
         if (disabled) {
             return '<span class="inventory-muted">' + escapeHtml(t('notJettisonable', 'Not jettisonable')) + '</span>';
@@ -132,17 +142,13 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
                 + '</article>'
             ));
 
-        const itemCards = (Array.isArray(inventory.items) ? inventory.items : []).map((item) => {
-            const isOnboardIdleManny = item.type === 'manny'
-                && item.location
-                && item.location.type === 'probe'
-                && item.currentTask === null;
-            return '<article class="inventory-card">'
+        const itemCards = (Array.isArray(inventory.items) ? inventory.items : []).map((item) => (
+            '<article class="inventory-card">'
                 + '<div><span>' + escapeHtml(t('inventoryItem', 'Equipment')) + '</span><b>' + escapeHtml(inventoryItemName(item)) + '</b></div>'
                 + '<p>' + escapeHtml(inventoryEntryDetail(item)) + '</p>'
-                + renderJettisonForm(item.id, 0, false, !isOnboardIdleManny)
-                + '</article>';
-        });
+                + renderJettisonForm(item.id, 0, false, !isJettisonableItem(item))
+                + '</article>'
+        ));
 
         node.innerHTML = stockCards.concat(tankCards, itemCards).join('');
     }

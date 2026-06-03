@@ -17,6 +17,7 @@ use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
+use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
@@ -196,6 +197,14 @@ final class SectorObservationService
             $data['mannyUid'] = $object->getMannyUid();
             $data['cargo'] = $object->getCargo();
             $data['salvageable'] = $object->getState() === SectorManny::STATE_ABANDONED;
+        }
+
+        if ($object instanceof SectorDriftingItem) {
+            $data['itemType'] = $object->getItemType();
+            $data['quantity'] = $object->getQuantity();
+            $data['containerSpace'] = $object->getContainerSpace();
+            $data['capacityUnit'] = $object->getCapacityUnit();
+            $data['salvageable'] = $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0;
         }
 
         if ($object->getWaypointBookmarks() !== []) {
@@ -387,6 +396,7 @@ final class SectorObservationService
                 SectorManny::STATE_FORGOTTEN => 'Manny left behind by a probe.',
                 default => 'Abandoned Manny drifting in this sector.',
             },
+            $object instanceof SectorDriftingItem => sprintf('%d inventory item(s) drifting in open space.', $object->getQuantity()),
             default => 'Unknown astronomical object.',
         };
     }

@@ -8,6 +8,7 @@ use VonNeumannGame\Auth\OAuthConfig;
 use VonNeumannGame\Auth\OAuthService;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
+use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
@@ -30,6 +31,7 @@ use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
+use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorManny;
@@ -175,7 +177,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(11, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(12, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -687,6 +689,60 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.5, $probes->findByPlayerId($player->id)?->metalsStock, 'jettisoning metals lowers the probe stock');
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->locationType, 'freeing storage lets a waiting Manny enter the probe');
     $test->assertEquals(null, $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->currentTask, 'Manny waiting for storage returns to idle after docking');
+
+    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.45 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $steelBarIds = [];
+    for ($index = 0; $index < 7; $index++) {
+        $steelBarIds[] = $items->create(
+            $createdProbe->id,
+            ProbeItem::TYPE_STEEL_BAR,
+            ProbeItem::STEEL_BAR_NAME,
+            0.01,
+            ['test' => 'drifting-stack'],
+        )->uid;
+    }
+    foreach ($steelBarIds as $steelBarId) {
+        $jettisonSteelBar = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($steelBarId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
+        $test->assertEquals(200, $jettisonSteelBar->status, 'craftable items can be jettisoned into the current sector');
+    }
+    $driftingObjectId = SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_STEEL_BAR);
+    $driftingSector = $sectorRepository->load($createdProbe->currentSector);
+    $driftingSteelBars = $driftingSector->findObjectById($driftingObjectId);
+    $test->assertEquals('drifting_item', $driftingSteelBars?->getType()->value, 'jettisoned craftable items are persisted as a drifting sector object');
+    $test->assertEquals(7, $driftingSteelBars?->toArray()['quantity'] ?? null, 'drifting craftable items are aggregated by type in the sector');
+    $scanWithDriftingItems = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $scanDriftingItems = array_values(array_filter(
+        $scanWithDriftingItems->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'drifting_item'
+    ));
+    $test->assertEquals(true, $scanDriftingItems[0]['salvageable'] ?? null, 'drifting craftable item stacks are exposed as salvageable');
+    $test->assertEquals(7, $scanDriftingItems[0]['quantity'] ?? null, 'current-sector scan exposes drifting item quantity');
+
+    $salvageSteelBars = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
+        'objectId' => $driftingObjectId,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $salvageSteelBars->status, 'Manny can start recovering a drifting craftable item stack');
+    $test->assertEquals(5, $salvageSteelBars->body['manny']['task']['reservedItem']['quantity'] ?? null, 'Manny recovery reserves at most one cargo trip of craftable items');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+        'uid' => $firstMannyId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $afterSteelBarSalvage = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $steelBarInventory = $kernel->handle('GET', '/api/probe', $headers);
+    $recoveredSteelBars = array_values(array_filter(
+        $steelBarInventory->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === ProbeItem::TYPE_STEEL_BAR,
+    ));
+    $test->assertEquals(5, count($recoveredSteelBars), 'completed drifting-item recovery creates only the Manny cargo capacity worth of items');
+    $driftingSectorAfterRecovery = $sectorRepository->load($createdProbe->currentSector);
+    $remainingDriftingSteelBars = $driftingSectorAfterRecovery->findObjectById($driftingObjectId);
+    $test->assertEquals(2, $remainingDriftingSteelBars?->toArray()['quantity'] ?? null, 'unrecovered drifting item quantity remains in the sector');
+    $steelBarSalvageActor = array_values(array_filter(
+        $afterSteelBarSalvage->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $firstMannyId,
+    ))[0] ?? null;
+    $test->assertEquals(null, $steelBarSalvageActor['currentTask'] ?? null, 'Manny returns to idle after recovering drifting craftable items');
+    $test->assertEquals('success', $steelBarSalvageActor['task']['result'] ?? null, 'drifting craftable item recovery records success');
 
     $jettisonManny = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($fourthMannyId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $jettisonManny->status, 'POST /api/probe/inventory/{itemId}/jettison can eject an idle onboard Manny');

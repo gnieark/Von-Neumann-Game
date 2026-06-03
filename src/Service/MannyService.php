@@ -17,6 +17,7 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
+use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\UniverseObject;
@@ -252,6 +253,10 @@ final class MannyService
             throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
         }
 
+        $reservedItem = $target instanceof SectorDriftingItem
+            ? $this->reserveDriftingItemForSalvage($probe, $target)
+            : null;
+
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $manny->locationType = Manny::LOCATION_SECTOR;
         $manny->sector = $probe->currentSector;
@@ -263,7 +268,7 @@ final class MannyService
             'durationSeconds' => self::SALVAGE_SECONDS,
             'target' => $this->salvageTargetArray($target),
             'result' => 'pending',
-        ];
+        ] + ($reservedItem !== null ? ['reservedItem' => $reservedItem] : []);
         $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
 
@@ -293,6 +298,12 @@ final class MannyService
             $this->mannies->save($manny);
 
             return $this->requiredManny($probe, $uid);
+        }
+        if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE && $this->reservedSalvageItemPayload($manny) !== null) {
+            return $manny;
+        }
+        if ($manny->currentTask === Manny::TASK_SALVAGE) {
+            $this->restoreReservedSalvageItem($manny);
         }
         if ($manny->isOnProbe()) {
             return $manny;
@@ -330,6 +341,34 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->mannies->findByUid($uid) ?? $manny;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function jettisonProbeItemFromProbe(NeumannProbe $probe, string $uid): array
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $item = $this->items->findByUidForProbe($probe->id, $uid)
+            ?? throw new MannyActionException(404, 'not_found', 'Inventory item not found.');
+        if (!$this->isJettisonableDriftingItemType($item->type)) {
+            throw new MannyActionException(422, 'item_not_jettisonable', 'This inventory item cannot be jettisoned.');
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $drifting = $this->addDriftingItemToSector($sector, $item->type, $this->itemDisplayName($item->type, $item->name), $item->containerSpace, 1);
+        $this->sectors->saveSector($sector);
+        $this->items->delete($item);
+
+        return [
+            'type' => $item->type,
+            'name' => $drifting->getName(),
+            'quantity' => 1,
+            'driftingQuantity' => $drifting->getQuantity(),
+            'objectId' => $drifting->getId(),
+            'containerSpace' => $drifting->getContainerSpace(),
+            'capacityUnit' => $drifting->getCapacityUnit(),
+        ];
     }
 
     public function refreshMannyState(Manny $manny, NeumannProbe $probe): Manny
@@ -427,13 +466,30 @@ final class MannyService
         $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
         $sectorCoordinates = $manny->sector ?? $probe->currentSector;
         $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
-        $target = $objectId !== '' ? $sector->findObjectById($objectId) : null;
+        $reservedItem = $this->reservedSalvageItemPayload($manny);
         $result = [
             'lastTask' => Manny::TASK_SALVAGE,
             'objectId' => $objectId,
             'target' => $manny->taskPayload['target'] ?? null,
         ];
 
+        if ($reservedItem !== null) {
+            $result['result'] = 'success';
+            $result['reservedItem'] = $reservedItem;
+            $result['salvaged'] = [
+                'type' => $reservedItem['type'],
+                'name' => $reservedItem['name'],
+                'quantity' => $reservedItem['quantity'],
+                'containerSpace' => $reservedItem['containerSpace'],
+            ];
+            $this->finishSalvageActor($manny, $probe, $result);
+            $this->probes->save($probe);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+
+        $target = $objectId !== '' ? $sector->findObjectById($objectId) : null;
         if ($target === null || !$this->isSalvageableObject($target)) {
             $result['result'] = 'failed';
             $result['failureReason'] = 'target_unavailable';
@@ -885,7 +941,7 @@ final class MannyService
             return $manny;
         }
 
-        if (!$this->canAcceptMannyDocking($probe, $manny)) {
+        if (!$this->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
             $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
             $this->mannies->save($manny);
 
@@ -893,11 +949,13 @@ final class MannyService
         }
 
         $this->transferMannyCargoToProbe($manny, $probe);
+        $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
         if ($this->mannyCargoIsEmpty($manny)) {
+            $finalPayload = $this->reservedSalvageItemPayload($manny) !== null ? $manny->taskPayload : [];
             $this->removeMannyFromSector($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
-            $this->clearTask($manny);
+            $this->clearTask($manny, $finalPayload);
         } else {
             $this->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
         }
@@ -909,16 +967,18 @@ final class MannyService
 
     private function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
-        if (!$this->canAcceptMannyDocking($probe, $manny)) {
+        if (!$this->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
             return $manny;
         }
 
         $this->transferMannyCargoToProbe($manny, $probe);
+        $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
         if ($this->mannyCargoIsEmpty($manny)) {
+            $finalPayload = $this->reservedSalvageItemPayload($manny) !== null ? $manny->taskPayload : [];
             $this->removeMannyFromSector($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
-            $this->clearTask($manny);
+            $this->clearTask($manny, $finalPayload);
         } else {
             $this->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
         }
@@ -977,7 +1037,8 @@ final class MannyService
 
     private function isSalvageableObject(UniverseObject $object): bool
     {
-        return $object instanceof SectorManny && $object->getState() === SectorManny::STATE_ABANDONED;
+        return ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_ABANDONED)
+            || ($object instanceof SectorDriftingItem && $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0);
     }
 
     private function salvageTargetArray(UniverseObject $object): array
@@ -989,6 +1050,11 @@ final class MannyService
         ] + ($object instanceof SectorManny ? [
             'mannyUid' => $object->getMannyUid(),
             'mannyState' => $object->getState(),
+        ] : []) + ($object instanceof SectorDriftingItem ? [
+            'itemType' => $object->getItemType(),
+            'quantity' => $object->getQuantity(),
+            'containerSpace' => $object->getContainerSpace(),
+            'capacityUnit' => $object->getCapacityUnit(),
         ] : []);
     }
 
@@ -1047,16 +1113,148 @@ final class MannyService
      */
     private function finishSalvageActor(Manny $manny, NeumannProbe $probe, array $resultPayload): void
     {
-        if (!$this->canAcceptMannyDocking($probe, $manny)) {
+        if (!$this->canAcceptMannyDocking($probe, $manny, $resultPayload)) {
             $this->waitForStorageSpace($manny, ['reason' => 'salvage_return'] + $resultPayload);
             return;
         }
 
         $this->transferMannyCargoToProbe($manny, $probe);
+        $this->deliverReservedSalvageItems($probe, $manny, $resultPayload);
         $this->removeMannyFromSector($manny);
         $manny->locationType = Manny::LOCATION_PROBE;
         $manny->sector = null;
         $this->clearTask($manny, $resultPayload);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function reserveDriftingItemForSalvage(NeumannProbe $probe, SectorDriftingItem $target): array
+    {
+        $containerSpace = round(max(0.0, $target->getContainerSpace()), 4);
+        if ($containerSpace <= 0.0) {
+            throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
+        }
+
+        $maximumQuantity = (int) floor((self::MANNY_CARGO_CAPACITY + 0.00001) / $containerSpace);
+        if ($maximumQuantity <= 0) {
+            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'This drifting object is too large for a Manny to carry.');
+        }
+
+        $quantity = min($target->getQuantity(), $maximumQuantity);
+        if ($quantity <= 0) {
+            throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $remaining = $target->getQuantity() - $quantity;
+        if ($remaining > 0) {
+            $sector->replaceObject($target->withQuantity($remaining));
+        } else {
+            $sector->removeObjectById($target->getId());
+        }
+        $this->sectors->saveSector($sector);
+
+        return [
+            'objectId' => $target->getId(),
+            'type' => $target->getItemType(),
+            'name' => $target->getName() ?? $this->itemDisplayName($target->getItemType()),
+            'quantity' => $quantity,
+            'containerSpace' => $containerSpace,
+            'capacityUnit' => $target->getCapacityUnit(),
+        ];
+    }
+
+    private function restoreReservedSalvageItem(Manny $manny): void
+    {
+        $reservedItem = $this->reservedSalvageItemPayload($manny);
+        if ($reservedItem === null || $manny->sector === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($manny->sector);
+        $this->addDriftingItemToSector(
+            $sector,
+            (string) $reservedItem['type'],
+            (string) $reservedItem['name'],
+            (float) $reservedItem['containerSpace'],
+            (int) $reservedItem['quantity'],
+        );
+        $this->sectors->saveSector($sector);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function deliverReservedSalvageItems(NeumannProbe $probe, Manny $manny, array $payload): void
+    {
+        $reservedItem = $this->reservedSalvageItemPayloadFrom($payload);
+        if ($reservedItem === null) {
+            return;
+        }
+
+        $quantity = (int) $reservedItem['quantity'];
+        for ($index = 0; $index < $quantity; $index++) {
+            $this->items->create(
+                $probe->id,
+                (string) $reservedItem['type'],
+                (string) $reservedItem['name'],
+                (float) $reservedItem['containerSpace'],
+                [
+                    'source' => 'salvaged_drifting_item',
+                    'recoveredByMannyId' => $manny->uid,
+                    'recoveredByMannyName' => $manny->name,
+                    'recoveredAt' => gmdate('c'),
+                ],
+            );
+        }
+    }
+
+    private function reservedSalvageItemPayload(Manny $manny): ?array
+    {
+        return $this->reservedSalvageItemPayloadFrom($manny->taskPayload);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>|null
+     */
+    private function reservedSalvageItemPayloadFrom(array $payload): ?array
+    {
+        $reservedItem = $payload['reservedItem'] ?? null;
+        if (!is_array($reservedItem)) {
+            return null;
+        }
+
+        $type = (string) ($reservedItem['type'] ?? '');
+        $name = (string) ($reservedItem['name'] ?? $this->itemDisplayName($type));
+        $quantity = max(0, (int) ($reservedItem['quantity'] ?? 0));
+        $containerSpace = round(max(0.0, (float) ($reservedItem['containerSpace'] ?? 0.0)), 4);
+        if ($type === '' || $quantity <= 0 || $containerSpace <= 0.0) {
+            return null;
+        }
+
+        return [
+            'objectId' => (string) ($reservedItem['objectId'] ?? SectorDriftingItem::objectIdForItemType($type)),
+            'type' => $type,
+            'name' => $name,
+            'quantity' => $quantity,
+            'containerSpace' => $containerSpace,
+            'capacityUnit' => (string) ($reservedItem['capacityUnit'] ?? ProbeInventory::CAPACITY_UNIT),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function reservedSalvageItemContainerSpace(array $payload): float
+    {
+        $reservedItem = $this->reservedSalvageItemPayloadFrom($payload);
+        if ($reservedItem === null) {
+            return 0.0;
+        }
+
+        return round((float) $reservedItem['containerSpace'] * (int) $reservedItem['quantity'], 4);
     }
 
     private function uniqueMannyNameForProbe(NeumannProbe $probe, string $name, int $exceptId): string
@@ -1273,13 +1471,14 @@ final class MannyService
         return round(max(0.0, min(1.0, $ratio)) * max(0.0, $requestedTotal), 4);
     }
 
-    private function canAcceptMannyDocking(NeumannProbe $probe, Manny $manny): bool
+    private function canAcceptMannyDocking(NeumannProbe $probe, Manny $manny, array $payload = []): bool
     {
         $requiredStorage = round(
             self::MANNY_CONTAINER_SPACE
             + $manny->cargoMetals
             + $manny->cargoIce
-            + $manny->cargoOrganicCompounds,
+            + $manny->cargoOrganicCompounds
+            + $this->reservedSalvageItemContainerSpace($payload),
             4,
         );
 
@@ -1493,6 +1692,52 @@ final class MannyService
             && $manny->cargoMetals <= 0.0001
             && $manny->cargoIce <= 0.0001
             && $manny->cargoOrganicCompounds <= 0.0001;
+    }
+
+    private function isJettisonableDriftingItemType(string $type): bool
+    {
+        return in_array($type, [
+            ProbeItem::TYPE_WAYPOINT_BOOKMARK,
+            ProbeItem::TYPE_STEEL_BAR,
+            ProbeItem::TYPE_STEEL_PLATE,
+        ], true);
+    }
+
+    private function itemDisplayName(string $type, ?string $fallback = null): string
+    {
+        return match ($type) {
+            ProbeItem::TYPE_WAYPOINT_BOOKMARK => ProbeItem::WAYPOINT_BOOKMARK_NAME,
+            ProbeItem::TYPE_STEEL_BAR => ProbeItem::STEEL_BAR_NAME,
+            ProbeItem::TYPE_STEEL_PLATE => ProbeItem::STEEL_PLATE_NAME,
+            ProbeItem::TYPE_ADDITIONAL_CONTAINER => ProbeItem::ADDITIONAL_CONTAINER_NAME,
+            default => $fallback !== null && trim($fallback) !== '' ? $fallback : $type,
+        };
+    }
+
+    private function addDriftingItemToSector(SectorContent $sector, string $itemType, string $name, float $containerSpace, int $quantity): SectorDriftingItem
+    {
+        $quantity = max(0, $quantity);
+        $objectId = SectorDriftingItem::objectIdForItemType($itemType);
+        $existing = $sector->findObjectById($objectId);
+        if ($existing instanceof SectorDriftingItem) {
+            $drifting = $existing->withQuantity($existing->getQuantity() + $quantity);
+            $sector->replaceObject($drifting);
+
+            return $drifting;
+        }
+
+        $drifting = new SectorDriftingItem(
+            $objectId,
+            $this->itemDisplayName($itemType, $name),
+            $itemType,
+            $quantity,
+            round(max(0.0, $containerSpace), 4),
+            ProbeInventory::CAPACITY_UNIT,
+            'Inventory items drifting in open space.',
+        );
+        $sector->addObject($drifting);
+
+        return $drifting;
     }
 
     private function registerMannyInSector(Manny $manny, string $state): void

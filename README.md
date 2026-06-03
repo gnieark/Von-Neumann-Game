@@ -197,6 +197,14 @@ Les coordonnees envoyees par l'API sont toujours relatives au joueur et doivent
 respecter la parite FCC.
 Les Mannys abandonnees ou oubliees apparaissent dans les objets detectes
 uniquement pour le secteur ou se trouve actuellement la sonde.
+La jetabilite depend du type d'entree d'inventaire: l'imprimante 3D atomique
+reste non jetable; les ressources de base et le deuterium jetes disparaissent;
+une Manny jetee devient un objet individuel abandonne dans le secteur courant;
+les objets craftables standards (`waypoint_bookmark`, `steel_bar`,
+`steel_plate`) rejoignent une pile agregee d'objets a la derive dans le secteur
+courant. Une Manny peut recuperer ces piles avec l'action `salvage`, dans la
+limite de sa capacite de transport par voyage. Les conteneurs supplementaires
+gardent une mecanique de jettison reservee pour plus tard.
 Les autres sondes detectees dans le secteur courant apparaissent dans
 `sector.probes` avec leur id, leur nom et leur etat de mouvement.
 

@@ -18,6 +18,7 @@ final class UniverseObjectFactory
             UniverseObjectType::BlackHole => BlackHole::fromArray($data),
             UniverseObjectType::SolarSystem => SolarSystem::fromArray($data),
             UniverseObjectType::Manny => SectorManny::fromArray($data),
+            UniverseObjectType::DriftingItem => SectorDriftingItem::fromArray($data),
         };
     }
 }

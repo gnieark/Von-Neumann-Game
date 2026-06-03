@@ -30,7 +30,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 11;
+    public const API_VERSION = 12;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -275,17 +275,27 @@ final class ApiKernel
         $inventory = $this->inventoryForProbe($probe);
         $item = $inventory->findItem($itemId);
         if ($item !== null) {
-            if ($item->type !== 'manny') {
+            if ($item->type === 'atomic_3d_printer') {
                 return ApiResponse::error(422, 'item_not_jettisonable', 'This inventory item cannot be jettisoned.');
             }
 
-            $manny = $this->mannies->jettisonMannyFromProbe($probe, $itemId);
+            if ($item->type === 'manny') {
+                $manny = $this->mannies->jettisonMannyFromProbe($probe, $itemId);
+                $this->mannies->manniesForProbe($probe);
+                $probe = $this->requiredProbe($player);
+
+                return new ApiResponse(200, [
+                    'inventory' => $this->inventoryForProbe($probe)->toArray(),
+                    'manny' => $this->mannyArray($player, $probe, $manny),
+                ]);
+            }
+
+            $jettisoned = $this->mannies->jettisonProbeItemFromProbe($probe, $itemId);
             $this->mannies->manniesForProbe($probe);
             $probe = $this->requiredProbe($player);
-
             return new ApiResponse(200, [
                 'inventory' => $this->inventoryForProbe($probe)->toArray(),
-                'manny' => $this->mannyArray($player, $probe, $manny),
+                'jettisoned' => $jettisoned,
             ]);
         }
 

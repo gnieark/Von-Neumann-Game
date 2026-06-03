@@ -313,6 +313,7 @@ if (body && body.dataset.authenticated === '1') {
                     setText('inventory-json', pretty(data.inventory));
                 }
                 loadProbe();
+                loadCurrentSector();
                 loadMannies();
             },
         });

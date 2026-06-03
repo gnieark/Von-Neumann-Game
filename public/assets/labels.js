@@ -24,6 +24,7 @@ export const createLabels = (i18n) => {
         black_hole: t('blackHoleObject', 'Black hole'),
         solar_system: t('solarSystemObject', 'Solar system'),
         manny: t('mannyObject', 'Manny'),
+        drifting_item: t('driftingItemObject', 'Drifting item'),
     }[type] || type);
     const mannyStateLabel = (state) => ({
         abandoned: t('abandonedManny', 'abandoned'),

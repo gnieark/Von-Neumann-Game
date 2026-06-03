@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '11'
+  version: '12'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 11
+                apiVersion: 12
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -204,7 +204,7 @@ paths:
                       location:
                         type: probe
                       cargo:
-                        capacity: 0.3
+                        capacity: 0.05
                         deuterium: 0
                         metals: 0
                         ice: 0
@@ -357,9 +357,10 @@ paths:
       summary: Jettison an inventory entry into space
       description: >
         Discards stored metals/non-metal materials by amount, vents deuterium from
-        the external tank by percentage points, or ejects an idle onboard Manny
-        into the current sector. Non-persisted core equipment cannot be
-        jettisoned.
+        the external tank by percentage points, ejects an idle onboard Manny
+        into the current sector, or adds supported crafted items to an aggregated
+        drifting-item stack in the current sector. Non-persisted core equipment
+        and additional containers cannot be jettisoned.
       parameters:
         - name: itemId
           in: path
@@ -568,7 +569,7 @@ paths:
             example:
               objectId: mine-rock
               resources: [metals, ice, carbon_compounds]
-              targetAmount: 0.3
+              targetAmount: 0.05
       responses:
         '202':
           description: Mining task accepted
@@ -956,7 +957,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container]
         name:
           type: string
         craftableBy:
@@ -981,21 +982,21 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate]
         quantity:
           type: number
           minimum: 0
           exclusiveMinimum: true
         unit:
           type: string
-          enum: [earth_container_equivalent]
+          enum: [earth_container_equivalent, item]
     CraftingRecipeOutput:
       type: object
       required: [type, name, containerSpace, containerSpaceUnit]
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container]
         name:
           type: string
         containerSpace:
@@ -1194,8 +1195,20 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate]
             amount:
+              type: number
+              description: Present for discarded resources and deuterium.
+            quantity:
+              type: integer
+              description: Present for crafted items added to a drifting sector stack.
+            driftingQuantity:
+              type: integer
+              description: Total quantity of this crafted item type now drifting in the current sector.
+            objectId:
+              type: string
+              description: Current-sector drifting item object id for crafted item jettison.
+            containerSpace:
               type: number
         manny:
           nullable: true
@@ -1233,7 +1246,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container]
         name:
           type: string
         containerSpace:
@@ -1261,7 +1274,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container]
         name:
           type: string
         currentTask:
@@ -1329,25 +1342,28 @@ components:
           type: number
           minimum: 0
           exclusiveMinimum: true
-          description: Amount to mine in equivalent earth containers. Manny cargo capacity is 0.3 per trip.
+          description: Amount to mine in equivalent earth containers. Manny cargo capacity is 0.05 per trip.
     MannyCraftRequest:
       type: object
       required: [recipe]
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container]
           description: >
-            Crafting recipe to start. The initial recipe, waypoint_bookmark,
-            consumes 0.01 containers of metals, takes 10 real minutes, and
-            creates an inventory item occupying 0.01 containers.
+            Crafting recipe to start. Manny craftable items can be jettisoned
+            later, except additional containers whose jettison mechanic is
+            reserved for a later rule.
     MannySalvageRequest:
       type: object
       required: [objectId]
       properties:
         objectId:
           type: string
-          description: Current-sector object id to recover. Abandoned Manny objects are recoverable.
+          description: >
+            Current-sector object id to recover. Abandoned Manny objects and
+            drifting crafted-item stacks are recoverable. For item stacks, a
+            Manny reserves at most one cargo trip of items.
     Manny:
       type: object
       required: [id, name, location, currentTask, taskProgressPercent, taskEstimatedEndTime, task, cargo, canReceiveOrders]
@@ -1400,7 +1416,7 @@ components:
       properties:
         capacity:
           type: number
-          example: 0.3
+          example: 0.05
         deuterium:
           type: number
         metals:
@@ -1498,7 +1514,7 @@ components:
           type: string
         type:
           type: string
-          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny]
+          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item]
         name:
           type: string
           nullable: true
@@ -1534,6 +1550,19 @@ components:
           description: Present only for detected Manny objects.
         cargo:
           $ref: '#/components/schemas/MannyCargo'
+        itemType:
+          type: string
+          enum: [waypoint_bookmark, steel_bar, steel_plate]
+          description: Present only for drifting item stacks.
+        quantity:
+          type: integer
+          description: Present only for drifting item stacks.
+        containerSpace:
+          type: number
+          description: Per-item storage space for drifting item stacks.
+        capacityUnit:
+          type: string
+          enum: [earth_container_equivalent]
     WaypointBookmarkTarget:
       type: object
       required: [id, type, name]
