@@ -175,7 +175,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(9, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(10, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -369,6 +369,38 @@ $deuteriumTank = $sector->body['inventory']['externalTanks'][0] ?? null;
 $test->assertEquals('deuterium', $deuteriumTank['type'] ?? null, 'default external tank stores deuterium');
 $test->assertEquals(100.0, $deuteriumTank['fillPercent'] ?? null, 'default deuterium tank starts full');
 $test->assertEquals(false, $deuteriumTank['usesCargoCapacity'] ?? null, 'deuterium tank is outside cargo capacity');
+
+$stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');
+$movingNeighbor = $auth->registerPlayerWithPassword('moving-neighbor', 'secret', 'Moving Neighbor', 'Moving neighbor probe');
+$stationaryNeighborProbe = $probes->findByPlayerId($stationaryNeighbor->id);
+$movingNeighborProbe = $probes->findByPlayerId($movingNeighbor->id);
+if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighborProbe !== null) {
+    $stationaryNeighborProbe->currentSector = $createdProbe->currentSector;
+    $probes->save($stationaryNeighborProbe);
+    $movingNeighborProbe->currentSector = $createdProbe->currentSector;
+    $probes->save($movingNeighborProbe);
+
+    $neighborTarget = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
+    $movements->create(
+        $movingNeighborProbe->id,
+        $movingNeighborProbe->currentSector,
+        $neighborTarget,
+        1,
+        (new MovementDurationCalculator())->timeline(new DateTimeImmutable('now', new DateTimeZone('UTC')), 1),
+        2.0,
+    );
+
+    $sectorWithProbePresence = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $detectedProbesById = [];
+    foreach ($sectorWithProbePresence->body['sector']['probes'] ?? [] as $detectedProbe) {
+        $detectedProbesById[(int) ($detectedProbe['id'] ?? 0)] = $detectedProbe;
+    }
+    $test->assert(!isset($detectedProbesById[$createdProbe->id]), 'current probe is not listed as another sector probe');
+    $test->assertEquals('Stationary neighbor probe', $detectedProbesById[$stationaryNeighborProbe->id]['name'] ?? null, 'current-sector scan exposes another probe name');
+    $test->assertEquals(false, $detectedProbesById[$stationaryNeighborProbe->id]['moving'] ?? null, 'current-sector scan marks idle neighbor probe as not moving');
+    $test->assertEquals('Moving neighbor probe', $detectedProbesById[$movingNeighborProbe->id]['name'] ?? null, 'current-sector scan exposes moving probe name');
+    $test->assertEquals(true, $detectedProbesById[$movingNeighborProbe->id]['moving'] ?? null, 'current-sector scan marks active neighbor probe as moving');
+}
 
 $inventoryItems = $sector->body['inventory']['items'] ?? [];
 $printer = $inventoryItems[0] ?? null;

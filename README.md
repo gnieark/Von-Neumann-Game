@@ -196,6 +196,8 @@ Les coordonnees envoyees par l'API sont toujours relatives au joueur et doivent
 respecter la parite FCC.
 Les Mannys abandonnees ou oubliees apparaissent dans les objets detectes
 uniquement pour le secteur ou se trouve actuellement la sonde.
+Les autres sondes detectees dans le secteur courant apparaissent dans
+`sector.probes` avec leur id, leur nom et leur etat de mouvement.
 
 Les endpoints proteges acceptent un Bearer token de session ou une clef API
 generee par `POST /api/me/api-key`. Les clefs API sont affichees une seule fois

@@ -24,12 +24,13 @@ use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
+use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
 
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 9;
+    public const API_VERSION = 10;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -211,22 +212,23 @@ final class ApiKernel
         }
         if ($sensorMode === 'degraded') {
             $frame = new PlayerReferenceFrame($player->homeSector);
+            $observation = [
+                'relativeCoordinates' => $frame->globalToRelative($observableSector),
+                'distance' => 0,
+                'knowledgeLevel' => 'long_range_estimation',
+                'confidence' => 0.2,
+                'sensorMode' => 'degraded',
+                'dataFreshness' => 'degraded_live',
+                'message' => 'Sensors are degraded during intersector maneuvering.',
+                'scan' => [
+                    'currentSectorResidenceSeconds' => 0,
+                    'requiredResidenceSeconds' => 0,
+                    'scanQuality' => 0.2,
+                ],
+            ];
 
             return new ApiResponse(200, [
-                'sector' => [
-                    'relativeCoordinates' => $frame->globalToRelative($observableSector),
-                    'distance' => 0,
-                    'knowledgeLevel' => 'long_range_estimation',
-                    'confidence' => 0.2,
-                    'sensorMode' => 'degraded',
-                    'dataFreshness' => 'degraded_live',
-                    'message' => 'Sensors are degraded during intersector maneuvering.',
-                    'scan' => [
-                        'currentSectorResidenceSeconds' => 0,
-                        'requiredResidenceSeconds' => 0,
-                        'scanQuality' => 0.2,
-                    ],
-                ],
+                'sector' => $this->withObservedProbePresence($observation, $probe, $observableSector),
                 'inventory' => $this->inventoryForProbe($probe)->toArray(),
             ]);
         }
@@ -235,6 +237,7 @@ final class ApiKernel
         $observation['sensorMode'] = $sensorMode;
         $observation['dataFreshness'] = 'live';
         $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
+        $observation = $this->withObservedProbePresence($observation, $probe, $observableSector);
 
         return new ApiResponse(200, [
             'sector' => $observation,
@@ -540,6 +543,42 @@ final class ApiKernel
     private function requiredProbe(Player $player): NeumannProbe
     {
         return $this->probes->findByPlayerId($player->id) ?? throw new \RuntimeException('Probe not found.');
+    }
+
+    private function withObservedProbePresence(array $observation, NeumannProbe $probe, SectorCoordinates $observableSector): array
+    {
+        if (!$observableSector->equals($probe->currentSector)) {
+            return $observation;
+        }
+
+        $observedProbes = $this->observedProbePresence($probe, $observableSector);
+        if ($observedProbes !== []) {
+            $observation['probes'] = $observedProbes;
+        }
+
+        return $observation;
+    }
+
+    /**
+     * @return array<array{id:int, name:string, moving:bool}>
+     */
+    private function observedProbePresence(NeumannProbe $probe, SectorCoordinates $sector): array
+    {
+        $observed = [];
+        foreach ($this->probes->findBySector($sector, $probe->id) as $otherProbe) {
+            $otherProbe = $this->movements->refreshProbeMovementState($otherProbe);
+            if (!$otherProbe->currentSector->equals($sector)) {
+                continue;
+            }
+
+            $observed[] = [
+                'id' => $otherProbe->id,
+                'name' => $otherProbe->name,
+                'moving' => $this->movements->activeMovementForProbe($otherProbe) !== null,
+            ];
+        }
+
+        return $observed;
     }
 
     private function probeArray(Player $player, NeumannProbe $probe, array $relative): array

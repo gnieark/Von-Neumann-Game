@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '9'
+  version: '10'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 9
+                apiVersion: 10
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -175,6 +175,10 @@ paths:
                     - type: solar_system
                       name: System abc123
                       summary: Stellar system with 1 star(s) and 4 orbital body(ies).
+                  probes:
+                    - id: 2
+                      name: Probe of nova
+                      moving: false
                   scan:
                     currentSectorResidenceSeconds: 42
                     requiredResidenceSeconds: 0
@@ -1391,6 +1395,11 @@ components:
           description: Detailed current or visited sector objects. Abandoned or forgotten Manny objects are included only when the observed sector is the probe current sector.
           items:
             $ref: '#/components/schemas/SectorObject'
+        probes:
+          type: array
+          description: Other probes detected in the current sector. Present only on current-sector observations when at least one other probe is detected.
+          items:
+            $ref: '#/components/schemas/SectorProbePresence'
         estimatedObjects:
           type: object
           additionalProperties: true
@@ -1420,6 +1429,16 @@ components:
               type: number
               minimum: 0
               maximum: 1
+    SectorProbePresence:
+      type: object
+      required: [id, name, moving]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        moving:
+          type: boolean
     SectorObject:
       type: object
       required: [type, name, summary]

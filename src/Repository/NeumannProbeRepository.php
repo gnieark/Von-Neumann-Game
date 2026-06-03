@@ -56,6 +56,29 @@ final class NeumannProbeRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    /**
+     * @return array<NeumannProbe>
+     */
+    public function findBySector(SectorCoordinates $sector, ?int $excludeId = null): array
+    {
+        $sql = 'SELECT * FROM neumann_probes WHERE sector_x = :x AND sector_y = :y AND sector_z = :z';
+        $params = [
+            'x' => $sector->getX(),
+            'y' => $sector->getY(),
+            'z' => $sector->getZ(),
+        ];
+        if ($excludeId !== null) {
+            $sql .= ' AND id != :exclude_id';
+            $params['exclude_id'] = $excludeId;
+        }
+        $sql .= ' ORDER BY id ASC';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return array_map(fn(array $row): NeumannProbe => $this->hydrate($row), $stmt->fetchAll());
+    }
+
     public function save(NeumannProbe $probe): void
     {
         $probe->updatedAt = gmdate('c');
