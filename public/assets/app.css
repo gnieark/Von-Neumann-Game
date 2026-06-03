@@ -666,6 +666,11 @@ button:disabled {
     box-shadow: 0 0 0 1px rgba(32, 255, 132, .28), 0 0 20px rgba(32, 255, 132, .32);
 }
 
+.sector-bookmark-alert[hidden],
+.sector-probe-alert[hidden] {
+    display: none;
+}
+
 .sector-bookmark-alert.acknowledged,
 .sector-probe-alert.acknowledged {
     animation: none;
