@@ -325,24 +325,42 @@ final class MannyService
                 'amount' => $amount,
             ];
         } elseif ($kind === 'item') {
+            $itemIds = $this->stringListPayload($payload['itemIds'] ?? null);
             $itemId = (string) ($payload['itemId'] ?? $payload['targetId'] ?? '');
-            if ($itemId === '') {
+            if ($itemIds === [] && $itemId !== '') {
+                $itemIds = [$itemId];
+            }
+            $quantity = isset($payload['quantity']) && is_numeric($payload['quantity'])
+                ? max(1, (int) floor((float) $payload['quantity']))
+                : count($itemIds);
+            $itemIds = array_slice($itemIds, 0, $quantity);
+            if ($itemIds === []) {
                 throw new MannyActionException(400, 'bad_request', 'Item storage move requires itemId and toContainerId.');
             }
-            $this->storage->assertCanMoveItem($probe, $itemId, $toContainerId);
-            $durationSeconds = $this->storage->storageMoveDurationSeconds('item');
-            $movePayload['itemId'] = $itemId;
+            $this->storage->assertCanMoveItems($probe, $itemIds, $toContainerId);
+            $durationSeconds = $this->storage->storageMoveDurationSeconds('item', count($itemIds));
+            $movePayload['itemIds'] = $itemIds;
+            $movePayload['quantity'] = count($itemIds);
         } elseif ($kind === 'manny') {
+            $targetMannyIds = $this->stringListPayload($payload['targetMannyIds'] ?? $payload['mannyIds'] ?? null);
             $targetMannyId = (string) ($payload['targetMannyId'] ?? $payload['mannyId'] ?? $payload['targetId'] ?? '');
-            if ($targetMannyId === '') {
+            if ($targetMannyIds === [] && $targetMannyId !== '') {
+                $targetMannyIds = [$targetMannyId];
+            }
+            $quantity = isset($payload['quantity']) && is_numeric($payload['quantity'])
+                ? max(1, (int) floor((float) $payload['quantity']))
+                : count($targetMannyIds);
+            $targetMannyIds = array_slice($targetMannyIds, 0, $quantity);
+            if ($targetMannyIds === []) {
                 throw new MannyActionException(400, 'bad_request', 'Manny storage move requires targetMannyId and toContainerId.');
             }
-            if ($targetMannyId === $uid) {
+            if (in_array($uid, $targetMannyIds, true)) {
                 throw new MannyActionException(422, 'invalid_storage_move', 'A Manny cannot move its own storage slot while executing the order.');
             }
-            $this->storage->assertCanMoveManny($probe, $targetMannyId, $toContainerId);
-            $durationSeconds = $this->storage->storageMoveDurationSeconds('manny');
-            $movePayload['targetMannyId'] = $targetMannyId;
+            $this->storage->assertCanMoveMannies($probe, $targetMannyIds, $toContainerId);
+            $durationSeconds = $this->storage->storageMoveDurationSeconds('manny', count($targetMannyIds));
+            $movePayload['targetMannyIds'] = $targetMannyIds;
+            $movePayload['quantity'] = count($targetMannyIds);
         } else {
             throw new MannyActionException(400, 'bad_request', 'Storage move kind must be resource, item or manny.');
         }
@@ -1098,23 +1116,51 @@ final class MannyService
                 (string) ($manny->taskPayload['toContainerId'] ?? ''),
             );
         } elseif ($kind === 'item') {
-            $this->storage->moveItem(
-                $probe,
-                (string) ($manny->taskPayload['itemId'] ?? ''),
-                (string) ($manny->taskPayload['toContainerId'] ?? ''),
-            );
+            $itemIds = $this->stringListPayload($manny->taskPayload['itemIds'] ?? null);
+            if ($itemIds !== []) {
+                $this->storage->moveItems($probe, $itemIds, (string) ($manny->taskPayload['toContainerId'] ?? ''));
+            } else {
+                $this->storage->moveItem(
+                    $probe,
+                    (string) ($manny->taskPayload['itemId'] ?? ''),
+                    (string) ($manny->taskPayload['toContainerId'] ?? ''),
+                );
+            }
         } elseif ($kind === 'manny') {
-            $this->storage->moveStoredManny(
-                $probe,
-                (string) ($manny->taskPayload['targetMannyId'] ?? ''),
-                (string) ($manny->taskPayload['toContainerId'] ?? ''),
-            );
+            $targetMannyIds = $this->stringListPayload($manny->taskPayload['targetMannyIds'] ?? null);
+            if ($targetMannyIds !== []) {
+                $this->storage->moveStoredMannies($probe, $targetMannyIds, (string) ($manny->taskPayload['toContainerId'] ?? ''));
+            } else {
+                $this->storage->moveStoredManny(
+                    $probe,
+                    (string) ($manny->taskPayload['targetMannyId'] ?? ''),
+                    (string) ($manny->taskPayload['toContainerId'] ?? ''),
+                );
+            }
         }
 
         $this->clearTask($manny);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function stringListPayload(mixed $value): array
+    {
+        if (is_string($value)) {
+            $value = [$value];
+        }
+        if (!is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            static fn(mixed $item): string => trim((string) $item),
+            $value,
+        ), static fn(string $item): bool => $item !== '')));
     }
 
     private function ensureProbeAcceptsMannyOrders(NeumannProbe $probe): void

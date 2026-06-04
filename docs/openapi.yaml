@@ -245,7 +245,8 @@ paths:
                 value:
                   actorMannyId: mny_actor
                   kind: item
-                  itemId: itm_steel_bar
+                  itemIds: [itm_steel_bar, itm_steel_bar_2]
+                  quantity: 2
                   toContainerId: container-itm_extra
       responses:
         '202':
@@ -563,6 +564,7 @@ paths:
               partialStock:
                 value:
                   amount: 0.05
+                  containerId: probe-core
               wholeItem:
                 value: {}
       responses:
@@ -1429,10 +1431,24 @@ components:
           description: Required for resource moves, in ECE.
         itemId:
           type: string
-          description: Required for item moves.
+          description: Single item id for item moves. Use itemIds for batch moves.
+        itemIds:
+          type: array
+          description: Multiple item ids for batch item moves.
+          items:
+            type: string
         targetMannyId:
           type: string
-          description: Required for Manny moves.
+          description: Single Manny id for Manny moves. Use targetMannyIds for batch moves.
+        targetMannyIds:
+          type: array
+          description: Multiple Manny ids for batch Manny storage moves.
+          items:
+            type: string
+        quantity:
+          type: integer
+          minimum: 1
+          description: Optional cap applied to itemIds or targetMannyIds.
     ProbeInventory:
       type: object
       required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, containers, externalTanks]
@@ -1537,6 +1553,9 @@ components:
             Amount to discard. For stored metals/non-metal materials this uses
             equivalent earth containers; for the deuterium tank this uses tank
             percentage points. Omit it to discard the full selected stock.
+        containerId:
+          type: string
+          description: Optional source container id for stored resource jettison.
     ProbeInventoryJettisonResponse:
       type: object
       required: [inventory]

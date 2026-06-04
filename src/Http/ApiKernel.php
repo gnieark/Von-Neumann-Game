@@ -364,6 +364,9 @@ final class ApiKernel
         if ($amount !== null && $amount <= 0.0) {
             return ApiResponse::error(400, 'bad_request', 'Jettison amount must be greater than zero.');
         }
+        $containerId = isset($data['containerId']) && is_string($data['containerId']) && $data['containerId'] !== ''
+            ? $data['containerId']
+            : null;
 
         $inventory = $this->inventoryForProbe($probe);
         $item = $inventory->findItem($itemId);
@@ -394,13 +397,19 @@ final class ApiKernel
 
         $resourceType = $this->inventoryResourceType($probe, $itemId);
         if ($resourceType !== null) {
-            $available = $this->storage->resourceStock($probe, $resourceType);
+            $available = $containerId !== null
+                ? $this->storage->resourceStockInContainer($probe, $resourceType, $containerId)
+                : $this->storage->resourceStock($probe, $resourceType);
             $discarded = $this->jettisonAmount($amount, $available);
             if ($discarded instanceof ApiResponse) {
                 return $discarded;
             }
 
-            $this->storage->consumeResource($probe, $resourceType, $discarded);
+            if ($containerId !== null) {
+                $this->storage->consumeResourceFromContainer($probe, $resourceType, $discarded, $containerId);
+            } else {
+                $this->storage->consumeResource($probe, $resourceType, $discarded);
+            }
             $this->mannies->manniesForProbe($probe);
             $probe = $this->requiredProbe($player);
 

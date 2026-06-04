@@ -1222,8 +1222,7 @@ button:disabled {
 }
 
 .storage-rules-form span,
-.inventory-container-lines span,
-.inventory-line-actions span {
+.inventory-container-lines span {
     color: var(--muted);
     text-transform: uppercase;
     font-size: .76rem;
@@ -1276,32 +1275,76 @@ button:disabled {
     list-style: none;
 }
 
-.inventory-container-lines li,
-.inventory-line-actions > div {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+.inventory-container-lines li {
+    display: grid;
+    grid-template-columns: minmax(130px, 1fr) minmax(54px, auto) auto;
+    gap: 10px;
     align-items: center;
     border-top: 1px solid rgba(255,255,255,.08);
     padding-top: 6px;
 }
 
-.inventory-line-actions {
-    display: grid;
-    gap: 8px;
-    justify-self: stretch;
+.inventory-container-lines b {
+    min-width: 0;
+    text-align: right;
 }
 
-.inventory-jettison-form {
+.inventory-line-controls {
+    display: inline-flex;
+    gap: 6px;
+    justify-self: end;
+}
+
+.inventory-icon-button {
+    display: inline-grid;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.06);
+    color: var(--text);
+}
+
+.inventory-icon-button:hover:not(:disabled) {
+    border-color: rgba(125,247,197,.45);
+    background: rgba(125,247,197,.1);
+    color: #7df7c5;
+}
+
+.inventory-icon-button:disabled {
+    cursor: not-allowed;
+    opacity: .4;
+}
+
+.inventory-icon-button svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.inventory-line-form-slot {
+    grid-column: 1 / -1;
+}
+
+.inventory-move-form {
     display: grid;
-    grid-template-columns: minmax(100px, 150px) auto;
+    grid-template-columns: minmax(100px, 130px) minmax(150px, 1fr) minmax(170px, 1.1fr) auto;
     gap: 10px;
     align-items: end;
+    margin-top: 4px;
+    padding: 10px;
+    border: 1px solid rgba(255,255,255,.1);
+    background: rgba(255,255,255,.04);
 }
 
-.inventory-jettison-form-simple {
-    grid-template-columns: auto;
-    justify-self: end;
+.inventory-move-form p {
+    grid-column: 1 / -1;
+    margin: 0;
 }
 
 .inventory-muted {
@@ -1400,12 +1443,24 @@ button:disabled {
     .manny-form,
     .inventory-card,
     .storage-rules-form,
-    .inventory-jettison-form {
+    .inventory-move-form {
         grid-template-columns: 1fr;
     }
 
-    .inventory-jettison-form,
-    .inventory-jettison-form-simple,
+    .inventory-container-lines li {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .inventory-line-controls {
+        grid-column: 1 / -1;
+        justify-self: stretch;
+    }
+
+    .inventory-icon-button {
+        flex: 1;
+    }
+
+    .inventory-move-form,
     .storage-rules-form button,
     .inventory-muted {
         justify-self: stretch;

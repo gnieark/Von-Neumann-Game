@@ -333,9 +333,9 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(0.0, $additionalContainers[0]['containerSpace'] ?? null, 'additional container item occupies no storage');
     $test->assertEquals(1.0, (float) ($additionalContainers[0]['metadata']['capacityBonus'] ?? 0), 'additional container item carries its capacity bonus');
     $test->assertEquals(2.0, $containerProbe->body['probe']['inventory']['capacity'] ?? null, 'additional container increases probe storage capacity');
-    $storageContainers = $kernel->handle('GET', '/api/probe/storage-containers', $craftHeaders);
-    $test->assertEquals(200, $storageContainers->status, 'GET /api/probe/storage-containers lists storage containers');
-    $craftStorageContainers = $storageContainers->body['containers'] ?? [];
+    $storageContainersResponse = $kernel->handle('GET', '/api/probe/storage-containers', $craftHeaders);
+    $test->assertEquals(200, $storageContainersResponse->status, 'GET /api/probe/storage-containers lists storage containers');
+    $craftStorageContainers = $storageContainersResponse->body['containers'] ?? [];
     $test->assertEquals(2, count($craftStorageContainers), 'additional container creates one individual storage container');
     $additionalStorageContainer = array_values(array_filter(
         $craftStorageContainers,
@@ -389,6 +389,41 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         static fn(array $item): bool => ($item['type'] ?? null) === 'steel_bar',
     ));
     $test->assertEquals($additionalStorageContainer['id'] ?? null, $movedSteelBars[0]['container']['id'] ?? null, 'completed storage move updates the item container');
+
+    $coreStorageContainer = $storageContainers->findByUidForProbe($craftProbeEntity->id, 'probe-core');
+    $additionalStorageContainerEntity = $storageContainers->findByUidForProbe($craftProbeEntity->id, (string) ($additionalStorageContainer['id'] ?? 'missing'));
+    if ($coreStorageContainer !== null && $additionalStorageContainerEntity !== null) {
+        $batchItemA = $items->create($craftProbeEntity->id, ProbeItem::TYPE_STEEL_PLATE, 'Plaque d’acier', 0.01, storageContainerId: $coreStorageContainer->id);
+        $batchItemB = $items->create($craftProbeEntity->id, ProbeItem::TYPE_STEEL_PLATE, 'Plaque d’acier', 0.01, storageContainerId: $coreStorageContainer->id);
+        $batchStorageMove = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
+            'actorMannyId' => $craftMannyId,
+            'kind' => 'item',
+            'itemIds' => [$batchItemA->uid, $batchItemB->uid],
+            'quantity' => 2,
+            'toContainerId' => $additionalStorageContainer['id'] ?? '',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $batchStorageMove->status, 'POST /api/probe/storage-moves accepts batch item ids');
+        $test->assertEquals(20, $batchStorageMove->body['manny']['task']['durationSeconds'] ?? null, 'batch item storage move lasts 10 seconds per item');
+        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $craftMannyDbId,
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+        $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemA->uid)?->storageContainerId, 'completed batch move updates the first item container');
+        $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemB->uid)?->storageContainerId, 'completed batch move updates the second item container');
+
+        $storageContainers->setResourceAmount($coreStorageContainer->id, 'metals', 0.2);
+        $storageContainers->setResourceAmount($additionalStorageContainerEntity->id, 'metals', 0.3);
+        $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.5 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+        $jettisonContainerMetals = $kernel->handle('POST', '/api/probe/inventory/probe-' . $craftProbeEntity->id . '-stock-metals/jettison', $craftHeaders, json_encode([
+            'amount' => 0.1,
+            'containerId' => $additionalStorageContainer['id'] ?? '',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(200, $jettisonContainerMetals->status, 'POST /api/probe/inventory/{itemId}/jettison can target a resource container');
+        $test->assertEquals(0.2, $storageContainers->resourceAmounts($coreStorageContainer->id)['metals'] ?? null, 'container-targeted jettison keeps the core stock untouched');
+        $test->assertEquals(0.2, $storageContainers->resourceAmounts($additionalStorageContainerEntity->id)['metals'] ?? null, 'container-targeted jettison consumes the selected container stock');
+        $test->assertEquals(0.4, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'container-targeted jettison syncs the global resource total');
+    }
 }
 
 $apiKeyResponse = $kernel->handle('POST', '/api/me/api-key', $headers, json_encode([], JSON_THROW_ON_ERROR));

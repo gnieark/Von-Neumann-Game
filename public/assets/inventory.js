@@ -110,23 +110,6 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
     const filteredStockPlacements = (stock) => stockPlacements(stock)
         .filter((placement) => selectedContainerId() === 'all'
             || (placement.container && placement.container.id === selectedContainerId()));
-    const placementLines = (placements, valueKey = 'amount') => (
-        placements.length === 0
-            ? '<p class="inventory-muted">' + escapeHtml(t('emptyContainerLine', 'No stock in this container.')) + '</p>'
-            : '<ul class="inventory-container-lines">'
-                + placements.map((placement) => (
-                    '<li><span>' + escapeHtml(containerLabel(placement.container)) + '</span><b>'
-                    + escapeHtml(numberValue(placement[valueKey] || 0))
-                    + '</b></li>'
-                )).join('')
-                + '</ul>'
-    );
-
-    const resourceStockDetail = (stock, amount, space) => [
-        t('storedAmount', 'Amount') + ' ' + numberValue(amount),
-        t('containerSpace', 'Space') + ' ' + numberValue(space),
-    ].join(' · ');
-
     const isJettisonableItem = (item) => {
         if (item.type === 'manny') {
             return item.location
@@ -137,19 +120,96 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
         return ['waypoint_bookmark', 'steel_bar', 'steel_plate'].includes(item.type);
     };
 
-    const renderJettisonForm = (itemId, amount, withAmount, disabled) => {
-        if (disabled) {
-            return '<span class="inventory-muted">' + escapeHtml(t('notJettisonable', 'Not jettisonable')) + '</span>';
+    const isMovableItem = (item) => (
+        item
+        && item.type !== 'atomic_3d_printer'
+        && item.container
+        && item.container.id
+        && !(item.metadata && item.metadata.movable === false)
+    );
+
+    const lineIcon = (name) => ({
+        move: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path><path d="M5 5v14"></path></svg>',
+        jettison: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 11 4 5"></path><path d="m5 10-1-5 5 1"></path><path d="M14 13l6 6"></path><path d="m19 14 1 5-5-1"></path><path d="m14 11 6-6"></path><path d="m19 10 1-5-5 1"></path><path d="M10 13l-6 6"></path><path d="m5 14-1 5 5-1"></path></svg>',
+    }[name] || '');
+
+    const lineIconButton = (className, label, icon, disabled = false) => (
+        '<button class="inventory-icon-button ' + className + '" type="button" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '"'
+        + (disabled ? ' disabled aria-disabled="true"' : '')
+        + '>' + lineIcon(icon) + '</button>'
+    );
+
+    const lineActionFlags = (action, placement) => {
+        if (!action) {
+            return {canMove: false, canJettison: false};
+        }
+        const hasContainer = Boolean(placement.container && placement.container.id);
+        if (action.kind === 'resource') {
+            const amount = Number(placement.amount || 0);
+            return {
+                canMove: hasContainer && amount > 0,
+                canJettison: hasContainer && amount > 0,
+            };
         }
 
-        return '<form class="inventory-jettison-form' + (withAmount ? '' : ' inventory-jettison-form-simple') + '" data-item-id="' + escapeHtml(itemId) + '">'
-            + (withAmount
-                ? '<label>' + escapeHtml(t('jettisonAmount', 'Amount to jettison'))
-                    + '<input name="amount" type="number" min="0.0001" max="' + escapeHtml(String(amount || 0)) + '" step="0.0001" value="' + escapeHtml(String(amount || 0)) + '"></label>'
-                : '')
-            + '<button type="submit">' + escapeHtml(t('jettison', 'Jettison')) + '</button>'
-            + '</form>';
+        const items = Array.isArray(placement.items) ? placement.items : [];
+        return {
+            canMove: hasContainer && items.length > 0 && items.every(isMovableItem),
+            canJettison: items.length > 0 && items.every(isJettisonableItem),
+        };
     };
+
+    const lineActionAttributes = (action, placement) => {
+        if (!action) {
+            return '';
+        }
+
+        const attributes = [
+            'data-line-kind="' + escapeHtml(action.kind) + '"',
+            'data-container-id="' + escapeHtml((placement.container && placement.container.id) || '') + '"',
+        ];
+        if (action.kind === 'resource') {
+            attributes.push('data-stock-id="' + escapeHtml(action.itemId || action.resourceType || '') + '"');
+            attributes.push('data-resource-type="' + escapeHtml(action.resourceType || '') + '"');
+            attributes.push('data-max-amount="' + escapeHtml(String(Number(placement.amount || 0))) + '"');
+            return attributes.join(' ');
+        }
+
+        const itemIds = Array.isArray(placement.itemIds) ? placement.itemIds : [];
+        attributes.push('data-item-type="' + escapeHtml(action.itemType || action.kind) + '"');
+        attributes.push('data-item-ids="' + escapeHtml(itemIds.join(',')) + '"');
+        attributes.push('data-max-quantity="' + escapeHtml(String(itemIds.length || Number(placement.quantity || 0))) + '"');
+
+        return attributes.join(' ');
+    };
+
+    const renderLineActions = (action, placement) => {
+        const flags = lineActionFlags(action, placement);
+        return '<span class="inventory-line-controls">'
+            + lineIconButton('inventory-line-move', t('moveStorageLine', 'Move'), 'move', !flags.canMove)
+            + lineIconButton('inventory-line-jettison', t('jettisonLine', 'Jettison'), 'jettison', !flags.canJettison)
+            + '</span>'
+            + '<div class="inventory-line-form-slot"></div>';
+    };
+
+    const placementLines = (placements, valueKey = 'amount', action = null) => (
+        placements.length === 0
+            ? '<p class="inventory-muted">' + escapeHtml(t('emptyContainerLine', 'No stock in this container.')) + '</p>'
+            : '<ul class="inventory-container-lines">'
+                + placements.map((placement) => (
+                    '<li class="inventory-container-line" ' + lineActionAttributes(action, placement) + '>'
+                    + '<span class="inventory-line-container">' + escapeHtml(containerLabel(placement.container)) + '</span>'
+                    + '<b>' + escapeHtml(numberValue(placement[valueKey] || 0)) + '</b>'
+                    + renderLineActions(action, placement)
+                    + '</li>'
+                )).join('')
+                + '</ul>'
+    );
+
+    const resourceStockDetail = (stock, amount, space) => [
+        t('storedAmount', 'Amount') + ' ' + numberValue(amount),
+        t('containerSpace', 'Space') + ' ' + numberValue(space),
+    ].join(' · ');
 
     const renderStorageRules = (inventory) => {
         const node = document.getElementById('storage-rules-panel');
@@ -234,6 +294,7 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
                     quantity: 0,
                     containerSpace: 0,
                     itemIds: [],
+                    items: [],
                     names: [],
                 });
             }
@@ -241,28 +302,11 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
             placement.quantity += 1;
             placement.containerSpace += Number(item.containerSpace || 0);
             placement.itemIds.push(item.id);
+            placement.items.push(item);
             placement.names.push(item.name || item.id);
         });
 
         return Array.from(groups.values());
-    };
-
-    const renderGroupedItemActions = (group) => {
-        const jettisonable = group.items.filter(isJettisonableItem);
-        if (jettisonable.length === 0) {
-            return '<span class="inventory-muted">' + escapeHtml(t('notJettisonable', 'Not jettisonable')) + '</span>';
-        }
-        if (jettisonable.length === 1) {
-            return renderJettisonForm(jettisonable[0].id, 0, false, false);
-        }
-
-        return '<div class="inventory-line-actions">'
-            + jettisonable.map((item) => (
-                '<div><span>' + escapeHtml(containerLabel(itemContainer(item))) + '</span>'
-                + renderJettisonForm(item.id, 0, false, false)
-                + '</div>'
-            )).join('')
-            + '</div>';
     };
 
     function renderInventory(inventory) {
@@ -294,8 +338,7 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
                 return '<article class="inventory-card">'
                     + '<div><span>' + escapeHtml(t('inventoryStock', 'Stock')) + '</span><b>' + escapeHtml(resourceTypeLabel(stock.type)) + '</b></div>'
                     + '<p>' + escapeHtml(resourceStockDetail(stock, amount, space)) + '</p>'
-                    + placementLines(placements, 'amount')
-                    + renderJettisonForm(stock.id || stock.type, amount, true, false)
+                    + placementLines(placements, 'amount', {kind: 'resource', resourceType: stock.type, itemId: stock.id || stock.type})
                     + '</article>';
             })
             .filter(Boolean);
@@ -307,7 +350,6 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
                 '<article class="inventory-card">'
                 + '<div><span>' + escapeHtml(t('externalTank', 'External tank')) + '</span><b>' + escapeHtml(resourceTypeLabel(tank.type)) + '</b></div>'
                 + '<p>' + escapeHtml(t('storedAmount', 'Amount') + ' ' + numberValue(tank.fillPercent, '%')) + '</p>'
-                + renderJettisonForm(tank.id || tank.type, Number(tank.fillPercent), true, true)
                 + '</article>'
             ));
 
@@ -317,14 +359,16 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
                 container: placement.container,
                 quantity: placement.quantity,
                 containerSpace: placement.containerSpace,
+                itemIds: placement.itemIds,
+                items: placement.items,
             }));
+            const kind = group.type === 'manny' ? 'manny' : 'item';
 
             return '<article class="inventory-card">'
                 + '<div><span>' + escapeHtml(t('inventoryItem', 'Equipment')) + '</span><b>' + escapeHtml(inventoryItemName(group.sample)) + '</b></div>'
                 + '<p>' + escapeHtml(t('quantity', 'Quantity') + ' ' + numberValue(group.items.length) + ' · ' + t('containerSpace', 'Space') + ' ' + numberValue(group.totalSpace)) + '</p>'
-                + placementLines(placements, 'quantity')
+                + placementLines(placements, 'quantity', {kind, itemType: group.type})
                 + (group.items.length === 1 ? '<p>' + escapeHtml(inventoryEntryDetail(group.sample)) + '</p>' : '')
-                + renderGroupedItemActions(group)
                 + '</article>';
         });
 
