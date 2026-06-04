@@ -13,11 +13,16 @@ use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Sector\Asteroid;
+use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
+use VonNeumannGame\Sector\SectorGrid;
+use VonNeumannGame\Sector\SectorService;
 
 final class AuthService
 {
     private const PSEUDONYM_PATTERN = '/\A[\p{L}\p{N}][\p{L}\p{N} ._-]{1,38}[\p{L}\p{N}]\z/u';
+    private readonly SectorGrid $grid;
 
     public function __construct(
         private readonly PlayerRepository $players,
@@ -28,7 +33,11 @@ final class AuthService
         private readonly int $sessionTtlDays = 7,
         private readonly ?MannyRepository $mannies = null,
         private readonly ?ApiKeyRepository $apiKeys = null,
-    ) {}
+        private readonly ?SectorService $sectors = null,
+        ?SectorGrid $grid = null,
+    ) {
+        $this->grid = $grid ?? new SectorGrid();
+    }
 
     public function registerPlayerWithPassword(string $username, string $password, ?string $displayName = null, ?string $probeName = null): Player
     {
@@ -36,7 +45,7 @@ final class AuthService
             throw new \RuntimeException('Username already exists.');
         }
 
-        $home = $this->randomHomeSector();
+        $home = $this->preparedHomeSector();
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
         $player = $this->players->createPlayer($username, $displayName, null, $home);
         $this->authMethods->addPasswordAuth($player->id, $passwordHash);
@@ -59,7 +68,7 @@ final class AuthService
             throw new \RuntimeException('External account already linked.');
         }
 
-        $home = $this->randomHomeSector();
+        $home = $this->preparedHomeSector();
         $player = $this->players->createPlayer($pseudonym, $pseudonym, null, $home);
         $this->authMethods->addExternalAuth($player->id, $provider, $providerUserId);
         $probe = $this->probes->createForPlayer($player->id, 'Sonde de ' . $pseudonym, $home);
@@ -180,5 +189,73 @@ final class AuthService
         } while (($x + $y + $z) % 2 !== 0);
 
         return new SectorCoordinates($x, $y, $z);
+    }
+
+    private function preparedHomeSector(): SectorCoordinates
+    {
+        $home = $this->randomHomeSector();
+        if ($this->sectors === null) {
+            return $home;
+        }
+
+        $neighbors = $this->grid->getNeighbors($home);
+        $existedBefore = $this->sectorExistenceMap([$home, ...$neighbors]);
+        $sector = $this->getOrCreateStarterSector($home, $existedBefore[$home->toKey()] ?? false);
+
+        if (!$sector->hasBlackHole()) {
+            return $home;
+        }
+
+        foreach ($neighbors as $neighbor) {
+            $neighborSector = $this->getOrCreateStarterSector($neighbor, $existedBefore[$neighbor->toKey()] ?? false);
+            if (!$neighborSector->hasBlackHole()) {
+                return $neighbor;
+            }
+        }
+
+        throw new \RuntimeException('Unable to place new probe outside a neighboring black hole sector.');
+    }
+
+    /**
+     * @param array<SectorCoordinates> $coordinates
+     * @return array<string, bool>
+     */
+    private function sectorExistenceMap(array $coordinates): array
+    {
+        $map = [];
+        foreach ($coordinates as $coordinate) {
+            $map[$coordinate->toKey()] = $this->sectors?->sectorExists($coordinate) ?? false;
+        }
+
+        return $map;
+    }
+
+    private function getOrCreateStarterSector(SectorCoordinates $coordinates, bool $existedBefore): SectorContent
+    {
+        if ($this->sectors === null) {
+            throw new \RuntimeException('Sector service is not configured.');
+        }
+
+        $sector = $this->sectors->getOrCreateSector($coordinates);
+        if (!$existedBefore && $sector->getObjects() === []) {
+            $sector->addObject($this->starterIronAsteroid($coordinates));
+            $this->sectors->saveSector($sector);
+        }
+
+        return $sector;
+    }
+
+    private function starterIronAsteroid(SectorCoordinates $coordinates): Asteroid
+    {
+        return new Asteroid(
+            'starter-iron-' . substr(hash('sha256', $coordinates->toKey()), 0, 16),
+            null,
+            'iron',
+            ['iron', 'nickel'],
+            'small',
+            0.00005,
+            0.012,
+            'Metallic asteroid seeded in a newly reactivated probe sector.',
+        );
     }
 }

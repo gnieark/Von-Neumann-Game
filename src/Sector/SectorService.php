@@ -27,6 +27,11 @@ final class SectorService
         return $this->createSector($coordinates, true);
     }
 
+    public function sectorExists(SectorCoordinates $coordinates): bool
+    {
+        return $this->repository->exists($coordinates);
+    }
+
     public function saveSector(SectorContent $sector): void
     {
         $this->repository->save($sector);

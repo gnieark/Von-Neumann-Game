@@ -349,20 +349,7 @@ final class ApiKernel
         }
 
         if ($itemId === 'probe-' . $probe->id . '-deuterium-tank' || $itemId === 'deuterium') {
-            $discarded = $this->jettisonAmount($amount, $probe->deuteriumStock);
-            if ($discarded instanceof ApiResponse) {
-                return $discarded;
-            }
-
-            $probe->deuteriumStock = round($probe->deuteriumStock - $discarded, 4);
-            $this->probes->save($probe);
-            $this->mannies->manniesForProbe($probe);
-            $probe = $this->requiredProbe($player);
-
-            return new ApiResponse(200, [
-                'inventory' => $this->inventoryForProbe($probe)->toArray(),
-                'jettisoned' => ['type' => 'deuterium', 'amount' => $discarded],
-            ]);
+            return ApiResponse::error(422, 'item_not_jettisonable', 'The external deuterium tank cannot be jettisoned.');
         }
 
         return ApiResponse::error(404, 'not_found', 'Inventory item not found.');

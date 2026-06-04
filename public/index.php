@@ -11,7 +11,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260604-system-bodies-v2';
+const ASSET_VERSION = '20260604-manny-jump-confirm';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -105,7 +105,8 @@ function renderHome(string $projectRoot, Translator $translator, ?Player $player
     $tpl = new TplBlock();
     $tpl->addVars([
         'pageTitle' => 'Von Neumann Game',
-        'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
+        'metaDescription' => e($translator->get('homeMetaDescription')),
+        'bodyClass' => $player === null ? 'is-login is-guest' : 'is-authenticated',
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
@@ -154,6 +155,7 @@ function renderPasswordAuth(string $projectRoot, Translator $translator, ?string
     $tpl = new TplBlock();
     $tpl->addVars([
         'pageTitle' => 'Von Neumann Game',
+        'metaDescription' => e($translator->get('homeMetaDescription')),
         'bodyClass' => 'is-guest',
         'authenticated' => '0',
         'language' => $translator->language(),
@@ -211,6 +213,7 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
     $tpl = new TplBlock();
     $tpl->addVars([
         'pageTitle' => 'Von Neumann Game - ' . $translator->get('aboutFooterLink'),
+        'metaDescription' => e($translator->get('aboutMetaDescription')),
         'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
@@ -235,6 +238,7 @@ function renderApiDocs(string $projectRoot, Translator $translator, ?Player $pla
     $tpl = new TplBlock();
     $tpl->addVars([
         'pageTitle' => 'Von Neumann Game - API',
+        'metaDescription' => e($translator->get('apiDocsMetaDescription')),
         'bodyClass' => $player === null ? 'is-api-docs is-guest' : 'is-api-docs is-authenticated',
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
@@ -277,6 +281,7 @@ function renderOAuthPseudo(string $projectRoot, Translator $translator, string $
     $tpl = new TplBlock();
     $tpl->addVars([
         'pageTitle' => 'Von Neumann Game',
+        'metaDescription' => e($translator->get('homeMetaDescription')),
         'bodyClass' => 'is-guest',
         'authenticated' => '0',
         'language' => $translator->language(),

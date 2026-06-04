@@ -67,9 +67,9 @@ final class AppFactory
         $sessions = new SessionRepository($pdo);
         $apiKeys = new ApiKeyRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
-        $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService);
         $observations = new SectorObservationService($sectorService, $visitedSectors);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items);
@@ -96,6 +96,8 @@ final class AppFactory
     public function authService(PDO $pdo): AuthService
     {
         $appConfig = $this->appConfig();
+        $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
 
         return new AuthService(
             new PlayerRepository($pdo),
@@ -106,6 +108,7 @@ final class AppFactory
             (int) ($appConfig['sessionTtlDays'] ?? 7),
             new MannyRepository($pdo),
             new ApiKeyRepository($pdo),
+            $sectorService,
         );
     }
 

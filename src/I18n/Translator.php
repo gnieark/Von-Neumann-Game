@@ -66,9 +66,24 @@ final class Translator
             'aboutHostingText' => 'Le service est hébergé chez OVH. OVH connaît mon identité civile, donc si un vrai problème légal apparaît, on ne parle pas à une ombre dans le vide.',
             'aboutContactTitle' => 'Code et signalements',
             'aboutContactText' => 'Le code est ouvert. Pour signaler un problème, une bizarrerie ou une inquiétude, le plus simple est de passer par le dépôt GitHub.',
-            'briefEyebrow' => 'Prototype de navigation interstellaire',
-            'briefTitle' => 'Une intelligence embarquée, une coque fatiguée, un univers à cartographier.',
-            'briefText' => 'Vous pilotez une sonde Von Neumann dans une grille de secteurs procéduraux. Chaque saut consomme du deutérium, perturbe les capteurs et laisse derrière lui une mémoire partielle de l\'environnement.',
+            'homeMetaDescription' => 'Vous pilotez une sonde Von Neumann dans une grille de secteurs procéduraux. Chaque saut consomme du deutérium, perturbe les capteurs et laisse derrière lui une mémoire partielle de l\'environnement.',
+            'aboutMetaDescription' => 'Neumann Probe est un petit projet personnel de jeu de sonde Von Neumann, codé maison et sans tracking publicitaire.',
+            'apiDocsMetaDescription' => 'Contrat OpenAPI de Von Neumann Game pour inspecter les endpoints de la sonde, des secteurs et des actions de jeu.',
+            'briefEyebrow' => 'PROTOCOLE DE RÉACTIVATION',
+            'briefTitle' => 'SONDE VON NEUMANN N°8421',
+            'briefText' => 'Temps écoulé depuis lancement :
+427 ans 14 jours
+
+Mémoire :
+CORROMPUE
+
+Position :
+INCONNUE ...
+RÉFÉRENTIEL LOCAL RÉINITIALISÉ : 0,0,0
+
+Statut :
+EN ATTENTE D\'UN OPÉRATEUR',
+            'briefImageAlt' => 'Illustration d\'une sonde spatiale',
             'consoleEyebrow' => 'Console active',
             'tabProbe' => 'Sonde',
             'tabEnvironment' => 'Environnement',
@@ -98,10 +113,13 @@ final class Translator
             'internalClock' => 'Horloge interne',
             'task' => 'Tâche',
             'noTask' => 'Aucune',
+            'mannyInactive' => 'Inactive',
             'requestDenied' => 'Requête refusée',
             'invalidCoordinates' => 'Coordonnées relatives invalides: x + y + z doit être pair.',
             'orderSent' => 'Ordre transmis...',
             'movementAccepted' => 'Déplacement accepté.',
+            'movementCancelled' => 'Déplacement annulé.',
+            'jumpWithAbsentManniesConfirm' => 'Certaines Mannys ne sont pas à bord de la sonde : {names}. Si vous initiez le saut maintenant, elles seront laissées dans ce secteur. Confirmer le saut ?',
             'originSector' => 'Secteur d\'origine',
             'destinationSector' => 'Secteur d\'arrivée',
             'remainingTime' => 'Temps restant',
@@ -305,9 +323,24 @@ final class Translator
             'aboutHostingText' => 'The service is hosted by OVH. OVH knows my legal identity, so if a real legal problem appears, this is not a conversation with a shadow in the void.',
             'aboutContactTitle' => 'Code and reports',
             'aboutContactText' => 'The code is open. To report a problem, an oddity, or a concern, the simplest path is through the GitHub repository.',
-            'briefEyebrow' => 'Interstellar navigation prototype',
-            'briefTitle' => 'An onboard intelligence, a tired hull, a universe to chart.',
-            'briefText' => 'You pilot a Von Neumann probe through a procedural sector grid. Each jump consumes deuterium, disrupts the sensors, and leaves behind a partial memory of the environment.',
+            'homeMetaDescription' => 'You pilot a Von Neumann probe through a procedural sector grid. Each jump consumes deuterium, disrupts the sensors, and leaves behind a partial memory of the environment.',
+            'aboutMetaDescription' => 'Neumann Probe is a small personal Von Neumann probe game project, homemade and free of advertising tracking.',
+            'apiDocsMetaDescription' => 'Von Neumann Game OpenAPI contract for inspecting probe, sector, and gameplay action endpoints.',
+            'briefEyebrow' => 'REACTIVATION PROTOCOL',
+            'briefTitle' => 'VON NEUMANN PROBE NO. 8421',
+            'briefText' => 'Elapsed time since launch:
+427 years 14 days
+
+Memory:
+CORRUPTED
+
+Position:
+UNKNOWN ...
+LOCAL REFERENCE FRAME RESET: 0,0,0
+
+Status:
+WAITING FOR AN OPERATOR',
+            'briefImageAlt' => 'Illustration of a space probe',
             'consoleEyebrow' => 'Active console',
             'tabProbe' => 'Probe',
             'tabEnvironment' => 'Environment',
@@ -337,10 +370,13 @@ final class Translator
             'internalClock' => 'Internal clock',
             'task' => 'Task',
             'noTask' => 'None',
+            'mannyInactive' => 'Inactive',
             'requestDenied' => 'Request denied',
             'invalidCoordinates' => 'Invalid relative coordinates: x + y + z must be even.',
             'orderSent' => 'Order transmitted...',
             'movementAccepted' => 'Movement accepted.',
+            'movementCancelled' => 'Movement cancelled.',
+            'jumpWithAbsentManniesConfirm' => 'Some Mannys are not aboard the probe: {names}. If you initiate the jump now, they will be left in this sector. Confirm jump?',
             'originSector' => 'Origin sector',
             'destinationSector' => 'Arrival sector',
             'remainingTime' => 'Remaining time',
@@ -543,10 +579,13 @@ final class Translator
             'internalClock' => $this->get('internalClock'),
             'task' => $this->get('task'),
             'noTask' => $this->get('noTask'),
+            'mannyInactive' => $this->get('mannyInactive'),
             'requestDenied' => $this->get('requestDenied'),
             'invalidCoordinates' => $this->get('invalidCoordinates'),
             'orderSent' => $this->get('orderSent'),
             'movementAccepted' => $this->get('movementAccepted'),
+            'movementCancelled' => $this->get('movementCancelled'),
+            'jumpWithAbsentManniesConfirm' => $this->get('jumpWithAbsentManniesConfirm'),
             'originSector' => $this->get('originSector'),
             'destinationSector' => $this->get('destinationSector'),
             'remainingTime' => $this->get('remainingTime'),

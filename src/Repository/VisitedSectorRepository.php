@@ -54,6 +54,14 @@ final class VisitedSectorRepository
         return $this->getVisitedSector($player, $coordinates) !== null;
     }
 
+    public function countVisited(Player $player): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM visited_sectors WHERE player_id = :player_id');
+        $stmt->execute(['player_id' => $player->id]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     public function getVisitedSector(Player $player, SectorCoordinates $coordinates): ?VisitedSector
     {
         return $this->getVisitedSectorByPlayerId($player->id, $coordinates);

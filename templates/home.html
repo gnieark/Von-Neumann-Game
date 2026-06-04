@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="{{metaDescription}}">
     <title>{{pageTitle}}</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20rx=%2212%22%20fill=%22%230f1720%22/%3E%3Ctext%20x=%2232%22%20y=%2241%22%20text-anchor=%22middle%22%20font-family=%22Arial,sans-serif%22%20font-size=%2224%22%20font-weight=%22700%22%20fill=%22%238fb6bd%22%3EVN%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/app.css?v={{assetVersion}}">
@@ -49,44 +50,48 @@
 
     <main>
         <!-- BEGIN loginview -->
-        <section class="auth-shell">
-            <div class="login-panel">
-                <div>
-                    <p class="eyebrow">{{t.loginEyebrow}}</p>
-                    <h1>{{t.loginTitle}}</h1>
-                </div>
-                <!-- BEGIN loginview.loginerror -->
-                <p class="form-error">{{loginview.loginerror.message}}</p>
-                <!-- END loginview.loginerror -->
-                <label class="remember">
-                    <input id="oauth-remember" name="remember" type="checkbox" value="1">
-                    <span>{{t.rememberMe}}</span>
-                </label>
-                <!-- BEGIN loginview.oauthsection -->
-                <div class="oauth-section">
-                    <p>{{t.oauthSeparator}}</p>
-                    <div class="oauth-buttons">
-                        <!-- BEGIN loginview.oauthsection.oauthprovider -->
-                        <a class="oauth-button {{loginview.oauthsection.oauthprovider.class}}" href="{{loginview.oauthsection.oauthprovider.url}}" data-oauth-url="{{loginview.oauthsection.oauthprovider.url}}">{{loginview.oauthsection.oauthprovider.label}}</a>
-                        <!-- END loginview.oauthsection.oauthprovider -->
-                    </div>
-                </div>
-                <!-- END loginview.oauthsection -->
-                <!-- BEGIN loginview.oauthmissing -->
-                <p class="form-error">{{t.oauthUnavailable}}</p>
-                <!-- END loginview.oauthmissing -->
-            </div>
-        </section>
-
         <section class="game-brief">
             <div class="brief-copy">
                 <p class="eyebrow">{{t.briefEyebrow}}</p>
                 <h2>{{t.briefTitle}}</h2>
-                <p>{{t.briefText}}</p>
+                <p class="brief-text">{{t.briefText}}</p>
             </div>
-            <div class="brief-placeholder" aria-hidden="true">
-                <div class="orbit-line"></div>
-                <div class="probe-mark"></div>
+            <div class="brief-placeholder">
+                <img class="brief-image" src="/images/une_sonde.png" alt="{{t.briefImageAlt}}">
+            </div>
+        </section>
+
+        <section class="auth-shell access-auth-shell">
+            <div class="login-panel access-login-panel">
+                <div class="access-login-copy">
+                    <div>
+                        <p class="eyebrow">{{t.loginEyebrow}}</p>
+                        <h1>{{t.loginTitle}}</h1>
+                    </div>
+                    <!-- BEGIN loginview.loginerror -->
+                    <p class="form-error">{{loginview.loginerror.message}}</p>
+                    <!-- END loginview.loginerror -->
+                    <label class="remember">
+                        <input id="oauth-remember" name="remember" type="checkbox" value="1">
+                        <span>{{t.rememberMe}}</span>
+                    </label>
+                </div>
+
+                <div class="access-login-actions">
+                    <!-- BEGIN loginview.oauthsection -->
+                    <div class="oauth-section">
+                        <p>{{t.oauthSeparator}}</p>
+                        <div class="oauth-buttons">
+                            <!-- BEGIN loginview.oauthsection.oauthprovider -->
+                            <a class="oauth-button {{loginview.oauthsection.oauthprovider.class}}" href="{{loginview.oauthsection.oauthprovider.url}}" data-oauth-url="{{loginview.oauthsection.oauthprovider.url}}">{{loginview.oauthsection.oauthprovider.label}}</a>
+                            <!-- END loginview.oauthsection.oauthprovider -->
+                        </div>
+                    </div>
+                    <!-- END loginview.oauthsection -->
+                    <!-- BEGIN loginview.oauthmissing -->
+                    <p class="form-error">{{t.oauthUnavailable}}</p>
+                    <!-- END loginview.oauthmissing -->
+                </div>
             </div>
         </section>
         <!-- END loginview -->

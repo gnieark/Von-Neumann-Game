@@ -45,7 +45,9 @@ final class SectorObservationService
         $relative = $frame->globalToRelative($target);
         $distance = $this->grid->getDistance($probe->currentSector, $target);
         $residenceSeconds = $this->residenceSeconds($probe);
-        $requiredSeconds = $this->requiredResidenceSeconds($distance);
+        $requiredSeconds = $this->skipsInitialNeighborDelay($player, $distance)
+            ? 0
+            : $this->requiredResidenceSeconds($distance);
         $content = $this->sectors->getOrCreateSector($target);
         $visited = $this->visitedSectors->hasVisited($player, $target);
         $current = $probe->currentSector->equals($target);
@@ -130,6 +132,11 @@ final class SectorObservationService
             $distance === 2 => 1800,
             default => 7200,
         };
+    }
+
+    private function skipsInitialNeighborDelay(Player $player, int $distance): bool
+    {
+        return $distance === 1 && $this->visitedSectors->countVisited($player) === 1;
     }
 
     private function scanMetadata(int $residenceSeconds, int $requiredSeconds): array

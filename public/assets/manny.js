@@ -462,7 +462,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         node.innerHTML = mannies.map((manny) => {
             const busy = manny.currentTask !== null;
             const mannyId = String(manny.id ?? '');
-            const taskName = manny.currentTask || t('noTask', 'None');
+            const taskName = manny.currentTask || t('mannyInactive', 'Inactive');
             const panelId = 'manny-panel-' + mannyId.replace(/[^a-zA-Z0-9_-]/g, '-');
             const expanded = openMannyIds.has(mannyId);
             const buttonTitle = manny.name + ' - ' + taskName;
@@ -498,11 +498,16 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
     async function loadMannies() {
         try {
             const data = await api('/api/probe/mannies');
-            renderMannyList(data.mannies || []);
+            const mannies = Array.isArray(data.mannies) ? data.mannies : [];
+            state.currentMannies = mannies;
+            renderMannyList(mannies);
             setText('manny-json', pretty(data));
+            return mannies;
         } catch (error) {
+            state.currentMannies = null;
             renderMannyList([]);
             setText('manny-json', error.message);
+            return null;
         }
     }
 

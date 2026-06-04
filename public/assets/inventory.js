@@ -138,7 +138,7 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
                 '<article class="inventory-card">'
                 + '<div><span>' + escapeHtml(t('externalTank', 'External tank')) + '</span><b>' + escapeHtml(resourceTypeLabel(tank.type)) + '</b></div>'
                 + '<p>' + escapeHtml(t('storedAmount', 'Amount') + ' ' + numberValue(tank.fillPercent, '%')) + '</p>'
-                + renderJettisonForm(tank.id || tank.type, Number(tank.fillPercent), true, false)
+                + renderJettisonForm(tank.id || tank.type, Number(tank.fillPercent), true, true)
                 + '</article>'
             ));
 

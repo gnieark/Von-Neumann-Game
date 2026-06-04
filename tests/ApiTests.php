@@ -166,9 +166,9 @@ $scheduledEvents = new ScheduledEventRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $apiKeys = new ApiKeyRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
-$auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys);
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
+$auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: 'api-test-world');
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items);
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
@@ -380,6 +380,19 @@ $deuteriumTank = $sector->body['inventory']['externalTanks'][0] ?? null;
 $test->assertEquals('deuterium', $deuteriumTank['type'] ?? null, 'default external tank stores deuterium');
 $test->assertEquals(100.0, $deuteriumTank['fillPercent'] ?? null, 'default deuterium tank starts full');
 $test->assertEquals(false, $deuteriumTank['usesCargoCapacity'] ?? null, 'deuterium tank is outside cargo capacity');
+$jettisonDeuteriumTank = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode((string) ($deuteriumTank['id'] ?? 'missing')) . '/jettison', $headers, json_encode([
+    'amount' => 100,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(422, $jettisonDeuteriumTank->status, 'external deuterium tank cannot be jettisoned');
+$test->assertEquals('item_not_jettisonable', $jettisonDeuteriumTank->body['error']['code'] ?? null, 'deuterium tank jettison returns an explicit error');
+$test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'failed deuterium tank jettison keeps fuel stock unchanged');
+if ($createdProbe !== null) {
+    $initialNeighbor = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
+    $initialNeighborRelative = $initialNeighbor->subtract($player->homeSector);
+    $initialNeighborScan = $kernel->handle('GET', '/api/sector?x=' . $initialNeighborRelative['x'] . '&y=' . $initialNeighborRelative['y'] . '&z=' . $initialNeighborRelative['z'], $headers);
+    $test->assertEquals(200, $initialNeighborScan->status, 'initial probe can scan a neighbor without residence delay');
+    $test->assertEquals(0, $initialNeighborScan->body['sector']['scan']['requiredResidenceSeconds'] ?? null, 'initial neighbor scan exposes no residence delay');
+}
 
 $stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');
 $movingNeighbor = $auth->registerPlayerWithPassword('moving-neighbor', 'secret', 'Moving Neighbor', 'Moving neighbor probe');

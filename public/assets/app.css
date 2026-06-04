@@ -28,6 +28,11 @@ body {
     letter-spacing: 0;
 }
 
+body.is-login {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+}
+
 button,
 input,
 select {
@@ -73,10 +78,21 @@ main {
     padding: 34px 0 48px;
 }
 
+body.is-login main {
+    display: grid;
+    grid-template-rows: auto minmax(240px, 1fr);
+    align-content: stretch;
+}
+
 .auth-shell {
     display: grid;
     min-height: 430px;
-    place-items: center;
+    place-items: stretch;
+}
+
+.access-auth-shell {
+    min-height: 240px;
+    place-items: center stretch;
 }
 
 .login-panel,
@@ -93,8 +109,28 @@ main {
 .login-panel {
     display: grid;
     gap: 18px;
-    width: min(430px, 100%);
+    width: 100%;
+    min-height: inherit;
     padding: 28px;
+}
+
+.access-login-panel {
+    grid-template-columns: minmax(0, .9fr) minmax(280px, 1fr);
+    align-items: center;
+    column-gap: 32px;
+    min-height: auto;
+    padding-block: 18px;
+}
+
+.access-login-copy,
+.access-login-actions {
+    display: grid;
+    gap: 18px;
+    align-content: center;
+}
+
+.access-login-actions .oauth-section {
+    padding-top: 0;
 }
 
 .eyebrow {
@@ -224,45 +260,36 @@ button:disabled {
 
 .game-brief {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(260px, .6fr);
+    grid-template-columns: minmax(260px, .6fr) minmax(0, 1.4fr);
     gap: 24px;
     align-items: center;
-    margin-top: 28px;
+    margin-bottom: 28px;
     padding: 28px;
 }
 
-.brief-copy p:last-child {
+.brief-text {
     max-width: 68ch;
     color: var(--muted);
     line-height: 1.6;
+    white-space: pre-line;
 }
 
 .brief-placeholder {
     position: relative;
+    display: grid;
+    place-items: center;
+    aspect-ratio: 3 / 2;
     min-height: 190px;
     border: 1px solid var(--line);
-    background:
-        linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px) 0 0 / 18px 18px,
-        #151819;
+    background: #151819;
     overflow: hidden;
 }
 
-.orbit-line {
-    position: absolute;
-    inset: 38px 28px;
-    border: 1px dashed rgba(143, 182, 189, .38);
-    transform: skew(-12deg);
-}
-
-.probe-mark {
-    position: absolute;
-    right: 28%;
-    top: 42%;
-    width: 42px;
-    height: 16px;
-    border: 1px solid var(--hot);
-    background: #22272a;
-    box-shadow: 0 0 24px rgba(184, 111, 75, .3);
+.brief-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .about-page {
@@ -1253,6 +1280,7 @@ button:disabled {
     }
 
     .game-brief,
+    .access-login-panel,
     .console-grid,
     .coordinate-form,
     .action-panel,

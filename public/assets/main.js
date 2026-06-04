@@ -5,9 +5,9 @@ import {
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
 import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
-import {createInventoryModule} from './inventory.js?v=20260604-system-bodies-v2';
+import {createInventoryModule} from './inventory.js?v=20260604-deuterium-guard';
 import {createLabels} from './labels.js?v=20260604-system-bodies-v2';
-import {createMannyModule} from './manny.js?v=20260604-system-bodies-v2';
+import {createMannyModule} from './manny.js?v=20260604-manny-jump-confirm';
 import {createSectorModule} from './sector.js?v=20260604-system-bodies-v2';
 import {
     bindAccountMenu,
@@ -21,6 +21,7 @@ import {
     coordinate,
     detailList,
     duration,
+    formatText,
     metric,
     numberValue,
     pretty,
@@ -48,6 +49,7 @@ if (body && body.dataset.authenticated === '1') {
         currentCraftingRecipes: [],
         currentInventory: null,
         currentMannyMineTargets: [],
+        currentMannies: null,
         currentMannySalvageTargets: [],
         currentSectorObjects: [],
         probeAlreadyMoving: false,
@@ -99,6 +101,25 @@ if (body && body.dataset.authenticated === '1') {
             }
         }
     };
+    const manniesOutsideProbe = (mannies) => (Array.isArray(mannies) ? mannies : [])
+        .filter((manny) => (manny.location && manny.location.type) !== 'probe');
+
+    async function confirmJumpWithMannies() {
+        const refreshedMannies = await mannyModule.loadMannies();
+        const mannies = Array.isArray(refreshedMannies)
+            ? refreshedMannies
+            : (Array.isArray(state.currentMannies) ? state.currentMannies : []);
+        const absentMannies = manniesOutsideProbe(mannies);
+        if (absentMannies.length === 0) {
+            return true;
+        }
+
+        const names = absentMannies.map((manny) => manny.name || manny.id || t('mannyObject', 'Manny')).join(', ');
+        return window.confirm(formatText(t('jumpWithAbsentManniesConfirm', 'Some Mannys are not aboard the probe: {names}. If you initiate the jump now, they will be left in this sector. Confirm jump?'), {
+            names,
+            count: absentMannies.length,
+        }));
+    }
 
     function updateMoveButtonState(probe) {
         const button = document.getElementById('move-submit');
@@ -237,6 +258,11 @@ if (body && body.dataset.authenticated === '1') {
         };
         if (!validRelativeCoordinates(target)) {
             setText('action-status', invalidCoordinateMessage);
+            setText('movement-json', '');
+            return;
+        }
+        if (!await confirmJumpWithMannies()) {
+            setText('action-status', t('movementCancelled', 'Movement cancelled.'));
             setText('movement-json', '');
             return;
         }
