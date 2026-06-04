@@ -175,6 +175,13 @@
         </section>
         <!-- END aboutview -->
 
+        <!-- BEGIN changelogview -->
+        <section class="changelog-page">
+            <p class="eyebrow">{{t.changelogEyebrow}}</p>
+            <div class="changelog-content">{{changelogview.html}}</div>
+        </section>
+        <!-- END changelogview -->
+
         <!-- BEGIN apidocsview -->
         <section class="api-docs-page">
             <div class="api-docs-heading">
@@ -317,6 +324,7 @@
     <!-- END apikeydialog -->
     <footer class="site-footer">
         <a href="/about">{{t.aboutFooterLink}}</a>
+        <a href="/changelog">{{t.changelogFooterLink}}</a>
         <a href="/api-docs">{{t.apiDocsFooterLink}}</a>
     </footer>
 </body>

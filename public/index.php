@@ -11,7 +11,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260604-manny-jump-confirm';
+const ASSET_VERSION = '20260604-changelog';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -78,6 +78,11 @@ if ($routePath === '/logout' && $method === 'POST') {
 
 if ($routePath === '/about' && in_array($method, ['GET', 'HEAD'], true)) {
     renderAbout($projectRoot, $translator, currentPlayer($factory));
+    return;
+}
+
+if ($routePath === '/changelog' && in_array($method, ['GET', 'HEAD'], true)) {
+    renderChangelog($projectRoot, $translator, currentPlayer($factory));
     return;
 }
 
@@ -224,6 +229,41 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
     ]);
     $tpl->addPrefixedVars('t', $translator->allEscaped());
     $tpl->addSubBlock(new TplBlock('aboutview'));
+
+    if ($player !== null) {
+        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
+    }
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function renderChangelog(string $projectRoot, Translator $translator, ?Player $player): void
+{
+    $path = $projectRoot . '/CHANGELOG.md';
+    if (!is_file($path)) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Changelog not found';
+        return;
+    }
+
+    $tpl = new TplBlock();
+    $tpl->addVars([
+        'pageTitle' => 'Von Neumann Game - ' . $translator->get('changelogFooterLink'),
+        'metaDescription' => e($translator->get('changelogMetaDescription')),
+        'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
+        'authenticated' => $player === null ? '0' : '1',
+        'language' => $translator->language(),
+        'assetVersion' => ASSET_VERSION,
+        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
+        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
+    ]);
+    $tpl->addPrefixedVars('t', $translator->allEscaped());
+    $tpl->addSubBlock((new TplBlock('changelogview'))->addVars([
+        'html' => renderMarkdownHtml((string) file_get_contents($path)),
+    ]));
 
     if ($player !== null) {
         addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
@@ -480,6 +520,103 @@ function addAuthenticatedUi(TplBlock $tpl, string $displayName): void
         'displayName' => $displayName,
     ]));
     $tpl->addSubBlock(new TplBlock('apikeydialog'));
+}
+
+function renderMarkdownHtml(string $markdown): string
+{
+    $lines = preg_split('/\R/', $markdown) ?: [];
+    $html = [];
+    $paragraph = [];
+    $listOpen = false;
+
+    $flushParagraph = static function () use (&$html, &$paragraph): void {
+        if ($paragraph === []) {
+            return;
+        }
+
+        $html[] = '<p>' . renderMarkdownInline(implode(' ', $paragraph)) . '</p>';
+        $paragraph = [];
+    };
+    $closeList = static function () use (&$html, &$listOpen): void {
+        if (!$listOpen) {
+            return;
+        }
+
+        $html[] = '</ul>';
+        $listOpen = false;
+    };
+
+    foreach ($lines as $line) {
+        $line = rtrim($line);
+        if (trim($line) === '') {
+            $flushParagraph();
+            $closeList();
+            continue;
+        }
+
+        if (preg_match('/^(#{1,6})\s+(.+)$/', $line, $matches) === 1) {
+            $flushParagraph();
+            $closeList();
+            $level = strlen($matches[1]);
+            $html[] = '<h' . $level . '>' . renderMarkdownInline(trim($matches[2])) . '</h' . $level . '>';
+            continue;
+        }
+
+        if (preg_match('/^-\s+(.+)$/', $line, $matches) === 1) {
+            $flushParagraph();
+            if (!$listOpen) {
+                $html[] = '<ul>';
+                $listOpen = true;
+            }
+            $html[] = '<li>' . renderMarkdownInline(trim($matches[1])) . '</li>';
+            continue;
+        }
+
+        $paragraph[] = trim($line);
+    }
+
+    $flushParagraph();
+    $closeList();
+
+    return implode("\n", $html);
+}
+
+function renderMarkdownInline(string $text): string
+{
+    $segments = preg_split('/(`[^`]+`)/', $text, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
+    $html = '';
+    foreach ($segments as $segment) {
+        if (str_starts_with($segment, '`') && str_ends_with($segment, '`') && strlen($segment) >= 2) {
+            $html .= '<code>' . e(substr($segment, 1, -1)) . '</code>';
+            continue;
+        }
+
+        $html .= renderMarkdownLinks($segment);
+    }
+
+    return $html;
+}
+
+function renderMarkdownLinks(string $text): string
+{
+    if (preg_match_all('/\[([^\]]+)\]\(([^)\s]+)\)/', $text, $matches, PREG_OFFSET_CAPTURE) === 0) {
+        return e($text);
+    }
+
+    $html = '';
+    $offset = 0;
+    foreach ($matches[0] as $index => $match) {
+        [$whole, $position] = $match;
+        $html .= e(substr($text, $offset, $position - $offset));
+        $label = $matches[1][$index][0];
+        $url = $matches[2][$index][0];
+        $html .= preg_match('#^(https?://|/)#', $url) === 1
+            ? '<a href="' . e($url) . '">' . e($label) . '</a>'
+            : e($whole);
+        $offset = $position + strlen($whole);
+    }
+
+    return $html . e(substr($text, $offset));
 }
 
 function issueSessionCookie(VonNeumannGame\Auth\AuthService $auth, Player $player, bool $remember = false): void
