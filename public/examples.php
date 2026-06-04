@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Sector\Examples;
 
-require_once __DIR__ . '/../class/SectorCoordinates.php';
-require_once __DIR__ . '/../class/SectorGrid.php';
-require_once __DIR__ . '/../class/PlayerReferenceFrame.php';
-require_once __DIR__ . '/../class/SectorSeedGenerator.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;

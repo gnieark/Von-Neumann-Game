@@ -69,7 +69,7 @@ ne conserve que le nom du fournisseur et le `sub` OpenID.
 ```text
 public/index.php        Point d'entree HTTP: routes web, auth web, delegation API.
 public/assets/          JavaScript et CSS sans pipeline de build.
-templates/home.html     Template HTML principal, rendu avec class/TplBlock.php.
+templates/home.html     Template HTML principal, rendu avec src/View/TplBlock.php.
 src/AppFactory.php      Composition des dependances applicatives.
 src/Http/               ApiKernel et format des reponses JSON.
 src/Auth/               Authentification mot de passe, OAuth, sessions.
@@ -77,16 +77,14 @@ src/Database/           Lecture config PDO, schema et migrations legeres.
 src/Repository/         Acces aux tables relationnelles.
 src/Domain/             Objets metier persistants et DTO de reponse.
 src/Service/            Cas d'usage: mouvement, observation, Mannies, scheduler.
-class/                  Moteur de secteurs/univers sous VonNeumannGame\Sector.
+src/Sector/             Moteur de secteurs/univers sous VonNeumannGame\Sector.
+src/View/               Helpers de rendu HTML.
 scripts/                Outils CLI: init-db, create-user, scheduler.
 tests/                  Tests API/integration.
 docs/openapi.yaml       Contrat REST.
 ```
 
-Composer charge deux espaces de noms: `VonNeumannGame\` depuis `src/` et
-`VonNeumannGame\Sector\` depuis `class/`. Le dossier `class/` est historique,
-mais il contient encore le moteur de generation de secteurs et le helper de
-template legacy.
+Composer charge l'espace de noms applicatif `VonNeumannGame\` depuis `src/`.
 
 ## Vue D'Architecture
 
@@ -123,7 +121,7 @@ stockes, comme pour les mouvements de sonde.
 
 ## Secteurs Et Coordonnees
 
-Le moteur de secteurs vit dans `class/` avec le namespace
+Le moteur de secteurs vit dans `src/Sector/` avec le namespace
 `VonNeumannGame\Sector`.
 
 Les coordonnees utilisent un reseau FCC:
@@ -238,12 +236,13 @@ Elles couvrent seulement les colonnes ajoutees pendant les iterations recentes.
 
 ```bash
 composer test
-php class/Tests.php
+php tests/SectorTests.php
 ```
 
-`composer test` execute les tests API/integration dans `tests/ApiTests.php`.
-`php class/Tests.php` verifie le moteur de secteurs historique: coordonnees FCC,
-voisinage, generation et persistance fichier.
+`composer test` execute les tests API/integration dans `tests/ApiTests.php`,
+puis les tests du moteur de secteurs dans `tests/SectorTests.php`.
+`php tests/SectorTests.php` peut aussi etre lance seul pour verifier les
+coordonnees FCC, le voisinage, la generation et la persistance fichier.
 
 Un scenario manuel contre un serveur lance existe aussi:
 

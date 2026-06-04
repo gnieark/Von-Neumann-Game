@@ -13,12 +13,14 @@
   },
   "autoload": {
     "psr-4": {
-      "VonNeumannGame\\": "src/",
-      "VonNeumannGame\\Sector\\": "class/"
+      "VonNeumannGame\\": "src/"
     }
   },
   "scripts": {
-    "test": "php tests/ApiTests.php",
+    "test": [
+      "php tests/ApiTests.php",
+      "php tests/SectorTests.php"
+    ],
     "init-db": "php scripts/init-db.php"
   }
 }

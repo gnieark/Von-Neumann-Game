@@ -5,9 +5,9 @@ declare(strict_types=1);
 use VonNeumannGame\AppFactory;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\I18n\Translator;
+use VonNeumannGame\View\TplBlock;
 
 require_once __DIR__ . '/../vendor/autoload.php';
-require_once __DIR__ . '/../class/TplBlock.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
