@@ -725,7 +725,7 @@ button:disabled {
     padding: 12px;
 }
 
-.sector-object div {
+.sector-object-heading {
     display: flex;
     justify-content: space-between;
     gap: 12px;
@@ -740,6 +740,81 @@ button:disabled {
 
 .sector-object p {
     margin: 8px 0 0;
+    color: var(--text);
+}
+
+.sector-system-toggle {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-color: rgba(143, 182, 189, .34);
+    background: rgba(143, 182, 189, .08);
+    color: #dce9eb;
+    text-align: left;
+    font-weight: 700;
+}
+
+.sector-system-toggle[aria-expanded="true"] {
+    border-color: var(--cold);
+    background: rgba(143, 182, 189, .16);
+}
+
+.sector-system-body-panel {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,.1);
+}
+
+.sector-system-body-panel[hidden] {
+    display: none;
+}
+
+.sector-system-body-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.sector-system-body {
+    display: grid;
+    gap: 6px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.sector-system-body:last-child {
+    border-bottom: 0;
+}
+
+.sector-system-body-title {
+    color: var(--text);
+    font-weight: 700;
+}
+
+.sector-system-body-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 6px 12px;
+    margin: 0;
+}
+
+.sector-system-body-details div {
+    display: grid;
+    gap: 2px;
+}
+
+.sector-system-body-details dt {
+    color: var(--muted);
+    font-size: .76rem;
+    text-transform: uppercase;
+}
+
+.sector-system-body-details dd {
+    margin: 0;
     color: var(--text);
 }
 

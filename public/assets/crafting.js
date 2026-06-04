@@ -4,7 +4,7 @@ import {
     formatText,
     numberValue,
     numericCount,
-} from './utils.js';
+} from './utils.js?v=20260604-system-bodies-v2';
 
 export const createCraftingModule = ({state, labels}) => {
     const {

@@ -11,6 +11,7 @@ require_once __DIR__ . '/../class/TplBlock.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
+const ASSET_VERSION = '20260604-system-bodies-v2';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -107,6 +108,7 @@ function renderHome(string $projectRoot, Translator $translator, ?Player $player
         'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
+        'assetVersion' => ASSET_VERSION,
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -155,6 +157,7 @@ function renderPasswordAuth(string $projectRoot, Translator $translator, ?string
         'bodyClass' => 'is-guest',
         'authenticated' => '0',
         'language' => $translator->language(),
+        'assetVersion' => ASSET_VERSION,
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -211,6 +214,7 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
         'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
+        'assetVersion' => ASSET_VERSION,
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -234,6 +238,7 @@ function renderApiDocs(string $projectRoot, Translator $translator, ?Player $pla
         'bodyClass' => $player === null ? 'is-api-docs is-guest' : 'is-api-docs is-authenticated',
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
+        'assetVersion' => ASSET_VERSION,
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -275,6 +280,7 @@ function renderOAuthPseudo(string $projectRoot, Translator $translator, string $
         'bodyClass' => 'is-guest',
         'authenticated' => '0',
         'language' => $translator->language(),
+        'assetVersion' => ASSET_VERSION,
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',

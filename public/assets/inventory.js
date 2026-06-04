@@ -1,7 +1,7 @@
 import {
     escapeHtml,
     numberValue,
-} from './utils.js';
+} from './utils.js?v=20260604-system-bodies-v2';
 
 export const createInventoryModule = ({state, labels, sector, onInventoryChanged = () => {}}) => {
     const {

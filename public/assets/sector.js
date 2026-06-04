@@ -2,10 +2,11 @@ import {
     duration,
     escapeHtml,
     formatText,
+    numberValue,
     numericCount,
     setText,
     sumCount,
-} from './utils.js';
+} from './utils.js?v=20260604-system-bodies-v2';
 
 export const miningResourceTypes = ['deuterium', 'metals', 'ice', 'carbon_compounds'];
 export const mannyMiningAmountMax = 0.55;
@@ -481,6 +482,123 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
         return direct.concat(nested).filter((target) => target.id);
     });
 
+    const systemBodyKey = (body) => String(body && (body.id || body.name || body.type) ? (body.id || body.name || body.type) : '');
+
+    const solarSystemBodies = (system) => {
+        const bodiesByKey = new Map();
+        if (Array.isArray(system.bookmarkTargets)) {
+            system.bookmarkTargets.forEach((body) => {
+                const key = systemBodyKey(body);
+                if (key) {
+                    bodiesByKey.set(key, body);
+                }
+            });
+        }
+        if (Array.isArray(system.minableTargets)) {
+            system.minableTargets.forEach((body) => {
+                const key = systemBodyKey(body);
+                if (key) {
+                    bodiesByKey.set(key, {...(bodiesByKey.get(key) || {}), ...body});
+                }
+            });
+        }
+
+        return Array.from(bodiesByKey.values());
+    };
+
+    const hasResourceDetails = (body) => {
+        if (Array.isArray(body.resourceTypes) && body.resourceTypes.length > 0) {
+            return true;
+        }
+        if (Array.isArray(body.resources) && body.resources.length > 0) {
+            return true;
+        }
+        const composition = body.resourceComposition && typeof body.resourceComposition === 'object'
+            ? body.resourceComposition
+            : null;
+
+        return composition !== null && miningResourceTypes.some((type) => Number(composition[type]) > 0);
+    };
+
+    const systemBodyLabel = (body) => {
+        const type = objectTypeLabel(body.type || 'object');
+        const name = body.name || body.id || t('unknownObject', 'Unknown object');
+
+        return type + ' - ' + name;
+    };
+
+    const systemBodyDetails = (body) => {
+        const details = [];
+        if (Number.isFinite(Number(body.mass))) {
+            details.push({label: t('mass', 'Mass'), value: numberValue(body.mass)});
+        }
+        if (Number.isFinite(Number(body.radius))) {
+            details.push({label: t('radius', 'Radius'), value: numberValue(body.radius)});
+        }
+        if (hasResourceDetails(body)) {
+            const resourceTypes = resourceTypesForTarget(body);
+            if (resourceTypes.length > 0) {
+                details.push({label: t('resources', 'Resources'), value: resourceTypes.map(resourceTypeLabel).join(', ')});
+            }
+            details.push({label: t('composition', 'Composition'), value: resourceCompositionLabel(body)});
+        }
+
+        if (details.length === 0) {
+            return '';
+        }
+
+        return '<dl class="sector-system-body-details">'
+            + details.map((detail) => (
+                '<div><dt>' + escapeHtml(detail.label) + '</dt><dd>' + escapeHtml(detail.value) + '</dd></div>'
+            )).join('')
+            + '</dl>';
+    };
+
+    const solarSystemDetails = (system, index) => {
+        if (system.type !== 'solar_system') {
+            return '';
+        }
+
+        const bodies = solarSystemBodies(system);
+        if (bodies.length === 0) {
+            return '';
+        }
+
+        const panelId = 'sector-system-bodies-' + String(index);
+        const openLabel = formatText(t('showSolarSystemBodies', 'System bodies ({count})'), {count: bodies.length});
+        return '<button class="sector-system-toggle" type="button" aria-expanded="false" aria-controls="' + escapeHtml(panelId) + '" data-open-label="' + escapeHtml(openLabel) + '" data-close-label="' + escapeHtml(t('hideSolarSystemBodies', 'Hide bodies')) + '">'
+            + escapeHtml(openLabel)
+            + '</button>'
+            + '<div id="' + escapeHtml(panelId) + '" class="sector-system-body-panel" hidden>'
+            + '<ul class="sector-system-body-list">'
+            + bodies.map((body) => (
+                '<li class="sector-system-body">'
+                    + '<span class="sector-system-body-title">' + escapeHtml(systemBodyLabel(body)) + '</span>'
+                    + systemBodyDetails(body)
+                + '</li>'
+            )).join('')
+            + '</ul>'
+            + '</div>';
+    };
+
+    const bindSolarSystemToggles = (root) => {
+        root.querySelectorAll('.sector-system-toggle').forEach((button) => {
+            button.addEventListener('click', () => {
+                const panel = document.getElementById(button.getAttribute('aria-controls') || '');
+                if (!panel) {
+                    return;
+                }
+
+                const willOpen = button.getAttribute('aria-expanded') !== 'true';
+                button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+                button.textContent = willOpen
+                    ? (button.dataset.closeLabel || t('hideSolarSystemBodies', 'Hide bodies'))
+                    : (button.dataset.openLabel || t('showSolarSystemBodies', 'System bodies'));
+                panel.hidden = !willOpen;
+            });
+        });
+    };
+
     const renderSectorObjects = (sector, options = {}) => {
         const node = document.getElementById('sector-objects');
         if (!node) {
@@ -499,7 +617,7 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
             state.currentMannySalvageTargets = salvageTargetsFromObjects(objects);
             state.currentSectorObjects = objects;
         }
-        node.innerHTML = objects.map((object) => {
+        node.innerHTML = objects.map((object, index) => {
             const danger = object.dangerLevel || 'unknown';
             const classes = ['sector-object', danger === 'extreme' ? 'sector-object-warning' : ''].filter(Boolean).join(' ');
             const countdown = object.noReturnCountdown && Number.isFinite(Number(object.noReturnCountdown.secondsRemaining))
@@ -514,13 +632,15 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
                 ? '<p>' + escapeHtml(t('quantity', 'Quantity') + ' ' + String(object.quantity || 0)) + '</p>'
                 : '';
             return '<article class="' + classes + '">'
-                + '<div><span>' + escapeHtml(objectTypeLabel(object.type || 'unknown')) + '</span><b>' + escapeHtml(danger) + '</b></div>'
+                + '<div class="sector-object-heading"><span>' + escapeHtml(objectTypeLabel(object.type || 'unknown')) + '</span><b>' + escapeHtml(danger) + '</b></div>'
                 + '<p>' + escapeHtml(object.summary || '') + '</p>'
                 + mannyDetail
                 + driftingItemDetail
+                + solarSystemDetails(object, index)
                 + countdown
                 + '</article>';
         }).join('');
+        bindSolarSystemToggles(node);
         if (syncMannyTargets) {
             onTargetsChanged();
         }

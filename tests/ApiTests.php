@@ -177,7 +177,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(12, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(13, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -356,6 +356,15 @@ $test->assert(!array_key_exists('damagePercent', $probe->body['probe']['systems'
 $test->assert(isset($probe->body['probe']['sector']['relative']), 'GET /api/probe exposes relative sector coordinates');
 $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $probe->body['probe']['sector']['relative'] ?? null, 'player sees initial sector as relative coordinates [0,0,0]');
 $test->assert(!str_contains(json_encode($probe->body, JSON_THROW_ON_ERROR), 'absolute'), 'GET /api/probe does not expose absolute coordinates');
+
+$visitedSectorList = $kernel->handle('GET', '/api/probe/visited-sectors', $headers);
+$test->assertEquals(200, $visitedSectorList->status, 'valid token allows GET /api/probe/visited-sectors');
+$initialVisitedSector = $visitedSectorList->body['visitedSectors'][0] ?? null;
+$test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $initialVisitedSector['relativeCoordinates'] ?? null, 'visited-sector list exposes relative coordinates');
+$test->assertEquals(1, $initialVisitedSector['visitCount'] ?? null, 'visited-sector list exposes visit count');
+$test->assert(isset($initialVisitedSector['firstVisitedAt']) && strtotime((string) $initialVisitedSector['firstVisitedAt']) !== false, 'visited-sector list exposes first visit date');
+$test->assert(isset($initialVisitedSector['lastVisitedAt']) && strtotime((string) $initialVisitedSector['lastVisitedAt']) !== false, 'visited-sector list exposes last visit date');
+$test->assert(!str_contains(json_encode($visitedSectorList->body, JSON_THROW_ON_ERROR), 'absolute'), 'visited-sector list does not expose absolute coordinates');
 
 $sector = $kernel->handle('GET', '/api/probe/sector', $headers);
 $test->assertEquals(200, $sector->status, 'valid token allows GET /api/probe/sector');
@@ -1005,6 +1014,12 @@ if ($moveProbe !== null) {
         $arrivedProbeEntity = $probes->findByPlayerId($player->id);
         if ($arrivedProbeEntity !== null) {
             $test->assert($visitedSectors->hasVisited($player, $arrivedProbeEntity->currentSector), 'arrival marks target sector as visited');
+            $visitedAfterArrival = $kernel->handle('GET', '/api/probe/visited-sectors', $moveHeaders);
+            $visitedRelativeKeys = array_map(
+                static fn(array $sector): string => implode(':', $sector['relativeCoordinates'] ?? []),
+                $visitedAfterArrival->body['visitedSectors'] ?? [],
+            );
+            $test->assert(in_array('1:1:0', $visitedRelativeKeys, true), 'visited-sector list includes the movement target after arrival');
             $test->assertEquals('normal', $arrivedProbe->body['probe']['sensorMode'] ?? null, 'idle sensor mode is normal after arrival');
             $originRelativeAfterArrival = $originBeforeMove->subtract($player->homeSector);
             $oldSectorResponse = $kernel->handle('GET', '/api/sector?x=' . $originRelativeAfterArrival['x'] . '&y=' . $originRelativeAfterArrival['y'] . '&z=' . $originRelativeAfterArrival['z'], $moveHeaders);
@@ -1153,7 +1168,7 @@ if ($escapeProbe !== null) {
     $test->assert($scheduledEvents->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $escapeProbe->id) === null, 'starting a movement cancels the pending black hole trap event');
 }
 
-foreach (['/api/me', '/api/probe', '/api/probe/sector', '/api/sector?x=0&y=0&z=0'] as $path) {
+foreach (['/api/me', '/api/probe', '/api/probe/visited-sectors', '/api/probe/sector', '/api/sector?x=0&y=0&z=0'] as $path) {
     $response = $kernel->handle('GET', $path);
     $test->assertEquals(401, $response->status, "protected endpoint $path rejects missing Authorization Bearer");
 }

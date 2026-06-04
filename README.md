@@ -180,6 +180,7 @@ Routes principales:
 - `POST /api/me/api-key`
 - `GET /api/crafting-recipes`
 - `GET /api/probe`
+- `GET /api/probe/visited-sectors`
 - `GET /api/probe/sector`
 - `POST /api/probe/move`
 - `GET /api/probe/inventory/{itemId}`
@@ -195,6 +196,9 @@ Routes principales:
 
 Les coordonnees envoyees par l'API sont toujours relatives au joueur et doivent
 respecter la parite FCC.
+`GET /api/probe/visited-sectors` liste les secteurs deja visites par la sonde
+courante avec leurs coordonnees relatives, dates de premiere/derniere visite et
+compteur de visites.
 Les Mannys abandonnees ou oubliees apparaissent dans les objets detectes
 uniquement pour le secteur ou se trouve actuellement la sonde.
 La jetabilite depend du type d'entree d'inventaire: l'imprimante 3D atomique

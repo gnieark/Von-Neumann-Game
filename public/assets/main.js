@@ -3,19 +3,19 @@ import {
     bindOAuthRememberLinks,
     createApiClient,
     initSwaggerUi,
-} from './api.js';
-import {createCraftingModule} from './crafting.js';
-import {createInventoryModule} from './inventory.js';
-import {createLabels} from './labels.js';
-import {createMannyModule} from './manny.js';
-import {createSectorModule} from './sector.js';
+} from './api.js?v=20260604-system-bodies-v2';
+import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
+import {createInventoryModule} from './inventory.js?v=20260604-system-bodies-v2';
+import {createLabels} from './labels.js?v=20260604-system-bodies-v2';
+import {createMannyModule} from './manny.js?v=20260604-system-bodies-v2';
+import {createSectorModule} from './sector.js?v=20260604-system-bodies-v2';
 import {
     bindAccountMenu,
     bindJsonToggles,
     bindMetricDetails,
     bindPanelTabs,
     bindRefreshButtons,
-} from './ui-accordion.js';
+} from './ui-accordion.js?v=20260604-system-bodies-v2';
 import {
     bindLanguageForm,
     coordinate,
@@ -28,7 +28,7 @@ import {
     setText,
     storageCapacityValue,
     validRelativeCoordinates,
-} from './utils.js';
+} from './utils.js?v=20260604-system-bodies-v2';
 
 const i18n = readI18n();
 bindLanguageForm();

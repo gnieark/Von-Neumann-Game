@@ -12,6 +12,7 @@ use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\VisitedSector;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
@@ -30,7 +31,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 12;
+    public const API_VERSION = 13;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -76,6 +77,7 @@ final class ApiKernel
                 '/api/me/api-key' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->apiKeyResponse($player)),
                 '/api/crafting-recipes' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $_player): ApiResponse => $this->craftingRecipesResponse()),
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
+                '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
                 '/api/probe/mannies' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeManniesResponse($player)),
@@ -194,6 +196,24 @@ final class ApiKernel
         )->globalToRelative($probe->currentSector);
 
         return new ApiResponse(200, ['probe' => $this->probeArray($player, $probe, $relative)]);
+    }
+
+    private function probeVisitedSectorsResponse(Player $player): ApiResponse
+    {
+        $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $frame = new PlayerReferenceFrame($player->homeSector);
+
+        return new ApiResponse(200, [
+            'visitedSectors' => array_map(
+                fn(VisitedSector $sector): array => [
+                    'relativeCoordinates' => $frame->globalToRelative($sector->coordinates),
+                    'firstVisitedAt' => $sector->firstVisitedAt,
+                    'lastVisitedAt' => $sector->lastVisitedAt,
+                    'visitCount' => $sector->visitCount,
+                ],
+                $this->visitedSectors->listVisited($player),
+            ),
+        ]);
     }
 
     private function probeSectorResponse(Player $player): ApiResponse

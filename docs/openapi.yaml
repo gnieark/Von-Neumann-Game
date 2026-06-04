@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '12'
+  version: '13'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 12
+                apiVersion: 13
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -147,6 +147,32 @@ paths:
                 properties:
                   probe:
                     $ref: '#/components/schemas/Probe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/visited-sectors:
+    get:
+      summary: List sectors already visited by the current probe
+      description: >
+        Returns the authenticated player's visited-sector history for the
+        current probe. Coordinates are relative to the player's home sector and
+        sorted by most recent visit first.
+      responses:
+        '200':
+          description: Visited sectors for the current probe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeVisitedSectorsResponse'
+              example:
+                visitedSectors:
+                  - relativeCoordinates: { x: 0, y: 0, z: 0 }
+                    firstVisitedAt: '2026-06-01T12:00:00+00:00'
+                    lastVisitedAt: '2026-06-01T12:00:00+00:00'
+                    visitCount: 1
+                  - relativeCoordinates: { x: 1, y: 1, z: 0 }
+                    firstVisitedAt: '2026-06-01T13:15:00+00:00'
+                    lastVisitedAt: '2026-06-01T15:45:00+00:00'
+                    visitCount: 2
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe/sector:
@@ -1018,6 +1044,29 @@ components:
       properties:
         target:
           $ref: '#/components/schemas/Vector'
+    ProbeVisitedSectorsResponse:
+      type: object
+      required: [visitedSectors]
+      properties:
+        visitedSectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/VisitedSector'
+    VisitedSector:
+      type: object
+      required: [relativeCoordinates, firstVisitedAt, lastVisitedAt, visitCount]
+      properties:
+        relativeCoordinates:
+          $ref: '#/components/schemas/Vector'
+        firstVisitedAt:
+          type: string
+          format: date-time
+        lastVisitedAt:
+          type: string
+          format: date-time
+        visitCount:
+          type: integer
+          minimum: 1
     ProbeMovement:
       type: object
       required: [status, origin, target, distance, fuelCostDeuterium, startedAt, arrivalAt]

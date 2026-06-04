@@ -79,6 +79,21 @@ final class VisitedSectorRepository
     /**
      * @return array<VisitedSector>
      */
+    public function listVisited(Player $player): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM visited_sectors
+             WHERE player_id = :player_id
+             ORDER BY last_visited_at DESC, id DESC'
+        );
+        $stmt->execute(['player_id' => $player->id]);
+
+        return array_map(fn(array $row): VisitedSector => $this->hydrate($row), $stmt->fetchAll());
+    }
+
+    /**
+     * @return array<VisitedSector>
+     */
     public function listVisitedAround(Player $player, SectorCoordinates $center, int $maxDistance): array
     {
         $stmt = $this->pdo->prepare(

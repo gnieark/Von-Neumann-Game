@@ -1,5 +1,5 @@
-import {mannyMiningAmountMax, miningResourceTypes} from './sector.js';
-import {toggleAccordion} from './ui-accordion.js';
+import {mannyMiningAmountMax, miningResourceTypes} from './sector.js?v=20260604-system-bodies-v2';
+import {toggleAccordion} from './ui-accordion.js?v=20260604-system-bodies-v2';
 import {
     coordinate,
     escapeHtml,
@@ -8,7 +8,7 @@ import {
     numberValue,
     pretty,
     setText,
-} from './utils.js';
+} from './utils.js?v=20260604-system-bodies-v2';
 
 export const createMannyModule = ({state, labels, sector, crafting, api, refreshers = {}}) => {
     const {
