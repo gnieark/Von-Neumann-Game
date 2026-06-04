@@ -5,8 +5,8 @@ import {
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
 import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
-import {createInventoryModule} from './inventory.js?v=20260604-deuterium-guard';
-import {createLabels} from './labels.js?v=20260604-system-bodies-v2';
+import {createInventoryModule} from './inventory.js?v=20260604-storage-containers';
+import {createLabels} from './labels.js?v=20260604-storage-containers';
 import {createMannyModule} from './manny.js?v=20260604-manny-jump-confirm';
 import {createSectorModule} from './sector.js?v=20260604-system-bodies-v2';
 import {
@@ -88,6 +88,14 @@ if (body && body.dataset.authenticated === '1') {
         method: 'POST',
         body: JSON.stringify(bodyValue),
     });
+    const patchJson = (path, bodyValue = {}) => api(path, {
+        method: 'PATCH',
+        body: JSON.stringify(bodyValue),
+    });
+    const splitStorageRuleValue = (value) => String(value || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
     const runApiOrder = async ({statusId, pendingText, request, onSuccess, onError}) => {
         setText(statusId, pendingText);
         try {
@@ -316,6 +324,33 @@ if (body && body.dataset.authenticated === '1') {
     });
 
     document.getElementById('systems-panel')?.addEventListener('submit', async (event) => {
+        if (event.target.classList.contains('storage-rules-form')) {
+            event.preventDefault();
+            const containerId = event.target.dataset.containerId;
+            if (!containerId) {
+                return;
+            }
+            const form = new FormData(event.target);
+            await runApiOrder({
+                statusId: 'inventory-status',
+                pendingText: t('orderSent', 'Order transmitted...'),
+                request: () => patchJson('/api/probe/storage-containers/' + encodeURIComponent(containerId) + '/rules', {
+                    priority: splitStorageRuleValue(form.get('priority')),
+                    exclusion: splitStorageRuleValue(form.get('exclusion')),
+                    strictExclusion: splitStorageRuleValue(form.get('strictExclusion')),
+                }),
+                onSuccess: (data) => {
+                    setText('inventory-status', t('storageRulesSaved', 'Storage rules saved.'));
+                    if (data.inventory) {
+                        inventoryModule.renderInventory(data.inventory);
+                        setText('inventory-json', pretty(data.inventory));
+                    }
+                    loadProbe();
+                },
+            });
+            return;
+        }
+
         if (!event.target.classList.contains('inventory-jettison-form')) {
             return;
         }

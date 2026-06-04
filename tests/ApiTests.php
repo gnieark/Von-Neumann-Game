@@ -19,10 +19,12 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
+use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\WaypointBookmarkService;
@@ -154,13 +156,20 @@ $mannySchemaColumns = array_map(
 );
 $test->assert(in_array('cargo_ice', $mannySchemaColumns, true), 'Manny table stores ice cargo explicitly');
 $test->assert(in_array('cargo_organic_compounds', $mannySchemaColumns, true), 'Manny table stores organic-compound cargo explicitly');
+$test->assert(in_array('storage_container_id', $mannySchemaColumns, true), 'Manny table stores its storage container');
 $test->assert(!in_array('cargo_other', $mannySchemaColumns, true), 'Manny table no longer stores generic cargo_other');
+$itemSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_items)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('storage_container_id', $itemSchemaColumns, true), 'Probe item table stores its storage container');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
+$storageContainers = new StorageContainerRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
 $scheduledEvents = new ScheduledEventRepository($pdo);
 $sessions = new SessionRepository($pdo);
@@ -170,14 +179,15 @@ $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: 'api-test-world');
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items);
+$storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage);
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService, $items, $bookmarkService);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService, $items, $bookmarkService, $storage);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(13, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(14, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -281,9 +291,21 @@ $craftSession = $kernel->handle('POST', '/api/session', [], json_encode(['userna
 $craftHeaders = ['Authorization' => 'Bearer ' . (string) ($craftSession->body['token'] ?? '')];
 $craftMannyList = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
 $craftMannyId = (string) ($craftMannyList->body['mannies'][0]['id'] ?? '');
+$craftSpareMannyId = (string) ($craftMannyList->body['mannies'][1]['id'] ?? '');
 $test->assert($craftProbeEntity !== null && $craftMannyId !== '', 'crafting test probe has a Manny');
 
 if ($craftProbeEntity !== null && $craftMannyId !== '') {
+    if ($craftSpareMannyId !== '') {
+        $pdo->prepare(
+            'UPDATE mannies SET location_type = :location_type, sector_x = :x, sector_y = :y, sector_z = :z, storage_container_id = NULL WHERE uid = :uid'
+        )->execute([
+            'uid' => $craftSpareMannyId,
+            'location_type' => 'sector',
+            'x' => $craftProbeEntity->currentSector->getX(),
+            'y' => $craftProbeEntity->currentSector->getY(),
+            'z' => $craftProbeEntity->currentSector->getZ(),
+        ]);
+    }
     $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.54 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
     $rawContainerCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'additional_container',
@@ -311,6 +333,22 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(0.0, $additionalContainers[0]['containerSpace'] ?? null, 'additional container item occupies no storage');
     $test->assertEquals(1.0, (float) ($additionalContainers[0]['metadata']['capacityBonus'] ?? 0), 'additional container item carries its capacity bonus');
     $test->assertEquals(2.0, $containerProbe->body['probe']['inventory']['capacity'] ?? null, 'additional container increases probe storage capacity');
+    $storageContainers = $kernel->handle('GET', '/api/probe/storage-containers', $craftHeaders);
+    $test->assertEquals(200, $storageContainers->status, 'GET /api/probe/storage-containers lists storage containers');
+    $craftStorageContainers = $storageContainers->body['containers'] ?? [];
+    $test->assertEquals(2, count($craftStorageContainers), 'additional container creates one individual storage container');
+    $additionalStorageContainer = array_values(array_filter(
+        $craftStorageContainers,
+        static fn(array $container): bool => ($container['kind'] ?? null) === 'container',
+    ))[0] ?? null;
+    $test->assert(is_string($additionalStorageContainer['id'] ?? null), 'additional storage container has a stable public id');
+    $storageRules = $kernel->handle('PATCH', '/api/probe/storage-containers/' . rawurlencode((string) ($additionalStorageContainer['id'] ?? 'missing')) . '/rules', $craftHeaders, json_encode([
+        'priority' => ['metals'],
+        'exclusion' => ['ice'],
+        'strictExclusion' => ['manny'],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $storageRules->status, 'PATCH /api/probe/storage-containers/{id}/rules updates routing rules');
+    $test->assertEquals(['metals'], $storageRules->body['container']['rules']['priority'] ?? null, 'storage priority rule is persisted');
 
     $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.02 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
     $steelBarCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
@@ -332,6 +370,25 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ));
     $test->assertEquals(1, count($steelBars), 'completed steel-bar craft adds a steel bar item');
     $test->assertEquals(0.01, $steelBars[0]['containerSpace'] ?? null, 'steel bar item occupies 0.01 containers');
+    $storageMove = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
+        'actorMannyId' => $craftMannyId,
+        'kind' => 'item',
+        'itemId' => $steelBars[0]['id'] ?? '',
+        'toContainerId' => $additionalStorageContainer['id'] ?? '',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $storageMove->status, 'POST /api/probe/storage-moves assigns a Manny to move an item');
+    $test->assertEquals('moving_stockage', $storageMove->body['manny']['currentTask'] ?? null, 'storage move uses moving_stockage task');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $afterStorageMoveProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $movedSteelBars = array_values(array_filter(
+        $afterStorageMoveProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === 'steel_bar',
+    ));
+    $test->assertEquals($additionalStorageContainer['id'] ?? null, $movedSteelBars[0]['container']['id'] ?? null, 'completed storage move updates the item container');
 }
 
 $apiKeyResponse = $kernel->handle('POST', '/api/me/api-key', $headers, json_encode([], JSON_THROW_ON_ERROR));
@@ -766,12 +823,14 @@ if ($createdProbe !== null) {
     $test->assertEquals(null, $steelBarSalvageActor['currentTask'] ?? null, 'Manny returns to idle after recovering drifting craftable items');
     $test->assertEquals('success', $steelBarSalvageActor['task']['result'] ?? null, 'drifting craftable item recovery records success');
 
+    $beforeMannyJettisonProbe = $kernel->handle('GET', '/api/probe', $headers);
+    $beforeMannyJettisonFreeCapacity = (float) ($beforeMannyJettisonProbe->body['probe']['inventory']['freeCapacity'] ?? 0.0);
     $jettisonManny = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($fourthMannyId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $jettisonManny->status, 'POST /api/probe/inventory/{itemId}/jettison can eject an idle onboard Manny');
     $jettisonedManny = $mannies->findByUid($fourthMannyId);
     $test->assertEquals(null, $jettisonedManny?->probeId, 'jettisoned Manny has no owner probe link in the database');
     $test->assertEquals('sector', $jettisonedManny?->locationType, 'jettisoned Manny is moved outside the probe');
-    $test->assertEquals(0.05, $jettisonManny->body['inventory']['freeCapacity'] ?? null, 'jettisoning an onboard Manny frees its storage slot');
+    $test->assertEquals(round($beforeMannyJettisonFreeCapacity + 0.05, 4), $jettisonManny->body['inventory']['freeCapacity'] ?? null, 'jettisoning an onboard Manny frees its storage slot');
     $jettisonedSector = $sectorRepository->load($createdProbe->currentSector);
     $jettisonedSectorManny = $jettisonedSector->findObjectById(SectorManny::objectIdForUid($fourthMannyId));
     $test->assertEquals('manny', $jettisonedSectorManny?->getType()->value, 'jettisoned Manny is registered as a sector object');

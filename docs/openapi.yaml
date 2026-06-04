@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '13'
+  version: '14'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 13
+                apiVersion: 14
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -149,6 +149,135 @@ paths:
                     $ref: '#/components/schemas/Probe'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/probe/storage-containers:
+    get:
+      summary: List probe storage containers
+      description: >
+        Returns the probe core storage and each additional container created
+        from an additional_container inventory item. The deuterium tank is not
+        managed here.
+      responses:
+        '200':
+          description: Storage containers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [containers]
+                properties:
+                  containers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StorageContainer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/storage-containers/{containerId}:
+    get:
+      summary: Get one storage container content
+      parameters:
+        - $ref: '#/components/parameters/StorageContainerId'
+      responses:
+        '200':
+          description: Container inventory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageContainerInventoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/probe/storage-containers/{containerId}/rules:
+    patch:
+      summary: Update storage routing rules for a container
+      description: >
+        Priority routes matching new items to this container first unless it is
+        full. Exclusion avoids this container unless no other non-strict
+        container can accept the item. Strict exclusion prevents automatic
+        placement into this container.
+      parameters:
+        - $ref: '#/components/parameters/StorageContainerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StorageContainerRules'
+            example:
+              priority: [metals]
+              exclusion: [ice]
+              strictExclusion: [manny]
+      responses:
+        '200':
+          description: Rules updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageContainerRulesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/probe/storage-moves:
+    post:
+      summary: Assign a Manny to move stock between containers
+      description: >
+        Starts a moving_stockage task on an idle onboard Manny. Unit items take
+        10 seconds; resources take 10 seconds per 0.05 ECE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StorageMoveRequest'
+            examples:
+              resource:
+                value:
+                  actorMannyId: mny_actor
+                  kind: resource
+                  resourceType: metals
+                  amount: 0.1
+                  fromContainerId: probe-core
+                  toContainerId: container-itm_extra
+              item:
+                value:
+                  actorMannyId: mny_actor
+                  kind: item
+                  itemId: itm_steel_bar
+                  toContainerId: container-itm_extra
+      responses:
+        '202':
+          description: Storage move task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Move is impossible because of capacity or item rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/visited-sectors:
     get:
       summary: List sectors already visited by the current probe
@@ -221,6 +350,11 @@ paths:
                       containerSpace: 0.3
                       currentTask: null
                       taskProgressPercent: 0
+                      container:
+                        id: probe-core
+                        kind: probe
+                        label: Sonde
+                        sortOrder: 0
                     - id: mny_8d4a2c1f5a91b334
                       type: manny
                       name: manny-1
@@ -236,6 +370,11 @@ paths:
                         ice: 0
                         organicCompounds: 0
                         capacityUnit: earth_container_equivalent
+                      container:
+                        id: probe-core
+                        kind: probe
+                        label: Sonde
+                        sortOrder: 0
                   resourceStocks:
                     - id: probe-1-stock-metals
                       type: metals
@@ -243,18 +382,34 @@ paths:
                       amount: 0
                       containerSpace: 0
                       capacityUnit: earth_container_equivalent
+                      containers: []
                     - id: probe-1-stock-ice
                       type: ice
                       name: Glace
                       amount: 0
                       containerSpace: 0
                       capacityUnit: earth_container_equivalent
+                      containers: []
                     - id: probe-1-stock-organic-compounds
                       type: carbon_compounds
                       name: Composés organiques
                       amount: 0
                       containerSpace: 0
                       capacityUnit: earth_container_equivalent
+                      containers: []
+                  containers:
+                    - id: probe-core
+                      kind: probe
+                      label: Sonde
+                      sortOrder: 0
+                      capacity: 1
+                      usedCapacity: 0.5
+                      freeCapacity: 0.5
+                      capacityUnit: earth_container_equivalent
+                      rules:
+                        priority: []
+                        exclusion: []
+                        strictExclusion: []
                   externalTanks:
                     - id: probe-1-deuterium-tank
                       type: deuterium
@@ -382,11 +537,11 @@ paths:
     post:
       summary: Jettison an inventory entry into space
       description: >
-        Discards stored metals/non-metal materials by amount, vents deuterium from
-        the external tank by percentage points, ejects an idle onboard Manny
+        Discards stored metals/non-metal materials by amount, ejects an idle onboard Manny
         into the current sector, or adds supported crafted items to an aggregated
         drifting-item stack in the current sector. Non-persisted core equipment
-        and additional containers cannot be jettisoned.
+        and additional containers cannot be jettisoned. The external deuterium
+        tank is not jettisonable.
       parameters:
         - name: itemId
           in: path
@@ -873,6 +1028,13 @@ components:
       schema:
         type: string
       example: mny_8d4a2c1f5a91b334
+    StorageContainerId:
+      name: containerId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: probe-core
   responses:
     BadRequest:
       description: Bad request
@@ -913,7 +1075,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, invalid_salvage_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, invalid_salvage_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -1029,6 +1191,13 @@ components:
           type: number
           minimum: 0
         containerSpaceUnit:
+          type: string
+          enum: [earth_container_equivalent]
+        capacityBonus:
+          type: number
+          minimum: 0
+          description: Present on additional_container; each one creates one storage container.
+        capacityBonusUnit:
           type: string
           enum: [earth_container_equivalent]
     Vector:
@@ -1149,9 +1318,124 @@ components:
               nullable: true
         inventory:
           $ref: '#/components/schemas/ProbeInventory'
+    StorageContainer:
+      type: object
+      required: [id, kind, label, sortOrder, capacity, usedCapacity, freeCapacity, capacityUnit, rules]
+      properties:
+        id:
+          type: string
+          description: Stable storage container uid. probe-core is the probe hull.
+          example: probe-core
+        kind:
+          type: string
+          enum: [probe, container]
+        label:
+          type: string
+          example: Sonde
+        sortOrder:
+          type: integer
+        capacity:
+          type: number
+          example: 1
+        usedCapacity:
+          type: number
+        freeCapacity:
+          type: number
+        capacityUnit:
+          type: string
+          enum: [earth_container_equivalent]
+        rules:
+          $ref: '#/components/schemas/StorageContainerRules'
+    StorageContainerSummary:
+      type: object
+      required: [id, kind, label, sortOrder]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [probe, container]
+        label:
+          type: string
+        sortOrder:
+          type: integer
+    StorageContainerRules:
+      type: object
+      properties:
+        priority:
+          type: array
+          items:
+            type: string
+          description: Item/resource types routed here first when new stock arrives.
+        exclusion:
+          type: array
+          items:
+            type: string
+          description: Item/resource types routed here only if no regular destination has room.
+        strictExclusion:
+          type: array
+          items:
+            type: string
+          description: Item/resource types never automatically routed here.
+    StorageContainerRulesResponse:
+      type: object
+      required: [container, inventory]
+      properties:
+        container:
+          $ref: '#/components/schemas/StorageContainer'
+        inventory:
+          $ref: '#/components/schemas/ProbeInventory'
+    StorageContainerInventoryResponse:
+      type: object
+      required: [container, inventory]
+      properties:
+        container:
+          $ref: '#/components/schemas/StorageContainer'
+        inventory:
+          type: object
+          required: [capacityUnit, items, resourceStocks]
+          properties:
+            capacityUnit:
+              type: string
+              enum: [earth_container_equivalent]
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProbeInventoryItem'
+            resourceStocks:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProbeResourceStock'
+    StorageMoveRequest:
+      type: object
+      required: [actorMannyId, kind, toContainerId]
+      properties:
+        actorMannyId:
+          type: string
+          description: Idle onboard Manny that will perform the move.
+        kind:
+          type: string
+          enum: [resource, item, manny]
+        toContainerId:
+          type: string
+        fromContainerId:
+          type: string
+          description: Required for resource moves.
+        resourceType:
+          type: string
+          enum: [metals, ice, carbon_compounds]
+        amount:
+          type: number
+          description: Required for resource moves, in ECE.
+        itemId:
+          type: string
+          description: Required for item moves.
+        targetMannyId:
+          type: string
+          description: Required for Manny moves.
     ProbeInventory:
       type: object
-      required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, externalTanks]
+      required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, containers, externalTanks]
       properties:
         capacity:
           type: number
@@ -1174,6 +1458,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProbeResourceStock'
+        containers:
+          type: array
+          description: Probe core and additional storage containers, including their routing rules.
+          items:
+            $ref: '#/components/schemas/StorageContainer'
         externalTanks:
           type: array
           description: Special external tanks that do not consume cargo capacity.
@@ -1181,7 +1470,7 @@ components:
             $ref: '#/components/schemas/ProbeExternalTank'
     ProbeResourceStock:
       type: object
-      required: [id, type, name, amount, containerSpace, capacityUnit]
+      required: [id, type, name, amount, containerSpace, capacityUnit, containers]
       properties:
         id:
           type: string
@@ -1200,6 +1489,22 @@ components:
         capacityUnit:
           type: string
           enum: [earth_container_equivalent]
+        containers:
+          type: array
+          description: Per-container placement lines for this resource stock.
+          items:
+            type: object
+            required: [container, amount, containerSpace, capacityUnit]
+            properties:
+              container:
+                $ref: '#/components/schemas/StorageContainerSummary'
+              amount:
+                type: number
+              containerSpace:
+                type: number
+              capacityUnit:
+                type: string
+                enum: [earth_container_equivalent]
     ProbeExternalTank:
       type: object
       required: [id, type, name, fillPercent, external, usesCargoCapacity]
@@ -1312,6 +1617,10 @@ components:
           $ref: '#/components/schemas/MannyLocation'
         cargo:
           $ref: '#/components/schemas/MannyCargo'
+        container:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StorageContainerSummary'
         metadata:
           type: object
           additionalProperties: true
@@ -1337,6 +1646,10 @@ components:
           $ref: '#/components/schemas/MannyLocation'
         cargo:
           $ref: '#/components/schemas/MannyCargo'
+        container:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StorageContainerSummary'
         metadata:
           type: object
           additionalProperties: true
@@ -1429,7 +1742,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, salvage, returning, waiting_for_space]
+          enum: [repair, mining, crafting, salvage, returning, waiting_for_space, moving_stockage]
         taskProgressPercent:
           type: number
           minimum: 0

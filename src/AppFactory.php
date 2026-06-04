@@ -20,9 +20,11 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
+use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\WaypointBookmarkService;
@@ -62,6 +64,7 @@ final class AppFactory
         $probes = new NeumannProbeRepository($pdo);
         $mannies = new MannyRepository($pdo);
         $items = new ProbeItemRepository($pdo);
+        $storageContainers = new StorageContainerRepository($pdo);
         $movements = new ProbeMovementRepository($pdo);
         $scheduledEvents = new ScheduledEventRepository($pdo);
         $sessions = new SessionRepository($pdo);
@@ -72,10 +75,11 @@ final class AppFactory
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService);
         $observations = new SectorObservationService($sectorService, $visitedSectors);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items);
+        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $bookmarks);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $bookmarks, $storage);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService

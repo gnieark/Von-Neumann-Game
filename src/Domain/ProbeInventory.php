@@ -12,12 +12,14 @@ final class ProbeInventory
      * @param array<ProbeInventoryItem> $items
      * @param array<ProbeExternalTank> $externalTanks
      * @param array<array<string, mixed>> $resourceStocks
+     * @param array<array<string, mixed>> $containers
      */
     public function __construct(
         public readonly float $capacity,
         public readonly array $items,
         public readonly array $externalTanks,
         public readonly array $resourceStocks = [],
+        public readonly array $containers = [],
     ) {}
 
     /**
@@ -160,6 +162,7 @@ final class ProbeInventory
                 $this->items,
             ),
             'resourceStocks' => $this->resourceStocks,
+            'containers' => $this->containers,
             'externalTanks' => array_map(
                 static fn(ProbeExternalTank $tank): array => $tank->toArray(),
                 $this->externalTanks,

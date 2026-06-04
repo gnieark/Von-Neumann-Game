@@ -37,6 +37,7 @@ export const createLabels = (i18n) => {
         salvage: t('salvage', 'Salvage'),
         returning: t('returning', 'Returning'),
         waiting_for_space: t('waitingForSpace', 'Waiting for space'),
+        moving_stockage: t('movingStorage', 'Moving storage'),
     }[task] || task || t('noTask', 'None'));
     const inventoryItemTypeLabel = (type, fallback) => ({
         waypoint_bookmark: t('waypointBookmark', 'Waypoint bookmark'),

@@ -17,6 +17,7 @@ final class Manny
     public const TASK_SALVAGE = 'salvage';
     public const TASK_RETURNING = 'returning';
     public const TASK_WAITING_FOR_SPACE = 'waiting_for_space';
+    public const TASK_MOVING_STORAGE = 'moving_stockage';
     public const CARGO_CAPACITY = 0.05;
     public const CONTAINER_SPACE = 0.05;
 
@@ -24,6 +25,7 @@ final class Manny
         public readonly int $id,
         public readonly string $uid,
         public ?int $probeId,
+        public ?int $storageContainerId,
         public string $name,
         public string $locationType,
         public ?SectorCoordinates $sector,

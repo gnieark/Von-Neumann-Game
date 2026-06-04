@@ -19,6 +19,7 @@ final class ProbeItem
         public readonly int $id,
         public readonly string $uid,
         public readonly int $probeId,
+        public ?int $storageContainerId,
         public readonly string $type,
         public string $name,
         public float $containerSpace,
@@ -27,7 +28,7 @@ final class ProbeItem
         public string $updatedAt,
     ) {}
 
-    public function inventoryItem(): ProbeInventoryItem
+    public function inventoryItem(?array $container = null): ProbeInventoryItem
     {
         return new ProbeInventoryItem(
             $this->uid,
@@ -41,7 +42,9 @@ final class ProbeItem
             $this->metadata + [
                 'createdAt' => $this->createdAt,
                 'updatedAt' => $this->updatedAt,
+                'movable' => true,
             ],
+            $container,
         );
     }
 }

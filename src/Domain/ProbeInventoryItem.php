@@ -16,6 +16,7 @@ final class ProbeInventoryItem
         public readonly ?array $location = null,
         public readonly ?array $cargo = null,
         public readonly array $metadata = [],
+        public readonly ?array $container = null,
     ) {}
 
     public function toArray(): array
@@ -29,6 +30,7 @@ final class ProbeInventoryItem
             'taskProgressPercent' => $this->taskProgressPercent,
         ] + ($this->location !== null ? ['location' => $this->location] : [])
             + ($this->cargo !== null ? ['cargo' => $this->cargo] : [])
+            + ($this->container !== null ? ['container' => $this->container] : [])
             + ($this->metadata !== [] ? ['metadata' => $this->metadata] : []);
     }
 
@@ -42,6 +44,7 @@ final class ProbeInventoryItem
             'taskProgressPercent' => $this->taskProgressPercent,
         ] + ($this->location !== null ? ['location' => $this->location] : [])
             + ($this->cargo !== null ? ['cargo' => $this->cargo] : [])
+            + ($this->container !== null ? ['container' => $this->container] : [])
             + ($this->metadata !== [] ? ['metadata' => $this->metadata] : []);
     }
 }

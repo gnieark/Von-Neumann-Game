@@ -30,6 +30,8 @@ final class MannyService
     public const MINING_AMOUNT_PER_TICK = 0.01;
     public const MINING_TICK_SECONDS = 300;
     public const SALVAGE_SECONDS = 300;
+    public const STORAGE_MOVE_SECONDS_PER_UNIT = 10;
+    public const STORAGE_MOVE_ECE_STEP = 0.05;
     public const MANNY_CARGO_CAPACITY = Manny::CARGO_CAPACITY;
     public const MANNY_CONTAINER_SPACE = Manny::CONTAINER_SPACE;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
@@ -42,6 +44,7 @@ final class MannyService
         private readonly NeumannProbeRepository $probes,
         private readonly SectorService $sectors,
         private readonly ProbeItemRepository $items,
+        private readonly ProbeStorageService $storage,
     ) {}
 
     /**
@@ -94,13 +97,12 @@ final class MannyService
 
         $integrityPercent = min($integrityPercent, $missingIntegrity);
         $metalsCost = round($integrityPercent * self::REPAIR_METALS_PER_INTEGRITY_PERCENT, 4);
-        if ($probe->metalsStock + 0.00001 < $metalsCost) {
+        if ($this->storage->resourceStock($probe, ResourceComposition::METALS) + 0.00001 < $metalsCost) {
             throw new MannyActionException(422, 'insufficient_metals', 'Insufficient metals in probe inventory for this repair.');
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $probe->metalsStock = round($probe->metalsStock - $metalsCost, 4);
-        $this->probes->save($probe);
+        $this->storage->consumeResource($probe, ResourceComposition::METALS, $metalsCost);
 
         $manny->currentTask = Manny::TASK_REPAIR;
         $manny->taskStartedAt = $now->format('c');
@@ -153,8 +155,11 @@ final class MannyService
         if ($target instanceof Asteroid && $availableAmounts !== null) {
             $this->ensureAsteroidHasResources($availableAmounts, $resourceProfile, $targetAmount);
         }
-        $storedAmount = $this->cargoAmountForResourceProfile($targetAmount, $resourceProfile);
-        if ($storedAmount > $this->freeCargoCapacity($probe) + ($manny->isOnProbe() ? self::MANNY_CONTAINER_SPACE : 0.0) + 0.00001) {
+        if (!$this->storage->canStoreIncoming(
+            $probe,
+            $this->resourceAmountsForTotal($targetAmount, $resourceProfile),
+            [['type' => 'manny', 'space' => self::MANNY_CONTAINER_SPACE]],
+        )) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this mining target.');
         }
 
@@ -182,6 +187,7 @@ final class MannyService
         $manny->cargoMetals = 0.0;
         $manny->cargoIce = 0.0;
         $manny->cargoOrganicCompounds = 0.0;
+        $this->storage->releaseMannyFromStorage($manny);
         $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
 
@@ -269,7 +275,83 @@ final class MannyService
             'target' => $this->salvageTargetArray($target),
             'result' => 'pending',
         ] + ($reservedItem !== null ? ['reservedItem' => $reservedItem] : []);
+        $this->storage->releaseMannyFromStorage($manny);
         $this->removeMannyFromSector($manny);
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function startStorageMove(NeumannProbe $probe, string $uid, array $payload): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to move storage.');
+        }
+
+        $kind = strtolower(trim((string) ($payload['kind'] ?? '')));
+        if ($kind === '') {
+            $kind = isset($payload['resourceType']) ? 'resource' : (isset($payload['targetMannyId']) ? 'manny' : 'item');
+        }
+        $toContainerId = (string) ($payload['toContainerId'] ?? $payload['toContainer'] ?? '');
+        if ($toContainerId === '') {
+            throw new MannyActionException(400, 'bad_request', 'Storage move target container is required.');
+        }
+
+        $movePayload = [
+            'kind' => $kind,
+            'toContainerId' => $toContainerId,
+        ];
+        $durationSeconds = self::STORAGE_MOVE_SECONDS_PER_UNIT;
+
+        if ($kind === 'resource') {
+            $fromContainerId = (string) ($payload['fromContainerId'] ?? $payload['fromContainer'] ?? '');
+            $resourceType = (string) ($payload['resourceType'] ?? $payload['type'] ?? '');
+            $amount = isset($payload['amount']) && is_numeric($payload['amount']) ? round((float) $payload['amount'], 4) : 0.0;
+            if ($fromContainerId === '' || $resourceType === '' || $amount <= 0.0) {
+                throw new MannyActionException(400, 'bad_request', 'Resource storage move requires fromContainerId, toContainerId, resourceType and amount.');
+            }
+            $this->storage->assertCanMoveResource($probe, $resourceType, $amount, $fromContainerId, $toContainerId);
+            $durationSeconds = $this->storage->storageMoveDurationSeconds('resource', $amount);
+            $movePayload += [
+                'fromContainerId' => $fromContainerId,
+                'resourceType' => $resourceType,
+                'amount' => $amount,
+            ];
+        } elseif ($kind === 'item') {
+            $itemId = (string) ($payload['itemId'] ?? $payload['targetId'] ?? '');
+            if ($itemId === '') {
+                throw new MannyActionException(400, 'bad_request', 'Item storage move requires itemId and toContainerId.');
+            }
+            $this->storage->assertCanMoveItem($probe, $itemId, $toContainerId);
+            $durationSeconds = $this->storage->storageMoveDurationSeconds('item');
+            $movePayload['itemId'] = $itemId;
+        } elseif ($kind === 'manny') {
+            $targetMannyId = (string) ($payload['targetMannyId'] ?? $payload['mannyId'] ?? $payload['targetId'] ?? '');
+            if ($targetMannyId === '') {
+                throw new MannyActionException(400, 'bad_request', 'Manny storage move requires targetMannyId and toContainerId.');
+            }
+            if ($targetMannyId === $uid) {
+                throw new MannyActionException(422, 'invalid_storage_move', 'A Manny cannot move its own storage slot while executing the order.');
+            }
+            $this->storage->assertCanMoveManny($probe, $targetMannyId, $toContainerId);
+            $durationSeconds = $this->storage->storageMoveDurationSeconds('manny');
+            $movePayload['targetMannyId'] = $targetMannyId;
+        } else {
+            throw new MannyActionException(400, 'bad_request', 'Storage move kind must be resource, item or manny.');
+        }
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manny->currentTask = Manny::TASK_MOVING_STORAGE;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
+        $manny->taskPayload = $movePayload + ['durationSeconds' => $durationSeconds];
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
@@ -338,6 +420,7 @@ final class MannyService
         $manny->sector = $probe->currentSector;
         $this->registerMannyInSector($manny, SectorManny::STATE_ABANDONED);
         $manny->probeId = null;
+        $this->storage->releaseMannyFromStorage($manny);
         $this->mannies->save($manny);
 
         return $this->mannies->findByUid($uid) ?? $manny;
@@ -399,6 +482,9 @@ final class MannyService
         }
         if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE) {
             return $this->refreshWaitingForSpace($manny, $probe, $now);
+        }
+        if ($manny->currentTask === Manny::TASK_MOVING_STORAGE) {
+            return $this->refreshStorageMove($manny, $probe, $now);
         }
 
         return $manny;
@@ -693,13 +779,7 @@ final class MannyService
 
     private function resourceStock(NeumannProbe $probe, string $type): float
     {
-        return match ($type) {
-            ResourceComposition::METALS => $probe->metalsStock,
-            ResourceComposition::ICE => $probe->iceStock,
-            ResourceComposition::CARBON_COMPOUNDS => $probe->organicCompoundsStock,
-            ResourceComposition::DEUTERIUM => $probe->deuteriumStock,
-            default => 0.0,
-        };
+        return $this->storage->resourceStock($probe, $type);
     }
 
     /**
@@ -727,15 +807,7 @@ final class MannyService
             return;
         }
 
-        if ($type === ResourceComposition::METALS) {
-            $probe->metalsStock = round(max(0.0, $probe->metalsStock - $quantity), 4);
-        } elseif ($type === ResourceComposition::ICE) {
-            $probe->iceStock = round(max(0.0, $probe->iceStock - $quantity), 4);
-        } elseif ($type === ResourceComposition::CARBON_COMPOUNDS) {
-            $probe->organicCompoundsStock = round(max(0.0, $probe->organicCompoundsStock - $quantity), 4);
-        } elseif ($type === ResourceComposition::DEUTERIUM) {
-            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - $quantity), 4);
-        }
+        $this->storage->consumeResource($probe, $type, $quantity);
     }
 
     /**
@@ -795,8 +867,8 @@ final class MannyService
             $metadata['capacityBonusUnit'] = ProbeInventory::CAPACITY_UNIT;
         }
 
-        $this->items->create(
-            $probe->id,
+        $this->storage->addItem(
+            $probe,
             $type,
             (string) ($output['name'] ?? $type),
             round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
@@ -843,8 +915,8 @@ final class MannyService
         }
 
         $metadata = $item['metadata'] ?? [];
-        $this->items->create(
-            $probe->id,
+        $this->storage->addItem(
+            $probe,
             $type,
             (string) ($item['name'] ?? $type),
             round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4),
@@ -923,6 +995,13 @@ final class MannyService
                 $manny->taskPayload['depositedResources'] = $this->resourceAmountsForTotal((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
             }
             $this->clearMannyCargo($manny);
+            if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+                $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
+                $this->probes->save($probe);
+                $this->mannies->save($manny);
+
+                return $this->mannies->findById($manny->id) ?? $manny;
+            }
             $this->removeMannyFromSector($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
@@ -952,6 +1031,13 @@ final class MannyService
         $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
         if ($this->mannyCargoIsEmpty($manny)) {
             $finalPayload = $this->reservedSalvageItemPayload($manny) !== null ? $manny->taskPayload : [];
+            if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+                $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
+                $this->probes->save($probe);
+                $this->mannies->save($manny);
+
+                return $this->mannies->findById($manny->id) ?? $manny;
+            }
             $this->removeMannyFromSector($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
@@ -975,6 +1061,13 @@ final class MannyService
         $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
         if ($this->mannyCargoIsEmpty($manny)) {
             $finalPayload = $this->reservedSalvageItemPayload($manny) !== null ? $manny->taskPayload : [];
+            if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+                $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
+                $this->probes->save($probe);
+                $this->mannies->save($manny);
+
+                return $this->mannies->findById($manny->id) ?? $manny;
+            }
             $this->removeMannyFromSector($manny);
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
@@ -984,6 +1077,41 @@ final class MannyService
         }
 
         $this->probes->save($probe);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function refreshStorageMove(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        $kind = (string) ($manny->taskPayload['kind'] ?? '');
+        if ($kind === 'resource') {
+            $this->storage->moveResource(
+                $probe,
+                (string) ($manny->taskPayload['resourceType'] ?? ''),
+                (float) ($manny->taskPayload['amount'] ?? 0.0),
+                (string) ($manny->taskPayload['fromContainerId'] ?? ''),
+                (string) ($manny->taskPayload['toContainerId'] ?? ''),
+            );
+        } elseif ($kind === 'item') {
+            $this->storage->moveItem(
+                $probe,
+                (string) ($manny->taskPayload['itemId'] ?? ''),
+                (string) ($manny->taskPayload['toContainerId'] ?? ''),
+            );
+        } elseif ($kind === 'manny') {
+            $this->storage->moveStoredManny(
+                $probe,
+                (string) ($manny->taskPayload['targetMannyId'] ?? ''),
+                (string) ($manny->taskPayload['toContainerId'] ?? ''),
+            );
+        }
+
+        $this->clearTask($manny);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -1120,6 +1248,10 @@ final class MannyService
 
         $this->transferMannyCargoToProbe($manny, $probe);
         $this->deliverReservedSalvageItems($probe, $manny, $resultPayload);
+        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+            $this->waitForStorageSpace($manny, ['reason' => 'salvage_return'] + $resultPayload);
+            return;
+        }
         $this->removeMannyFromSector($manny);
         $manny->locationType = Manny::LOCATION_PROBE;
         $manny->sector = null;
@@ -1195,8 +1327,8 @@ final class MannyService
 
         $quantity = (int) $reservedItem['quantity'];
         for ($index = 0; $index < $quantity; $index++) {
-            $this->items->create(
-                $probe->id,
+            $this->storage->addItem(
+                $probe,
                 (string) $reservedItem['type'],
                 (string) $reservedItem['name'],
                 (float) $reservedItem['containerSpace'],
@@ -1255,6 +1387,28 @@ final class MannyService
         }
 
         return round((float) $reservedItem['containerSpace'] * (int) $reservedItem['quantity'], 4);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return list<array{type:string, space:float}>
+     */
+    private function reservedSalvageItemUnits(array $payload): array
+    {
+        $reservedItem = $this->reservedSalvageItemPayloadFrom($payload);
+        if ($reservedItem === null) {
+            return [];
+        }
+
+        $units = [];
+        for ($index = 0; $index < (int) $reservedItem['quantity']; $index++) {
+            $units[] = [
+                'type' => (string) $reservedItem['type'],
+                'space' => (float) $reservedItem['containerSpace'],
+            ];
+        }
+
+        return $units;
     }
 
     private function uniqueMannyNameForProbe(NeumannProbe $probe, string $name, int $exceptId): string
@@ -1473,16 +1627,18 @@ final class MannyService
 
     private function canAcceptMannyDocking(NeumannProbe $probe, Manny $manny, array $payload = []): bool
     {
-        $requiredStorage = round(
-            self::MANNY_CONTAINER_SPACE
-            + $manny->cargoMetals
-            + $manny->cargoIce
-            + $manny->cargoOrganicCompounds
-            + $this->reservedSalvageItemContainerSpace($payload),
-            4,
+        return $this->storage->canStoreIncoming(
+            $probe,
+            [
+                ResourceComposition::METALS => $manny->cargoMetals,
+                ResourceComposition::ICE => $manny->cargoIce,
+                ResourceComposition::CARBON_COMPOUNDS => $manny->cargoOrganicCompounds,
+            ],
+            [
+                ...$this->reservedSalvageItemUnits($payload),
+                ['type' => 'manny', 'space' => self::MANNY_CONTAINER_SPACE],
+            ],
         );
-
-        return $this->freeCargoCapacity($probe) + 0.00001 >= $requiredStorage;
     }
 
     /**
@@ -1490,14 +1646,9 @@ final class MannyService
      */
     private function canAcceptMiningDelivery(NeumannProbe $probe, array $profile, float $amount, bool $includeManny): bool
     {
-        $amounts = $this->resourceAmountsForTotal($amount, $profile);
-        $requiredStorage = round(
-            $this->cargoAmountForResources($amounts)
-            + ($includeManny ? self::MANNY_CONTAINER_SPACE : 0.0),
-            4,
-        );
+        $units = $includeManny ? [['type' => 'manny', 'space' => self::MANNY_CONTAINER_SPACE]] : [];
 
-        return $this->freeCargoCapacity($probe) + 0.00001 >= $requiredStorage;
+        return $this->storage->canStoreIncoming($probe, $this->resourceAmountsForTotal($amount, $profile), $units);
     }
 
     /**
@@ -1533,23 +1684,7 @@ final class MannyService
             return 0.0;
         }
 
-        if ($resourceType === 'deuterium') {
-            $before = $probe->deuteriumStock;
-            $probe->deuteriumStock = round(min(100.0, $probe->deuteriumStock + ($amount * 100.0)), 4);
-
-            return round(($probe->deuteriumStock - $before) / 100.0, 4);
-        }
-
-        $accepted = min($amount, $this->freeCargoCapacity($probe));
-        if ($resourceType === 'metals') {
-            $probe->metalsStock = round($probe->metalsStock + $accepted, 4);
-        } elseif ($resourceType === 'ice') {
-            $probe->iceStock = round($probe->iceStock + $accepted, 4);
-        } else {
-            $probe->organicCompoundsStock = round($probe->organicCompoundsStock + $accepted, 4);
-        }
-
-        return round($accepted, 4);
+        return $this->storage->addResource($probe, $resourceType, $amount);
     }
 
     /**
@@ -1565,13 +1700,7 @@ final class MannyService
 
     private function freeCargoCapacity(NeumannProbe $probe): float
     {
-        $inventory = ProbeInventory::defaultForProbe(
-            $probe,
-            $this->mannies->findByProbeId($probe->id),
-            $this->items->findByProbeId($probe->id),
-        );
-
-        return max(0.0, round($inventory->capacity - $inventory->usedCapacity(), 4));
+        return $this->storage->freeCargoCapacity($probe);
     }
 
     /**

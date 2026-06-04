@@ -1174,6 +1174,67 @@ button:disabled {
     margin: 14px 0;
 }
 
+.storage-rules-panel {
+    margin-top: 12px;
+}
+
+.storage-rules {
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(0,0,0,.14);
+    padding: 10px 12px;
+}
+
+.storage-rules summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.inventory-filter-row {
+    margin-top: 12px;
+}
+
+.inventory-filter-row label,
+.storage-rule-fields label {
+    display: grid;
+    gap: 5px;
+}
+
+.storage-container-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.storage-rules-form {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(240px, 2fr) auto;
+    gap: 10px;
+    align-items: end;
+    padding: 10px;
+    border: 1px solid rgba(255,255,255,.1);
+    background: rgba(255,255,255,.04);
+}
+
+.storage-rules-form > div:first-child {
+    display: grid;
+    gap: 4px;
+}
+
+.storage-rules-form span,
+.inventory-container-lines span,
+.inventory-line-actions span {
+    color: var(--muted);
+    text-transform: uppercase;
+    font-size: .76rem;
+}
+
+.storage-rule-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
 .inventory-card {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
@@ -1204,6 +1265,31 @@ button:disabled {
     grid-column: 1 / -1;
     margin: -4px 0 0;
     color: var(--muted);
+}
+
+.inventory-container-lines {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.inventory-container-lines li,
+.inventory-line-actions > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 6px;
+}
+
+.inventory-line-actions {
+    display: grid;
+    gap: 8px;
+    justify-self: stretch;
 }
 
 .inventory-jettison-form {
@@ -1313,14 +1399,20 @@ button:disabled {
     .bookmark-form,
     .manny-form,
     .inventory-card,
+    .storage-rules-form,
     .inventory-jettison-form {
         grid-template-columns: 1fr;
     }
 
     .inventory-jettison-form,
     .inventory-jettison-form-simple,
+    .storage-rules-form button,
     .inventory-muted {
         justify-self: stretch;
+    }
+
+    .storage-rule-fields {
+        grid-template-columns: 1fr;
     }
 
     .data-panel {

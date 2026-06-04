@@ -21,6 +21,7 @@ use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\ObservationAccessException;
 use VonNeumannGame\Service\ProbeMovementException;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
@@ -31,7 +32,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 13;
+    public const API_VERSION = 14;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -42,6 +43,7 @@ final class ApiKernel
         private readonly MannyService $mannies,
         private readonly ProbeItemRepository $items,
         private readonly WaypointBookmarkService $bookmarks,
+        private readonly ProbeStorageService $storage,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -63,6 +65,12 @@ final class ApiKernel
             if (preg_match('#^/api/probe/inventory/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeInventoryItemResponse($player, rawurldecode($matches[1])));
             }
+            if (preg_match('#^/api/probe/storage-containers/([^/]+)/rules$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainerRulesResponse($player, rawurldecode($matches[1]), $body));
+            }
+            if (preg_match('#^/api/probe/storage-containers/([^/]+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainerResponse($player, rawurldecode($matches[1])));
+            }
             if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
             }
@@ -77,6 +85,8 @@ final class ApiKernel
                 '/api/me/api-key' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->apiKeyResponse($player)),
                 '/api/crafting-recipes' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $_player): ApiResponse => $this->craftingRecipesResponse()),
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
+                '/api/probe/storage-containers' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player)),
+                '/api/probe/storage-moves' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeStorageMoveResponse($player, $body)),
                 '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
@@ -278,6 +288,69 @@ final class ApiKernel
         return new ApiResponse(200, ['item' => $item->taskArray()]);
     }
 
+    private function probeStorageContainersResponse(Player $player): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+
+        return new ApiResponse(200, ['containers' => $this->storage->containersForProbe($probe)]);
+    }
+
+    private function probeStorageContainerResponse(Player $player, string $containerId): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+
+        return new ApiResponse(200, $this->storage->containerInventory($probe, $containerId));
+    }
+
+    private function probeStorageContainerRulesResponse(Player $player, string $containerId, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain storage rules.');
+        }
+        foreach (['priority', 'exclusion', 'strictExclusion'] as $field) {
+            if (isset($data[$field]) && !is_array($data[$field])) {
+                return ApiResponse::error(400, 'bad_request', 'Storage rule filters must be arrays.');
+            }
+        }
+
+        return new ApiResponse(200, [
+            'container' => $this->storage->updateContainerRules(
+                $probe,
+                $containerId,
+                $data['priority'] ?? [],
+                $data['exclusion'] ?? [],
+                $data['strictExclusion'] ?? [],
+            ),
+            'inventory' => $this->inventoryForProbe($probe)->toArray(),
+        ]);
+    }
+
+    private function probeStorageMoveResponse(Player $player, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a storage move order.');
+        }
+        $mannyId = $data['actorMannyId'] ?? $data['mannyId'] ?? null;
+        if (!is_string($mannyId) || $mannyId === '') {
+            return ApiResponse::error(400, 'bad_request', 'Storage move order requires actorMannyId.');
+        }
+
+        $manny = $this->mannies->startStorageMove($probe, $mannyId, $data);
+
+        return new ApiResponse(202, [
+            'manny' => $this->mannyArray($player, $probe, $manny),
+            'inventory' => $this->inventoryForProbe($probe)->toArray(),
+        ]);
+    }
+
     private function probeInventoryJettisonResponse(Player $player, string $itemId, ?string $body): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
@@ -321,24 +394,13 @@ final class ApiKernel
 
         $resourceType = $this->inventoryResourceType($probe, $itemId);
         if ($resourceType !== null) {
-            $available = match ($resourceType) {
-                'metals' => $probe->metalsStock,
-                'ice' => $probe->iceStock,
-                'carbon_compounds' => $probe->organicCompoundsStock,
-            };
+            $available = $this->storage->resourceStock($probe, $resourceType);
             $discarded = $this->jettisonAmount($amount, $available);
             if ($discarded instanceof ApiResponse) {
                 return $discarded;
             }
 
-            if ($resourceType === 'metals') {
-                $probe->metalsStock = round($probe->metalsStock - $discarded, 4);
-            } elseif ($resourceType === 'ice') {
-                $probe->iceStock = round($probe->iceStock - $discarded, 4);
-            } elseif ($resourceType === 'carbon_compounds') {
-                $probe->organicCompoundsStock = round($probe->organicCompoundsStock - $discarded, 4);
-            }
-            $this->probes->save($probe);
+            $this->storage->consumeResource($probe, $resourceType, $discarded);
             $this->mannies->manniesForProbe($probe);
             $probe = $this->requiredProbe($player);
 
@@ -639,7 +701,7 @@ final class ApiKernel
 
     private function inventoryForProbe(NeumannProbe $probe): ProbeInventory
     {
-        return ProbeInventory::defaultForProbe(
+        return $this->storage->inventoryForProbe(
             $probe,
             $this->mannies->manniesForProbe($probe),
             $this->items->findByProbeId($probe->id),

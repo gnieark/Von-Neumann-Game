@@ -11,18 +11,19 @@ final class ProbeItemRepository
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function create(int $probeId, string $type, string $name, float $containerSpace, array $metadata = []): ProbeItem
+    public function create(int $probeId, string $type, string $name, float $containerSpace, array $metadata = [], ?int $storageContainerId = null): ProbeItem
     {
         $now = gmdate('c');
         $uid = $this->uniqueUid();
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_items
-             (uid, probe_id, type, name, container_space, metadata_json, created_at, updated_at)
-             VALUES (:uid, :probe_id, :type, :name, :container_space, :metadata_json, :created_at, :updated_at)'
+             (uid, probe_id, storage_container_id, type, name, container_space, metadata_json, created_at, updated_at)
+             VALUES (:uid, :probe_id, :storage_container_id, :type, :name, :container_space, :metadata_json, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
             'probe_id' => $probeId,
+            'storage_container_id' => $storageContainerId,
             'type' => $type,
             'name' => $name,
             'container_space' => $containerSpace,
@@ -32,6 +33,20 @@ final class ProbeItemRepository
         ]);
 
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe item creation failed.');
+    }
+
+    public function saveStorageContainer(ProbeItem $item, ?int $storageContainerId): void
+    {
+        $item->storageContainerId = $storageContainerId;
+        $item->updatedAt = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'UPDATE probe_items SET storage_container_id = :storage_container_id, updated_at = :updated_at WHERE id = :id'
+        );
+        $stmt->execute([
+            'id' => $item->id,
+            'storage_container_id' => $storageContainerId,
+            'updated_at' => $item->updatedAt,
+        ]);
     }
 
     /**
@@ -80,6 +95,7 @@ final class ProbeItemRepository
             (int) $row['id'],
             (string) $row['uid'],
             (int) $row['probe_id'],
+            isset($row['storage_container_id']) && $row['storage_container_id'] !== null ? (int) $row['storage_container_id'] : null,
             (string) $row['type'],
             (string) $row['name'],
             (float) $row['container_space'],

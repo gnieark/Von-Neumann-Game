@@ -32,18 +32,19 @@ final class MannyRepository
         }
     }
 
-    public function createForProbe(int $probeId, string $name): Manny
+    public function createForProbe(int $probeId, string $name, ?int $storageContainerId = null): Manny
     {
         $now = gmdate('c');
         $uid = $this->uniqueUid();
         $stmt = $this->pdo->prepare(
             'INSERT INTO mannies
-             (uid, probe_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
-             VALUES (:uid, :probe_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, 0, 0, 0, 0, :created_at, :updated_at)'
+             (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
+             VALUES (:uid, :probe_id, :storage_container_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, 0, 0, 0, 0, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
             'probe_id' => $probeId,
+            'storage_container_id' => $storageContainerId,
             'name' => $name,
             'location_type' => Manny::LOCATION_PROBE,
             'task_payload_json' => '{}',
@@ -115,6 +116,7 @@ final class MannyRepository
         $stmt = $this->pdo->prepare(
             'UPDATE mannies SET
                 probe_id = :probe_id,
+                storage_container_id = :storage_container_id,
                 name = :name,
                 location_type = :location_type,
                 sector_x = :sector_x,
@@ -134,6 +136,7 @@ final class MannyRepository
         $stmt->execute([
             'id' => $manny->id,
             'probe_id' => $manny->probeId,
+            'storage_container_id' => $manny->storageContainerId,
             'name' => $manny->name,
             'location_type' => $manny->locationType,
             'sector_x' => $manny->sector?->getX(),
@@ -166,6 +169,7 @@ final class MannyRepository
             (int) $row['id'],
             (string) $row['uid'],
             $row['probe_id'] !== null ? (int) $row['probe_id'] : null,
+            isset($row['storage_container_id']) && $row['storage_container_id'] !== null ? (int) $row['storage_container_id'] : null,
             (string) $row['name'],
             (string) $row['location_type'],
             $sector,

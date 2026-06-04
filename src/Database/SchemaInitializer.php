@@ -87,6 +87,7 @@ final class SchemaInitializer
                 id $id,
                 uid $text NOT NULL UNIQUE,
                 probe_id INTEGER NULL,
+                storage_container_id INTEGER NULL,
                 name $text NOT NULL,
                 location_type $text NOT NULL,
                 sector_x INTEGER NULL,
@@ -112,6 +113,7 @@ final class SchemaInitializer
                 id $id,
                 uid $text NOT NULL UNIQUE,
                 probe_id INTEGER NOT NULL,
+                storage_container_id INTEGER NULL,
                 type $text NOT NULL,
                 name $text NOT NULL,
                 container_space $decimal NOT NULL,
@@ -122,6 +124,33 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_probe_id ON probe_items(probe_id)",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_uid ON probe_items(uid)",
+            "CREATE TABLE IF NOT EXISTS storage_containers (
+                id $id,
+                uid $text NOT NULL,
+                probe_id INTEGER NOT NULL,
+                kind $text NOT NULL,
+                label $text NOT NULL,
+                sort_order INTEGER NOT NULL,
+                capacity $decimal NOT NULL DEFAULT 1,
+                priority_filter_json TEXT NOT NULL,
+                exclusion_filter_json TEXT NOT NULL,
+                strict_exclusion_filter_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(probe_id, uid),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_storage_containers_probe_id ON storage_containers(probe_id)",
+            "CREATE TABLE IF NOT EXISTS storage_container_resources (
+                id $id,
+                container_id INTEGER NOT NULL,
+                resource_type $text NOT NULL,
+                amount $decimal NOT NULL DEFAULT 0,
+                updated_at $text NOT NULL,
+                UNIQUE(container_id, resource_type),
+                FOREIGN KEY(container_id) REFERENCES storage_containers(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_storage_container_resources_container_id ON storage_container_resources(container_id)",
             "CREATE TABLE IF NOT EXISTS probe_movements (
                 id $id,
                 probe_id INTEGER NOT NULL,
@@ -230,6 +259,7 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
             $this->ensureSqliteProbeResourceStockColumns($pdo);
+            $this->ensureStorageSchema($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlMannyProbeIdNullable($pdo);
             $this->ensureMysqlMannyCargoColumns($pdo);
@@ -247,7 +277,81 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
             $this->ensureMysqlProbeResourceStockColumns($pdo);
+            $this->ensureStorageSchema($pdo);
         }
+    }
+
+    private function ensureStorageSchema(PDO $pdo): void
+    {
+        $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
+
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS storage_containers (
+                id $id,
+                uid $text NOT NULL,
+                probe_id INTEGER NOT NULL,
+                kind $text NOT NULL,
+                label $text NOT NULL,
+                sort_order INTEGER NOT NULL,
+                capacity $decimal NOT NULL DEFAULT 1,
+                priority_filter_json TEXT NOT NULL,
+                exclusion_filter_json TEXT NOT NULL,
+                strict_exclusion_filter_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(probe_id, uid),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_storage_containers_probe_id ON storage_containers(probe_id)');
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS storage_container_resources (
+                id $id,
+                container_id INTEGER NOT NULL,
+                resource_type $text NOT NULL,
+                amount $decimal NOT NULL DEFAULT 0,
+                updated_at $text NOT NULL,
+                UNIQUE(container_id, resource_type),
+                FOREIGN KEY(container_id) REFERENCES storage_containers(id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_storage_container_resources_container_id ON storage_container_resources(container_id)');
+
+        if ($this->driver === 'sqlite') {
+            $this->ensureSqliteColumn($pdo, 'probe_items', 'storage_container_id', 'INTEGER NULL');
+            $this->ensureSqliteColumn($pdo, 'mannies', 'storage_container_id', 'INTEGER NULL');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_items_storage_container_id ON probe_items(storage_container_id)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_storage_container_id ON mannies(storage_container_id)');
+            return;
+        }
+
+        $this->ensureMysqlColumn($pdo, 'probe_items', 'storage_container_id', 'INTEGER NULL AFTER probe_id');
+        $this->ensureMysqlColumn($pdo, 'mannies', 'storage_container_id', 'INTEGER NULL AFTER probe_id');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_items_storage_container_id ON probe_items(storage_container_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_storage_container_id ON mannies(storage_container_id)');
+    }
+
+    private function ensureSqliteColumn(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        $columns = $pdo->query('PRAGMA table_info(' . $table . ')')->fetchAll(PDO::FETCH_ASSOC);
+        $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
+        if (in_array($column, $names, true)) {
+            return;
+        }
+
+        $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+    }
+
+    private function ensureMysqlColumn(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        $stmt = $pdo->query("SHOW COLUMNS FROM $table WHERE Field = '$column'");
+        if ($stmt !== false && $stmt->fetch(PDO::FETCH_ASSOC) !== false) {
+            return;
+        }
+
+        $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
     }
 
     private function ensureSqliteProbeResourceStockColumns(PDO $pdo): void
