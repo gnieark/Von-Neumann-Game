@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
@@ -35,6 +36,7 @@ final class MannyService
     public const MANNY_CARGO_CAPACITY = Manny::CARGO_CAPACITY;
     public const MANNY_CONTAINER_SPACE = Manny::CONTAINER_SPACE;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
+    public const MAX_INTEGRITY_PERCENT = 100.0;
     public const WAYPOINT_BOOKMARK_METALS_COST = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_METALS_COST;
     public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CONTAINER_SPACE;
     public const WAYPOINT_BOOKMARK_CRAFTING_SECONDS = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CRAFTING_SECONDS;
@@ -45,6 +47,7 @@ final class MannyService
         private readonly SectorService $sectors,
         private readonly ProbeItemRepository $items,
         private readonly ProbeStorageService $storage,
+        private readonly array $config = [],
     ) {}
 
     /**
@@ -90,13 +93,13 @@ final class MannyService
         if ($integrityPercent <= 0) {
             throw new MannyActionException(400, 'bad_request', 'Repair percent must be greater than zero.');
         }
-        $missingIntegrity = round(max(0.0, 100.0 - $probe->integrityPercent), 2);
+        $missingIntegrity = round(max(0.0, $this->maxIntegrityPercent() - $probe->integrityPercent), 2);
         if ($missingIntegrity <= 0.0001) {
             throw new MannyActionException(409, 'probe_integrity_full', 'The probe integrity is already full.');
         }
 
         $integrityPercent = min($integrityPercent, $missingIntegrity);
-        $metalsCost = round($integrityPercent * self::REPAIR_METALS_PER_INTEGRITY_PERCENT, 4);
+        $metalsCost = round($integrityPercent * $this->repairMetalsPerIntegrityPercent(), 4);
         if ($this->storage->resourceStock($probe, ResourceComposition::METALS) + 0.00001 < $metalsCost) {
             throw new MannyActionException(422, 'insufficient_metals', 'Insufficient metals in probe inventory for this repair.');
         }
@@ -106,7 +109,7 @@ final class MannyService
 
         $manny->currentTask = Manny::TASK_REPAIR;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . (int) ceil($integrityPercent * self::REPAIR_SECONDS_PER_INTEGRITY_PERCENT) . ' seconds')->format('c');
+        $manny->taskEndsAt = $now->modify('+' . (int) ceil($integrityPercent * $this->repairSecondsPerIntegrityPercent()) . ' seconds')->format('c');
         $manny->taskPayload = [
             'integrityPercent' => $integrityPercent,
             'metalsCost' => $metalsCost,
@@ -158,7 +161,7 @@ final class MannyService
         if (!$this->storage->canStoreIncoming(
             $probe,
             $this->resourceAmountsForTotal($targetAmount, $resourceProfile),
-            [['type' => 'manny', 'space' => self::MANNY_CONTAINER_SPACE]],
+            [['type' => 'manny', 'space' => $this->mannyContainerSpace()]],
         )) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this mining target.');
         }
@@ -206,7 +209,7 @@ final class MannyService
         }
 
         $recipe = CraftingRecipeCatalog::normalizeId($recipe);
-        $recipeDefinition = CraftingRecipeCatalog::find($recipe);
+        $recipeDefinition = CraftingRecipeCatalog::find($recipe, $this->craftingConfig());
         if (
             $recipeDefinition === null
             || !in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $recipeDefinition['craftableBy'] ?? [], true)
@@ -268,10 +271,11 @@ final class MannyService
         $manny->sector = $probe->currentSector;
         $manny->currentTask = Manny::TASK_SALVAGE;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . self::SALVAGE_SECONDS . ' seconds')->format('c');
+        $salvageSeconds = $this->salvageSeconds();
+        $manny->taskEndsAt = $now->modify('+' . $salvageSeconds . ' seconds')->format('c');
         $manny->taskPayload = [
             'objectId' => $objectId,
-            'durationSeconds' => self::SALVAGE_SECONDS,
+            'durationSeconds' => $salvageSeconds,
             'target' => $this->salvageTargetArray($target),
             'result' => 'pending',
         ] + ($reservedItem !== null ? ['reservedItem' => $reservedItem] : []);
@@ -308,7 +312,7 @@ final class MannyService
             'kind' => $kind,
             'toContainerId' => $toContainerId,
         ];
-        $durationSeconds = self::STORAGE_MOVE_SECONDS_PER_UNIT;
+        $durationSeconds = $this->storageMoveSecondsPerUnit();
 
         if ($kind === 'resource') {
             $fromContainerId = (string) ($payload['fromContainerId'] ?? $payload['fromContainer'] ?? '');
@@ -416,7 +420,7 @@ final class MannyService
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $manny->currentTask = Manny::TASK_RETURNING;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . self::MINING_TRAVEL_SECONDS . ' seconds')->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $this->miningTravelSeconds() . ' seconds')->format('c');
         $manny->taskPayload = ['reason' => 'recall'];
         $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
@@ -520,7 +524,7 @@ final class MannyService
             'taskProgressPercent' => $manny->taskProgressPercent(),
             'taskEstimatedEndTime' => $manny->taskEndsAt,
             'task' => $manny->taskPayload,
-            'cargo' => $manny->cargoArray(),
+            'cargo' => $this->mannyCargoArray($manny),
             'canReceiveOrders' => $manny->probeId === $probe->id && $manny->isInSameSectorAs($probe) && $manny->currentTask === null,
         ];
     }
@@ -538,7 +542,7 @@ final class MannyService
         }
 
         $integrityPercent = (float) ($manny->taskPayload['integrityPercent'] ?? 0);
-        $probe->integrityPercent = round(min(100.0, $probe->integrityPercent + $integrityPercent), 2);
+        $probe->integrityPercent = round(min($this->maxIntegrityPercent(), $probe->integrityPercent + $integrityPercent), 2);
         $this->probes->save($probe);
 
         $this->clearTask($manny);
@@ -656,7 +660,7 @@ final class MannyService
 
                 $missingCount = $requiredCount - $consumedCount;
                 if ($missingCount > 0) {
-                    $componentRecipe = CraftingRecipeCatalog::find($type);
+                    $componentRecipe = CraftingRecipeCatalog::find($type, $this->craftingConfig());
                     $componentResourceCosts = $componentRecipe !== null
                         ? $this->directResourceCostsForRecipe($componentRecipe)
                         : null;
@@ -859,7 +863,7 @@ final class MannyService
     {
         $output = $manny->taskPayload['output'] ?? null;
         if (!is_array($output)) {
-            $recipeDefinition = CraftingRecipeCatalog::find((string) ($manny->taskPayload['recipe'] ?? ''));
+            $recipeDefinition = CraftingRecipeCatalog::find((string) ($manny->taskPayload['recipe'] ?? ''), $this->craftingConfig());
             $output = is_array($recipeDefinition) && is_array($recipeDefinition['output'] ?? null)
                 ? $recipeDefinition['output']
                 : null;
@@ -1206,7 +1210,7 @@ final class MannyService
     private function isMineableObject(UniverseObject $object): bool
     {
         return $object instanceof Asteroid
-            || ($object instanceof Planet && $object->getMass() <= self::MOON_MASS_EARTH_UNITS);
+            || ($object instanceof Planet && $object->getMass() <= $this->mineablePlanetMaxMass());
     }
 
     private function isSalvageableObject(UniverseObject $object): bool
@@ -1314,7 +1318,7 @@ final class MannyService
             throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
         }
 
-        $maximumQuantity = (int) floor((self::MANNY_CARGO_CAPACITY + 0.00001) / $containerSpace);
+        $maximumQuantity = (int) floor(($this->mannyCargoCapacity() + 0.00001) / $containerSpace);
         if ($maximumQuantity <= 0) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'This drifting object is too large for a Manny to carry.');
         }
@@ -1565,10 +1569,10 @@ final class MannyService
         $remaining = round($targetAmount, 4);
         $duration = 0;
         while ($remaining > 0.0001) {
-            $tripAmount = min(self::MANNY_CARGO_CAPACITY, $remaining);
-            $duration += self::MINING_TRAVEL_SECONDS;
-            $duration += (int) ceil($tripAmount / self::MINING_AMOUNT_PER_TICK) * self::MINING_TICK_SECONDS;
-            $duration += self::MINING_TRAVEL_SECONDS;
+            $tripAmount = min($this->mannyCargoCapacity(), $remaining);
+            $duration += $this->miningTravelSeconds();
+            $duration += (int) ceil($tripAmount / $this->miningAmountPerTick()) * $this->miningTickSeconds();
+            $duration += $this->miningTravelSeconds();
             $remaining = round($remaining - $tripAmount, 4);
         }
 
@@ -1582,22 +1586,22 @@ final class MannyService
         $delivered = 0.0;
         $tripIndex = 1;
         while ($remaining > 0.0001) {
-            $tripAmount = min(self::MANNY_CARGO_CAPACITY, $remaining);
-            $outboundEnd = $cursor + self::MINING_TRAVEL_SECONDS;
+            $tripAmount = min($this->mannyCargoCapacity(), $remaining);
+            $outboundEnd = $cursor + $this->miningTravelSeconds();
             if ($elapsedSeconds < $outboundEnd) {
                 return ['phase' => 'outbound', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => 0.0];
             }
 
-            $miningTicks = (int) ceil($tripAmount / self::MINING_AMOUNT_PER_TICK);
-            $miningEnd = $outboundEnd + ($miningTicks * self::MINING_TICK_SECONDS);
+            $miningTicks = (int) ceil($tripAmount / $this->miningAmountPerTick());
+            $miningEnd = $outboundEnd + ($miningTicks * $this->miningTickSeconds());
             if ($elapsedSeconds < $miningEnd) {
-                $ticksDone = (int) floor(($elapsedSeconds - $outboundEnd) / self::MINING_TICK_SECONDS);
-                $cargo = min($tripAmount, $ticksDone * self::MINING_AMOUNT_PER_TICK);
+                $ticksDone = (int) floor(($elapsedSeconds - $outboundEnd) / $this->miningTickSeconds());
+                $cargo = min($tripAmount, $ticksDone * $this->miningAmountPerTick());
 
                 return ['phase' => 'mining', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => round($cargo, 4)];
             }
 
-            $returnEnd = $miningEnd + self::MINING_TRAVEL_SECONDS;
+            $returnEnd = $miningEnd + $this->miningTravelSeconds();
             if ($elapsedSeconds < $returnEnd) {
                 return ['phase' => 'returning', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => round($tripAmount, 4)];
             }
@@ -1682,7 +1686,7 @@ final class MannyService
             ],
             [
                 ...$this->reservedSalvageItemUnits($payload),
-                ['type' => 'manny', 'space' => self::MANNY_CONTAINER_SPACE],
+                ['type' => 'manny', 'space' => $this->mannyContainerSpace()],
             ],
         );
     }
@@ -1692,7 +1696,7 @@ final class MannyService
      */
     private function canAcceptMiningDelivery(NeumannProbe $probe, array $profile, float $amount, bool $includeManny): bool
     {
-        $units = $includeManny ? [['type' => 'manny', 'space' => self::MANNY_CONTAINER_SPACE]] : [];
+        $units = $includeManny ? [['type' => 'manny', 'space' => $this->mannyContainerSpace()]] : [];
 
         return $this->storage->canStoreIncoming($probe, $this->resourceAmountsForTotal($amount, $profile), $units);
     }
@@ -1889,6 +1893,71 @@ final class MannyService
         };
     }
 
+    private function craftingConfig(): array
+    {
+        return Config::getArray($this->config, 'crafting');
+    }
+
+    private function repairSecondsPerIntegrityPercent(): int
+    {
+        return max(1, Config::int($this->config, 'manny.actions.repairSecondsPerIntegrityPercent', self::REPAIR_SECONDS_PER_INTEGRITY_PERCENT));
+    }
+
+    private function repairMetalsPerIntegrityPercent(): float
+    {
+        return max(0.0, Config::float($this->config, 'manny.actions.repairMetalsPerIntegrityPercent', self::REPAIR_METALS_PER_INTEGRITY_PERCENT));
+    }
+
+    private function miningTravelSeconds(): int
+    {
+        return max(0, Config::int($this->config, 'manny.actions.miningTravelSeconds', self::MINING_TRAVEL_SECONDS));
+    }
+
+    private function miningAmountPerTick(): float
+    {
+        return max(0.0001, Config::float($this->config, 'manny.actions.miningAmountPerTick', self::MINING_AMOUNT_PER_TICK));
+    }
+
+    private function miningTickSeconds(): int
+    {
+        return max(1, Config::int($this->config, 'manny.actions.miningTickSeconds', self::MINING_TICK_SECONDS));
+    }
+
+    private function salvageSeconds(): int
+    {
+        return max(1, Config::int($this->config, 'manny.actions.salvageSeconds', self::SALVAGE_SECONDS));
+    }
+
+    private function storageMoveSecondsPerUnit(): int
+    {
+        return max(1, Config::int($this->config, 'manny.actions.storageMoveSecondsPerUnit', self::STORAGE_MOVE_SECONDS_PER_UNIT));
+    }
+
+    private function mannyCargoCapacity(): float
+    {
+        return max(0.0001, Config::float($this->config, 'manny.cargoCapacity', self::MANNY_CARGO_CAPACITY));
+    }
+
+    private function mannyContainerSpace(): float
+    {
+        return max(0.0, Config::float($this->config, 'manny.containerSpace', self::MANNY_CONTAINER_SPACE));
+    }
+
+    private function mineablePlanetMaxMass(): float
+    {
+        return max(0.0, Config::float($this->config, 'manny.mineablePlanetMaxMassEarthUnits', self::MOON_MASS_EARTH_UNITS));
+    }
+
+    private function maxIntegrityPercent(): float
+    {
+        return max(0.0001, Config::float($this->config, 'probe.maxIntegrityPercent', self::MAX_INTEGRITY_PERCENT));
+    }
+
+    private function mannyCargoArray(Manny $manny): array
+    {
+        return array_replace($manny->cargoArray(), ['capacity' => $this->mannyCargoCapacity()]);
+    }
+
     private function addDriftingItemToSector(SectorContent $sector, string $itemType, string $name, float $containerSpace, int $quantity): SectorDriftingItem
     {
         $quantity = max(0, $quantity);
@@ -1927,7 +1996,7 @@ final class MannyService
             $manny->name,
             $manny->uid,
             $state,
-            $manny->cargoArray(),
+            $this->mannyCargoArray($manny),
             $state === SectorManny::STATE_FORGOTTEN
                 ? 'Manny left behind by its probe.'
                 : 'Manny abandoned in open space.',

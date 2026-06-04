@@ -1,0 +1,116 @@
+{
+  "player": {
+    "spawnCoordinateMin": -1000,
+    "spawnCoordinateMax": 1000,
+    "starterAsteroid": {
+      "enabledForNewEmptySectors": true,
+      "idPrefix": "starter-iron",
+      "composition": "iron",
+      "estimatedResources": ["iron", "nickel"],
+      "sizeCategory": "small",
+      "mass": 0.00005,
+      "radius": 0.012,
+      "description": "Metallic asteroid seeded in a newly reactivated probe sector."
+    }
+  },
+  "probe": {
+    "initialMannyCount": 4,
+    "mannyNameSearchLimit": 12,
+    "initialIntegrityPercent": 100.0,
+    "maxIntegrityPercent": 100.0,
+    "initialDeuteriumPercent": 100.0,
+    "atomicPrinterContainerSpace": 0.3,
+    "coreContainerCapacity": 1.0,
+    "additionalContainerCapacity": 1.0,
+    "maxDeuteriumPercent": 100.0
+  },
+  "manny": {
+    "cargoCapacity": 0.05,
+    "containerSpace": 0.05,
+    "mineablePlanetMaxMassEarthUnits": 0.0123,
+    "actions": {
+      "repairSecondsPerIntegrityPercent": 600,
+      "repairMetalsPerIntegrityPercent": 0.01,
+      "miningTravelSeconds": 900,
+      "miningAmountPerTick": 0.01,
+      "miningTickSeconds": 300,
+      "salvageSeconds": 300,
+      "storageMoveSecondsPerUnit": 10,
+      "storageMoveEceStep": 0.05
+    }
+  },
+  "movement": {
+    "durationFactor": 0.5,
+    "preparationMinutes": 10,
+    "accelerationMinutesPerDistance": 20,
+    "cruiseMinutesPerDistance": 30,
+    "decelerationMinutesPerDistance": 20,
+    "fuelCostRatioOfCurrentDeuterium": 0.02,
+    "velocityBaseC": 0.42,
+    "velocityPerDistanceC": 0.1,
+    "velocityMaxC": 0.95,
+    "accelerationCPerDay": 0.36,
+    "destructionSafeDistance": 2,
+    "destructionRiskByDistance": {
+      "3": 0.05,
+      "4": 0.12,
+      "5": 0.25,
+      "default": 0.4
+    },
+    "intersectorIntegrityLossMaxPercentPerDistance": 3.0,
+    "blackHoleTrap": {
+      "minDelaySeconds": 5400,
+      "maxDelaySeconds": 10800,
+      "minMass": 3.0,
+      "maxMass": 30.0
+    }
+  },
+  "scan": {
+    "residenceSecondsByDistance": {
+      "0": 0,
+      "1": 300,
+      "2": 1800,
+      "default": 7200
+    },
+    "initialNeighborDelayBypassVisitedCount": 1,
+    "qualityRequiredSecondsMultiplier": 4.0,
+    "neighborConfidenceBase": 0.62,
+    "neighborConfidenceQualityScale": 0.3,
+    "neighborConfidenceMax": 0.92,
+    "distantConfidenceBase": 0.24,
+    "distantConfidenceQualityScale": 0.25,
+    "distantConfidenceMax": 0.58,
+    "longRangeConfidenceBase": 0.08,
+    "longRangeConfidenceQualityScale": 0.12,
+    "longRangeConfidenceMax": 0.24,
+    "neighborPlanetCountBlurBase": 3.0,
+    "neighborPlanetCountBlurQualityScale": 2.0,
+    "neighborPlanetCountBlurMin": 1,
+    "neighborBlackHoleProbabilityIfPresent": 0.7,
+    "neighborBlackHoleProbabilityIfAbsent": 0.03
+  },
+  "crafting": {
+    "waypoint_bookmark": {
+      "metalsCost": 0.01,
+      "containerSpace": 0.01,
+      "durationSeconds": 600
+    },
+    "steel_bar": {
+      "metalsCost": 0.02,
+      "containerSpace": 0.01,
+      "durationSeconds": 300
+    },
+    "steel_plate": {
+      "metalsCost": 0.02,
+      "containerSpace": 0.01,
+      "durationSeconds": 300
+    },
+    "additional_container": {
+      "steelPlateCount": 12,
+      "steelBarCount": 15,
+      "durationSeconds": 180,
+      "capacityBonus": 1.0,
+      "containerSpace": 0.0
+    }
+  }
+}

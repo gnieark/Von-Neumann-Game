@@ -44,6 +44,7 @@ final class ApiKernel
         private readonly ProbeItemRepository $items,
         private readonly WaypointBookmarkService $bookmarks,
         private readonly ProbeStorageService $storage,
+        private readonly array $gameplayConfig = [],
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -162,7 +163,7 @@ final class ApiKernel
 
     private function craftingRecipesResponse(): ApiResponse
     {
-        return new ApiResponse(200, ['recipes' => CraftingRecipeCatalog::all()]);
+        return new ApiResponse(200, ['recipes' => CraftingRecipeCatalog::all($this->gameplayConfig['crafting'] ?? [])]);
     }
 
     private function probeResponse(Player $player): ApiResponse

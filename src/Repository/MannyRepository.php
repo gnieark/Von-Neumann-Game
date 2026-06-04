@@ -5,23 +5,28 @@ declare(strict_types=1);
 namespace VonNeumannGame\Repository;
 
 use PDO;
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Sector\SectorCoordinates;
 
 final class MannyRepository
 {
-    public function __construct(private readonly PDO $pdo) {}
+    public function __construct(
+        private readonly PDO $pdo,
+        private readonly array $config = [],
+    ) {}
 
     public function ensureDefaultsForProbe(NeumannProbe $probe): void
     {
         $existing = $this->findByProbeId($probe->id);
-        if (count($existing) >= 4) {
+        $defaultCount = $this->defaultMannyCount();
+        if (count($existing) >= $defaultCount) {
             return;
         }
 
         $names = array_map(static fn(Manny $manny): string => strtolower($manny->name), $existing);
-        for ($i = 1; count($existing) < 4 && $i <= 12; $i++) {
+        for ($i = 1; count($existing) < $defaultCount && $i <= $this->nameSearchLimit(); $i++) {
             $name = 'manny-' . $i;
             if (in_array($name, $names, true)) {
                 continue;
@@ -53,6 +58,16 @@ final class MannyRepository
         ]);
 
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Manny creation failed.');
+    }
+
+    private function defaultMannyCount(): int
+    {
+        return max(0, Config::int($this->config, 'probe.initialMannyCount', 4));
+    }
+
+    private function nameSearchLimit(): int
+    {
+        return max(1, Config::int($this->config, 'probe.mannyNameSearchLimit', 12));
     }
 
     /**

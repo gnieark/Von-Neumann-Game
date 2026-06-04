@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeExternalTank;
@@ -27,6 +28,7 @@ final class ProbeStorageService
         private readonly ProbeItemRepository $items,
         private readonly MannyRepository $mannies,
         private readonly NeumannProbeRepository $probes,
+        private readonly array $config = [],
     ) {}
 
     public function ensureProbeStorage(NeumannProbe $probe): void
@@ -80,7 +82,7 @@ final class ProbeStorageService
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
                 'Imprimante 3D atomique',
-                self::ATOMIC_PRINTER_SPACE,
+                $this->atomicPrinterSpace(),
                 null,
                 0.0,
                 null,
@@ -98,11 +100,11 @@ final class ProbeStorageService
                 $manny->uid,
                 'manny',
                 $manny->name,
-                $manny->isOnProbe() ? Manny::CONTAINER_SPACE : 0.0,
+                $manny->isOnProbe() ? $this->mannyContainerSpace() : 0.0,
                 $manny->currentTask,
                 $manny->taskProgressPercent(),
                 ['type' => $manny->locationType],
-                $manny->cargoArray(),
+                $this->mannyCargoArray($manny),
                 ['movable' => $manny->isOnProbe()],
                 $this->containerSummary($container),
             );
@@ -155,7 +157,7 @@ final class ProbeStorageService
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
                 'Imprimante 3D atomique',
-                self::ATOMIC_PRINTER_SPACE,
+                $this->atomicPrinterSpace(),
                 null,
                 0.0,
                 null,
@@ -172,11 +174,11 @@ final class ProbeStorageService
                 $manny->uid,
                 'manny',
                 $manny->name,
-                Manny::CONTAINER_SPACE,
+                $this->mannyContainerSpace(),
                 $manny->currentTask,
                 $manny->taskProgressPercent(),
                 ['type' => $manny->locationType],
-                $manny->cargoArray(),
+                $this->mannyCargoArray($manny),
                 ['movable' => true],
                 $this->containerSummary($container),
             ))->toArray();
@@ -238,10 +240,10 @@ final class ProbeStorageService
         }
         if ($type === ResourceComposition::DEUTERIUM) {
             $before = $probe->deuteriumStock;
-            $probe->deuteriumStock = round(min(100.0, $probe->deuteriumStock + ($amount * 100.0)), 4);
+            $probe->deuteriumStock = round(min($this->maxDeuteriumPercent(), $probe->deuteriumStock + ($amount * $this->maxDeuteriumPercent())), 4);
             $this->probes->save($probe);
 
-            return round(($probe->deuteriumStock - $before) / 100.0, 4);
+            return round(($probe->deuteriumStock - $before) / $this->maxDeuteriumPercent(), 4);
         }
 
         $this->ensureProbeStorage($probe);
@@ -284,8 +286,8 @@ final class ProbeStorageService
             return 0.0;
         }
         if ($type === ResourceComposition::DEUTERIUM) {
-            $consumed = min($amount, round(max(0.0, $probe->deuteriumStock / 100.0), 4));
-            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - ($consumed * 100.0)), 4);
+            $consumed = min($amount, round(max(0.0, $probe->deuteriumStock / $this->maxDeuteriumPercent()), 4));
+            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - ($consumed * $this->maxDeuteriumPercent())), 4);
             $this->probes->save($probe);
 
             return $consumed;
@@ -426,7 +428,7 @@ final class ProbeStorageService
     public function placeMannyOnProbe(NeumannProbe $probe, Manny $manny): bool
     {
         $this->ensureProbeStorage($probe);
-        $container = $this->placeUnit($probe, 'manny', Manny::CONTAINER_SPACE);
+        $container = $this->placeUnit($probe, 'manny', $this->mannyContainerSpace());
         if ($container === null) {
             return false;
         }
@@ -611,7 +613,7 @@ final class ProbeStorageService
             }
             $mannies[] = $manny;
             if ($manny->storageContainerId !== $to->id) {
-                $requiredSpace = round($requiredSpace + Manny::CONTAINER_SPACE, 4);
+                $requiredSpace = round($requiredSpace + $this->mannyContainerSpace(), 4);
             }
         }
         if ($mannies === []) {
@@ -627,10 +629,10 @@ final class ProbeStorageService
     public function storageMoveDurationSeconds(string $kind, float $amount = 1.0): int
     {
         if ($kind === 'resource') {
-            return (int) ceil(max(0.0, $amount) / 0.05) * 10;
+            return (int) ceil(max(0.0, $amount) / $this->storageMoveEceStep()) * $this->storageMoveSecondsPerUnit();
         }
 
-        return max(1, (int) ceil(max(1.0, $amount))) * 10;
+        return max(1, (int) ceil(max(1.0, $amount))) * $this->storageMoveSecondsPerUnit();
     }
 
     private function assignUnplacedItems(NeumannProbe $probe, StorageContainer $fallback): void
@@ -650,7 +652,7 @@ final class ProbeStorageService
             if (!$manny->isOnProbe() || $manny->storageContainerId !== null) {
                 continue;
             }
-            $container = $this->placeUnit($probe, 'manny', Manny::CONTAINER_SPACE) ?? $fallback;
+            $container = $this->placeUnit($probe, 'manny', $this->mannyContainerSpace()) ?? $fallback;
             $manny->storageContainerId = $container->id;
             $this->mannies->save($manny);
         }
@@ -719,7 +721,7 @@ final class ProbeStorageService
     {
         $used = [];
         foreach ($containers as $container) {
-            $used[$container->id] = $container->uid === StorageContainer::CORE_UID ? self::ATOMIC_PRINTER_SPACE : 0.0;
+            $used[$container->id] = $container->uid === StorageContainer::CORE_UID ? $this->atomicPrinterSpace() : 0.0;
         }
         foreach ($this->containers->resourceAmountsByContainer($probe->id) as $containerId => $resources) {
             foreach ($resources as $amount) {
@@ -733,7 +735,7 @@ final class ProbeStorageService
         }
         foreach ($mannies as $manny) {
             if ($manny->isOnProbe() && $manny->storageContainerId !== null) {
-                $used[$manny->storageContainerId] = round((float) ($used[$manny->storageContainerId] ?? 0.0) + Manny::CONTAINER_SPACE, 4);
+                $used[$manny->storageContainerId] = round((float) ($used[$manny->storageContainerId] ?? 0.0) + $this->mannyContainerSpace(), 4);
             }
         }
 
@@ -970,5 +972,40 @@ final class ProbeStorageService
         }
 
         return array_values(array_unique($normalized));
+    }
+
+    private function atomicPrinterSpace(): float
+    {
+        return max(0.0, Config::float($this->config, 'probe.atomicPrinterContainerSpace', self::ATOMIC_PRINTER_SPACE));
+    }
+
+    private function mannyContainerSpace(): float
+    {
+        return max(0.0, Config::float($this->config, 'manny.containerSpace', Manny::CONTAINER_SPACE));
+    }
+
+    private function mannyCargoCapacity(): float
+    {
+        return max(0.0001, Config::float($this->config, 'manny.cargoCapacity', Manny::CARGO_CAPACITY));
+    }
+
+    private function mannyCargoArray(Manny $manny): array
+    {
+        return array_replace($manny->cargoArray(), ['capacity' => $this->mannyCargoCapacity()]);
+    }
+
+    private function maxDeuteriumPercent(): float
+    {
+        return max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+    }
+
+    private function storageMoveSecondsPerUnit(): int
+    {
+        return max(1, Config::int($this->config, 'manny.actions.storageMoveSecondsPerUnit', 10));
+    }
+
+    private function storageMoveEceStep(): float
+    {
+        return max(0.0001, Config::float($this->config, 'manny.actions.storageMoveEceStep', 0.05));
     }
 }

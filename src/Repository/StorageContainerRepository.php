@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace VonNeumannGame\Repository;
 
 use PDO;
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\StorageContainer;
 
 final class StorageContainerRepository
 {
-    public function __construct(private readonly PDO $pdo) {}
+    public function __construct(
+        private readonly PDO $pdo,
+        private readonly array $config = [],
+    ) {}
 
     public function ensureCoreContainer(NeumannProbe $probe): StorageContainer
     {
@@ -19,7 +23,7 @@ final class StorageContainerRepository
             return $existing;
         }
 
-        return $this->create($probe->id, StorageContainer::CORE_UID, StorageContainer::KIND_PROBE, 'Sonde', 0, 1.0);
+        return $this->create($probe->id, StorageContainer::CORE_UID, StorageContainer::KIND_PROBE, 'Sonde', 0, $this->coreCapacity());
     }
 
     public function ensureContainerForItem(int $probeId, string $itemUid): StorageContainer
@@ -37,7 +41,7 @@ final class StorageContainerRepository
             StorageContainer::KIND_CONTAINER,
             'Container ' . $number,
             $number,
-            1.0,
+            $this->additionalContainerCapacity(),
         );
     }
 
@@ -207,6 +211,16 @@ final class StorageContainerRepository
     private function containerUidForItem(string $itemUid): string
     {
         return 'container-' . $itemUid;
+    }
+
+    private function coreCapacity(): float
+    {
+        return max(0.0, Config::float($this->config, 'probe.coreContainerCapacity', 1.0));
+    }
+
+    private function additionalContainerCapacity(): float
+    {
+        return max(0.0, Config::float($this->config, 'probe.additionalContainerCapacity', 1.0));
     }
 
     private function hydrate(array $row): StorageContainer

@@ -1,0 +1,126 @@
+{
+  "generationVersion": 3,
+  "resourceContainersPerEarthMass": 1000000.0,
+  "categoryWeights": {
+    "empty": 72.0,
+    "stellar_simple": 18.0,
+    "stellar_binary": 2.0,
+    "asteroids": 4.0,
+    "dust_cloud": 2.5,
+    "dead_star": 1.0,
+    "black_hole": 0.5
+  },
+  "neighborInfluence": {
+    "stellarSimpleBonusPerStar": 0.8,
+    "stellarSimpleBonusMax": 4.0,
+    "stellarBinaryBonusPerStar": 0.12,
+    "stellarBinaryBonusMax": 0.8,
+    "emptyBonusPerEmptyNeighbor": 0.6,
+    "emptyBonusMax": 5.0,
+    "dustCloudBonusPerBlackHole": 1.0,
+    "dustCloudBonusMax": 3.0,
+    "asteroidBonusPerBlackHole": 0.9,
+    "asteroidBonusMax": 3.0,
+    "blackHoleBonusPerBlackHole": 0.2,
+    "blackHoleBonusMax": 1.0,
+    "stellarSimpleMultiplierNearBlackHole": 0.85,
+    "stellarBinaryMultiplierNearBlackHole": 0.75
+  },
+  "solarSystem": {
+    "planetCountMin": 0,
+    "planetCountMax": 12,
+    "emptySystemRadius": 1.0,
+    "planetAxisBase": 0.15,
+    "planetAxisStepMin": 0.28,
+    "planetAxisStepMax": 1.3,
+    "planetAxisJitterMin": 0.0,
+    "planetAxisJitterMax": 0.4,
+    "asteroidBeltAxisMin": 1.8,
+    "asteroidBeltAxisMax": 12.0,
+    "asteroidBeltBaseMin": 0,
+    "asteroidBeltBaseMax": 2,
+    "asteroidBeltChancePerPlanet": 0.075,
+    "asteroidBeltChanceMax": 0.95,
+    "asteroidBeltSecondChanceOffset": 0.35,
+    "asteroidBeltThirdChanceOffset": 0.65,
+    "asteroidBeltMax": 4
+  },
+  "stars": {
+    "liveWeights": {"O": 0.04, "B": 0.2, "A": 0.7, "F": 3.0, "G": 7.0, "K": 14.0, "M": 75.0},
+    "deadWeights": {"white_dwarf": 70.0, "neutron_star": 25.0, "red_dwarf_remnant": 5.0},
+    "ranges": {
+      "O": {"mass": [16, 45], "radius": [6, 15], "luminosity": [30000, 700000], "temperature": [30000, 52000]},
+      "B": {"mass": [2.1, 16], "radius": [1.8, 6], "luminosity": [25, 30000], "temperature": [10000, 30000]},
+      "A": {"mass": [1.4, 2.1], "radius": [1.4, 2.1], "luminosity": [5, 25], "temperature": [7500, 10000]},
+      "F": {"mass": [1.04, 1.4], "radius": [1.1, 1.4], "luminosity": [1.5, 5], "temperature": [6000, 7500]},
+      "G": {"mass": [0.8, 1.04], "radius": [0.9, 1.1], "luminosity": [0.6, 1.5], "temperature": [5200, 6000]},
+      "K": {"mass": [0.45, 0.8], "radius": [0.65, 0.9], "luminosity": [0.08, 0.6], "temperature": [3700, 5200]},
+      "M": {"mass": [0.08, 0.45], "radius": [0.1, 0.65], "luminosity": [0.0005, 0.08], "temperature": [2400, 3700]},
+      "neutron_star": {"mass": [1.1, 2.3], "radius": [0.000015, 0.000025], "luminosity": [0.001, 0.05], "temperature": [250000, 900000]},
+      "default_dead": {"mass": [0.2, 1.3], "radius": [0.008, 0.02], "luminosity": [0.0001, 0.1], "temperature": [6000, 100000]}
+    }
+  },
+  "planets": {
+    "smallStarSpectralTypes": ["K", "M"],
+    "smallStarCategoryWeights": {"rocky": 42, "frozen": 18, "ocean": 4, "lava": 6, "dwarf": 18, "gas_giant": 6, "ice_giant": 6},
+    "largeStarCategoryWeights": {"rocky": 28, "frozen": 14, "ocean": 3, "lava": 8, "dwarf": 12, "gas_giant": 22, "ice_giant": 13},
+    "ranges": {
+      "gas_giant": {"mass": [20, 320], "radius": [3.5, 11.5]},
+      "ice_giant": {"mass": [8, 25], "radius": [2.5, 4.5]},
+      "dwarf": {"mass": [0.01, 0.2], "radius": [0.15, 0.55]},
+      "default": {"mass": [0.2, 6.0], "radius": [0.45, 1.8]}
+    },
+    "atmosphereBlockedCategories": ["dwarf", "lava"],
+    "atmosphereChance": 0.75,
+    "habitableAxisMin": 0.45,
+    "habitableAxisMax": 2.2,
+    "habitableCategories": ["rocky", "ocean"],
+    "habitableChance": 0.08,
+    "habitableRange": [0.35, 0.92],
+    "backgroundHabitabilityRange": [0.0, 0.18],
+    "rareMetalsTraceChance": 0.22
+  },
+  "asteroids": {
+    "compositionWeights": {"iron": 25, "silicate": 35, "carbonaceous": 22, "ice": 12, "rare_metals": 6},
+    "resourcesByComposition": {
+      "iron": ["iron", "nickel"],
+      "silicate": ["silicates", "magnesium"],
+      "carbonaceous": ["carbon", "organics", "ice_trace"],
+      "ice": ["water_ice", "deuterium_trace", "volatiles"],
+      "rare_metals": ["rare_metals", "platinum_group"]
+    },
+    "sizeWeights": {"small": 55, "medium": 35, "large": 10},
+    "massRange": [0.000001, 0.02],
+    "radiusRange": [0.001, 0.2],
+    "wanderingCountMin": 1,
+    "wanderingCountMax": 5
+  },
+  "dustClouds": {
+    "densityRange": [0.05, 0.9],
+    "compositionWeights": {"hydrogen": 45, "silicate_dust": 25, "ice_particles": 20, "metallic_dust": 10},
+    "ionizationRange": [0.05, 0.75],
+    "sensorOcclusionRange": [0.1, 0.95],
+    "massRange": [0.001, 2.5],
+    "radiusRange": [0.5, 12.0]
+  },
+  "blackHoles": {
+    "massRange": [3.0, 30.0],
+    "schwarzschildRadiusMultiplier": 2.95,
+    "accretionDiskChance": 0.42,
+    "dangerRadiusRange": [0.8, 7.5],
+    "wanderingAsteroidsChance": 0.55,
+    "dustCloudChance": 0.45
+  },
+  "orbits": {
+    "periodDaysPerYear": 365.25,
+    "minimumStarMassForPeriod": 0.05,
+    "eccentricityRange": [0.0, 0.25],
+    "inclinationRange": [0.0, 12.0],
+    "phaseRange": [0.0, 360.0]
+  },
+  "generatedTimestamp": {
+    "epochSeconds": 1704067200,
+    "rangeSeconds": 31536000
+  },
+  "roundPrecision": 6
+}

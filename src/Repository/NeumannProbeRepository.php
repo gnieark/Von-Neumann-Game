@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Repository;
 
 use PDO;
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeStatus;
@@ -12,7 +13,10 @@ use VonNeumannGame\Sector\SectorCoordinates;
 
 final class NeumannProbeRepository
 {
-    public function __construct(private readonly PDO $pdo) {}
+    public function __construct(
+        private readonly PDO $pdo,
+        private readonly array $config = [],
+    ) {}
 
     public function createForPlayer(int $playerId, string $name, ?SectorCoordinates $sector = null): NeumannProbe
     {
@@ -21,7 +25,7 @@ final class NeumannProbeRepository
         $stmt = $this->pdo->prepare(
             'INSERT INTO neumann_probes
              (player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
-             VALUES (:player_id, :name, :x, :y, :z, 0, 0, 0, 0, 0, :status, 100, 0, 100, 0, 0, 0, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
+             VALUES (:player_id, :name, :x, :y, :z, 0, 0, 0, 0, 0, :status, :integrity_percent, 0, :deuterium_stock, 0, 0, 0, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
         );
         $stmt->execute([
             'player_id' => $playerId,
@@ -30,6 +34,8 @@ final class NeumannProbeRepository
             'y' => $sector->getY(),
             'z' => $sector->getZ(),
             'status' => ProbeStatus::Idle->value,
+            'integrity_percent' => $this->initialIntegrityPercent(),
+            'deuterium_stock' => $this->initialDeuteriumPercent(),
             'entered_current_sector_at' => $now,
             'created_at' => $now,
             'updated_at' => $now,
@@ -142,9 +148,9 @@ final class NeumannProbeRepository
             (float) $row['acceleration_c_per_day'],
             new ProbeDirection((float) $row['direction_x'], (float) $row['direction_y'], (float) $row['direction_z']),
             ProbeStatus::from((string) $row['status']),
-            max(0.0, min(100.0, (float) $row['integrity_percent'])),
+            max(0.0, min($this->maxIntegrityPercent(), (float) $row['integrity_percent'])),
             (float) $row['energy_stored'],
-            (float) ($row['deuterium_stock'] ?? 100),
+            max(0.0, min($this->maxDeuteriumPercent(), (float) ($row['deuterium_stock'] ?? $this->initialDeuteriumPercent()))),
             (float) ($row['metals_stock'] ?? 0),
             (float) ($row['ice_stock'] ?? 0),
             (float) ($row['organic_compounds_stock'] ?? 0),
@@ -154,5 +160,25 @@ final class NeumannProbeRepository
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );
+    }
+
+    private function initialIntegrityPercent(): float
+    {
+        return max(0.0, min($this->maxIntegrityPercent(), Config::float($this->config, 'probe.initialIntegrityPercent', 100.0)));
+    }
+
+    private function maxIntegrityPercent(): float
+    {
+        return max(0.0001, Config::float($this->config, 'probe.maxIntegrityPercent', 100.0));
+    }
+
+    private function initialDeuteriumPercent(): float
+    {
+        return max(0.0, min($this->maxDeuteriumPercent(), Config::float($this->config, 'probe.initialDeuteriumPercent', 100.0)));
+    }
+
+    private function maxDeuteriumPercent(): float
+    {
+        return max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
     }
 }

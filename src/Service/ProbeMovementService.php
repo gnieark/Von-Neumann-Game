@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeMovement;
@@ -25,6 +26,8 @@ final class ProbeMovementService
     public const BLACK_HOLE_TRAP_MAX_DELAY_SECONDS = 10800;
 
     private readonly SectorGrid $grid;
+    private readonly array $gameplayConfig;
+    private readonly array $movementConfig;
 
     public function __construct(
         private readonly NeumannProbeRepository $probes,
@@ -37,8 +40,11 @@ final class ProbeMovementService
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
         ?SectorGrid $grid = null,
+        array $gameplayConfig = [],
     ) {
         $this->grid = $grid ?? new SectorGrid();
+        $this->gameplayConfig = $gameplayConfig;
+        $this->movementConfig = Config::getArray($gameplayConfig, 'movement', $gameplayConfig);
     }
 
     public function startMovement(NeumannProbe $probe, SectorCoordinates $target): ProbeMovement
@@ -63,7 +69,7 @@ final class ProbeMovementService
             throw new ProbeMovementException(422, 'insufficient_fuel', 'Insufficient deuterium for movement.');
         }
 
-        $fuelCost = round($probe->deuteriumStock * 0.02, 4);
+        $fuelCost = round($probe->deuteriumStock * $this->float('fuelCostRatioOfCurrentDeuterium', 0.02), 4);
         $startedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $movement = $this->movements->create(
             $probe->id,
@@ -126,7 +132,8 @@ final class ProbeMovementService
 
         $probe->status = ProbeStatus::from($phase);
         $probe->velocityC = $this->estimatedVelocityC($movement, $now);
-        $probe->accelerationCPerDay = $phase === 'accelerating' ? 0.36 : ($phase === 'decelerating' ? -0.36 : 0.0);
+        $accelerationCPerDay = $this->float('accelerationCPerDay', 0.36);
+        $probe->accelerationCPerDay = $phase === 'accelerating' ? $accelerationCPerDay : ($phase === 'decelerating' ? -$accelerationCPerDay : 0.0);
         $probe->direction = $this->directionBetween($movement->origin, $movement->target);
         $this->probes->save($probe);
 
@@ -211,7 +218,10 @@ final class ProbeMovementService
         }
         $now ??= new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $phase = $this->phaseAt($movement, $now);
-        $max = min(0.95, 0.42 + ($movement->distance * 0.1));
+        $max = min(
+            $this->float('velocityMaxC', 0.95),
+            $this->float('velocityBaseC', 0.42) + ($movement->distance * $this->float('velocityPerDistanceC', 0.1)),
+        );
 
         if ($phase === 'preparing') {
             return 0.0;
@@ -275,13 +285,7 @@ final class ProbeMovementService
         }
 
         $movement->destructionCheckedAt = $now->format('c');
-        $risk = match (true) {
-            $movement->distance <= 2 => 0.0,
-            $movement->distance === 3 => 0.05,
-            $movement->distance === 4 => 0.12,
-            $movement->distance === 5 => 0.25,
-            default => 0.40,
-        };
+        $risk = $this->destructionRiskForDistance($movement->distance);
 
         if ($risk > 0 && $this->riskRoll->roll($this->worldSeed, $movement) < $risk) {
             $movement->status = 'destroyed';
@@ -320,7 +324,7 @@ final class ProbeMovementService
                 $manny->name,
                 $manny->uid,
                 SectorManny::STATE_FORGOTTEN,
-                $manny->cargoArray(),
+                $this->mannyCargoArray($manny),
                 'Manny left behind by its probe.',
             );
             if (!$sector->replaceObject($object)) {
@@ -427,7 +431,7 @@ final class ProbeMovementService
                 $sectorIndex,
             ]);
             $roll = hexdec(substr(hash('sha256', $payload), 0, 8)) / hexdec('ffffffff');
-            $integrityLoss += round($roll * 3.0, 2);
+            $integrityLoss += round($roll * $this->float('intersectorIntegrityLossMaxPercentPerDistance', 3.0), 2);
         }
 
         $probe->integrityPercent = round(max(0.0, $probe->integrityPercent - $integrityLoss), 2);
@@ -477,8 +481,47 @@ final class ProbeMovementService
         }
 
         $mass = max($masses);
-        $factor = max(0.0, min(1.0, ($mass - 3.0) / 27.0));
+        $minMass = $this->float('blackHoleTrap.minMass', 3.0);
+        $maxMass = $this->float('blackHoleTrap.maxMass', 30.0);
+        $factor = max(0.0, min(1.0, ($mass - $minMass) / max(0.0001, $maxMass - $minMass)));
+        $minDelay = $this->int('blackHoleTrap.minDelaySeconds', self::BLACK_HOLE_TRAP_MIN_DELAY_SECONDS);
+        $maxDelay = $this->int('blackHoleTrap.maxDelaySeconds', self::BLACK_HOLE_TRAP_MAX_DELAY_SECONDS);
 
-        return (int) round(self::BLACK_HOLE_TRAP_MAX_DELAY_SECONDS - ($factor * (self::BLACK_HOLE_TRAP_MAX_DELAY_SECONDS - self::BLACK_HOLE_TRAP_MIN_DELAY_SECONDS)));
+        return (int) round($maxDelay - ($factor * ($maxDelay - $minDelay)));
+    }
+
+    private function destructionRiskForDistance(int $distance): float
+    {
+        if ($distance <= $this->int('destructionSafeDistance', 2)) {
+            return 0.0;
+        }
+
+        $risks = Config::getArray($this->movementConfig, 'destructionRiskByDistance', [
+            '3' => 0.05,
+            '4' => 0.12,
+            '5' => 0.25,
+            'default' => 0.40,
+        ]);
+        $key = (string) $distance;
+        $risk = is_numeric($risks[$key] ?? null) ? (float) $risks[$key] : (float) ($risks['default'] ?? 0.40);
+
+        return max(0.0, min(1.0, $risk));
+    }
+
+    private function int(string $path, int $default): int
+    {
+        return Config::int($this->movementConfig, $path, $default);
+    }
+
+    private function float(string $path, float $default): float
+    {
+        return Config::float($this->movementConfig, $path, $default);
+    }
+
+    private function mannyCargoArray(\VonNeumannGame\Domain\Manny $manny): array
+    {
+        return array_replace($manny->cargoArray(), [
+            'capacity' => max(0.0001, Config::float($this->gameplayConfig, 'manny.cargoCapacity', \VonNeumannGame\Domain\Manny::CARGO_CAPACITY)),
+        ]);
     }
 }

@@ -24,10 +24,11 @@ final class Asteroid extends UniverseObject
         ?string $description = null,
         ?array $resourceAmounts = null,
         array $waypointBookmarks = [],
+        ?float $resourceContainersPerEarthMass = null,
     ) {
         parent::__construct($id, $name, UniverseObjectType::Asteroid, $mass, $radius, $description, $waypointBookmarks);
         $this->resourceAmounts = $resourceAmounts === null
-            ? self::initialResourceAmounts($estimatedResources, $mass)
+            ? self::initialResourceAmounts($estimatedResources, $mass, $resourceContainersPerEarthMass ?? self::RESOURCE_CONTAINERS_PER_EARTH_MASS)
             : self::normalizeResourceAmounts($resourceAmounts, $estimatedResources);
     }
 
@@ -87,10 +88,10 @@ final class Asteroid extends UniverseObject
      * @param array<mixed> $estimatedResources
      * @return array<string, float>
      */
-    private static function initialResourceAmounts(array $estimatedResources, float $mass): array
+    private static function initialResourceAmounts(array $estimatedResources, float $mass, float $resourceContainersPerEarthMass): array
     {
         $composition = ResourceComposition::fromHints($estimatedResources);
-        $amount = round(max(0.0, $mass) * self::RESOURCE_CONTAINERS_PER_EARTH_MASS, 4);
+        $amount = round(max(0.0, $mass) * max(0.0, $resourceContainersPerEarthMass), 4);
         return self::resourceAmountsForTotal($amount, $composition);
     }
 

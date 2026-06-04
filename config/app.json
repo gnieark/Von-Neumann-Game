@@ -1,5 +1,6 @@
 {
   "worldSeed": "local-development-world",
   "universePath": "data/universe",
-  "sessionTtlDays": 7
+  "sessionTtlDays": 7,
+  "schedulerProcessLimit": 100
 }

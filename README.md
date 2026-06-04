@@ -55,9 +55,22 @@ Le code accepte aussi `mysql` via PDO avec `host`, `port`, `database`,
 {
   "worldSeed": "local-development-world",
   "universePath": "data/universe",
-  "sessionTtlDays": 7
+  "sessionTtlDays": 7,
+  "schedulerProcessLimit": 100
 }
 ```
+
+`config/gameplay.json` centralise les curseurs de gameplay: zone d'apparition
+des nouveaux joueurs, stock initial des sondes, capacites de containers, delais
+des actions Manny, timings et risques de mouvement, delais de scan et couts de
+craft. `config/universe.json` centralise les probabilites et plages de valeurs
+de la generation procedurale.
+
+Chaque fichier JSON de `config/` peut etre surcharge localement avec un fichier
+du meme nom termine par `-local.json`, par exemple
+`config/gameplay-local.json` ou `config/universe-local.json`. Les objets sont
+fusionnes recursivement et les listes sont remplacees. Ces fichiers locaux sont
+ignores par Git.
 
 L'authentification OAuth est optionnelle. Copier `config/oauth.example.json` vers
 `config/oauth.json`, renseigner Google et/ou Discord, puis declarer les callbacks
@@ -110,9 +123,9 @@ l'API expose des coordonnees relatives au secteur d'origine du joueur.
 
 Une sonde neuve demarre avec:
 
-- une capacite cargo de `1 earth_container_equivalent`;
-- une imprimante 3D atomique occupant `0.3`;
-- quatre Mannies occupant chacun `0.05` quand ils sont a bord;
+- la capacite cargo et les reserves initiales definies dans `config/gameplay.json`;
+- une imprimante 3D atomique stockee dans la sonde;
+- le nombre de Mannies et leur encombrement definis dans `config/gameplay.json`;
 - une cuve externe de deuterium pleine, hors capacite cargo.
 
 `MannyService` gere le renommage, la reparation, le minage et le rappel des
@@ -151,12 +164,8 @@ connaissance:
 - `long_range_estimation` au-dela.
 
 `ProbeMovementService` lance et rafraichit les mouvements intersecteurs. Un
-mouvement consomme 2% du deuterium courant et suit la timeline:
-
-- 5 minutes de preparation pendant la beta;
-- 10 minutes par secteur d'acceleration pendant la beta;
-- 15 minutes par secteur de croisiere pendant la beta;
-- 10 minutes par secteur de deceleration pendant la beta.
+mouvement consomme et dure selon les parametres `movement` de
+`config/gameplay.json`.
 
 L'etat courant est derive des timestamps a chaque lecture. Le scheduler CLI
 (`php scripts/scheduler.php`) traite aussi les evenements planifies utiles aux

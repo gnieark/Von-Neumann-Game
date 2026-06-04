@@ -8,6 +8,8 @@ use PDO;
 use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Auth\OAuthConfig;
 use VonNeumannGame\Auth\OAuthService;
+use VonNeumannGame\Config\Config;
+use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Http\ApiKernel;
@@ -23,6 +25,7 @@ use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
@@ -59,40 +62,46 @@ final class AppFactory
     {
         $pdo ??= $this->pdo(initializeSchema: true);
         $appConfig = $this->appConfig();
+        $gameplayConfig = $this->gameplayConfig();
+        $universeConfig = $this->universeConfig();
         $players = new PlayerRepository($pdo);
         $authMethods = new PlayerAuthRepository($pdo);
-        $probes = new NeumannProbeRepository($pdo);
-        $mannies = new MannyRepository($pdo);
+        $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
+        $mannies = new MannyRepository($pdo, $gameplayConfig);
         $items = new ProbeItemRepository($pdo);
-        $storageContainers = new StorageContainerRepository($pdo);
+        $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
         $movements = new ProbeMovementRepository($pdo);
         $scheduledEvents = new ScheduledEventRepository($pdo);
         $sessions = new SessionRepository($pdo);
         $apiKeys = new ApiKeyRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
-        $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService);
-        $observations = new SectorObservationService($sectorService, $visitedSectors);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
-        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage);
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
+        $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig);
+        $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
+        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $bookmarks, $storage);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $bookmarks, $storage, $gameplayConfig);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService
     {
         $pdo ??= $this->pdo(initializeSchema: true);
         $appConfig = $this->appConfig();
-        $probes = new NeumannProbeRepository($pdo);
+        $gameplayConfig = $this->gameplayConfig();
+        $universeConfig = $this->universeConfig();
+        $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
         $movements = new ProbeMovementRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
         $scheduledEvents = new ScheduledEventRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
 
         return new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
     }
@@ -100,19 +109,23 @@ final class AppFactory
     public function authService(PDO $pdo): AuthService
     {
         $appConfig = $this->appConfig();
+        $gameplayConfig = $this->gameplayConfig();
+        $universeConfig = $this->universeConfig();
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
 
         return new AuthService(
             new PlayerRepository($pdo),
             new PlayerAuthRepository($pdo),
-            new NeumannProbeRepository($pdo),
+            new NeumannProbeRepository($pdo, $gameplayConfig),
             new SessionRepository($pdo),
             new VisitedSectorRepository($pdo),
             (int) ($appConfig['sessionTtlDays'] ?? 7),
-            new MannyRepository($pdo),
+            new MannyRepository($pdo, $gameplayConfig),
             new ApiKeyRepository($pdo),
             $sectorService,
+            gameplayConfig: $gameplayConfig,
+            universeConfig: $universeConfig,
         );
     }
 
@@ -123,14 +136,17 @@ final class AppFactory
 
     public function appConfig(): array
     {
-        $path = $this->projectRoot . '/config/app.json';
-        if (!is_file($path)) {
-            return [];
-        }
+        return $this->configLoader()->load('app');
+    }
 
-        $data = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+    public function gameplayConfig(): array
+    {
+        return $this->configLoader()->load('gameplay');
+    }
 
-        return is_array($data) ? $data : [];
+    public function universeConfig(): array
+    {
+        return $this->configLoader()->load('universe');
     }
 
     private function absolutePath(string $path): string
@@ -140,5 +156,10 @@ final class AppFactory
         }
 
         return rtrim($this->projectRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $path;
+    }
+
+    private function configLoader(): JsonConfigLoader
+    {
+        return new JsonConfigLoader($this->projectRoot);
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ResourceComposition;
@@ -30,13 +31,18 @@ final class SectorObservationService
     private const MANNY_MINEABLE_MAX_MASS = 0.0123;
 
     private readonly SectorGrid $grid;
+    private readonly array $scanConfig;
+    private readonly array $mannyConfig;
 
     public function __construct(
         private readonly SectorService $sectors,
         private readonly VisitedSectorRepository $visitedSectors,
         ?SectorGrid $grid = null,
+        array $config = [],
     ) {
         $this->grid = $grid ?? new SectorGrid();
+        $this->scanConfig = Config::getArray($config, 'scan', $config);
+        $this->mannyConfig = Config::getArray($config, 'manny', $config);
     }
 
     public function observe(Player $player, NeumannProbe $probe, SectorCoordinates $target): SectorObservation
@@ -78,7 +84,10 @@ final class SectorObservationService
                 $relative,
                 $distance,
                 SectorKnowledgeLevel::NeighborScan,
-                $this->round(min(0.92, 0.62 + ($scan['scanQuality'] * 0.3))),
+                $this->round(min(
+                    $this->scanFloat('neighborConfidenceMax', 0.92),
+                    $this->scanFloat('neighborConfidenceBase', 0.62) + ($scan['scanQuality'] * $this->scanFloat('neighborConfidenceQualityScale', 0.3)),
+                )),
                 ['estimatedObjects' => $this->neighborEstimate($content, $scan['scanQuality'])],
                 $scan,
             );
@@ -89,7 +98,10 @@ final class SectorObservationService
                 $relative,
                 $distance,
                 SectorKnowledgeLevel::DistantScan,
-                $this->round(min(0.58, 0.24 + ($scan['scanQuality'] * 0.25))),
+                $this->round(min(
+                    $this->scanFloat('distantConfidenceMax', 0.58),
+                    $this->scanFloat('distantConfidenceBase', 0.24) + ($scan['scanQuality'] * $this->scanFloat('distantConfidenceQualityScale', 0.25)),
+                )),
                 [
                     'possibleObjects' => $this->distantSignatures($content),
                     'dangerEstimate' => $this->dangerEstimate($content),
@@ -102,7 +114,10 @@ final class SectorObservationService
             $relative,
             $distance,
             SectorKnowledgeLevel::LongRangeEstimation,
-            $this->round(min(0.24, 0.08 + ($scan['scanQuality'] * 0.12))),
+            $this->round(min(
+                $this->scanFloat('longRangeConfidenceMax', 0.24),
+                $this->scanFloat('longRangeConfidenceBase', 0.08) + ($scan['scanQuality'] * $this->scanFloat('longRangeConfidenceQualityScale', 0.12)),
+            )),
             [
                 'navigationalRisk' => $content->hasBlackHole() ? 'high' : 'unknown',
                 'message' => 'Insufficient sensor accuracy.',
@@ -126,24 +141,29 @@ final class SectorObservationService
 
     private function requiredResidenceSeconds(int $distance): int
     {
-        return match (true) {
-            $distance === 0 => 0,
-            $distance === 1 => 300,
-            $distance === 2 => 1800,
-            default => 7200,
-        };
+        $seconds = Config::getArray($this->scanConfig, 'residenceSecondsByDistance', [
+            '0' => 0,
+            '1' => 300,
+            '2' => 1800,
+            'default' => 7200,
+        ]);
+
+        return is_numeric($seconds[(string) $distance] ?? null)
+            ? max(0, (int) $seconds[(string) $distance])
+            : max(0, (int) ($seconds['default'] ?? 7200));
     }
 
     private function skipsInitialNeighborDelay(Player $player, int $distance): bool
     {
-        return $distance === 1 && $this->visitedSectors->countVisited($player) === 1;
+        return $distance === 1
+            && $this->visitedSectors->countVisited($player) === $this->scanInt('initialNeighborDelayBypassVisitedCount', 1);
     }
 
     private function scanMetadata(int $residenceSeconds, int $requiredSeconds): array
     {
         $quality = $requiredSeconds === 0
             ? 1.0
-            : min(1.0, $residenceSeconds / max(1, $requiredSeconds * 4));
+            : min(1.0, $residenceSeconds / max(1, (int) round($requiredSeconds * $this->scanFloat('qualityRequiredSecondsMultiplier', 4.0))));
 
         return [
             'currentSectorResidenceSeconds' => $residenceSeconds,
@@ -321,19 +341,24 @@ final class SectorObservationService
     private function isMannyMineable(UniverseObject $object): bool
     {
         return $object instanceof Asteroid
-            || ($object instanceof Planet && $object->getMass() <= self::MANNY_MINEABLE_MAX_MASS);
+            || ($object instanceof Planet && $object->getMass() <= Config::float($this->mannyConfig, 'mineablePlanetMaxMassEarthUnits', self::MANNY_MINEABLE_MAX_MASS));
     }
 
     private function neighborEstimate(SectorContent $content, float $quality): array
     {
         $planetCount = $this->planetCount($content);
-        $blur = max(1, (int) round(3 - ($quality * 2)));
+        $blur = max(
+            $this->scanInt('neighborPlanetCountBlurMin', 1),
+            (int) round($this->scanFloat('neighborPlanetCountBlurBase', 3.0) - ($quality * $this->scanFloat('neighborPlanetCountBlurQualityScale', 2.0))),
+        );
 
         return [
             'star' => $content->hasStar(),
             'planetCountMin' => max(0, $planetCount - $blur),
             'planetCountMax' => $planetCount + $blur,
-            'blackHoleProbability' => $content->hasBlackHole() ? 0.7 : 0.03,
+            'blackHoleProbability' => $content->hasBlackHole()
+                ? $this->scanFloat('neighborBlackHoleProbabilityIfPresent', 0.7)
+                : $this->scanFloat('neighborBlackHoleProbabilityIfAbsent', 0.03),
             'dangerEstimate' => $this->dangerEstimate($content),
             'signalAge' => 'recent',
         ];
@@ -411,5 +436,15 @@ final class SectorObservationService
     private function round(float $value): float
     {
         return round($value, 2);
+    }
+
+    private function scanInt(string $path, int $default): int
+    {
+        return Config::int($this->scanConfig, $path, $default);
+    }
+
+    private function scanFloat(string $path, float $default): float
+    {
+        return Config::float($this->scanConfig, $path, $default);
     }
 }

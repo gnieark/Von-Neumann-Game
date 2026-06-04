@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Auth;
 
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\AuthProvider;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Repository\ApiKeyRepository;
@@ -35,6 +36,8 @@ final class AuthService
         private readonly ?ApiKeyRepository $apiKeys = null,
         private readonly ?SectorService $sectors = null,
         ?SectorGrid $grid = null,
+        private readonly array $gameplayConfig = [],
+        private readonly array $universeConfig = [],
     ) {
         $this->grid = $grid ?? new SectorGrid();
     }
@@ -182,10 +185,16 @@ final class AuthService
 
     private function randomHomeSector(): SectorCoordinates
     {
+        $min = Config::int($this->gameplayConfig, 'player.spawnCoordinateMin', -1000);
+        $max = Config::int($this->gameplayConfig, 'player.spawnCoordinateMax', 1000);
+        if ($min > $max) {
+            [$min, $max] = [$max, $min];
+        }
+
         do {
-            $x = random_int(-1000, 1000);
-            $y = random_int(-1000, 1000);
-            $z = random_int(-1000, 1000);
+            $x = random_int($min, $max);
+            $y = random_int($min, $max);
+            $z = random_int($min, $max);
         } while (($x + $y + $z) % 2 !== 0);
 
         return new SectorCoordinates($x, $y, $z);
@@ -237,7 +246,7 @@ final class AuthService
         }
 
         $sector = $this->sectors->getOrCreateSector($coordinates);
-        if (!$existedBefore && $sector->getObjects() === []) {
+        if (!$existedBefore && $sector->getObjects() === [] && Config::bool($this->gameplayConfig, 'player.starterAsteroid.enabledForNewEmptySectors', true)) {
             $sector->addObject($this->starterIronAsteroid($coordinates));
             $this->sectors->saveSector($sector);
         }
@@ -247,15 +256,24 @@ final class AuthService
 
     private function starterIronAsteroid(SectorCoordinates $coordinates): Asteroid
     {
+        $prefix = (string) Config::value($this->gameplayConfig, 'player.starterAsteroid.idPrefix', 'starter-iron');
+        $composition = (string) Config::value($this->gameplayConfig, 'player.starterAsteroid.composition', 'iron');
+        $resources = Config::getArray($this->gameplayConfig, 'player.starterAsteroid.estimatedResources', ['iron', 'nickel']);
+        $sizeCategory = (string) Config::value($this->gameplayConfig, 'player.starterAsteroid.sizeCategory', 'small');
+        $mass = Config::float($this->gameplayConfig, 'player.starterAsteroid.mass', 0.00005);
+        $radius = Config::float($this->gameplayConfig, 'player.starterAsteroid.radius', 0.012);
+        $description = (string) Config::value($this->gameplayConfig, 'player.starterAsteroid.description', 'Metallic asteroid seeded in a newly reactivated probe sector.');
+
         return new Asteroid(
-            'starter-iron-' . substr(hash('sha256', $coordinates->toKey()), 0, 16),
+            $prefix . '-' . substr(hash('sha256', $coordinates->toKey()), 0, 16),
             null,
-            'iron',
-            ['iron', 'nickel'],
-            'small',
-            0.00005,
-            0.012,
-            'Metallic asteroid seeded in a newly reactivated probe sector.',
+            $composition,
+            $resources,
+            $sizeCategory,
+            $mass,
+            $radius,
+            $description,
+            resourceContainersPerEarthMass: Config::float($this->universeConfig, 'resourceContainersPerEarthMass', 1000000.0),
         );
     }
 }

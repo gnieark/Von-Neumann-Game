@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Domain;
 
+use VonNeumannGame\Config\Config;
+
 final class CraftingRecipeCatalog
 {
     public const FABRICATOR_MANNY = 'manny';
@@ -25,23 +27,23 @@ final class CraftingRecipeCatalog
     /**
      * @return list<array<string, mixed>>
      */
-    public static function all(): array
+    public static function all(array $config = []): array
     {
         return [
-            self::waypointBookmark(),
-            self::steelBar(),
-            self::steelPlate(),
-            self::additionalContainer(),
+            self::waypointBookmark($config),
+            self::steelBar($config),
+            self::steelPlate($config),
+            self::additionalContainer($config),
         ];
     }
 
     /**
      * @return array<string, mixed>|null
      */
-    public static function find(string $id): ?array
+    public static function find(string $id, array $config = []): ?array
     {
         $id = self::normalizeId($id);
-        foreach (self::all() as $recipe) {
+        foreach (self::all($config) as $recipe) {
             if ($recipe['id'] === $id) {
                 return $recipe;
             }
@@ -58,7 +60,7 @@ final class CraftingRecipeCatalog
     /**
      * @return array<string, mixed>
      */
-    private static function waypointBookmark(): array
+    private static function waypointBookmark(array $config): array
     {
         return [
             'id' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
@@ -67,16 +69,16 @@ final class CraftingRecipeCatalog
             'ingredients' => [
                 [
                     'type' => ResourceComposition::METALS,
-                    'quantity' => self::WAYPOINT_BOOKMARK_METALS_COST,
+                    'quantity' => Config::float($config, 'waypoint_bookmark.metalsCost', self::WAYPOINT_BOOKMARK_METALS_COST),
                     'unit' => ProbeInventory::CAPACITY_UNIT,
                     'kind' => 'resource',
                 ],
             ],
-            'durationSeconds' => self::WAYPOINT_BOOKMARK_CRAFTING_SECONDS,
+            'durationSeconds' => Config::int($config, 'waypoint_bookmark.durationSeconds', self::WAYPOINT_BOOKMARK_CRAFTING_SECONDS),
             'output' => [
                 'type' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
                 'name' => ProbeItem::WAYPOINT_BOOKMARK_NAME,
-                'containerSpace' => self::WAYPOINT_BOOKMARK_CONTAINER_SPACE,
+                'containerSpace' => Config::float($config, 'waypoint_bookmark.containerSpace', self::WAYPOINT_BOOKMARK_CONTAINER_SPACE),
                 'containerSpaceUnit' => ProbeInventory::CAPACITY_UNIT,
             ],
         ];
@@ -85,7 +87,7 @@ final class CraftingRecipeCatalog
     /**
      * @return array<string, mixed>
      */
-    private static function steelBar(): array
+    private static function steelBar(array $config): array
     {
         return [
             'id' => ProbeItem::TYPE_STEEL_BAR,
@@ -94,16 +96,16 @@ final class CraftingRecipeCatalog
             'ingredients' => [
                 [
                     'type' => ResourceComposition::METALS,
-                    'quantity' => self::STEEL_BAR_METALS_COST,
+                    'quantity' => Config::float($config, 'steel_bar.metalsCost', self::STEEL_BAR_METALS_COST),
                     'unit' => ProbeInventory::CAPACITY_UNIT,
                     'kind' => 'resource',
                 ],
             ],
-            'durationSeconds' => self::STEEL_BAR_CRAFTING_SECONDS,
+            'durationSeconds' => Config::int($config, 'steel_bar.durationSeconds', self::STEEL_BAR_CRAFTING_SECONDS),
             'output' => [
                 'type' => ProbeItem::TYPE_STEEL_BAR,
                 'name' => ProbeItem::STEEL_BAR_NAME,
-                'containerSpace' => self::STEEL_BAR_CONTAINER_SPACE,
+                'containerSpace' => Config::float($config, 'steel_bar.containerSpace', self::STEEL_BAR_CONTAINER_SPACE),
                 'containerSpaceUnit' => ProbeInventory::CAPACITY_UNIT,
             ],
         ];
@@ -112,7 +114,7 @@ final class CraftingRecipeCatalog
     /**
      * @return array<string, mixed>
      */
-    private static function steelPlate(): array
+    private static function steelPlate(array $config): array
     {
         return [
             'id' => ProbeItem::TYPE_STEEL_PLATE,
@@ -121,16 +123,16 @@ final class CraftingRecipeCatalog
             'ingredients' => [
                 [
                     'type' => ResourceComposition::METALS,
-                    'quantity' => self::STEEL_PLATE_METALS_COST,
+                    'quantity' => Config::float($config, 'steel_plate.metalsCost', self::STEEL_PLATE_METALS_COST),
                     'unit' => ProbeInventory::CAPACITY_UNIT,
                     'kind' => 'resource',
                 ],
             ],
-            'durationSeconds' => self::STEEL_PLATE_CRAFTING_SECONDS,
+            'durationSeconds' => Config::int($config, 'steel_plate.durationSeconds', self::STEEL_PLATE_CRAFTING_SECONDS),
             'output' => [
                 'type' => ProbeItem::TYPE_STEEL_PLATE,
                 'name' => ProbeItem::STEEL_PLATE_NAME,
-                'containerSpace' => self::STEEL_PLATE_CONTAINER_SPACE,
+                'containerSpace' => Config::float($config, 'steel_plate.containerSpace', self::STEEL_PLATE_CONTAINER_SPACE),
                 'containerSpaceUnit' => ProbeInventory::CAPACITY_UNIT,
             ],
         ];
@@ -139,7 +141,7 @@ final class CraftingRecipeCatalog
     /**
      * @return array<string, mixed>
      */
-    private static function additionalContainer(): array
+    private static function additionalContainer(array $config): array
     {
         return [
             'id' => ProbeItem::TYPE_ADDITIONAL_CONTAINER,
@@ -148,24 +150,24 @@ final class CraftingRecipeCatalog
             'ingredients' => [
                 [
                     'type' => ProbeItem::TYPE_STEEL_PLATE,
-                    'quantity' => self::ADDITIONAL_CONTAINER_STEEL_PLATES,
+                    'quantity' => Config::int($config, 'additional_container.steelPlateCount', self::ADDITIONAL_CONTAINER_STEEL_PLATES),
                     'unit' => 'item',
                     'kind' => 'item',
                 ],
                 [
                     'type' => ProbeItem::TYPE_STEEL_BAR,
-                    'quantity' => self::ADDITIONAL_CONTAINER_STEEL_BARS,
+                    'quantity' => Config::int($config, 'additional_container.steelBarCount', self::ADDITIONAL_CONTAINER_STEEL_BARS),
                     'unit' => 'item',
                     'kind' => 'item',
                 ],
             ],
-            'durationSeconds' => self::ADDITIONAL_CONTAINER_CRAFTING_SECONDS,
+            'durationSeconds' => Config::int($config, 'additional_container.durationSeconds', self::ADDITIONAL_CONTAINER_CRAFTING_SECONDS),
             'output' => [
                 'type' => ProbeItem::TYPE_ADDITIONAL_CONTAINER,
                 'name' => ProbeItem::ADDITIONAL_CONTAINER_NAME,
-                'containerSpace' => self::ADDITIONAL_CONTAINER_CONTAINER_SPACE,
+                'containerSpace' => Config::float($config, 'additional_container.containerSpace', self::ADDITIONAL_CONTAINER_CONTAINER_SPACE),
                 'containerSpaceUnit' => ProbeInventory::CAPACITY_UNIT,
-                'capacityBonus' => self::ADDITIONAL_CONTAINER_CAPACITY_BONUS,
+                'capacityBonus' => Config::float($config, 'additional_container.capacityBonus', self::ADDITIONAL_CONTAINER_CAPACITY_BONUS),
                 'capacityBonusUnit' => ProbeInventory::CAPACITY_UNIT,
             ],
         ];

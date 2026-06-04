@@ -12,16 +12,18 @@ use VonNeumannGame\Service\ProbeStorageService;
 require_once __DIR__ . '/../vendor/autoload.php';
 
 $factory = new AppFactory(dirname(__DIR__));
+$gameplayConfig = $factory->gameplayConfig();
 $dbFactory = $factory->databaseFactory();
 $pdo = $dbFactory->create();
 $dbFactory->initializeSchema($pdo);
 
-$probes = new NeumannProbeRepository($pdo);
+$probes = new NeumannProbeRepository($pdo, $gameplayConfig);
 $storage = new ProbeStorageService(
-    new StorageContainerRepository($pdo),
+    new StorageContainerRepository($pdo, $gameplayConfig),
     new ProbeItemRepository($pdo),
-    new MannyRepository($pdo),
+    new MannyRepository($pdo, $gameplayConfig),
     $probes,
+    $gameplayConfig,
 );
 
 $ids = $pdo->query('SELECT id FROM neumann_probes ORDER BY id ASC')->fetchAll(PDO::FETCH_COLUMN);

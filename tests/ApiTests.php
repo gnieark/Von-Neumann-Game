@@ -6,8 +6,10 @@ use League\OAuth2\Client\Token\AccessToken;
 use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Auth\OAuthConfig;
 use VonNeumannGame\Auth\OAuthService;
+use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
+use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
@@ -119,6 +121,46 @@ $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_api_tests_' . bin2hex(ran
 $dbPath = $tmp . DIRECTORY_SEPARATOR . 'database.sqlite';
 $universePath = $tmp . DIRECTORY_SEPARATOR . 'universe';
 mkdir($tmp, 0775, true);
+
+$testConfigPath = $tmp . DIRECTORY_SEPARATOR . 'config';
+mkdir($testConfigPath, 0775, true);
+file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'gameplay.json', json_encode([
+    'probe' => [
+        'initialMannyCount' => 4,
+        'maxDeuteriumPercent' => 100.0,
+    ],
+    'movement' => [
+        'durationFactor' => 0.5,
+        'preparationMinutes' => 10,
+    ],
+    'crafting' => [
+        'steel_bar' => [
+            'durationSeconds' => 300,
+            'metalsCost' => 0.02,
+        ],
+    ],
+    'listValues' => ['base', 'kept'],
+], JSON_THROW_ON_ERROR));
+file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'gameplay-local.json', json_encode([
+    'probe' => [
+        'initialMannyCount' => 6,
+    ],
+    'movement' => [
+        'durationFactor' => 1.0,
+    ],
+    'crafting' => [
+        'steel_bar' => [
+            'durationSeconds' => 123,
+        ],
+    ],
+    'listValues' => ['local'],
+], JSON_THROW_ON_ERROR));
+$loadedGameplayConfig = (new JsonConfigLoader($tmp))->load('gameplay');
+$test->assertEquals(6, $loadedGameplayConfig['probe']['initialMannyCount'] ?? null, 'local gameplay config overrides scalar values');
+$test->assertEquals(100, $loadedGameplayConfig['probe']['maxDeuteriumPercent'] ?? null, 'local gameplay config keeps unspecified nested defaults');
+$test->assertEquals(['local'], $loadedGameplayConfig['listValues'] ?? null, 'local gameplay config replaces list values');
+$configuredSteelBar = CraftingRecipeCatalog::find('steel_bar', $loadedGameplayConfig['crafting'] ?? []);
+$test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafting recipes consume gameplay config overrides');
 
 $oauthConfigPath = $tmp . DIRECTORY_SEPARATOR . 'oauth.json';
 file_put_contents($oauthConfigPath, json_encode([

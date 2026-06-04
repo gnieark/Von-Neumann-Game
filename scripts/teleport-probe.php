@@ -14,6 +14,7 @@ avec 42 l'id de a sonde
 */
 
 use VonNeumannGame\AppFactory;
+use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeStatus;
@@ -30,6 +31,7 @@ use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
+use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\SchedulerService;
 
@@ -45,21 +47,26 @@ try {
     $root = dirname(__DIR__);
     $factory = new AppFactory($root);
     $pdo = $factory->pdo(initializeSchema: true);
+    $appConfig = $factory->appConfig();
+    $gameplayConfig = $factory->gameplayConfig();
 
     $players = new PlayerRepository($pdo);
-    $probes = new NeumannProbeRepository($pdo);
+    $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
     $movements = new ProbeMovementRepository($pdo);
     $visitedSectors = new VisitedSectorRepository($pdo);
     $scheduledEvents = new ScheduledEventRepository($pdo);
-    $mannies = new MannyRepository($pdo);
+    $mannies = new MannyRepository($pdo, $gameplayConfig);
     $sectorService = buildSectorService($factory, $root);
+    $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
     $movementService = new ProbeMovementService(
         $probes,
         $movements,
         $visitedSectors,
         $scheduledEvents,
         $sectorService,
-        worldSeed: (string) ($factory->appConfig()['worldSeed'] ?? 'default-world'),
+        durations: $durations,
+        worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'),
+        gameplayConfig: $gameplayConfig,
     );
 
     $probe = $probes->findById($options['probeId']);
@@ -92,7 +99,7 @@ try {
 
     $forgottenMannies = 0;
     if (!$sameSector) {
-        $forgottenMannies = registerForgottenMannies($mannies, $sectorService, $probe);
+        $forgottenMannies = registerForgottenMannies($mannies, $sectorService, $probe, $gameplayConfig);
     }
 
     $pdo->beginTransaction();
@@ -278,7 +285,7 @@ function buildSectorService(AppFactory $factory, string $root): SectorService
 
     return new SectorService(
         new SectorFileRepository($universePath),
-        new SectorContentGenerator(),
+        new SectorContentGenerator($factory->universeConfig()),
         (string) ($appConfig['worldSeed'] ?? 'default-world'),
     );
 }
@@ -339,7 +346,7 @@ function cancelPendingMovementEvents(ScheduledEventRepository $events, array $mo
     return $cancelled;
 }
 
-function registerForgottenMannies(MannyRepository $mannies, SectorService $sectors, NeumannProbe $probe): int
+function registerForgottenMannies(MannyRepository $mannies, SectorService $sectors, NeumannProbe $probe, array $gameplayConfig): int
 {
     $sector = null;
     $registered = 0;
@@ -355,7 +362,9 @@ function registerForgottenMannies(MannyRepository $mannies, SectorService $secto
             $manny->name,
             $manny->uid,
             SectorManny::STATE_FORGOTTEN,
-            $manny->cargoArray(),
+            array_replace($manny->cargoArray(), [
+                'capacity' => max(0.0001, Config::float($gameplayConfig, 'manny.cargoCapacity', \VonNeumannGame\Domain\Manny::CARGO_CAPACITY)),
+            ]),
             'Manny left behind by debug teleport.',
         );
 
