@@ -11,7 +11,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260604-storage-line-actions';
+const ASSET_VERSION = '20260605-manny-sector-confirm';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);

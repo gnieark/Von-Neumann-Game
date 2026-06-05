@@ -222,14 +222,14 @@ $sectorService = new SectorService($sectorRepository, new SectorContentGenerator
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: 'api-test-world');
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage);
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService, $items, $bookmarkService, $storage);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService, $items, $storage);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(14, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(15, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -785,24 +785,39 @@ if ($createdProbe !== null) {
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('bookmark-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
     ]));
-    $deployBookmark = $kernel->handle('POST', '/api/probe/waypoint-bookmarks/' . rawurlencode((string) ($craftedItems[0]['id'] ?? 'missing')) . '/deploy', $headers, json_encode([
+    $installBookmark = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/install-bookmark', $headers, json_encode([
         'objectId' => 'bookmark-rock',
         'name' => 'Balise test',
     ], JSON_THROW_ON_ERROR));
-    $test->assertEquals(200, $deployBookmark->status, 'POST /api/probe/waypoint-bookmarks/{itemId}/deploy places a bookmark');
-    $test->assertEquals('Balise test', $deployBookmark->body['object']['name'] ?? null, 'bookmark deployment renames the celestial object');
-    $test->assertEquals('Remi', $deployBookmark->body['object']['waypointBookmarks'][0]['playerName'] ?? null, 'bookmark history stores the player display name');
+    $test->assertEquals(202, $installBookmark->status, 'POST /api/probe/mannies/{id}/install-bookmark starts a bookmark installation task');
+    $test->assertEquals('installing_waypoint_bookmark', $installBookmark->body['manny']['currentTask'] ?? null, 'bookmark installation task is exposed on Manny');
+    $test->assertEquals(10, $installBookmark->body['manny']['task']['durationSeconds'] ?? null, 'bookmark installation takes ten seconds');
+    $test->assertEquals('Balise test', $installBookmark->body['manny']['task']['name'] ?? null, 'bookmark installation stores the requested label');
+    $bookmarkOrderProbe = $kernel->handle('GET', '/api/probe', $headers);
     $remainingBookmarks = array_values(array_filter(
-        $deployBookmark->body['inventory']['items'] ?? [],
+        $bookmarkOrderProbe->body['probe']['inventory']['items'] ?? [],
         static fn(array $item): bool => ($item['type'] ?? null) === 'waypoint_bookmark',
     ));
-    $test->assertEquals(0, count($remainingBookmarks), 'bookmark deployment consumes the waypoint bookmark item');
+    $test->assertEquals(0, count($remainingBookmarks), 'bookmark installation reserves the waypoint bookmark item when the Manny starts');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $completedBookmarkMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $completedBookmarkManny = array_values(array_filter(
+        $completedBookmarkMannies->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $firstMannyId,
+    ))[0] ?? null;
+    $test->assertEquals(null, $completedBookmarkManny['currentTask'] ?? null, 'completed bookmark installation returns the Manny to idle');
+    $test->assertEquals('success', $completedBookmarkManny['task']['result'] ?? null, 'completed bookmark installation records a success result');
     $bookmarkedSector = $sectorRepository->load($createdProbe->currentSector);
     $bookmarkedObject = $bookmarkedSector->findObjectById('bookmark-rock');
     $bookmarkedData = $bookmarkedObject?->toArray() ?? [];
-    $test->assertEquals('Balise test', $bookmarkedObject?->getName(), 'bookmark deployment persists the celestial object name in the sector file');
-    $test->assert(isset($bookmarkedData['waypointBookmarks'][0]['createdAt']), 'bookmark deployment persists a timestamped history entry');
-    $test->assertEquals('Balise test', $deployBookmark->body['sector']['objects'][0]['waypointBookmarks'][0]['name'] ?? null, 'sector observation exposes bookmark history');
+    $test->assertEquals('Balise test', $bookmarkedObject?->getName(), 'bookmark installation persists the celestial object name in the sector file');
+    $test->assert(isset($bookmarkedData['waypointBookmarks'][0]['createdAt']), 'bookmark installation persists a timestamped history entry');
+    $test->assertEquals('Remi', $bookmarkedData['waypointBookmarks'][0]['playerName'] ?? null, 'bookmark history stores the player display name');
+    $bookmarkObservation = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $test->assertEquals('Balise test', $bookmarkObservation->body['sector']['objects'][0]['waypointBookmarks'][0]['name'] ?? null, 'sector observation exposes bookmark history');
 
     $fourthRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $fourthRow->execute(['uid' => $fourthMannyId]);

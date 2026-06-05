@@ -12,6 +12,7 @@ import {
 
 export const createMannyModule = ({state, labels, sector, crafting, api, refreshers = {}}) => {
     const {
+        objectTypeLabel,
         resourceTypeLabel,
         t,
         taskLabel,
@@ -57,6 +58,18 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         return state.currentMannyMineTargets.find((target) => target.id === (payload && payload.objectId)) || null;
     };
 
+    const bookmarkItems = () => (
+        Array.isArray(state.currentInventory && state.currentInventory.items)
+            ? state.currentInventory.items.filter((item) => item.type === 'waypoint_bookmark')
+            : []
+    );
+
+    const bookmarkTargets = () => sector.bookmarkTargetsFromObjects(state.currentSectorObjects);
+
+    const bookmarkTargetLabel = (target) => (
+        [objectTypeLabel(target.type || 'object'), target.name || target.id].filter(Boolean).join(' ')
+    );
+
     const renderMannyTaskPanel = (manny, observedAt) => {
         const payload = manny.task || {};
         const progress = mannyProgressValueHtml(manny, observedAt);
@@ -99,6 +112,17 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 + '<h4>' + escapeHtml(t('salvageInProgress', 'Recovery in progress')) + '</h4>'
                 + '<p>' + escapeHtml(formatText(t('salvageTaskDetail', '{target} will be checked and recovered after the delay.'), {
                     target: sector.salvageTargetLabel(target),
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
+                + '</section>';
+        }
+        if (manny.currentTask === 'installing_waypoint_bookmark') {
+            const target = payload.target || {};
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('bookmarkInstallInProgress', 'Waypoint bookmark installation in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('bookmarkInstallTaskDetail', '{name} toward {target}.'), {
+                    name: payload.name || t('waypointBookmark', 'Waypoint bookmark'),
+                    target: bookmarkTargetLabel(target),
                 })) + '</p>'
                 + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
                 + '</section>';
@@ -163,12 +187,29 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         + '</form>'
     );
 
+    const renderBookmarkForm = () => {
+        const hasStock = bookmarkItems().length > 0;
+        const hasTarget = bookmarkTargets().length > 0;
+        const disabled = !hasStock || !hasTarget;
+        const message = !hasStock
+            ? t('noWaypointBookmark', 'No waypoint bookmark in inventory.')
+            : (!hasTarget ? t('noBookmarkTarget', 'No celestial target available in the current sector.') : '');
+
+        return '<form class="manny-bookmark-form manny-form">'
+            + '<label>' + escapeHtml(t('bookmarkTarget', 'Target')) + '<select class="manny-bookmark-target" name="objectId">' + bookmarkTargetOptions('') + '</select></label>'
+            + '<label>' + escapeHtml(t('bookmarkName', 'Name')) + '<input name="name" maxlength="80" required></label>'
+            + '<button class="manny-bookmark-button" type="submit"' + (disabled ? ' disabled aria-disabled="true"' : '') + '>' + escapeHtml(t('installBookmark', 'Install')) + '</button>'
+            + '<p class="manny-bookmark-hint">' + escapeHtml(message) + '</p>'
+            + '</form>';
+    };
+
     const renderMannyActionForms = (idPrefix) => {
         const prefix = String(idPrefix || 'manny-actions').replace(/[^a-zA-Z0-9_-]/g, '-');
         const actionForms = [
             {id: 'repair', title: t('repairActionTitle', 'Repair'), render: renderRepairForm},
             {id: 'mine', title: t('miningActionTitle', 'Mine'), render: renderMineForm},
             {id: 'salvage', title: t('salvageActionTitle', 'Recover a drifting object'), render: renderSalvageForm},
+            {id: 'bookmark', title: t('installBookmarkActionTitle', 'Install a waypoint-bookmark'), render: renderBookmarkForm},
             {id: 'craft', title: t('craftingActionTitle', 'Craft'), render: renderCraftForm},
         ];
 
@@ -228,6 +269,19 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         return state.currentMannySalvageTargets.map((target) => (
             '<option value="' + escapeHtml(target.id) + '"' + (target.id === selected ? ' selected' : '') + '>'
             + escapeHtml(sector.salvageTargetLabel(target))
+            + '</option>'
+        )).join('');
+    }
+
+    function bookmarkTargetOptions(selected) {
+        const targets = bookmarkTargets();
+        if (targets.length === 0) {
+            return '<option value="">-</option>';
+        }
+
+        return targets.map((target) => (
+            '<option value="' + escapeHtml(target.id) + '"' + (target.id === selected ? ' selected' : '') + '>'
+            + escapeHtml(bookmarkTargetLabel(target))
             + '</option>'
         )).join('');
     }
@@ -377,6 +431,35 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 button.setAttribute('aria-disabled', hasTarget ? 'false' : 'true');
             }
         });
+        updateMannyBookmarkForms();
+    }
+
+    function updateMannyBookmarkForms() {
+        document.querySelectorAll('.manny-bookmark-form').forEach((form) => {
+            const targetSelect = form.querySelector('.manny-bookmark-target');
+            const button = form.querySelector('.manny-bookmark-button');
+            const hint = form.querySelector('.manny-bookmark-hint');
+            const selected = targetSelect ? targetSelect.value : '';
+            const targets = bookmarkTargets();
+            const hasStock = bookmarkItems().length > 0;
+            const hasTarget = targets.length > 0;
+            if (targetSelect) {
+                targetSelect.innerHTML = bookmarkTargetOptions(selected);
+                if (!targets.some((target) => target.id === targetSelect.value)) {
+                    targetSelect.value = targets[0] ? targets[0].id : '';
+                }
+            }
+            if (button) {
+                const disabled = !hasStock || !hasTarget;
+                button.disabled = disabled;
+                button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            }
+            if (hint) {
+                hint.textContent = !hasStock
+                    ? t('noWaypointBookmark', 'No waypoint bookmark in inventory.')
+                    : (!hasTarget ? t('noBookmarkTarget', 'No celestial target available in the current sector.') : '');
+            }
+        });
     }
 
     function clearMannyProgressTimers() {
@@ -493,6 +576,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         }).join('');
         scheduleMannyProgressUpdates();
         crafting.updateMannyCraftForms();
+        updateMannyBookmarkForms();
     }
 
     async function loadMannies() {
@@ -585,6 +669,30 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 });
             },
         },
+        {
+            matches: (form) => form.classList.contains('manny-bookmark-form'),
+            submit: ({form, formData, mannyId}) => {
+                const targetSelect = form.querySelector('.manny-bookmark-target');
+                if (bookmarkItems().length === 0) {
+                    updateMannyBookmarkForms();
+                    setText('manny-status', t('noWaypointBookmark', 'No waypoint bookmark in inventory.'));
+                    return null;
+                }
+                if (!targetSelect || !targetSelect.value) {
+                    updateMannyBookmarkForms();
+                    setText('manny-status', t('noBookmarkTarget', 'No celestial target available in the current sector.'));
+                    return null;
+                }
+
+                return api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/install-bookmark', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        objectId: formData.get('objectId'),
+                        name: formData.get('name'),
+                    }),
+                });
+            },
+        },
     ];
 
     async function submitMannyForm(form, mannyId, formData) {
@@ -639,6 +747,9 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             }
             if (event.target.classList.contains('manny-salvage-target')) {
                 updateMannyTargetOptions();
+            }
+            if (event.target.classList.contains('manny-bookmark-target')) {
+                updateMannyBookmarkForms();
             }
             if (event.target.classList.contains('manny-craft-recipe')) {
                 crafting.updateMannyCraftForm(event.target.closest('.manny-craft-form'));
@@ -703,6 +814,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         bindMannyEvents,
         loadMannies,
         renderMannyList,
+        updateMannyBookmarkForms,
         updateMannyMineFormState,
         updateMannyTargetOptions,
     };

@@ -18,6 +18,7 @@ final class Manny
     public const TASK_RETURNING = 'returning';
     public const TASK_WAITING_FOR_SPACE = 'waiting_for_space';
     public const TASK_MOVING_STORAGE = 'moving_stockage';
+    public const TASK_INSTALLING_WAYPOINT_BOOKMARK = 'installing_waypoint_bookmark';
     public const CARGO_CAPACITY = 0.05;
     public const CONTAINER_SPACE = 0.05;
 

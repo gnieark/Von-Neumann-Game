@@ -18,6 +18,7 @@
 .env.*
 !.env.example
 /config/oauth.json
+/config/*-local.json
 /config/*.local.json
 
 # Logs and cache

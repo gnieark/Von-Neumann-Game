@@ -82,10 +82,10 @@ final class AppFactory
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $bookmarks, $storage, $gameplayConfig);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $gameplayConfig);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService

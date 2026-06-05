@@ -23,7 +23,6 @@ use VonNeumannGame\Service\ProbeMovementException;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SectorObservationService;
-use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -32,7 +31,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 14;
+    public const API_VERSION = 15;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -42,7 +41,6 @@ final class ApiKernel
         private readonly VisitedSectorRepository $visitedSectors,
         private readonly MannyService $mannies,
         private readonly ProbeItemRepository $items,
-        private readonly WaypointBookmarkService $bookmarks,
         private readonly ProbeStorageService $storage,
         private readonly array $gameplayConfig = [],
     ) {}
@@ -57,9 +55,6 @@ final class ApiKernel
         }
 
         try {
-            if (preg_match('#^/api/probe/waypoint-bookmarks/([^/]+)/deploy$#', $routePath, $matches) === 1) {
-                return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeWaypointBookmarkDeployResponse($player, rawurldecode($matches[1]), $body));
-            }
             if (preg_match('#^/api/probe/inventory/([^/]+)/jettison$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeInventoryJettisonResponse($player, rawurldecode($matches[1]), $body));
             }
@@ -72,7 +67,7 @@ final class ApiKernel
             if (preg_match('#^/api/probe/storage-containers/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainerResponse($player, rawurldecode($matches[1])));
             }
-            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|recall)$#', $routePath, $matches) === 1) {
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
@@ -427,32 +422,6 @@ final class ApiKernel
         return ApiResponse::error(404, 'not_found', 'Inventory item not found.');
     }
 
-    private function probeWaypointBookmarkDeployResponse(Player $player, string $itemId, ?string $body): ApiResponse
-    {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $this->movements->ensureProbeOperational($probe);
-        if ($this->movements->activeMovementForProbe($probe) !== null) {
-            return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
-        }
-
-        $data = $this->decodeJsonBody($body);
-        if (!is_array($data) || !isset($data['objectId'], $data['name']) || !is_string($data['objectId']) || !is_string($data['name'])) {
-            return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId and name.');
-        }
-
-        $object = $this->bookmarks->deploy($probe, $player, $itemId, $data['objectId'], $data['name']);
-        $probe = $this->requiredProbe($player);
-        $observation = $this->observations->observe($player, $probe, $probe->currentSector)->toArray();
-        $observation['sensorMode'] = 'normal';
-        $observation['dataFreshness'] = 'live';
-
-        return new ApiResponse(200, [
-            'object' => $object->toArray(),
-            'sector' => $this->withBlackHoleTrapCountdown($observation, $probe),
-            'inventory' => $this->inventoryForProbe($probe)->toArray(),
-        ]);
-    }
-
     private function inventoryResourceType(NeumannProbe $probe, string $itemId): ?string
     {
         return match ($itemId) {
@@ -630,6 +599,20 @@ final class ApiKernel
             }
 
             $manny = $this->mannies->startSalvage($probe, $uid, $data['objectId']);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        if ($action === 'install-bookmark') {
+            $this->movements->ensureProbeOperational($probe);
+            if ($this->movements->activeMovementForProbe($probe) !== null) {
+                return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
+            }
+            if (!isset($data['objectId'], $data['name']) || !is_string($data['objectId']) || !is_string($data['name'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId and name.');
+            }
+
+            $manny = $this->mannies->startWaypointBookmarkInstallation($probe, $player, $uid, $data['objectId'], $data['name']);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }

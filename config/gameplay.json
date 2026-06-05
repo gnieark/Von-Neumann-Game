@@ -35,6 +35,7 @@
       "miningAmountPerTick": 0.01,
       "miningTickSeconds": 300,
       "salvageSeconds": 300,
+      "waypointBookmarkInstallSeconds": 10,
       "storageMoveSecondsPerUnit": 10,
       "storageMoveEceStep": 0.05
     }

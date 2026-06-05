@@ -5,9 +5,9 @@ import {
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
 import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
-import {createInventoryModule} from './inventory.js?v=20260604-storage-line-actions';
-import {createLabels} from './labels.js?v=20260604-storage-line-actions';
-import {createMannyModule} from './manny.js?v=20260604-manny-jump-confirm';
+import {createInventoryModule} from './inventory.js?v=20260605-bookmark-manny';
+import {createLabels} from './labels.js?v=20260605-bookmark-manny';
+import {createMannyModule} from './manny.js?v=20260605-bookmark-manny';
 import {createSectorModule} from './sector.js?v=20260604-system-bodies-v2';
 import {
     bindAccountMenu,
@@ -52,6 +52,7 @@ if (body && body.dataset.authenticated === '1') {
         currentMannyMineTargets: [],
         currentMannies: null,
         currentMannySalvageTargets: [],
+        currentProbeSectorRelative: null,
         currentSectorObjects: [],
         probeAlreadyMoving: false,
     };
@@ -65,15 +66,16 @@ if (body && body.dataset.authenticated === '1') {
         labels,
         onTargetsChanged: () => {
             mannyModule?.updateMannyTargetOptions();
-            inventoryModule?.renderBookmarkAction();
         },
     });
     const craftingModule = createCraftingModule({state, labels});
     inventoryModule = createInventoryModule({
         state,
         labels,
-        sector: sectorModule,
-        onInventoryChanged: () => craftingModule.updateMannyCraftForms(),
+        onInventoryChanged: () => {
+            craftingModule.updateMannyCraftForms();
+            mannyModule?.updateMannyBookmarkForms();
+        },
     });
     mannyModule = createMannyModule({
         state,
@@ -266,15 +268,38 @@ if (body && body.dataset.authenticated === '1') {
 
         return latest || {};
     }
-    const manniesOutsideProbe = (mannies) => (Array.isArray(mannies) ? mannies : [])
-        .filter((manny) => (manny.location && manny.location.type) !== 'probe');
+    const relativeCoordinates = (value) => {
+        if (!value || !Number.isFinite(Number(value.x)) || !Number.isFinite(Number(value.y)) || !Number.isFinite(Number(value.z))) {
+            return null;
+        }
+
+        return {
+            x: Number(value.x),
+            y: Number(value.y),
+            z: Number(value.z),
+        };
+    };
+    const sameRelativeCoordinates = (left, right) => {
+        const a = relativeCoordinates(left);
+        const b = relativeCoordinates(right);
+
+        return a !== null && b !== null && a.x === b.x && a.y === b.y && a.z === b.z;
+    };
+    const manniesOutsideProbeInCurrentSector = (mannies) => (Array.isArray(mannies) ? mannies : [])
+        .filter((manny) => (
+            (manny.location && manny.location.type) !== 'probe'
+            && sameRelativeCoordinates(manny.location && manny.location.sector && manny.location.sector.relative, state.currentProbeSectorRelative)
+        ));
 
     async function confirmJumpWithMannies() {
+        if (state.currentProbeSectorRelative === null) {
+            await loadProbe();
+        }
         const refreshedMannies = await mannyModule.loadMannies();
         const mannies = Array.isArray(refreshedMannies)
             ? refreshedMannies
             : (Array.isArray(state.currentMannies) ? state.currentMannies : []);
-        const absentMannies = manniesOutsideProbe(mannies);
+        const absentMannies = manniesOutsideProbeInCurrentSector(mannies);
         if (absentMannies.length === 0) {
             return true;
         }
@@ -308,6 +333,7 @@ if (body && body.dataset.authenticated === '1') {
             const nav = probe.navigation || {};
             const movement = probe.movement || null;
             const sector = probe.sector && probe.sector.relative ? probe.sector.relative : null;
+            state.currentProbeSectorRelative = sector ? relativeCoordinates(sector) : null;
             const sensorDetail = probe.sensorMode === 'degraded'
                 ? t('sensorDegradedInfo', 'At relativistic speeds, external sensors cannot analyze the environment in detail.')
                 : (probe.sensorMode === 'blind' ? t('sensorBlindInfo', 'At this relativistic speed, external sensors are blinded.') : null);
@@ -337,6 +363,7 @@ if (body && body.dataset.authenticated === '1') {
             inventoryModule.renderInventory(probe.inventory || {});
         } catch (error) {
             updateMoveButtonState(null);
+            state.currentProbeSectorRelative = null;
             setText('probe-json', error.message);
             setText('inventory-json', error.message);
             inventoryModule.renderInventory(null);
@@ -443,39 +470,6 @@ if (body && body.dataset.authenticated === '1') {
             onError: (error) => {
                 setText('action-status', error.message);
                 setText('movement-json', '');
-            },
-        });
-    });
-
-    document.getElementById('actions-panel')?.addEventListener('submit', async (event) => {
-        if (event.target.id !== 'bookmark-form') {
-            return;
-        }
-
-        event.preventDefault();
-        const form = new FormData(event.target);
-        const itemId = String(form.get('itemId') || '');
-        if (!itemId) {
-            return;
-        }
-        await runApiOrder({
-            statusId: 'action-status',
-            pendingText: t('orderSent', 'Order transmitted...'),
-            request: () => postJson('/api/probe/waypoint-bookmarks/' + encodeURIComponent(itemId) + '/deploy', {
-                objectId: form.get('objectId'),
-                name: form.get('name'),
-            }),
-            onSuccess: (data) => {
-                setText('action-status', t('bookmarkAccepted', 'Waypoint bookmark placed.'));
-                setText('movement-json', pretty(data));
-                if (data.inventory) {
-                    inventoryModule.renderInventory(data.inventory);
-                    setText('inventory-json', pretty(data.inventory));
-                }
-                if (data.sector) {
-                    sectorModule.renderSectorObjects(data.sector);
-                    setText('sector-json', pretty({sector: data.sector}));
-                }
             },
         });
     });

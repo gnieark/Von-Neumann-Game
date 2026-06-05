@@ -128,9 +128,10 @@ Une sonde neuve demarre avec:
 - le nombre de Mannies et leur encombrement definis dans `config/gameplay.json`;
 - une cuve externe de deuterium pleine, hors capacite cargo.
 
-`MannyService` gere le renommage, la reparation, le minage et le rappel des
-Mannies. Les taches sont temporelles: leur progression est derivee des timestamps
-stockes, comme pour les mouvements de sonde.
+`MannyService` gere le renommage, la reparation, le minage, la fabrication, la
+recuperation, les deplacements de stock, l'installation de waypoint-bookmarks et
+le rappel des Mannies. Les taches sont temporelles: leur progression est derivee
+des timestamps stockes, comme pour les mouvements de sonde.
 
 ## Secteurs Et Coordonnees
 
@@ -198,6 +199,7 @@ Routes principales:
 - `POST /api/probe/mannies/{mannyId}/mine`
 - `POST /api/probe/mannies/{mannyId}/craft`
 - `POST /api/probe/mannies/{mannyId}/salvage`
+- `POST /api/probe/mannies/{mannyId}/install-bookmark`
 - `POST /api/probe/mannies/{mannyId}/recall`
 - `GET /api/sector?x=...&y=...&z=...`
 
@@ -216,6 +218,10 @@ les objets craftables standards (`waypoint_bookmark`, `steel_bar`,
 courant. Une Manny peut recuperer ces piles avec l'action `salvage`, dans la
 limite de sa capacite de transport par voyage. Les conteneurs supplementaires
 gardent une mecanique de jettison reservee pour plus tard.
+Un `waypoint_bookmark` stocke s'installe via une tache Manny
+`installing_waypoint_bookmark`: la Manny reserve l'objet, passe 10 secondes a
+lui donner son impulsion, puis la persistance habituelle des `waypointBookmarks`
+est appliquee a l'objet cible du secteur courant.
 Les autres sondes detectees dans le secteur courant apparaissent dans
 `sector.probes` avec leur id, leur nom et leur etat de mouvement.
 

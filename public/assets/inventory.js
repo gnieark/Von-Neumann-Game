@@ -3,68 +3,19 @@ import {
     numberValue,
 } from './utils.js?v=20260604-system-bodies-v2';
 
-export const createInventoryModule = ({state, labels, sector, onInventoryChanged = () => {}}) => {
+export const createInventoryModule = ({state, labels, onInventoryChanged = () => {}}) => {
     const {
         inventoryItemTypeLabel,
-        objectTypeLabel,
         resourceTypeLabel,
         t,
         taskLabel,
     } = labels;
-
-    const bookmarkItems = () => (
-        Array.isArray(state.currentInventory && state.currentInventory.items)
-            ? state.currentInventory.items.filter((item) => item.type === 'waypoint_bookmark')
-            : []
-    );
 
     const inventoryItemName = (item) => (
         item && item.type
             ? inventoryItemTypeLabel(item.type, item.name || item.type)
             : (item && (item.name || item.id)) || '-'
     );
-
-    const bookmarkTargetLabel = (target) => (
-        [objectTypeLabel(target.type || 'object'), target.name || target.id].filter(Boolean).join(' ')
-    );
-
-    const renderBookmarkAction = () => {
-        const node = document.getElementById('bookmark-action');
-        if (!node) {
-            return;
-        }
-
-        const items = bookmarkItems();
-        const targets = sector.bookmarkTargetsFromObjects(state.currentSectorObjects);
-        if (items.length === 0) {
-            node.innerHTML = '<section class="bookmark-action-panel">'
-                + '<h3>' + escapeHtml(t('bookmarkActionTitle', 'Place a waypoint bookmark')) + '</h3>'
-                + '<p>' + escapeHtml(t('noWaypointBookmark', 'No waypoint bookmark in inventory.')) + '</p>'
-                + '</section>';
-            return;
-        }
-        if (targets.length === 0) {
-            node.innerHTML = '<section class="bookmark-action-panel">'
-                + '<h3>' + escapeHtml(t('bookmarkActionTitle', 'Place a waypoint bookmark')) + '</h3>'
-                + '<p>' + escapeHtml(t('noBookmarkTarget', 'No celestial target available in the current sector.')) + '</p>'
-                + '</section>';
-            return;
-        }
-
-        node.innerHTML = '<section class="bookmark-action-panel">'
-            + '<h3>' + escapeHtml(t('bookmarkActionTitle', 'Place a waypoint bookmark')) + '</h3>'
-            + '<form id="bookmark-form" class="bookmark-form">'
-            + '<label>' + escapeHtml(t('bookmarkItem', 'Bookmark')) + '<select name="itemId">'
-            + items.map((item) => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(inventoryItemName(item)) + '</option>').join('')
-            + '</select></label>'
-            + '<label>' + escapeHtml(t('bookmarkTarget', 'Target')) + '<select name="objectId">'
-            + targets.map((target) => '<option value="' + escapeHtml(target.id) + '">' + escapeHtml(bookmarkTargetLabel(target)) + '</option>').join('')
-            + '</select></label>'
-            + '<label>' + escapeHtml(t('bookmarkName', 'Name')) + '<input name="name" maxlength="80" required></label>'
-            + '<button type="submit">' + escapeHtml(t('deployBookmark', 'Place')) + '</button>'
-            + '</form>'
-            + '</section>';
-    };
 
     const inventoryEntryDetail = (entry) => {
         const details = [
@@ -318,7 +269,6 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
         if (!state.inventoryContainerFilter) {
             state.inventoryContainerFilter = 'all';
         }
-        renderBookmarkAction();
         onInventoryChanged();
         renderStorageRules(inventory);
         if (!inventory || typeof inventory !== 'object') {
@@ -377,7 +327,6 @@ export const createInventoryModule = ({state, labels, sector, onInventoryChanged
 
     return {
         inventoryItemName,
-        renderBookmarkAction,
         renderInventory,
     };
 };
