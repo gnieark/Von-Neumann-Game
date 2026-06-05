@@ -419,6 +419,128 @@ button:disabled {
     gap: 10px;
 }
 
+.tutorial-dialog {
+    z-index: 1000;
+    width: min(640px, calc(100% - 28px));
+    max-height: calc(100dvh - 32px);
+    border: 1px solid rgba(143, 182, 189, .48);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,.065), rgba(255,255,255,.018)),
+        #111416;
+    color: var(--text);
+    padding: 24px;
+    overflow: auto;
+    box-shadow: 0 26px 70px rgba(0,0,0,.68);
+}
+
+.tutorial-dialog::backdrop {
+    background: rgba(0,0,0,.68);
+    backdrop-filter: blur(2px);
+}
+
+.tutorial-dialog h2 {
+    margin: 0 0 8px;
+}
+
+.tutorial-dialog h3 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+}
+
+.tutorial-dialog p {
+    line-height: 1.6;
+}
+
+.tutorial-step-progress {
+    margin: 0 0 18px;
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+.tutorial-step {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    align-items: stretch;
+    min-height: 210px;
+}
+
+.tutorial-step[hidden] {
+    display: none;
+}
+
+.tutorial-illustration {
+    display: grid;
+    min-height: 190px;
+    overflow: hidden;
+    place-items: center;
+    border: 1px solid rgba(143, 182, 189, .28);
+    background:
+        linear-gradient(135deg, rgba(143, 182, 189, .08), rgba(184, 111, 75, .08)),
+        rgba(0,0,0,.2);
+    color: var(--muted);
+    font-size: .78rem;
+    text-transform: uppercase;
+}
+
+.tutorial-illustration-image {
+    display: block;
+    width: 100%;
+    max-height: min(46dvh, 420px);
+    object-fit: contain;
+}
+
+.tutorial-image-button {
+    display: block;
+    width: 100%;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: zoom-in;
+}
+
+.tutorial-image-button:hover {
+    border: 0;
+}
+
+.tutorial-image-button:focus-visible {
+    outline: 2px solid rgba(143, 182, 189, .55);
+    outline-offset: 3px;
+}
+
+.tutorial-image-preview-dialog {
+    z-index: 1100;
+    width: min(1080px, calc(100% - 24px));
+    max-height: calc(100dvh - 24px);
+    border: 1px solid rgba(143, 182, 189, .55);
+    background: #080a0b;
+    padding: 14px;
+    box-shadow: 0 28px 78px rgba(0,0,0,.78);
+}
+
+.tutorial-image-preview-dialog::backdrop {
+    background: rgba(0,0,0,.78);
+}
+
+.tutorial-image-preview {
+    display: block;
+    width: 100%;
+    max-height: calc(100dvh - 76px);
+    object-fit: contain;
+}
+
+.tutorial-step-copy {
+    display: grid;
+    align-content: start;
+}
+
+.tutorial-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 22px;
+}
+
 .site-footer {
     display: flex;
     justify-content: flex-end;
@@ -458,16 +580,38 @@ button:disabled {
     right: 0;
     top: calc(100% + 8px);
     min-width: 220px;
+    max-width: calc(100vw - 20px);
     padding: 8px;
     border: 1px solid rgba(143, 182, 189, .4);
     background: #101314;
     box-shadow: 0 18px 34px rgba(0,0,0,.45);
 }
 
-.account-menu-panel button {
+.account-menu-panel button,
+.account-menu-item {
     width: 100%;
     padding: 0 12px;
     text-align: left;
+}
+
+.account-menu-item {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: transparent;
+    color: var(--muted);
+}
+
+button.account-menu-item {
+    color: var(--text);
+    cursor: pointer;
+}
+
+button.account-menu-item:hover {
+    border-color: rgba(143, 182, 189, .34);
+    background: rgba(143, 182, 189, .08);
 }
 
 .language-form {
@@ -1452,6 +1596,12 @@ button:disabled {
         margin-left: 0;
     }
 
+    .tutorial-menu .account-menu-panel {
+        right: auto;
+        left: 0;
+        min-width: min(220px, calc(100vw - 20px));
+    }
+
     .sessionbar {
         flex-wrap: wrap;
     }
@@ -1464,6 +1614,7 @@ button:disabled {
     .game-brief,
     .access-login-panel,
     .console-grid,
+    .tutorial-step,
     .coordinate-form,
     .action-panel,
     .manny-form,

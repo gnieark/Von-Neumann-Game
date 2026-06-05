@@ -5,13 +5,14 @@ declare(strict_types=1);
 use VonNeumannGame\AppFactory;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\I18n\Translator;
+use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\View\TplBlock;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260605-player-ui-alerts';
+const ASSET_VERSION = '20260605-tutorial-image-preview';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -77,17 +78,20 @@ if ($routePath === '/logout' && $method === 'POST') {
 }
 
 if ($routePath === '/about' && in_array($method, ['GET', 'HEAD'], true)) {
-    renderAbout($projectRoot, $translator, currentPlayer($factory));
+    $player = currentPlayer($factory);
+    renderAbout($projectRoot, $translator, $player, currentProbeName($factory, $player));
     return;
 }
 
 if ($routePath === '/changelog' && in_array($method, ['GET', 'HEAD'], true)) {
-    renderChangelog($projectRoot, $translator, currentPlayer($factory));
+    $player = currentPlayer($factory);
+    renderChangelog($projectRoot, $translator, $player, currentProbeName($factory, $player));
     return;
 }
 
 if ($routePath === '/api-docs' && in_array($method, ['GET', 'HEAD'], true)) {
-    renderApiDocs($projectRoot, $translator, currentPlayer($factory));
+    $player = currentPlayer($factory);
+    renderApiDocs($projectRoot, $translator, $player, currentProbeName($factory, $player));
     return;
 }
 
@@ -103,9 +107,10 @@ if ($routePath !== '/' || $method !== 'GET') {
     return;
 }
 
-renderHome($projectRoot, $translator, currentPlayer($factory));
+$player = currentPlayer($factory);
+renderHome($projectRoot, $translator, $player, null, currentProbeName($factory, $player));
 
-function renderHome(string $projectRoot, Translator $translator, ?Player $player, ?string $loginError = null): void
+function renderHome(string $projectRoot, Translator $translator, ?Player $player, ?string $loginError = null, ?string $tutorialProbeName = null): void
 {
     $tpl = new TplBlock();
     $tpl->addVars([
@@ -115,6 +120,7 @@ function renderHome(string $projectRoot, Translator $translator, ?Player $player
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
+        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -165,6 +171,7 @@ function renderPasswordAuth(string $projectRoot, Translator $translator, ?string
         'authenticated' => '0',
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
+        'tutorialProbeName' => e('N°8421'),
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -213,7 +220,7 @@ function handlePasswordAuth(AppFactory $factory, string $projectRoot, Translator
     header('Location: /', true, 303);
 }
 
-function renderAbout(string $projectRoot, Translator $translator, ?Player $player): void
+function renderAbout(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
 {
     $tpl = new TplBlock();
     $tpl->addVars([
@@ -223,6 +230,7 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
+        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -238,7 +246,7 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
     echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
 }
 
-function renderChangelog(string $projectRoot, Translator $translator, ?Player $player): void
+function renderChangelog(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
 {
     $path = $projectRoot . '/CHANGELOG.md';
     if (!is_file($path)) {
@@ -256,6 +264,7 @@ function renderChangelog(string $projectRoot, Translator $translator, ?Player $p
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
+        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -273,7 +282,7 @@ function renderChangelog(string $projectRoot, Translator $translator, ?Player $p
     echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
 }
 
-function renderApiDocs(string $projectRoot, Translator $translator, ?Player $player): void
+function renderApiDocs(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
 {
     $tpl = new TplBlock();
     $tpl->addVars([
@@ -283,6 +292,7 @@ function renderApiDocs(string $projectRoot, Translator $translator, ?Player $pla
         'authenticated' => $player === null ? '0' : '1',
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
+        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -326,6 +336,7 @@ function renderOAuthPseudo(string $projectRoot, Translator $translator, string $
         'authenticated' => '0',
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
+        'tutorialProbeName' => e('N°8421'),
         'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
@@ -677,6 +688,17 @@ function currentPlayer(AppFactory $factory): ?Player
     }
 
     return $factory->authService($factory->pdo(initializeSchema: true))->getPlayerFromBearerToken('Bearer ' . $token);
+}
+
+function currentProbeName(AppFactory $factory, ?Player $player): ?string
+{
+    if ($player === null) {
+        return null;
+    }
+
+    $probes = new NeumannProbeRepository($factory->pdo(initializeSchema: true), $factory->gameplayConfig());
+
+    return $probes->findByPlayerId($player->id)?->name;
 }
 
 function redirect(string $location): void

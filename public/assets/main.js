@@ -14,7 +14,8 @@ import {
     bindMetricDetails,
     bindPanelTabs,
     bindRefreshButtons,
-} from './ui-accordion.js?v=20260604-system-bodies-v2';
+    bindTutorialDialog,
+} from './ui-accordion.js?v=20260605-tutorial-image-preview';
 import {
     bindLanguageForm,
     coordinate,
@@ -34,6 +35,8 @@ const i18n = readI18n();
 bindLanguageForm();
 bindOAuthRememberLinks();
 initSwaggerUi();
+const closeAccountMenus = bindAccountMenu();
+bindTutorialDialog({closeAccountMenus});
 
 const body = document.body;
 if (body && body.dataset.authenticated === '1') {
@@ -492,7 +495,6 @@ if (body && body.dataset.authenticated === '1') {
     refreshers.loadProbe = loadProbe;
     refreshers.loadCurrentSector = loadCurrentSector;
 
-    const closeAccountMenus = bindAccountMenu();
     bindApiKeyDialog({api, t, closeAccountMenus});
     bindPanelTabs();
     bindRefreshButtons({loadCurrentSector, loadMannies, loadProbe});

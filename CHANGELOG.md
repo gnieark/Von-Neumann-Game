@@ -4,6 +4,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-06-05
 
+### Added
+
+- Rédaction et intégration des tutoriels de premiers pas : contexte de la sonde, déplacement et utilisation des Mannys, avec illustrations agrandissables.
+
 ### Changed
 
 - API v15 : l’installation d’un waypoint-bookmark passe par `POST /api/probe/mannies/{mannyId}/install-bookmark` et crée une tâche Manny `installing_waypoint_bookmark` de 10 secondes.
