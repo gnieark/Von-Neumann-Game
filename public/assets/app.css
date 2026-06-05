@@ -528,6 +528,13 @@ button:disabled {
     background: linear-gradient(180deg, #394549, #202629);
 }
 
+.panel-tab.alerts-pending {
+    border-color: #20ff84;
+    color: #d8ffe6;
+    animation: sector-bookmark-alert-blink .8s steps(2, start) infinite;
+    box-shadow: 0 0 0 1px rgba(32, 255, 132, .4), 0 0 20px rgba(32, 255, 132, .28);
+}
+
 .workspace {
     min-width: 0;
 }
@@ -703,6 +710,11 @@ button:disabled {
     font-weight: 700;
 }
 
+.console-alerts-list {
+    display: grid;
+    gap: 12px;
+}
+
 .sector-bookmark-alert,
 .sector-probe-alert {
     display: flex;
@@ -755,6 +767,44 @@ button:disabled {
 .sector-alert-acknowledge:disabled {
     cursor: default;
     opacity: .72;
+}
+
+.jump-checklist {
+    margin: 0 0 16px;
+    padding: 12px;
+    border: 1px solid rgba(143, 182, 189, .28);
+    background: rgba(0, 0, 0, .16);
+}
+
+.jump-checklist h3 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+}
+
+.jump-checklist ul {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.jump-checklist li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.checklist-value {
+    font-weight: 800;
+}
+
+.checklist-value.ok {
+    color: #75ffad;
+}
+
+.checklist-value.warn {
+    color: var(--error);
 }
 
 @keyframes sector-bookmark-alert-blink {
@@ -1357,7 +1407,7 @@ button:disabled {
 .coordinate-form,
 .action-panel {
     display: grid;
-    grid-template-columns: repeat(3, minmax(86px, 1fr)) auto;
+    grid-template-columns: repeat(3, minmax(86px, 1fr)) minmax(130px, auto) minmax(100px, auto);
     gap: 12px;
     align-items: end;
     margin-bottom: 16px;

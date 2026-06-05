@@ -8,10 +8,9 @@ import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
 import {createInventoryModule} from './inventory.js?v=20260605-bookmark-manny';
 import {createLabels} from './labels.js?v=20260605-bookmark-manny';
 import {createMannyModule} from './manny.js?v=20260605-bookmark-manny';
-import {createSectorModule} from './sector.js?v=20260604-system-bodies-v2';
+import {createSectorModule} from './sector.js?v=20260605-player-ui-alerts';
 import {
     bindAccountMenu,
-    bindJsonToggles,
     bindMetricDetails,
     bindPanelTabs,
     bindRefreshButtons,
@@ -25,7 +24,6 @@ import {
     formatText,
     metric,
     numberValue,
-    pretty,
     readI18n,
     setText,
     storageCapacityValue,
@@ -53,8 +51,10 @@ if (body && body.dataset.authenticated === '1') {
         currentMannies: null,
         currentMannySalvageTargets: [],
         currentProbeSectorRelative: null,
+        currentScannedSectorRelative: null,
         currentSectorObjects: [],
         probeAlreadyMoving: false,
+        probeDeuteriumSufficient: false,
     };
 
     const refreshers = {};
@@ -67,6 +67,7 @@ if (body && body.dataset.authenticated === '1') {
         onTargetsChanged: () => {
             mannyModule?.updateMannyTargetOptions();
         },
+        onAlertsChanged: syncAlertTab,
     });
     const craftingModule = createCraftingModule({state, labels});
     inventoryModule = createInventoryModule({
@@ -291,6 +292,111 @@ if (body && body.dataset.authenticated === '1') {
             && sameRelativeCoordinates(manny.location && manny.location.sector && manny.location.sector.relative, state.currentProbeSectorRelative)
         ));
 
+    function activatePanel(panelId) {
+        document.querySelectorAll('.panel-tab').forEach((item) => item.classList.remove('active'));
+        document.querySelectorAll('.data-panel').forEach((panel) => panel.classList.remove('active'));
+        const tab = document.querySelector('.panel-tab[data-panel-target="' + panelId + '"]');
+        tab?.classList.add('active');
+        document.getElementById(panelId)?.classList.add('active');
+    }
+
+    function syncAlertTab(alerts) {
+        const tab = document.getElementById('alerts-tab');
+        if (!tab) {
+            return;
+        }
+
+        const alertList = Array.isArray(alerts) ? alerts : [];
+        const hasAlerts = alertList.length > 0;
+        const hasPendingAlerts = alertList.some((alert) => !alert.acknowledged);
+        tab.disabled = !hasAlerts;
+        tab.setAttribute('aria-disabled', hasAlerts ? 'false' : 'true');
+        tab.classList.toggle('alerts-pending', hasPendingAlerts);
+    }
+
+    const sectorScanTarget = (sector) => relativeCoordinates(sector && sector.relativeCoordinates);
+
+    function syncPrepareJumpButton(sector) {
+        const button = document.getElementById('prepare-jump-button');
+        if (!button) {
+            return;
+        }
+
+        const target = sectorScanTarget(sector);
+        const distance = Number(sector && sector.distance);
+        const isRemoteSector = target !== null && (
+            Number.isFinite(distance)
+                ? distance !== 0
+                : !sameRelativeCoordinates(target, state.currentProbeSectorRelative)
+        );
+        state.currentScannedSectorRelative = isRemoteSector ? target : null;
+        button.hidden = !isRemoteSector;
+        button.disabled = !isRemoteSector;
+        button.setAttribute('aria-disabled', isRemoteSector ? 'false' : 'true');
+    }
+
+    function fillMoveForm(target) {
+        const form = document.getElementById('move-form');
+        if (!form || !target) {
+            return;
+        }
+
+        ['x', 'y', 'z'].forEach((field) => {
+            if (form.elements[field]) {
+                form.elements[field].value = target[field] ?? 0;
+            }
+        });
+    }
+
+    function prepareJumpFromScannedSector() {
+        const target = state.currentScannedSectorRelative;
+        if (!target) {
+            return;
+        }
+
+        fillMoveForm(target);
+        activatePanel('actions-panel');
+    }
+
+    const checklistValue = (ok) => (
+        '<span class="checklist-value ' + (ok ? 'ok' : 'warn') + '">'
+        + escapeHtml(ok ? t('checklistYes', 'Yes') : t('checklistNo', 'No'))
+        + '</span>'
+    );
+
+    const allManniesAboard = () => (
+        Array.isArray(state.currentMannies)
+            ? state.currentMannies.every((manny) => (manny.location && manny.location.type) === 'probe')
+            : false
+    );
+
+    function renderJumpChecklist() {
+        const node = document.getElementById('jump-checklist');
+        if (!node) {
+            return;
+        }
+
+        node.innerHTML = '<h3>' + escapeHtml(t('jumpPreparationChecklist', 'Preparation')) + '</h3>'
+            + '<ul>'
+            + '<li><span>' + escapeHtml(t('deuteriumSufficient', 'Sufficient deuterium')) + '</span>' + checklistValue(state.probeDeuteriumSufficient) + '</li>'
+            + '<li><span>' + escapeHtml(t('manniesAboard', 'Mannys aboard')) + '</span>' + checklistValue(allManniesAboard()) + '</li>'
+            + '</ul>';
+    }
+
+    function applyMoveButtonState() {
+        const button = document.getElementById('move-submit');
+        if (!button) {
+            return;
+        }
+
+        const blockedByFuel = !state.probeDeuteriumSufficient;
+        button.disabled = state.probeAlreadyMoving || blockedByFuel;
+        button.title = state.probeAlreadyMoving
+            ? alreadyMovingMessage
+            : (blockedByFuel ? t('insufficientFuelForJump', 'Insufficient deuterium to initiate a jump.') : '');
+        button.setAttribute('aria-disabled', button.disabled ? 'true' : 'false');
+    }
+
     async function confirmJumpWithMannies() {
         if (state.currentProbeSectorRelative === null) {
             await loadProbe();
@@ -312,16 +418,11 @@ if (body && body.dataset.authenticated === '1') {
     }
 
     function updateMoveButtonState(probe) {
-        const button = document.getElementById('move-submit');
-        if (!button) {
-            return;
-        }
-
         const movement = probe && probe.movement ? probe.movement : null;
         state.probeAlreadyMoving = Boolean(movement && ['preparing', 'accelerating', 'cruising', 'decelerating'].includes(movement.phase || movement.status));
-        button.disabled = state.probeAlreadyMoving;
-        button.title = state.probeAlreadyMoving ? alreadyMovingMessage : '';
-        button.setAttribute('aria-disabled', state.probeAlreadyMoving ? 'true' : 'false');
+        state.probeDeuteriumSufficient = Number(probe && probe.fuel ? probe.fuel.deuterium : 0) > 0.0001;
+        applyMoveButtonState();
+        renderJumpChecklist();
     }
 
     async function loadProbe() {
@@ -358,14 +459,10 @@ if (body && body.dataset.authenticated === '1') {
                 metric(t('internalClock', 'Internal clock'), systems.internalClockRate),
                 metric(t('task', 'Task'), systems.currentTask || t('noTask', 'None')),
             ].join('');
-            setText('probe-json', pretty(data));
-            setText('inventory-json', pretty(probe.inventory || {}));
             inventoryModule.renderInventory(probe.inventory || {});
         } catch (error) {
             updateMoveButtonState(null);
             state.currentProbeSectorRelative = null;
-            setText('probe-json', error.message);
-            setText('inventory-json', error.message);
             inventoryModule.renderInventory(null);
         }
     }
@@ -376,6 +473,7 @@ if (body && body.dataset.authenticated === '1') {
 
     async function loadMannies() {
         await mannyModule.loadMannies();
+        renderJumpChecklist();
     }
 
     async function loadCurrentSector() {
@@ -383,10 +481,11 @@ if (body && body.dataset.authenticated === '1') {
             const data = await api('/api/probe/sector');
             sectorModule.syncSectorForm(data.sector);
             sectorModule.renderSectorObjects(data.sector);
-            setText('sector-json', pretty(data));
+            syncPrepareJumpButton(data.sector);
         } catch (error) {
             sectorModule.renderSectorObjects(null, {syncMannyTargets: true});
-            setText('sector-json', error.message);
+            syncPrepareJumpButton(null);
+            setText('sector-context', error.message);
         }
     }
 
@@ -397,8 +496,8 @@ if (body && body.dataset.authenticated === '1') {
     bindApiKeyDialog({api, t, closeAccountMenus});
     bindPanelTabs();
     bindRefreshButtons({loadCurrentSector, loadMannies, loadProbe});
-    bindJsonToggles();
     mannyModule.bindMannyEvents();
+    renderJumpChecklist();
 
     document.getElementById('sector-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -414,24 +513,31 @@ if (body && body.dataset.authenticated === '1') {
             z: Number.parseInt(form.get('z'), 10),
         };
         if (!validRelativeCoordinates(target)) {
-            setText('sector-json', invalidCoordinateMessage);
+            syncPrepareJumpButton(null);
+            setText('sector-context', invalidCoordinateMessage);
             return;
         }
         try {
             const data = await api('/api/sector?' + query.toString());
             sectorModule.syncSectorForm(data.sector);
             sectorModule.renderSectorObjects(data.sector);
-            setText('sector-json', pretty(data));
+            syncPrepareJumpButton(data.sector);
         } catch (error) {
             sectorModule.renderSectorObjects(null, {syncMannyTargets: false});
-            setText('sector-json', error.message);
+            syncPrepareJumpButton(null);
+            setText('sector-context', error.message);
         }
     });
+
+    document.getElementById('prepare-jump-button')?.addEventListener('click', prepareJumpFromScannedSector);
 
     document.getElementById('jump-control')?.addEventListener('click', () => {
         if (state.probeAlreadyMoving) {
             setText('action-status', alreadyMovingMessage);
-            setText('movement-json', '');
+            return;
+        }
+        if (!state.probeDeuteriumSufficient) {
+            setText('action-status', t('insufficientFuelForJump', 'Insufficient deuterium to initiate a jump.'));
         }
     });
 
@@ -439,7 +545,10 @@ if (body && body.dataset.authenticated === '1') {
         event.preventDefault();
         if (state.probeAlreadyMoving) {
             setText('action-status', alreadyMovingMessage);
-            setText('movement-json', '');
+            return;
+        }
+        if (!state.probeDeuteriumSufficient) {
+            setText('action-status', t('insufficientFuelForJump', 'Insufficient deuterium to initiate a jump.'));
             return;
         }
         const form = new FormData(event.currentTarget);
@@ -450,12 +559,10 @@ if (body && body.dataset.authenticated === '1') {
         };
         if (!validRelativeCoordinates(target)) {
             setText('action-status', invalidCoordinateMessage);
-            setText('movement-json', '');
             return;
         }
         if (!await confirmJumpWithMannies()) {
             setText('action-status', t('movementCancelled', 'Movement cancelled.'));
-            setText('movement-json', '');
             return;
         }
         await runApiOrder({
@@ -464,12 +571,10 @@ if (body && body.dataset.authenticated === '1') {
             request: () => postJson('/api/probe/move', {target}),
             onSuccess: (data) => {
                 setText('action-status', t('movementAccepted', 'Movement accepted.'));
-                setText('movement-json', pretty(data));
                 loadProbe();
             },
             onError: (error) => {
                 setText('action-status', error.message);
-                setText('movement-json', '');
             },
         });
     });
@@ -507,7 +612,6 @@ if (body && body.dataset.authenticated === '1') {
                 setText('inventory-status', t('jettisonAccepted', 'Inventory entry jettisoned into space.'));
                 if (data.inventory) {
                     inventoryModule.renderInventory(data.inventory);
-                    setText('inventory-json', pretty(data.inventory));
                 }
                 loadProbe();
                 loadCurrentSector();
@@ -536,7 +640,6 @@ if (body && body.dataset.authenticated === '1') {
                     setText('inventory-status', t('storageRulesSaved', 'Storage rules saved.'));
                     if (data.inventory) {
                         inventoryModule.renderInventory(data.inventory);
-                        setText('inventory-json', pretty(data.inventory));
                     }
                     loadProbe();
                 },
@@ -560,7 +663,6 @@ if (body && body.dataset.authenticated === '1') {
                     setText('inventory-status', t('storageMoveAccepted', 'Storage move assigned.'));
                     if (data.inventory) {
                         inventoryModule.renderInventory(data.inventory);
-                        setText('inventory-json', pretty(data.inventory));
                     }
                     loadProbe();
                     loadMannies();

@@ -13,7 +13,7 @@ export const mannyMiningAmountMax = 0.55;
 
 const sectorAlertAcknowledgementsStorageKey = 'vng:sector-alert-acknowledgements:v1';
 
-export const createSectorModule = ({state, labels, onTargetsChanged = () => {}}) => {
+export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, onAlertsChanged = () => {}}) => {
     const {
         mannyStateLabel,
         objectTypeLabel,
@@ -196,25 +196,6 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
         writeSectorAlertAcknowledgements(acknowledgements);
     };
 
-    const renderAcknowledgableSectorAlert = (node, message, type, sector, signature) => {
-        const acknowledged = isSectorAlertAcknowledged(type, sector, signature);
-        node.classList.toggle('acknowledged', acknowledged);
-        node.innerHTML = '<span class="sector-alert-message">' + escapeHtml(message) + '</span>'
-            + '<button class="sector-alert-acknowledge" type="button">'
-            + escapeHtml(acknowledged ? t('acknowledgedAlert', 'Acknowledged') : t('acknowledgeAlert', 'Acknowledge'))
-            + '</button>';
-        const button = node.querySelector('.sector-alert-acknowledge');
-        if (button) {
-            button.disabled = acknowledged;
-            button.setAttribute('aria-disabled', acknowledged ? 'true' : 'false');
-            button.addEventListener('click', () => {
-                acknowledgeSectorAlert(type, sector, signature);
-                renderAcknowledgableSectorAlert(node, message, type, sector, signature);
-            });
-        }
-        node.hidden = false;
-    };
-
     const sectorContext = (sector) => {
         const distance = Number(sector && sector.distance);
         if (!Number.isFinite(distance)) {
@@ -359,39 +340,29 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
         return result;
     };
 
-    const renderSectorBookmarkAlert = (sector) => {
-        const node = document.getElementById('sector-bookmark-alert');
-        if (!node) {
-            return;
-        }
-
+    const sectorBookmarkAlert = (sector) => {
         const bookmarkedObjects = bookmarkedSectorObjects(sector);
         if (bookmarkedObjects.length === 0) {
-            node.hidden = true;
-            node.textContent = '';
-            node.classList.remove('acknowledged');
-            return;
+            return null;
         }
 
         const message = formatText(t('sectorWaypointBookmarkAlert', 'Waypoint bookmark detected on object(s): {objects}'), {
             objects: bookmarkedObjects.map((object) => object.label).join(', '),
         });
         const signature = bookmarkedObjects.map((object) => object.key).sort().join('|');
-        renderAcknowledgableSectorAlert(node, message, 'bookmark', sector, signature);
+
+        return {
+            type: 'bookmark',
+            className: 'sector-bookmark-alert',
+            message,
+            signature,
+        };
     };
 
-    const renderSectorProbeAlert = (sector) => {
-        const node = document.getElementById('sector-probe-alert');
-        if (!node) {
-            return;
-        }
-
+    const sectorProbeAlert = (sector) => {
         const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
         if (probes.length === 0) {
-            node.hidden = true;
-            node.textContent = '';
-            node.classList.remove('acknowledged');
-            return;
+            return null;
         }
 
         const probeLabels = probes.map((probe) => formatText(t('sectorProbeAlertEntry', '{name} ({movement})'), {
@@ -411,7 +382,63 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
             ].join(':'))
             .sort()
             .join('|');
-        renderAcknowledgableSectorAlert(node, message, 'probe', sector, signature);
+
+        return {
+            type: 'probe',
+            className: 'sector-probe-alert',
+            message,
+            signature,
+        };
+    };
+
+    const sectorAlerts = (sector) => [
+        sectorBookmarkAlert(sector),
+        sectorProbeAlert(sector),
+    ].filter(Boolean).map((alert) => ({
+        ...alert,
+        acknowledged: isSectorAlertAcknowledged(alert.type, sector, alert.signature),
+    }));
+
+    const renderConsoleAlerts = (sector) => {
+        const alerts = sectorAlerts(sector);
+        onAlertsChanged(alerts);
+
+        const list = document.getElementById('console-alerts-list');
+        const empty = document.getElementById('console-alerts-empty');
+        if (!list) {
+            return;
+        }
+
+        if (empty) {
+            empty.hidden = alerts.length > 0;
+        }
+
+        if (alerts.length === 0) {
+            list.innerHTML = '';
+            return;
+        }
+
+        list.innerHTML = alerts.map((alert, index) => (
+            '<article class="sector-alert ' + escapeHtml(alert.className) + (alert.acknowledged ? ' acknowledged' : '') + '" data-alert-index="' + String(index) + '">'
+                + '<span class="sector-alert-message">' + escapeHtml(alert.message) + '</span>'
+                + '<button class="sector-alert-acknowledge" type="button"' + (alert.acknowledged ? ' disabled aria-disabled="true"' : ' aria-disabled="false"') + '>'
+                + escapeHtml(alert.acknowledged ? t('acknowledgedAlert', 'Acknowledged') : t('acknowledgeAlert', 'Acknowledge'))
+                + '</button>'
+            + '</article>'
+        )).join('');
+
+        list.querySelectorAll('.sector-alert-acknowledge').forEach((button) => {
+            button.addEventListener('click', () => {
+                const alertNode = button.closest('.sector-alert');
+                const alert = alerts[Number.parseInt(alertNode && alertNode.dataset.alertIndex || '-1', 10)];
+                if (!alert) {
+                    return;
+                }
+
+                acknowledgeSectorAlert(alert.type, sector, alert.signature);
+                renderConsoleAlerts(sector);
+            });
+        });
     };
 
     const syncSectorForm = (sector) => {
@@ -607,8 +634,7 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}})
 
         setText('sector-context', sectorContext(sector));
         setText('sector-summary', sectorSummary(sector));
-        renderSectorBookmarkAlert(sector);
-        renderSectorProbeAlert(sector);
+        renderConsoleAlerts(sector);
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         const distance = Number(sector && sector.distance);
         const syncMannyTargets = options.syncMannyTargets ?? (Boolean(sector) && Number.isFinite(distance) && distance === 0);
