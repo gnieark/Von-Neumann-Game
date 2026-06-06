@@ -237,7 +237,7 @@ export const bindPanelTabs = () => {
     });
 };
 
-export const bindRefreshButtons = ({loadCurrentSector, loadMannies, loadProbe}) => {
+export const bindRefreshButtons = ({loadCurrentSector, loadMannies, loadMessages, loadProbe}) => {
     document.querySelectorAll('[data-refresh]').forEach((button) => {
         button.addEventListener('click', () => {
             if (button.dataset.refresh === 'sector') {
@@ -246,6 +246,10 @@ export const bindRefreshButtons = ({loadCurrentSector, loadMannies, loadProbe}) 
             }
             if (button.dataset.refresh === 'mannies') {
                 loadMannies();
+                return;
+            }
+            if (button.dataset.refresh === 'messages' && loadMessages) {
+                loadMessages();
                 return;
             }
             loadProbe();

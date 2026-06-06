@@ -331,7 +331,11 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
                 const key = String(object.id || object.name || label);
                 if (!seen.has(key)) {
                     seen.add(key);
-                    result.push({key, label: label || key});
+                    result.push({
+                        key,
+                        label: label || key,
+                        bookmarks: object.waypointBookmarks,
+                    });
                 }
             }
             ['bookmarkTargets', 'minableTargets'].forEach((childKey) => {
@@ -364,6 +368,24 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
         };
     };
 
+    const sectorBookmarkObjects = (sector) => bookmarkedSectorObjects(sector).map((bookmarkTarget, index) => {
+        const bookmarks = Array.isArray(bookmarkTarget.bookmarks) ? bookmarkTarget.bookmarks : [];
+        const bookmarkNames = bookmarks
+            .map((bookmark) => bookmark && bookmark.name ? bookmark.name : '')
+            .filter(Boolean);
+
+        return {
+            id: 'waypoint-bookmark-' + String(bookmarkTarget.key || index),
+            type: 'waypoint_bookmark',
+            name: bookmarkNames.join(', ') || t('waypointBookmark', 'Waypoint bookmark'),
+            estimated: false,
+            summary: 'Waypoint bookmark detected in this sector.',
+            dangerLevel: 'low',
+            targetLabel: bookmarkTarget.label || '',
+            bookmarkNames,
+        };
+    });
+
     const sectorProbeAlert = (sector) => {
         const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
         if (probes.length === 0) {
@@ -394,6 +416,20 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
             message,
             signature,
         };
+    };
+
+    const sectorProbeObjects = (sector) => {
+        const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
+
+        return probes.map((probe, index) => ({
+            id: 'probe-' + String(probe && probe.id ? probe.id : index),
+            type: 'probe',
+            name: probe && probe.name ? probe.name : t('unknownProbe', 'Unknown probe'),
+            estimated: false,
+            summary: 'Another probe is present in this sector.',
+            dangerLevel: 'low',
+            moving: Boolean(probe && probe.moving),
+        }));
     };
 
     const sectorAlerts = (sector) => [
@@ -498,7 +534,7 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
     }));
 
     const bookmarkTargetsFromObjects = (objects) => objects.flatMap((object) => {
-        const direct = !['manny', 'drifting_item'].includes(object.type) ? [{
+        const direct = !['manny', 'probe', 'drifting_item'].includes(object.type) ? [{
             id: object.id,
             type: object.type || 'object',
             name: object.name || object.id || '',
@@ -638,9 +674,10 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
         }
 
         setText('sector-context', sectorContext(sector));
-        setText('sector-summary', sectorSummary(sector));
         renderConsoleAlerts(sector);
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
+        const displayObjects = objects.concat(sectorBookmarkObjects(sector), sectorProbeObjects(sector));
+        setText('sector-summary', sectorSummary(sector ? {...sector, objects: displayObjects} : sector));
         const distance = Number(sector && sector.distance);
         const syncMannyTargets = options.syncMannyTargets ?? (Boolean(sector) && Number.isFinite(distance) && distance === 0);
         if (syncMannyTargets) {
@@ -648,7 +685,7 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
             state.currentMannySalvageTargets = salvageTargetsFromObjects(objects);
             state.currentSectorObjects = objects;
         }
-        node.innerHTML = objects.map((object, index) => {
+        node.innerHTML = displayObjects.map((object, index) => {
             const danger = object.dangerLevel || 'unknown';
             const classes = ['sector-object', danger === 'extreme' ? 'sector-object-warning' : ''].filter(Boolean).join(' ');
             const countdown = object.noReturnCountdown && Number.isFinite(Number(object.noReturnCountdown.secondsRemaining))
@@ -664,11 +701,24 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
             const driftingItemDetail = object.type === 'drifting_item'
                 ? '<p>' + escapeHtml(t('quantity', 'Quantity') + ' ' + String(object.quantity || 0)) + '</p>'
                 : '';
+            const bookmarkDetail = object.type === 'waypoint_bookmark'
+                ? '<p>' + escapeHtml(t('bookmarkTarget', 'Target') + ' ' + (object.targetLabel || '-')) + '</p>'
+                    + '<p>' + escapeHtml(t('bookmarkName', 'Name') + ' ' + (Array.isArray(object.bookmarkNames) && object.bookmarkNames.length > 0 ? object.bookmarkNames.join(', ') : (object.name || '-'))) + '</p>'
+                : '';
+            const probeDetail = object.type === 'probe'
+                ? '<p>' + escapeHtml(
+                    [object.name || t('unknownProbe', 'Unknown probe'), object.moving
+                        ? t('probeMovementActive', 'movement in progress')
+                        : t('probeMovementInactive', 'no movement in progress')].filter(Boolean).join(' · '),
+                ) + '</p>'
+                : '';
             return '<article class="' + classes + '">'
                 + '<div class="sector-object-heading"><span>' + escapeHtml(objectTypeLabel(object.type || 'unknown')) + '</span><b>' + escapeHtml(dangerLevelLabel(danger)) + '</b></div>'
                 + '<p>' + escapeHtml(observationSummaryLabel(object.summary || '')) + '</p>'
                 + mannyDetail
                 + driftingItemDetail
+                + bookmarkDetail
+                + probeDetail
                 + solarSystemDetails(object, index)
                 + countdown
                 + '</article>';

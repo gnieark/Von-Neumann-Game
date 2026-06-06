@@ -10,11 +10,13 @@ use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
+use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\VisitedSector;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyActionException;
 use VonNeumannGame\Service\MannyService;
@@ -31,7 +33,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 15;
+    public const API_VERSION = 19;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -42,6 +44,7 @@ final class ApiKernel
         private readonly MannyService $mannies,
         private readonly ProbeItemRepository $items,
         private readonly ProbeStorageService $storage,
+        private readonly ProbeMessageRepository $messages,
         private readonly array $gameplayConfig = [],
     ) {}
 
@@ -73,6 +76,9 @@ final class ApiKernel
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMannyRenameResponse($player, rawurldecode($matches[1]), $body));
             }
+            if (preg_match('#^/api/probe/messages/(\d+)/read$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, (int) $matches[1]));
+            }
 
             return match ($routePath) {
                 '/api/version' => $this->routeApiVersion($method),
@@ -83,6 +89,8 @@ final class ApiKernel
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
                 '/api/probe/storage-containers' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player)),
                 '/api/probe/storage-moves' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeStorageMoveResponse($player, $body)),
+                '/api/probe/messages/sent' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSentMessagesResponse($player, $query)),
+                '/api/probe/messages' => $this->protectedRoute($method, ['GET', 'POST'], $headers, fn(Player $player): ApiResponse => $method === 'POST' ? $this->probeMessageSendResponse($player, $body) : $this->probeMessagesResponse($player, $query)),
                 '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
@@ -345,6 +353,139 @@ final class ApiKernel
             'manny' => $this->mannyArray($player, $probe, $manny),
             'inventory' => $this->inventoryForProbe($probe)->toArray(),
         ]);
+    }
+
+    private function probeMessageSendResponse(Player $player, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a probe message.');
+        }
+
+        $recipientProbeId = $this->messageRecipientProbeId($data['recipientProbeId'] ?? null);
+        if ($recipientProbeId === null) {
+            return ApiResponse::error(400, 'bad_request', 'Message requires recipientProbeId.');
+        }
+        if ($recipientProbeId === $probe->id) {
+            return ApiResponse::error(422, 'invalid_message_recipient', 'A probe cannot send a message to itself.');
+        }
+
+        $messageBody = isset($data['body']) && is_string($data['body']) ? trim($data['body']) : '';
+        if ($messageBody === '' || strlen($messageBody) > 2000) {
+            return ApiResponse::error(400, 'bad_request', 'Message body must contain 1 to 2000 characters.');
+        }
+
+        $recipient = $this->probes->findById($recipientProbeId);
+        if ($recipient === null) {
+            return ApiResponse::error(404, 'not_found', 'Recipient probe not found.');
+        }
+        $recipient = $this->movements->refreshProbeMovementState($recipient);
+        if (!$recipient->currentSector->equals($probe->currentSector)) {
+            return ApiResponse::error(422, 'probe_not_in_same_sector', 'Recipient probe must be in the same sector.');
+        }
+
+        $message = $this->messages->create($probe->id, $recipient->id, $probe->currentSector, $messageBody);
+
+        return new ApiResponse(201, ['message' => $this->probeMessageArray($player, $message)]);
+    }
+
+    private function probeMessagesResponse(Player $player, array $query): ApiResponse
+    {
+        return $this->probeMessageListResponse($player, $query, false);
+    }
+
+    private function probeSentMessagesResponse(Player $player, array $query): ApiResponse
+    {
+        return $this->probeMessageListResponse($player, $query, true);
+    }
+
+    private function probeMessageListResponse(Player $player, array $query, bool $sent): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $limit = $this->messagePaginationParameter($query, 'limit', 50, 1, 200);
+        if ($limit instanceof ApiResponse) {
+            return $limit;
+        }
+        $offset = $this->messagePaginationParameter($query, 'offset', 0, 0);
+        if ($offset instanceof ApiResponse) {
+            return $offset;
+        }
+
+        $messages = $sent
+            ? $this->messages->sentByProbe($probe->id, $limit, $offset)
+            : $this->messages->receivedByProbe($probe->id, $limit, $offset);
+        $total = $sent
+            ? $this->messages->countSentByProbe($probe->id)
+            : $this->messages->countReceivedByProbe($probe->id);
+
+        return new ApiResponse(200, [
+            'messages' => array_map(
+                fn(ProbeMessage $message): array => $this->probeMessageArray($player, $message, includeReadState: !$sent),
+                $messages,
+            ),
+            'pagination' => [
+                'limit' => $limit,
+                'offset' => $offset,
+                'count' => count($messages),
+                'total' => $total,
+                'hasMore' => $offset + count($messages) < $total,
+            ],
+        ]);
+    }
+
+    private function probeMessageReadResponse(Player $player, int $messageId): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $message = $this->messages->findById($messageId);
+        if ($message === null || $message->recipientProbeId !== $probe->id) {
+            return ApiResponse::error(404, 'not_found', 'Message not found.');
+        }
+
+        return new ApiResponse(200, ['message' => $this->probeMessageArray($player, $this->messages->markRead($message))]);
+    }
+
+    private function messageRecipientProbeId(mixed $value): ?int
+    {
+        if (is_int($value) && $value > 0) {
+            return $value;
+        }
+        if (is_string($value) && ctype_digit($value) && (int) $value > 0) {
+            return (int) $value;
+        }
+
+        return null;
+    }
+
+    private function messagePaginationParameter(array $query, string $name, int $default, int $min, ?int $max = null): int|ApiResponse
+    {
+        if (!array_key_exists($name, $query)) {
+            return $default;
+        }
+
+        $value = $query[$name];
+        if (is_array($value) || !is_string($value) || !ctype_digit($value)) {
+            return ApiResponse::error(400, 'bad_request', $this->messagePaginationError($name, $min, $max));
+        }
+
+        $integer = (int) $value;
+        if ($integer < $min || ($max !== null && $integer > $max)) {
+            return ApiResponse::error(400, 'bad_request', $this->messagePaginationError($name, $min, $max));
+        }
+
+        return $integer;
+    }
+
+    private function messagePaginationError(string $name, int $min, ?int $max): string
+    {
+        if ($max === null) {
+            return sprintf('Query parameter %s must be an integer greater than or equal to %d.', $name, $min);
+        }
+
+        return sprintf('Query parameter %s must be an integer between %d and %d.', $name, $min, $max);
     }
 
     private function probeInventoryJettisonResponse(Player $player, string $itemId, ?string $body): ApiResponse
@@ -708,6 +849,37 @@ final class ApiKernel
             : (new PlayerReferenceFrame($player->homeSector))->globalToRelative($manny->sector);
 
         return $this->mannies->publicArray($probe, $manny, $relativeSector);
+    }
+
+    private function probeMessageArray(Player $player, ProbeMessage $message, bool $includeReadState = true): array
+    {
+        $sender = $this->probes->findById($message->senderProbeId);
+        $recipient = $this->probes->findById($message->recipientProbeId);
+
+        $payload = [
+            'id' => $message->id,
+            'sender' => [
+                'probeId' => $message->senderProbeId,
+                'name' => $sender?->name ?? 'Probe #' . $message->senderProbeId,
+            ],
+            'recipient' => [
+                'probeId' => $message->recipientProbeId,
+                'name' => $recipient?->name ?? 'Probe #' . $message->recipientProbeId,
+            ],
+            'sector' => [
+                'relative' => (new PlayerReferenceFrame($player->homeSector))->globalToRelative($message->sector),
+            ],
+            'body' => $message->body,
+            'createdAt' => $message->createdAt,
+        ];
+
+        if ($includeReadState) {
+            $payload['status'] = $message->status;
+            $payload['readAt'] = $message->readAt;
+            $payload['updatedAt'] = $message->updatedAt;
+        }
+
+        return $payload;
     }
 
     private function movementArray(Player $player, ProbeMovement $movement, bool $includeLive = true): array

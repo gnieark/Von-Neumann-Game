@@ -1,4 +1,4 @@
-import {mannyMiningAmountMax, miningResourceTypes} from './sector.js?v=20260606-api-en-i18n';
+import {mannyMiningAmountMax, miningResourceTypes} from './sector.js?v=20260606-sector-radar-bookmarks';
 import {toggleAccordion} from './ui-accordion.js?v=20260604-system-bodies-v2';
 import {
     coordinate,

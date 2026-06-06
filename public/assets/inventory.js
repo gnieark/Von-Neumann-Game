@@ -85,10 +85,10 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
         jettison: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 11 4 5"></path><path d="m5 10-1-5 5 1"></path><path d="M14 13l6 6"></path><path d="m19 14 1 5-5-1"></path><path d="m14 11 6-6"></path><path d="m19 10 1-5-5 1"></path><path d="M10 13l-6 6"></path><path d="m5 14-1 5 5-1"></path></svg>',
     }[name] || '');
 
-    const lineIconButton = (className, label, icon, disabled = false) => (
+    const lineIconButton = (className, label, icon, disabled = false, visibleLabel = label) => (
         '<button class="inventory-icon-button ' + className + '" type="button" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '"'
         + (disabled ? ' disabled aria-disabled="true"' : '')
-        + '>' + lineIcon(icon) + '</button>'
+        + '>' + lineIcon(icon) + '<span class="inventory-icon-label">' + escapeHtml(visibleLabel) + '</span></button>'
     );
 
     const lineActionFlags = (action, placement) => {
@@ -139,7 +139,7 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
         const flags = lineActionFlags(action, placement);
         return '<span class="inventory-line-controls">'
             + lineIconButton('inventory-line-move', t('moveStorageLine', 'Move'), 'move', !flags.canMove)
-            + lineIconButton('inventory-line-jettison', t('jettisonLine', 'Jettison'), 'jettison', !flags.canJettison)
+            + lineIconButton('inventory-line-jettison', t('jettisonLine', 'Jettison line'), 'jettison', !flags.canJettison, t('jettison', 'Jettison'))
             + '</span>'
             + '<div class="inventory-line-form-slot"></div>';
     };

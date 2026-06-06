@@ -19,6 +19,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
@@ -70,6 +71,7 @@ final class AppFactory
         $mannies = new MannyRepository($pdo, $gameplayConfig);
         $items = new ProbeItemRepository($pdo);
         $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
+        $messages = new ProbeMessageRepository($pdo);
         $movements = new ProbeMovementRepository($pdo);
         $scheduledEvents = new ScheduledEventRepository($pdo);
         $sessions = new SessionRepository($pdo);
@@ -85,7 +87,7 @@ final class AppFactory
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $gameplayConfig);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $gameplayConfig);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService

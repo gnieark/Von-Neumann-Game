@@ -5,17 +5,17 @@ import {
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
 import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
-import {createInventoryModule} from './inventory.js?v=20260606-api-en-i18n';
-import {createLabels} from './labels.js?v=20260606-api-en-i18n';
-import {createMannyModule} from './manny.js?v=20260606-api-en-i18n';
-import {createSectorModule} from './sector.js?v=20260606-api-en-i18n';
+import {createInventoryModule} from './inventory.js?v=20260606-touch-inventory-labels';
+import {createLabels} from './labels.js?v=20260606-sector-radar-bookmarks';
+import {createMannyModule} from './manny.js?v=20260606-sector-radar-bookmarks';
+import {createSectorModule} from './sector.js?v=20260606-sector-radar-bookmarks';
 import {
     bindAccountMenu,
     bindMetricDetails,
     bindPanelTabs,
     bindRefreshButtons,
     bindTutorialDialog,
-} from './ui-accordion.js?v=20260606-tutorial-chain';
+} from './ui-accordion.js?v=20260606-messaging-ui';
 import {
     bindLanguageForm,
     coordinate,
@@ -58,6 +58,12 @@ if (body && body.dataset.authenticated === '1') {
         currentMannySalvageTargets: [],
         currentProbeSectorRelative: null,
         currentScannedSectorRelative: null,
+        currentSectorProbes: [],
+        currentMessageFolder: 'received',
+        receivedMessages: [],
+        receivedMessagePagination: null,
+        sentMessages: [],
+        sentMessagePagination: null,
         currentSectorObjects: [],
         probeAlreadyMoving: false,
         probeDeuteriumSufficient: false,
@@ -102,6 +108,7 @@ if (body && body.dataset.authenticated === '1') {
         method: 'PATCH',
         body: JSON.stringify(bodyValue),
     });
+    const messagePageSize = 50;
     const splitStorageRuleValue = (value) => String(value || '')
         .split(',')
         .map((entry) => entry.trim())
@@ -320,6 +327,242 @@ if (body && body.dataset.authenticated === '1') {
         tab.classList.toggle('alerts-pending', hasPendingAlerts);
     }
 
+    function syncMessageTab() {
+        const tab = document.getElementById('messages-tab');
+        if (!tab) {
+            return;
+        }
+
+        const messages = Array.isArray(state.receivedMessages) ? state.receivedMessages : [];
+        const hasUnreadMessages = messages.some((message) => message && message.status === 'unread');
+        tab.classList.toggle('alerts-pending', hasUnreadMessages);
+    }
+
+    const normalizeMessageFolder = (folder) => (folder === 'sent' ? 'sent' : 'received');
+    const messagesForFolder = (folder) => (
+        normalizeMessageFolder(folder) === 'sent' ? state.sentMessages : state.receivedMessages
+    );
+    const paginationForFolder = (folder) => (
+        normalizeMessageFolder(folder) === 'sent' ? state.sentMessagePagination : state.receivedMessagePagination
+    );
+    const messageEndpointForFolder = (folder) => (
+        normalizeMessageFolder(folder) === 'sent' ? '/api/probe/messages/sent' : '/api/probe/messages'
+    );
+    const setMessagesForFolder = (folder, messages, append) => {
+        if (normalizeMessageFolder(folder) === 'sent') {
+            state.sentMessages = append ? state.sentMessages.concat(messages) : messages;
+            return;
+        }
+
+        state.receivedMessages = append ? state.receivedMessages.concat(messages) : messages;
+    };
+    const setPaginationForFolder = (folder, pagination) => {
+        if (normalizeMessageFolder(folder) === 'sent') {
+            state.sentMessagePagination = pagination;
+            return;
+        }
+
+        state.receivedMessagePagination = pagination;
+    };
+
+    function syncMessageFolderTabs() {
+        const activeFolder = normalizeMessageFolder(state.currentMessageFolder);
+        document.querySelectorAll('[data-message-folder]').forEach((button) => {
+            const isActive = normalizeMessageFolder(button.dataset.messageFolder) === activeFolder;
+            button.classList.toggle('active', isActive);
+            button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            button.setAttribute('tabindex', isActive ? '0' : '-1');
+        });
+
+        const list = document.getElementById('messages-list');
+        if (list) {
+            list.setAttribute('aria-labelledby', activeFolder === 'sent' ? 'messages-sent-tab' : 'messages-received-tab');
+        }
+
+        const empty = document.getElementById('messages-empty');
+        if (empty) {
+            empty.textContent = activeFolder === 'sent'
+                ? t('noSentMessages', 'No sent messages.')
+                : t('noReceivedMessages', 'No received messages.');
+        }
+    }
+
+    const sectorProbeRecipients = () => (
+        Array.isArray(state.currentSectorProbes)
+            ? state.currentSectorProbes.filter((probe) => probe && probe.id)
+            : []
+    );
+
+    function renderMessageRecipients() {
+        const select = document.getElementById('message-recipient');
+        const submit = document.getElementById('message-submit');
+        if (!select) {
+            return;
+        }
+
+        const previousValue = select.value;
+        const probes = sectorProbeRecipients();
+        if (probes.length === 0) {
+            select.innerHTML = '<option value="">' + escapeHtml(t('noMessageRecipients', 'No other probe detected in the sector.')) + '</option>';
+            select.disabled = true;
+            if (submit) {
+                submit.disabled = true;
+                submit.setAttribute('aria-disabled', 'true');
+            }
+            return;
+        }
+
+        select.innerHTML = probes.map((probe) => (
+            '<option value="' + escapeHtml(probe.id) + '">' + escapeHtml(probe.name || t('unknownProbe', 'Unknown probe')) + '</option>'
+        )).join('');
+        if (previousValue && probes.some((probe) => String(probe.id) === previousValue)) {
+            select.value = previousValue;
+        }
+        select.disabled = false;
+        if (submit) {
+            submit.disabled = false;
+            submit.setAttribute('aria-disabled', 'false');
+        }
+    }
+
+    const formatMessageDate = (value) => {
+        if (!value) {
+            return '-';
+        }
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return String(value);
+        }
+
+        return new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
+            dateStyle: 'short',
+            timeStyle: 'short',
+        }).format(date);
+    };
+
+    function renderMessages() {
+        const activeFolder = normalizeMessageFolder(state.currentMessageFolder);
+        const list = document.getElementById('messages-list');
+        const empty = document.getElementById('messages-empty');
+        const loadMore = document.getElementById('messages-load-more');
+        syncMessageFolderTabs();
+        if (!list) {
+            syncMessageTab();
+            return;
+        }
+
+        const messages = Array.isArray(messagesForFolder(activeFolder)) ? messagesForFolder(activeFolder) : [];
+        const pagination = paginationForFolder(activeFolder);
+        if (empty) {
+            empty.hidden = messages.length > 0;
+        }
+        if (loadMore) {
+            loadMore.hidden = !(pagination && pagination.hasMore);
+        }
+
+        list.innerHTML = messages.map((message) => {
+            const counterpart = activeFolder === 'sent' ? (message.recipient || {}) : (message.sender || {});
+            const sector = message.sector && message.sector.relative ? message.sector.relative : null;
+            const statusIsUnread = message.status === 'unread';
+            const isUnread = activeFolder === 'received' && statusIsUnread;
+            const counterpartLabel = activeFolder === 'sent' ? t('messageTo', 'To') : t('messageFrom', 'From');
+            const statusBadge = activeFolder === 'received'
+                ? '<span class="probe-message-status">' + escapeHtml(statusIsUnread ? t('messageUnread', 'Unread') : t('messageRead', 'Read')) + '</span>'
+                : '';
+
+            return '<article class="probe-message ' + (isUnread ? 'unread' : 'read') + '">'
+                + '<div class="probe-message-header">'
+                    + '<div>'
+                        + '<div class="probe-message-sender">' + escapeHtml(counterpartLabel) + ' : ' + escapeHtml(counterpart.name || t('unknownProbe', 'Unknown probe')) + '</div>'
+                        + '<div class="probe-message-meta">'
+                            + '<span>' + escapeHtml(formatMessageDate(message.createdAt)) + '</span>'
+                            + '<span>' + escapeHtml(t('messageSector', 'Sector')) + ' ' + escapeHtml(coordinate(sector)) + '</span>'
+                        + '</div>'
+                    + '</div>'
+                    + statusBadge
+                + '</div>'
+                + '<p class="probe-message-body">' + escapeHtml(message.body || '') + '</p>'
+                + '<div class="probe-message-actions">'
+                    + '<button class="probe-message-read-button" data-message-read-id="' + escapeHtml(message.id) + '" type="button"' + (isUnread ? '' : ' hidden') + '>'
+                        + escapeHtml(t('markMessageRead', 'Mark read'))
+                    + '</button>'
+                + '</div>'
+            + '</article>';
+        }).join('');
+
+        list.querySelectorAll('[data-message-read-id]').forEach((button) => {
+            button.addEventListener('click', () => {
+                markMessageRead(button.dataset.messageReadId || '');
+            });
+        });
+        syncMessageTab();
+    }
+
+    async function loadMessages({folder = state.currentMessageFolder, offset = 0, append = false, silent = false} = {}) {
+        const messageFolder = normalizeMessageFolder(folder);
+        const query = new URLSearchParams({
+            limit: String(messagePageSize),
+            offset: String(offset),
+        });
+
+        try {
+            const data = await api(messageEndpointForFolder(messageFolder) + '?' + query.toString());
+            const messages = Array.isArray(data.messages) ? data.messages : [];
+            setMessagesForFolder(messageFolder, messages, append);
+            setPaginationForFolder(messageFolder, data.pagination || null);
+            if (messageFolder === normalizeMessageFolder(state.currentMessageFolder)) {
+                renderMessages();
+            } else {
+                syncMessageTab();
+            }
+            if (!silent) {
+                setText('message-status', '');
+            }
+        } catch (error) {
+            if (!append) {
+                setMessagesForFolder(messageFolder, [], false);
+                setPaginationForFolder(messageFolder, null);
+                renderMessages();
+            }
+            setText('message-status', error.message);
+        }
+    }
+
+    function activateMessageFolder(folder) {
+        const nextFolder = normalizeMessageFolder(folder);
+        state.currentMessageFolder = nextFolder;
+        renderMessages();
+        if (messagesForFolder(nextFolder).length === 0 && paginationForFolder(nextFolder) === null) {
+            loadMessages({folder: nextFolder, silent: true});
+        }
+    }
+
+    async function markMessageRead(messageId) {
+        if (!messageId) {
+            return;
+        }
+
+        setText('message-status', t('orderSent', 'Order transmitted...'));
+        try {
+            const data = await patchJson('/api/probe/messages/' + encodeURIComponent(messageId) + '/read', {});
+            const updated = data.message || null;
+            if (updated) {
+                state.receivedMessages = state.receivedMessages.map((message) => (
+                    String(message.id) === String(updated.id) ? updated : message
+                ));
+            }
+            if (normalizeMessageFolder(state.currentMessageFolder) === 'received') {
+                renderMessages();
+            } else {
+                syncMessageTab();
+            }
+            setText('message-status', t('messageMarkedRead', 'Message marked as read.'));
+        } catch (error) {
+            setText('message-status', error.message);
+        }
+    }
+
     const sectorScanTarget = (sector) => relativeCoordinates(sector && sector.relativeCoordinates);
 
     function syncPrepareJumpButton(sector) {
@@ -485,10 +728,14 @@ if (body && body.dataset.authenticated === '1') {
     async function loadCurrentSector() {
         try {
             const data = await api('/api/probe/sector');
+            state.currentSectorProbes = Array.isArray(data.sector && data.sector.probes) ? data.sector.probes : [];
+            renderMessageRecipients();
             sectorModule.syncSectorForm(data.sector);
             sectorModule.renderSectorObjects(data.sector);
             syncPrepareJumpButton(data.sector);
         } catch (error) {
+            state.currentSectorProbes = [];
+            renderMessageRecipients();
             sectorModule.renderSectorObjects(null, {syncMannyTargets: true});
             syncPrepareJumpButton(null);
             setText('sector-context', error.message);
@@ -497,12 +744,15 @@ if (body && body.dataset.authenticated === '1') {
 
     refreshers.loadProbe = loadProbe;
     refreshers.loadCurrentSector = loadCurrentSector;
+    refreshers.loadMessages = loadMessages;
 
     bindApiKeyDialog({api, t, closeAccountMenus});
     bindPanelTabs();
-    bindRefreshButtons({loadCurrentSector, loadMannies, loadProbe});
+    bindRefreshButtons({loadCurrentSector, loadMannies, loadMessages, loadProbe});
     mannyModule.bindMannyEvents();
     renderJumpChecklist();
+    renderMessageRecipients();
+    renderMessages();
 
     document.getElementById('sector-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -535,6 +785,56 @@ if (body && body.dataset.authenticated === '1') {
     });
 
     document.getElementById('prepare-jump-button')?.addEventListener('click', prepareJumpFromScannedSector);
+
+    document.getElementById('messages-tab')?.addEventListener('click', () => {
+        loadCurrentSector();
+        loadMessages({folder: state.currentMessageFolder, silent: true});
+    });
+
+    document.querySelectorAll('[data-message-folder]').forEach((button) => {
+        button.addEventListener('click', () => {
+            activateMessageFolder(button.dataset.messageFolder || 'received');
+        });
+    });
+
+    document.getElementById('messages-load-more')?.addEventListener('click', () => {
+        const folder = normalizeMessageFolder(state.currentMessageFolder);
+        loadMessages({folder, offset: messagesForFolder(folder).length, append: true});
+    });
+
+    document.getElementById('message-form')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const messageForm = event.currentTarget;
+        const form = new FormData(messageForm);
+        const recipientProbeId = Number.parseInt(String(form.get('recipientProbeId') || ''), 10);
+        const bodyValue = String(form.get('body') || '').trim();
+        if (!Number.isFinite(recipientProbeId) || recipientProbeId <= 0 || bodyValue === '') {
+            setText('message-status', t('requestDenied', 'Request denied'));
+            return;
+        }
+
+        await runApiOrder({
+            statusId: 'message-status',
+            pendingText: t('orderSent', 'Order transmitted...'),
+            request: () => postJson('/api/probe/messages', {
+                recipientProbeId,
+                body: bodyValue,
+            }),
+            onSuccess: async () => {
+                messageForm.reset();
+                renderMessageRecipients();
+                state.sentMessages = [];
+                state.sentMessagePagination = null;
+                setText('message-status', t('messageSent', 'Message transmitted.'));
+                if (normalizeMessageFolder(state.currentMessageFolder) === 'sent') {
+                    await loadMessages({folder: 'sent', silent: true});
+                }
+            },
+            onError: (error) => {
+                setText('message-status', error.message);
+            },
+        });
+    });
 
     document.getElementById('jump-control')?.addEventListener('click', () => {
         if (state.probeAlreadyMoving) {
@@ -681,5 +981,6 @@ if (body && body.dataset.authenticated === '1') {
         loadCurrentSector();
         loadCraftingRecipes();
         loadMannies();
+        loadMessages({folder: 'received', silent: true});
     }
 }

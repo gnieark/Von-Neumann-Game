@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '15'
+  version: '19'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 15
+                apiVersion: 19
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -279,6 +279,172 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/messages:
+    get:
+      summary: List messages received by the current probe
+      description: >
+        Returns messages where the authenticated player's probe is the
+        recipient. Messages are sorted newest first, include their read
+        status, and are limited to the 50 latest messages by default.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of messages to return. Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of newest messages to skip before returning the page.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Received probe messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeMessagesResponse'
+              example:
+                messages:
+                  - id: 12
+                    sender:
+                      probeId: 2
+                      name: Probe of nova
+                    recipient:
+                      probeId: 1
+                      name: Probe of remi
+                    sector:
+                      relative: { x: 0, y: 0, z: 0 }
+                    body: Signal local reçu.
+                    status: unread
+                    readAt: null
+                    createdAt: '2026-06-06T12:00:00+00:00'
+                    updatedAt: '2026-06-06T12:00:00+00:00'
+                pagination:
+                  limit: 50
+                  offset: 0
+                  count: 1
+                  total: 67
+                  hasMore: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      summary: Send a message to another probe in the same sector
+      description: >
+        Creates an unread message for another probe. The recipient probe must
+        currently be in the exact same sector as the sender probe.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeMessageSendRequest'
+            example:
+              recipientProbeId: 2
+              body: Signal local reçu ?
+      responses:
+        '201':
+          description: Probe message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Recipient probe is invalid or not in the same sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/messages/sent:
+    get:
+      summary: List messages sent by the current probe
+      description: >
+        Returns messages where the authenticated player's probe is the sender.
+        Messages are sorted newest first and are limited to the 50 latest
+        messages by default. This endpoint does not expose recipient read
+        state fields.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of messages to return. Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of newest messages to skip before returning the page.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Sent probe messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeSentMessagesResponse'
+              example:
+                messages:
+                  - id: 12
+                    sender:
+                      probeId: 1
+                      name: Probe of remi
+                    recipient:
+                      probeId: 2
+                      name: Probe of nova
+                    sector:
+                      relative: { x: 0, y: 0, z: 0 }
+                    body: Signal local reçu ?
+                    createdAt: '2026-06-06T12:00:00+00:00'
+                pagination:
+                  limit: 50
+                  offset: 0
+                  count: 1
+                  total: 3
+                  hasMore: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/probe/messages/{messageId}/read:
+    patch:
+      summary: Mark a received probe message as read
+      description: >
+        Only the recipient probe can mark a message as read. Repeating the call
+        on an already-read message is safe and returns the message unchanged.
+      parameters:
+        - $ref: '#/components/parameters/ProbeMessageId'
+      responses:
+        '200':
+          description: Probe message marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeMessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/visited-sectors:
     get:
       summary: List sectors already visited by the current probe
@@ -1038,6 +1204,14 @@ components:
       schema:
         type: string
       example: probe-core
+    ProbeMessageId:
+      name: messageId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 12
   responses:
     BadRequest:
       description: Bad request
@@ -1078,7 +1252,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, invalid_salvage_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, invalid_salvage_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -1450,6 +1624,122 @@ components:
           type: integer
           minimum: 1
           description: Optional cap applied to itemIds or targetMannyIds.
+    ProbeMessageSendRequest:
+      type: object
+      required: [recipientProbeId, body]
+      properties:
+        recipientProbeId:
+          type: integer
+          minimum: 1
+          description: Probe id of another probe currently in the same sector.
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    ProbeMessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          $ref: '#/components/schemas/ProbeMessage'
+    ProbeMessagesResponse:
+      type: object
+      required: [messages, pagination]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeMessage'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    ProbeSentMessagesResponse:
+      type: object
+      required: [messages, pagination]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeSentMessage'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    Pagination:
+      type: object
+      required: [limit, offset, count, total, hasMore]
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+        count:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+        hasMore:
+          type: boolean
+    ProbeMessage:
+      type: object
+      required: [id, sender, recipient, sector, body, status, readAt, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        sender:
+          $ref: '#/components/schemas/ProbeMessageEndpoint'
+        recipient:
+          $ref: '#/components/schemas/ProbeMessageEndpoint'
+        sector:
+          type: object
+          required: [relative]
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+        body:
+          type: string
+        status:
+          type: string
+          enum: [unread, read]
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ProbeSentMessage:
+      type: object
+      required: [id, sender, recipient, sector, body, createdAt]
+      properties:
+        id:
+          type: integer
+        sender:
+          $ref: '#/components/schemas/ProbeMessageEndpoint'
+        recipient:
+          $ref: '#/components/schemas/ProbeMessageEndpoint'
+        sector:
+          type: object
+          required: [relative]
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ProbeMessageEndpoint:
+      type: object
+      required: [probeId, name]
+      properties:
+        probeId:
+          type: integer
+        name:
+          type: string
     ProbeInventory:
       type: object
       required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, containers, externalTanks]

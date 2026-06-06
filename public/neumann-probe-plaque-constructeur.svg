@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Neumann Probe - plaque constructeur</title>
+  <desc id="desc">Logo SVG representant une plaque constructeur boulonnee, style machine spatiale industrielle.</desc>
+
+  <defs>
+    <linearGradient id="plate" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2a3238"/>
+      <stop offset="0.45" stop-color="#11181d"/>
+      <stop offset="1" stop-color="#05080b"/>
+    </linearGradient>
+
+    <linearGradient id="edge" x1="96" y1="72" x2="420" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8fa3ad"/>
+      <stop offset="0.35" stop-color="#39464d"/>
+      <stop offset="1" stop-color="#11171b"/>
+    </linearGradient>
+
+    <radialGradient id="bolt" cx="35%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#b7c4ca"/>
+      <stop offset="0.45" stop-color="#5a686f"/>
+      <stop offset="1" stop-color="#11181d"/>
+    </radialGradient>
+
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="#05070b"/>
+
+  <rect x="58" y="92" width="396" height="328" rx="26" fill="url(#edge)" filter="url(#shadow)"/>
+  <rect x="72" y="106" width="368" height="300" rx="18" fill="url(#plate)" stroke="#6f858f" stroke-width="3"/>
+  <rect x="90" y="124" width="332" height="264" rx="10" fill="none" stroke="#243139" stroke-width="3"/>
+
+  <g opacity="0.28" stroke="#a9bbc2" stroke-width="1">
+    <path d="M116 155h92M248 155h55M320 155h61"/>
+    <path d="M112 349h76M213 349h114M344 349h42"/>
+    <path d="M103 184h306M103 328h306"/>
+  </g>
+
+  <g>
+    <circle cx="105" cy="139" r="18" fill="url(#bolt)" stroke="#0b0f12" stroke-width="4"/>
+    <circle cx="407" cy="139" r="18" fill="url(#bolt)" stroke="#0b0f12" stroke-width="4"/>
+    <circle cx="105" cy="373" r="18" fill="url(#bolt)" stroke="#0b0f12" stroke-width="4"/>
+    <circle cx="407" cy="373" r="18" fill="url(#bolt)" stroke="#0b0f12" stroke-width="4"/>
+    <g stroke="#10171b" stroke-width="4" stroke-linecap="round">
+      <path d="M96 139h18M398 139h18M96 373h18M398 373h18"/>
+    </g>
+  </g>
+
+  <text x="256" y="206"
+        text-anchor="middle"
+        font-family="Arial Narrow, Bahnschrift, DIN Condensed, Oswald, Arial, sans-serif"
+        font-size="58"
+        font-weight="700"
+        letter-spacing="6"
+        fill="#d7e4e9">VN-01</text>
+
+  <text x="256" y="248"
+        text-anchor="middle"
+        font-family="Arial Narrow, Bahnschrift, DIN Condensed, Oswald, Arial, sans-serif"
+        font-size="27"
+        font-weight="700"
+        letter-spacing="3"
+        fill="#8fc7df">NEUMANN PROBE</text>
+
+  <line x1="130" y1="275" x2="382" y2="275" stroke="#41535b" stroke-width="3"/>
+
+  <text x="256" y="313"
+        text-anchor="middle"
+        font-family="Consolas, 'Courier New', monospace"
+        font-size="17"
+        letter-spacing="2"
+        fill="#b5c5cb">AUTONOMOUS SECTOR UNIT</text>
+
+  <text x="256" y="342"
+        text-anchor="middle"
+        font-family="Consolas, 'Courier New', monospace"
+        font-size="15"
+        letter-spacing="2"
+        fill="#758991">EXPLORE · REPLICATE · CONTINUE</text>
+
+  <g transform="translate(256 382)" stroke="#7dbed8" stroke-width="4" fill="none" opacity="0.95">
+    <circle cx="0" cy="0" r="11"/>
+    <path d="M0 -34v22M0 12v22M-34 0h22M12 0h22"/>
+    <path d="M-23 -23l15 15M8 8l15 15M23 -23L8 -8M-8 8l-15 15" opacity="0.55"/>
+  </g>
+</svg>

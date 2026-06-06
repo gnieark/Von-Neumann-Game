@@ -28,6 +28,8 @@ export const createLabels = (i18n) => {
         black_hole: t('blackHoleObject', 'Black hole'),
         solar_system: t('solarSystemObject', 'Solar system'),
         manny: t('mannyObject', 'Manny'),
+        probe: t('tabProbe', 'Probe'),
+        waypoint_bookmark: t('waypointBookmark', 'Waypoint bookmark'),
         drifting_item: t('driftingItemObject', 'Drifting item'),
         object: t('object', 'Object'),
         unknown: t('unknownObject', 'Unknown object'),
@@ -116,6 +118,8 @@ export const createLabels = (i18n) => {
             'Dangerous compact object detected.': t('observationSummaryBlackHole', 'Dangerous compact object detected.'),
             'Manny left behind by a probe.': t('observationSummaryForgottenManny', 'Manny left behind by a probe.'),
             'Abandoned Manny drifting in this sector.': t('observationSummaryAbandonedManny', 'Abandoned Manny drifting in this sector.'),
+            'Another probe is present in this sector.': t('observationSummaryProbePresence', 'Another probe is present in this sector.'),
+            'Waypoint bookmark detected in this sector.': t('observationSummaryWaypointBookmark', 'Waypoint bookmark detected in this sector.'),
             'Unknown astronomical object.': t('observationSummaryUnknown', 'Unknown astronomical object.'),
         }[value] || value;
     };

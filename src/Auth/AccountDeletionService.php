@@ -83,6 +83,8 @@ final class AccountDeletionService
             'storageContainers' => 0,
             'storageContainerResources' => 0,
             'probeMovements' => 0,
+            'probeMessagesSent' => 0,
+            'probeMessagesReceived' => 0,
             'scheduledEvents' => 0,
         ];
 
@@ -101,6 +103,8 @@ final class AccountDeletionService
             ['probe_id' => $probeId],
         );
         $stats['probeMovements'] = $this->count('SELECT COUNT(*) FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $stats['probeMessagesSent'] = $this->count('SELECT COUNT(*) FROM probe_messages WHERE sender_probe_id = :probe_id', ['probe_id' => $probeId]);
+        $stats['probeMessagesReceived'] = $this->count('SELECT COUNT(*) FROM probe_messages WHERE recipient_probe_id = :probe_id', ['probe_id' => $probeId]);
         $stats['scheduledEvents'] = $this->countScheduledEvents($probeId);
 
         return $stats;
@@ -165,6 +169,10 @@ final class AccountDeletionService
         $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM mannies WHERE probe_id = :probe_id',
+            ['probe_id' => $probeId],
+        );
+        $this->execute(
+            'DELETE FROM probe_messages WHERE sender_probe_id = :probe_id OR recipient_probe_id = :probe_id',
             ['probe_id' => $probeId],
         );
         $this->execute('DELETE FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probeId]);

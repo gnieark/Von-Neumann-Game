@@ -177,6 +177,23 @@ final class SchemaInitializer
                 FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_movements_probe_status ON probe_movements(probe_id, status)",
+            "CREATE TABLE IF NOT EXISTS probe_messages (
+                id $id,
+                sender_probe_id INTEGER NOT NULL,
+                recipient_probe_id INTEGER NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                body TEXT NOT NULL,
+                status $text NOT NULL,
+                read_at $nullableText,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(sender_probe_id) REFERENCES neumann_probes(id),
+                FOREIGN KEY(recipient_probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient ON probe_messages(recipient_probe_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_probe_messages_sender ON probe_messages(sender_probe_id, created_at)",
             "CREATE TABLE IF NOT EXISTS scheduled_events (
                 id $id,
                 type $text NOT NULL,
