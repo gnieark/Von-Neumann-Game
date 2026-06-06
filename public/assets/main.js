@@ -4,10 +4,10 @@ import {
     createApiClient,
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
-import {createCraftingModule} from './crafting.js?v=20260606-circuit-recipes';
+import {createCraftingModule} from './crafting.js?v=20260606-printer-workshop';
 import {createInventoryModule} from './inventory.js?v=20260606-circuit-recipes';
-import {createLabels} from './labels.js?v=20260606-circuit-recipes';
-import {createMannyModule} from './manny.js?v=20260606-sector-radar-bookmarks';
+import {createLabels} from './labels.js?v=20260606-printer-workshop';
+import {createMannyModule} from './manny.js?v=20260606-printer-workshop';
 import {createSectorModule} from './sector.js?v=20260606-sector-units';
 import {
     bindAccountMenu,
@@ -88,6 +88,7 @@ if (body && body.dataset.authenticated === '1') {
         onInventoryChanged: () => {
             craftingModule.updateMannyCraftForms();
             mannyModule?.updateMannyBookmarkForms();
+            mannyModule?.updatePrinterCraftForms();
         },
     });
     mannyModule = createMannyModule({
@@ -721,6 +722,7 @@ if (body && body.dataset.authenticated === '1') {
 
     async function loadCraftingRecipes() {
         await craftingModule.loadCraftingRecipes(api);
+        mannyModule?.updatePrinterCraftForms();
     }
 
     async function loadMannies() {

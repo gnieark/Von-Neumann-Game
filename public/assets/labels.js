@@ -133,6 +133,8 @@ export const createLabels = (i18n) => {
         waiting_for_space: t('waitingForSpace', 'Waiting for space'),
         moving_stockage: t('movingStorage', 'Moving storage'),
         installing_waypoint_bookmark: t('installingWaypointBookmark', 'Installing waypoint bookmark'),
+        assisting_atomic_printer: t('assistingAtomicPrinter', 'Assisting the atomic printer'),
+        atomic_printing: t('atomicPrinting', 'Atomic printing'),
     }[task] || task || t('noTask', 'None'));
     const inventoryItemTypeLabel = (type, fallback) => ({
         atomic_3d_printer: t('atomicPrinter', 'Atomic printer'),

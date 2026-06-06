@@ -245,7 +245,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(21, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(22, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -526,21 +526,38 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(['metals'], $storageRules->body['container']['rules']['priority'] ?? null, 'storage priority rule is persisted');
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100, metals_stock = 0.2, ice_stock = 0.09, organic_compounds_stock = 0.11 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
-    $integratedCircuitCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+    $directAtomicMannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'integrated_circuit',
     ], JSON_THROW_ON_ERROR));
-    $test->assertEquals(202, $integratedCircuitCraft->status, 'Manny can operate the atomic printer to craft an integrated circuit');
+    $test->assertEquals(400, $directAtomicMannyCraft->status, 'Manny craft endpoint refuses atomic-printer recipes');
+    $test->assertEquals('invalid_recipe', $directAtomicMannyCraft->body['error']['code'] ?? null, 'atomic-printer recipes require the printer endpoint');
+
+    $integratedCircuitCraft = $kernel->handle('POST', '/api/probe/atomic-printer/craft', $craftHeaders, json_encode([
+        'recipe' => 'integrated_circuit',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $integratedCircuitCraft->status, 'Atomic printer can start an integrated-circuit craft');
+    $test->assertEquals('assisting_atomic_printer', $integratedCircuitCraft->body['manny']['currentTask'] ?? null, 'atomic-printer craft reserves a Manny assistant');
     $test->assertEquals('integrated_circuit', $integratedCircuitCraft->body['manny']['task']['recipe'] ?? null, 'integrated-circuit task stores its recipe');
+    $test->assertEquals('atomic_3d_printer', $integratedCircuitCraft->body['manny']['task']['fabricator'] ?? null, 'integrated-circuit task records the atomic printer as fabricator');
     $test->assertEquals(5400, $integratedCircuitCraft->body['manny']['task']['durationSeconds'] ?? null, 'raw integrated-circuit craft includes intermediate component fabrication time');
     $test->assertEquals(0.2, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['metals'] ?? null, 'raw integrated-circuit craft commits metal costs');
     $test->assertEquals(0.09, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['ice'] ?? null, 'raw integrated-circuit craft commits ice costs');
     $test->assertEquals(0.11, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'raw integrated-circuit craft commits organic-compound costs');
     $test->assertEquals(0.13, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['deuterium'] ?? null, 'raw integrated-circuit craft commits deuterium energy costs');
+    $printerAfterStart = array_values(array_filter(
+        $integratedCircuitCraft->body['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === 'atomic_3d_printer',
+    ))[0] ?? null;
+    $test->assertEquals('atomic_printing', $printerAfterStart['currentTask'] ?? null, 'atomic printer exposes its active crafting task');
+    $test->assertEquals($integratedCircuitCraft->body['manny']['id'] ?? null, $printerAfterStart['metadata']['assistantMannyId'] ?? null, 'atomic printer exposes its assistant Manny');
     $circuitProbeAfterStart = $probes->findByPlayerId($craftPlayer->id);
     $test->assertEquals(87.0, $circuitProbeAfterStart?->deuteriumStock, 'integrated-circuit craft consumes thirteen percent of the deuterium tank');
 
+    $printerAssistantRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $printerAssistantRow->execute(['uid' => (string) ($integratedCircuitCraft->body['manny']['id'] ?? '')]);
+    $printerAssistantDbId = (int) $printerAssistantRow->fetchColumn();
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
-        'id' => $craftMannyDbId,
+        'id' => $printerAssistantDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
@@ -1615,8 +1632,18 @@ if ($escapeProbe !== null) {
     $test->assert($scheduledEvents->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $escapeProbe->id) === null, 'starting a movement cancels the pending black hole trap event');
 }
 
-foreach (['/api/me', '/api/probe', '/api/probe/messages', '/api/probe/messages/sent', '/api/probe/visited-sectors', '/api/probe/sector', '/api/sector?x=0&y=0&z=0'] as $path) {
-    $response = $kernel->handle('GET', $path);
+foreach ([
+    'GET /api/me',
+    'GET /api/probe',
+    'POST /api/probe/atomic-printer/craft',
+    'GET /api/probe/messages',
+    'GET /api/probe/messages/sent',
+    'GET /api/probe/visited-sectors',
+    'GET /api/probe/sector',
+    'GET /api/sector?x=0&y=0&z=0',
+] as $route) {
+    [$routeMethod, $path] = explode(' ', $route, 2);
+    $response = $kernel->handle($routeMethod, $path);
     $test->assertEquals(401, $response->status, "protected endpoint $path rejects missing Authorization Bearer");
 }
 

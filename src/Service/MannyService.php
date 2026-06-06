@@ -217,7 +217,7 @@ final class MannyService
 
         $recipe = CraftingRecipeCatalog::normalizeId($recipe);
         $recipeDefinition = CraftingRecipeCatalog::find($recipe, $this->craftingConfig());
-        if ($recipeDefinition === null || !$this->canMannyOperateRecipe($recipeDefinition)) {
+        if ($recipeDefinition === null || !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_MANNY)) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
         }
         $craftingPlan = $this->craftingPlan($probe, $recipeDefinition);
@@ -251,6 +251,58 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
+    }
+
+    public function startAtomicPrinterCrafting(NeumannProbe $probe, string $recipe): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $this->refreshAllMannyStates($probe);
+        if ($this->atomicPrinterAssistant($probe) !== null) {
+            throw new MannyActionException(409, 'atomic_printer_busy', 'The atomic printer is already executing an order.');
+        }
+
+        $manny = $this->availableAtomicPrinterAssistant($probe)
+            ?? throw new MannyActionException(409, 'no_available_manny', 'No available Manny can assist the atomic printer.');
+
+        $recipe = CraftingRecipeCatalog::normalizeId($recipe);
+        $recipeDefinition = CraftingRecipeCatalog::find($recipe, $this->craftingConfig());
+        if ($recipeDefinition === null || !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER)) {
+            throw new MannyActionException(400, 'invalid_recipe', 'Unknown atomic-printer recipe.');
+        }
+
+        $craftingPlan = $this->craftingPlan($probe, $recipeDefinition);
+        $freeAfterConsumption = round(
+            $this->freeCargoCapacity($probe)
+            + $this->cargoSpaceFreedByResourceCosts($craftingPlan['resourceCosts'])
+            + $this->cargoSpaceFreedByConsumedItems($craftingPlan['consumedItems']),
+            4,
+        );
+        if ($freeAfterConsumption + 0.00001 < (float) ($craftingPlan['output']['containerSpace'] ?? 0.0)) {
+            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.');
+        }
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $this->consumeCraftingPlan($probe, $craftingPlan);
+        $this->probes->save($probe);
+
+        $manny->currentTask = Manny::TASK_ASSISTING_ATOMIC_PRINTER;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'recipe' => $recipe,
+            'recipeName' => (string) ($recipeDefinition['name'] ?? $recipe),
+            'durationSeconds' => (int) $craftingPlan['durationSeconds'],
+            'resourceCosts' => $craftingPlan['resourceCosts'],
+            'metalsCost' => round((float) ($craftingPlan['resourceCosts']['metals'] ?? 0.0), 4),
+            'consumedItems' => $craftingPlan['consumedItems'],
+            'output' => $craftingPlan['output'],
+            'containerSpace' => (float) ($craftingPlan['output']['containerSpace'] ?? 0.0),
+            'fabricator' => CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER,
+            'printerId' => 'probe-' . $probe->id . '-atomic-3d-printer',
+        ];
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
     }
 
     public function startSalvage(NeumannProbe $probe, string $uid, string $objectId): Manny
@@ -440,7 +492,7 @@ final class MannyService
 
             return $this->requiredManny($probe, $uid);
         }
-        if ($manny->currentTask === Manny::TASK_CRAFTING) {
+        if ($manny->currentTask === Manny::TASK_CRAFTING || $manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
             $this->refundCraftingCommitment($probe, $manny);
             $this->clearTask($manny);
             $this->mannies->save($manny);
@@ -537,7 +589,7 @@ final class MannyService
         if ($manny->currentTask === Manny::TASK_MINING) {
             return $this->refreshMining($manny, $probe, $now);
         }
-        if ($manny->currentTask === Manny::TASK_CRAFTING) {
+        if ($manny->currentTask === Manny::TASK_CRAFTING || $manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
             return $this->refreshCrafting($manny, $probe, $now);
         }
         if ($manny->currentTask === Manny::TASK_SALVAGE) {
@@ -760,7 +812,10 @@ final class MannyService
      */
     private function directResourceCostsForRecipe(array $recipeDefinition): ?array
     {
-        if (!$this->canMannyOperateRecipe($recipeDefinition)) {
+        if (
+            !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_MANNY)
+            && !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER)
+        ) {
             return null;
         }
 
@@ -865,15 +920,14 @@ final class MannyService
     /**
      * @param array<string, mixed> $recipeDefinition
      */
-    private function canMannyOperateRecipe(array $recipeDefinition): bool
+    private function recipeCraftableBy(array $recipeDefinition, string $fabricator): bool
     {
         $craftableBy = $recipeDefinition['craftableBy'] ?? [];
         if (!is_array($craftableBy)) {
             return false;
         }
 
-        return in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $craftableBy, true)
-            || in_array(CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER, $craftableBy, true);
+        return in_array($fabricator, $craftableBy, true);
     }
 
     /**
@@ -955,6 +1009,9 @@ final class MannyService
             'craftedByMannyName' => $manny->name,
             'craftedAt' => $now->format('c'),
         ];
+        if (isset($manny->taskPayload['fabricator']) && is_string($manny->taskPayload['fabricator'])) {
+            $metadata['fabricator'] = $manny->taskPayload['fabricator'];
+        }
         $capacityBonus = round(max(0.0, (float) ($output['capacityBonus'] ?? 0.0)), 4);
         if ($capacityBonus > 0.0) {
             $metadata['capacityBonus'] = $capacityBonus;
@@ -1322,6 +1379,37 @@ final class MannyService
 
             $this->refreshMannyState($manny, $probe);
         }
+    }
+
+    private function refreshAllMannyStates(NeumannProbe $probe): void
+    {
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->currentTask !== null) {
+                $this->refreshMannyState($manny, $probe);
+            }
+        }
+    }
+
+    private function atomicPrinterAssistant(NeumannProbe $probe): ?Manny
+    {
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
+                return $manny;
+            }
+        }
+
+        return null;
+    }
+
+    private function availableAtomicPrinterAssistant(NeumannProbe $probe): ?Manny
+    {
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->isOnProbe() && $manny->currentTask === null) {
+                return $manny;
+            }
+        }
+
+        return null;
     }
 
     private function findObjectInCurrentSector(NeumannProbe $probe, string $objectId): ?UniverseObject

@@ -71,6 +71,32 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         [objectTypeLabel(target.type || 'object'), target.name || target.id].filter(Boolean).join(' ')
     );
 
+    const atomicPrinterItem = () => (
+        Array.isArray(state.currentInventory && state.currentInventory.items)
+            ? state.currentInventory.items.find((item) => item.type === 'atomic_3d_printer') || null
+            : null
+    );
+
+    const availableAtomicPrinterAssistants = () => (
+        Array.isArray(state.currentMannies)
+            ? state.currentMannies.filter((manny) => (
+                manny
+                && manny.id
+                && manny.currentTask === null
+                && manny.location
+                && manny.location.type === 'probe'
+            ))
+            : []
+    );
+
+    const atomicPrinterAssistant = () => (
+        Array.isArray(state.currentMannies)
+            ? state.currentMannies.find((manny) => manny && manny.currentTask === 'assisting_atomic_printer') || null
+            : null
+    );
+
+    const atomicPrinterHasRecipes = () => crafting.atomicPrinterCraftingRecipes().length > 0;
+
     const renderMannyTaskPanel = (manny, observedAt) => {
         const payload = manny.task || {};
         const progress = mannyProgressValueHtml(manny, observedAt);
@@ -102,6 +128,16 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 + '<p>' + escapeHtml(formatText(t('craftingTaskDetail', '{recipe}, {metals} metal containers committed.'), {
                     recipe: payload.recipeName || t('waypointBookmark', 'Waypoint bookmark'),
                     metals: numberValue(payload.metalsCost),
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
+                + '<button class="manny-recall-button" type="button">' + escapeHtml(t('cancelCrafting', 'Cancel crafting')) + '</button>'
+                + '</section>';
+        }
+        if (manny.currentTask === 'assisting_atomic_printer') {
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('atomicPrinterAssistanceInProgress', 'Atomic printer assistance in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('atomicPrinterAssistanceTaskDetail', '{recipe}, loading and unloading support.'), {
+                    recipe: payload.recipeName || t('integratedCircuit', 'Integrated circuit'),
                 })) + '</p>'
                 + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
                 + '<button class="manny-recall-button" type="button">' + escapeHtml(t('cancelCrafting', 'Cancel crafting')) + '</button>'
@@ -179,14 +215,32 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
     };
 
     const renderCraftForm = () => (
-        '<form class="manny-craft-form manny-form">'
+        '<form class="manny-craft-form manny-form" data-fabricator="manny">'
         + '<div class="manny-craft-picker">'
-        + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select class="manny-craft-recipe" name="recipe">' + crafting.craftRecipeOptions('') + '</select></label>'
+        + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select class="manny-craft-recipe" name="recipe">' + crafting.craftRecipeOptions('', 'manny') + '</select></label>'
         + '<div class="manny-craft-ingredients" aria-live="polite"></div>'
         + '</div>'
         + '<button class="manny-craft-button" type="submit">' + escapeHtml(t('craft', 'Craft')) + '</button>'
         + '</form>'
     );
+
+    const renderAtomicPrinterCraftForm = () => {
+        const noAssistant = availableAtomicPrinterAssistants().length === 0;
+        const noRecipes = !atomicPrinterHasRecipes();
+        const disabled = noAssistant || noRecipes;
+        const hint = noRecipes
+            ? t('noAtomicPrinterRecipes', 'No atomic printer recipe available.')
+            : (noAssistant ? t('noAvailableMannyForPrinter', 'No available Manny can assist the printer.') : t('atomicPrinterAssistantHint', 'A free Manny aboard will handle loading and unloading.'));
+
+        return '<form class="printer-craft-form manny-form" data-fabricator="atomic_3d_printer">'
+            + '<div class="manny-craft-picker">'
+            + '<label>' + escapeHtml(t('recipe', 'Recipe')) + '<select class="manny-craft-recipe" name="recipe">' + crafting.craftRecipeOptions('', 'atomic_3d_printer') + '</select></label>'
+            + '<div class="manny-craft-ingredients" aria-live="polite"></div>'
+            + '</div>'
+            + '<button class="printer-craft-button" type="submit"' + (disabled ? ' disabled aria-disabled="true"' : '') + '>' + escapeHtml(t('craft', 'Craft')) + '</button>'
+            + '<p class="printer-craft-hint">' + escapeHtml(hint) + '</p>'
+            + '</form>';
+    };
 
     const renderBookmarkForm = () => {
         const hasStock = bookmarkItems().length > 0;
@@ -218,6 +272,46 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             + '<h4 class="manny-action-heading">' + escapeHtml(t('assignMannyTask', 'Assign a task to this Manny')) + '</h4>'
             + actionForms.map((action) => renderMannyActionAccordion(prefix + '-' + action.id, action.title, action.render())).join('')
             + '</div>';
+    };
+
+    const renderAtomicPrinterTaskPanel = (assistant, observedAt) => {
+        const payload = assistant && assistant.task ? assistant.task : {};
+        return '<section class="manny-task-panel printer-task-panel">'
+            + '<h4>' + escapeHtml(t('atomicPrintingInProgress', 'Atomic printing in progress')) + '</h4>'
+            + '<p>' + escapeHtml(formatText(t('atomicPrintingTaskDetail', '{recipe}, assisted by {manny}.'), {
+                recipe: payload.recipeName || t('integratedCircuit', 'Integrated circuit'),
+                manny: assistant ? assistant.name : t('mannyObject', 'Manny'),
+            })) + '</p>'
+            + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + (assistant ? mannyProgressValueHtml(assistant, observedAt) : numberValue(0, '%')) + '</p>'
+            + (assistant ? '<button class="printer-recall-button" type="button">' + escapeHtml(t('cancelCrafting', 'Cancel crafting')) + '</button>' : '')
+            + '</section>';
+    };
+
+    const renderAtomicPrinterCard = (observedAt, expanded) => {
+        const printer = atomicPrinterItem();
+        const assistant = atomicPrinterAssistant();
+        const busy = assistant !== null;
+        const printerName = printer && printer.name ? printer.name : t('atomicPrinter', 'Atomic printer');
+        const taskName = busy ? taskLabel('atomic_printing') : t('noTask', 'None');
+        const panelId = 'atomic-printer-panel';
+        const buttonTitle = printerName + ' - ' + taskName;
+
+        return '<article class="manny-card printer-card" data-printer-id="atomic_3d_printer"' + (assistant ? ' data-assistant-manny-id="' + escapeHtml(assistant.id) + '"' : '') + '>'
+            + '<button class="manny-accordion-trigger" type="button" aria-expanded="' + (expanded ? 'true' : 'false') + '" aria-controls="' + panelId + '" title="' + escapeHtml(buttonTitle) + '" aria-label="' + escapeHtml(buttonTitle) + '">'
+            + '<span class="manny-accordion-title">'
+            + '<b>' + escapeHtml(printerName) + '</b>'
+            + '<span class="manny-accordion-task">' + escapeHtml(taskName) + '</span>'
+            + '</span>'
+            + '</button>'
+            + '<div id="' + panelId + '" class="manny-accordion-panel"' + (expanded ? '' : ' hidden') + '>'
+            + '<div class="manny-metrics printer-metrics">'
+            + metric(t('location', 'Location'), locationTypeLabel('probe'))
+            + metric(t('task', 'Task'), busy ? mannyProgressText(assistant) : t('noTask', 'None'), null, busy ? 'manny-task-progress-value' : null, busy ? mannyProgressDataAttributes(assistant, observedAt) : '')
+            + metric(t('assistantManny', 'Assistant Manny'), assistant ? assistant.name : '-')
+            + '</div>'
+            + (busy ? renderAtomicPrinterTaskPanel(assistant, observedAt) : renderAtomicPrinterCraftForm())
+            + '</div>'
+            + '</article>';
     };
 
     const mannyLocation = (manny) => {
@@ -463,6 +557,29 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         });
     }
 
+    function updatePrinterCraftForms() {
+        document.querySelectorAll('.printer-craft-form').forEach((form) => {
+            const select = form.querySelector('.manny-craft-recipe');
+            const button = form.querySelector('.printer-craft-button');
+            const hint = form.querySelector('.printer-craft-hint');
+            const noAssistant = availableAtomicPrinterAssistants().length === 0;
+            const noRecipes = !atomicPrinterHasRecipes();
+            const recipe = select ? crafting.craftingRecipeById(select.value, 'atomic_3d_printer') : null;
+            const canCraft = crafting.canCraftRecipe(recipe);
+            if (button) {
+                const disabled = noAssistant || noRecipes || !canCraft;
+                button.disabled = disabled;
+                button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+                button.title = !canCraft && !noAssistant && !noRecipes ? t('missingCraftIngredients', 'Insufficient ingredients.') : '';
+            }
+            if (hint) {
+                hint.textContent = noRecipes
+                    ? t('noAtomicPrinterRecipes', 'No atomic printer recipe available.')
+                    : (noAssistant ? t('noAvailableMannyForPrinter', 'No available Manny can assist the printer.') : t('atomicPrinterAssistantHint', 'A free Manny aboard will handle loading and unloading.'));
+            }
+        });
+    }
+
     function clearMannyProgressTimers() {
         if (mannyProgressTickTimer !== null) {
             window.clearTimeout(mannyProgressTickTimer);
@@ -537,16 +654,15 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         const openMannyIds = new Set(Array.from(node.querySelectorAll('.manny-card[data-manny-id] .manny-accordion-trigger[aria-expanded="true"]'))
             .map((button) => button.closest('.manny-card')?.dataset.mannyId)
             .filter(Boolean));
-        if (!Array.isArray(mannies) || mannies.length === 0) {
-            node.innerHTML = '';
-            return;
-        }
+        const printerExpanded = node.querySelector('.printer-card .manny-accordion-trigger[aria-expanded="true"]') !== null;
+        const mannyItems = Array.isArray(mannies) ? mannies : [];
 
         const observedAt = Date.now();
-        node.innerHTML = mannies.map((manny) => {
+        node.innerHTML = renderAtomicPrinterCard(observedAt, printerExpanded)
+            + mannyItems.map((manny) => {
             const busy = manny.currentTask !== null;
             const mannyId = String(manny.id ?? '');
-            const taskName = manny.currentTask || t('mannyInactive', 'Inactive');
+            const taskName = manny.currentTask ? taskLabel(manny.currentTask) : t('mannyInactive', 'Inactive');
             const panelId = 'manny-panel-' + mannyId.replace(/[^a-zA-Z0-9_-]/g, '-');
             const expanded = openMannyIds.has(mannyId);
             const buttonTitle = manny.name + ' - ' + taskName;
@@ -577,6 +693,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         }).join('');
         scheduleMannyProgressUpdates();
         crafting.updateMannyCraftForms();
+        updatePrinterCraftForms();
         updateMannyBookmarkForms();
     }
 
@@ -657,7 +774,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         {
             matches: (form) => form.classList.contains('manny-craft-form'),
             submit: ({form, formData, mannyId}) => {
-                const recipe = crafting.craftingRecipeById(String(formData.get('recipe') || ''));
+                const recipe = crafting.craftingRecipeById(String(formData.get('recipe') || ''), 'manny');
                 if (!crafting.canCraftRecipe(recipe)) {
                     crafting.updateMannyCraftForm(form);
                     setText('manny-status', t('missingCraftIngredients', 'Insufficient ingredients.'));
@@ -665,6 +782,33 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 }
 
                 return api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/craft', {
+                    method: 'POST',
+                    body: JSON.stringify({recipe: formData.get('recipe')}),
+                });
+            },
+        },
+        {
+            matches: (form) => form.classList.contains('printer-craft-form'),
+            submit: ({form, formData}) => {
+                const recipe = crafting.craftingRecipeById(String(formData.get('recipe') || ''), 'atomic_3d_printer');
+                if (!atomicPrinterHasRecipes()) {
+                    updatePrinterCraftForms();
+                    setText('manny-status', t('noAtomicPrinterRecipes', 'No atomic printer recipe available.'));
+                    return null;
+                }
+                if (availableAtomicPrinterAssistants().length === 0) {
+                    updatePrinterCraftForms();
+                    setText('manny-status', t('noAvailableMannyForPrinter', 'No available Manny can assist the printer.'));
+                    return null;
+                }
+                if (!crafting.canCraftRecipe(recipe)) {
+                    crafting.updateMannyCraftForm(form);
+                    updatePrinterCraftForms();
+                    setText('manny-status', t('missingCraftIngredients', 'Insufficient ingredients.'));
+                    return null;
+                }
+
+                return api('/api/probe/atomic-printer/craft', {
                     method: 'POST',
                     body: JSON.stringify({recipe: formData.get('recipe')}),
                 });
@@ -721,7 +865,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             event.preventDefault();
             const card = event.target.closest('.manny-card');
             const mannyId = card ? card.dataset.mannyId : null;
-            if (!mannyId) {
+            if (!mannyId && !event.target.classList.contains('printer-craft-form')) {
                 return;
             }
             const form = new FormData(event.target);
@@ -754,6 +898,8 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             }
             if (event.target.classList.contains('manny-craft-recipe')) {
                 crafting.updateMannyCraftForm(event.target.closest('.manny-craft-form'));
+                crafting.updateMannyCraftForm(event.target.closest('.printer-craft-form'));
+                updatePrinterCraftForms();
             }
         });
 
@@ -787,6 +933,28 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 return;
             }
 
+            const printerRecallButton = event.target.closest('.printer-recall-button');
+            if (printerRecallButton) {
+                const card = printerRecallButton.closest('.printer-card');
+                const assistantMannyId = card ? card.dataset.assistantMannyId : null;
+                if (!assistantMannyId) {
+                    return;
+                }
+                setText('manny-status', t('orderSent', 'Order transmitted...'));
+                try {
+                    await api('/api/probe/mannies/' + encodeURIComponent(assistantMannyId) + '/recall', {
+                        method: 'POST',
+                        body: JSON.stringify({}),
+                    });
+                    setText('manny-status', t('mannyOrderAccepted', 'Manny order accepted.'));
+                    refreshers.loadProbe?.();
+                    loadMannies();
+                } catch (error) {
+                    setText('manny-status', error.message);
+                }
+                return;
+            }
+
             const button = event.target.closest('.manny-recall-button');
             if (!button) {
                 return;
@@ -816,6 +984,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         loadMannies,
         renderMannyList,
         updateMannyBookmarkForms,
+        updatePrinterCraftForms,
         updateMannyMineFormState,
         updateMannyTargetOptions,
     };

@@ -21,6 +21,7 @@ use VonNeumannGame\Repository\StorageContainerRepository;
 final class ProbeStorageService
 {
     private const ATOMIC_PRINTER_SPACE = 0.3;
+    private const ATOMIC_PRINTER_TASK = 'atomic_printing';
     private const EPSILON = 0.00001;
 
     public function __construct(
@@ -76,6 +77,7 @@ final class ProbeStorageService
         $containers = $this->containers->findByProbeId($probe->id);
         $used = $this->usedCapacityByContainer($probe, $containers, $mannies, $probeItems);
         $containerById = $this->containersByDatabaseId($containers);
+        $printerAssistant = $this->atomicPrinterAssistant($mannies);
 
         $items = [
             new ProbeInventoryItem(
@@ -83,11 +85,11 @@ final class ProbeStorageService
                 'atomic_3d_printer',
                 'Imprimante atomique',
                 $this->atomicPrinterSpace(),
+                $printerAssistant !== null ? self::ATOMIC_PRINTER_TASK : null,
+                $printerAssistant?->taskProgressPercent() ?? 0.0,
                 null,
-                0.0,
                 null,
-                null,
-                ['movable' => false],
+                $this->atomicPrinterMetadata($printerAssistant),
                 $this->containerSummary($containerById[$this->coreContainer($containers)->id] ?? null),
             ),
         ];
@@ -153,16 +155,17 @@ final class ProbeStorageService
         $summary = $container->toArray((float) ($used[$container->id] ?? 0.0));
         $items = [];
         if ($container->uid === StorageContainer::CORE_UID) {
+            $printerAssistant = $this->atomicPrinterAssistant($mannies);
             $items[] = (new ProbeInventoryItem(
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
                 'Imprimante atomique',
                 $this->atomicPrinterSpace(),
+                $printerAssistant !== null ? self::ATOMIC_PRINTER_TASK : null,
+                $printerAssistant?->taskProgressPercent() ?? 0.0,
                 null,
-                0.0,
                 null,
-                null,
-                ['movable' => false],
+                $this->atomicPrinterMetadata($printerAssistant),
                 $this->containerSummary($container),
             ))->toArray();
         }
@@ -793,6 +796,37 @@ final class ProbeStorageService
             'kind' => $container->kind,
             'label' => $container->label,
             'sortOrder' => $container->sortOrder,
+        ];
+    }
+
+    /**
+     * @param array<Manny> $mannies
+     */
+    private function atomicPrinterAssistant(array $mannies): ?Manny
+    {
+        foreach ($mannies as $manny) {
+            if ($manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
+                return $manny;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function atomicPrinterMetadata(?Manny $assistant): array
+    {
+        $metadata = ['movable' => false];
+        if ($assistant === null) {
+            return $metadata;
+        }
+
+        return $metadata + [
+            'assistantMannyId' => $assistant->uid,
+            'assistantMannyName' => $assistant->name,
+            'task' => $assistant->taskPayload,
         ];
     }
 

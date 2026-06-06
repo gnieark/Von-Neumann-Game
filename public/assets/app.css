@@ -1250,6 +1250,11 @@ button.account-menu-item:hover {
     background: rgba(0,0,0,.18);
 }
 
+.printer-card {
+    border-color: rgba(143,182,189,.26);
+    background: rgba(143,182,189,.07);
+}
+
 .manny-accordion-trigger {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1437,7 +1442,8 @@ button.account-menu-item:hover {
 
 .manny-mine-hint,
 .manny-salvage-hint,
-.manny-bookmark-hint {
+.manny-bookmark-hint,
+.printer-craft-hint {
     grid-column: 1 / -1;
     margin: 0;
     color: var(--muted);

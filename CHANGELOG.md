@@ -26,10 +26,13 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v21 : ajout des recettes `micro_conductor`, `ceramic_insulator`, `crystal_substrate`, `dopant_matrix` et `integrated_circuit`, fabriquées via l’imprimante atomique.
 - Interface : l’`Imprimante 3D atomique` est renommée `Imprimante atomique`, et les nouveaux composants de circuit sont affichés dans les inventaires, recettes et règles de stockage.
 - Craft : les coûts de deutérium des recettes sont vérifiés et consommés en ECE de cuve, afin que `0.13 ECE` corresponde à 13% d’une cuve pleine.
+- API v22 : ajout de `POST /api/probe/atomic-printer/craft` pour lancer les recettes de l’imprimante atomique avec réservation automatique d’une Manny assistante.
+- Interface : l’onglet `Mannys` devient `Mannys & imprimante`; l’imprimante atomique y apparaît comme poste de fabrication et les Mannys réservées affichent `Assistance à l’imprimante`.
 
 ### Breaking Changes
 
-- Les clients typés doivent accepter `apiVersion: 21`, les nouveaux schémas `ProbeMessage*`, le champ `pagination` sur `ProbeMessagesResponse` et les nouveaux types d’items de craft électronique.
+- Les clients typés doivent accepter `apiVersion: 22`, les nouveaux schémas `ProbeMessage*`, le champ `pagination` sur `ProbeMessagesResponse` et les nouveaux types d’items de craft électronique.
+- Les recettes `atomic_3d_printer` doivent être lancées via `POST /api/probe/atomic-printer/craft`; `POST /api/probe/mannies/{mannyId}/craft` est réservé aux recettes fabriquées directement par une Manny.
 - Les clients de `GET /api/probe/messages/sent` doivent utiliser `ProbeSentMessagesResponse` : les champs `status`, `readAt` et `updatedAt` ne sont plus présents sur les messages envoyés.
 
 ## 2026-06-05

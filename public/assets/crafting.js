@@ -30,14 +30,24 @@ export const createCraftingModule = ({state, labels}) => {
     }
 
     function mannyCraftingRecipes() {
+        const recipes = craftingRecipesForFabricator('manny');
+
+        return recipes.length > 0 ? recipes : fallbackMannyCraftingRecipes();
+    }
+
+    function atomicPrinterCraftingRecipes() {
+        return craftingRecipesForFabricator('atomic_3d_printer');
+    }
+
+    function craftingRecipesForFabricator(fabricator) {
         const recipes = state.currentCraftingRecipes.filter((recipe) => (
             recipe
             && typeof recipe === 'object'
             && Array.isArray(recipe.craftableBy)
-            && (recipe.craftableBy.includes('manny') || recipe.craftableBy.includes('atomic_3d_printer'))
+            && recipe.craftableBy.includes(fabricator)
         ));
 
-        return recipes.length > 0 ? recipes : fallbackMannyCraftingRecipes();
+        return recipes;
     }
 
     function craftingRecipeName(recipe) {
@@ -48,8 +58,12 @@ export const createCraftingModule = ({state, labels}) => {
         return inventoryItemTypeLabel(recipe.id, recipe.name || recipe.id || '-');
     }
 
-    function craftingRecipeById(id) {
-        return mannyCraftingRecipes().find((recipe) => recipe.id === id) || null;
+    function craftingRecipeById(id, fabricator = 'manny') {
+        const recipes = fabricator === 'atomic_3d_printer'
+            ? atomicPrinterCraftingRecipes()
+            : mannyCraftingRecipes();
+
+        return recipes.find((recipe) => recipe.id === id) || null;
     }
 
     function craftingRecipeOutputType(recipe) {
@@ -59,13 +73,15 @@ export const createCraftingModule = ({state, labels}) => {
     }
 
     function craftingRecipeByOutputType(type) {
-        return mannyCraftingRecipes().find((recipe) => (
+        return state.currentCraftingRecipes.find((recipe) => (
             craftingRecipeOutputType(recipe) === type || recipe.id === type
         )) || null;
     }
 
-    function craftRecipeOptions(selected) {
-        const recipes = mannyCraftingRecipes();
+    function craftRecipeOptions(selected, fabricator = 'manny') {
+        const recipes = fabricator === 'atomic_3d_printer'
+            ? atomicPrinterCraftingRecipes()
+            : mannyCraftingRecipes();
         if (recipes.length === 0) {
             return '<option value="">' + escapeHtml(t('noCraftingRecipes', 'No recipes available.')) + '</option>';
         }
@@ -261,21 +277,22 @@ export const createCraftingModule = ({state, labels}) => {
             + '<p class="manny-craft-duration">' + escapeHtml(t('craftingDuration', 'Duration') + ' ' + craftingDuration(availability.durationSeconds)) + '</p>';
     }
 
-    function updateMannyCraftForm(form) {
+    function updateCraftForm(form) {
         if (!form) {
             return;
         }
 
         const select = form.querySelector('.manny-craft-recipe');
         const ingredientsNode = form.querySelector('.manny-craft-ingredients');
-        const button = form.querySelector('.manny-craft-button');
+        const button = form.querySelector('.manny-craft-button, .printer-craft-button');
         if (!select) {
             return;
         }
 
         const selected = select.value;
-        select.innerHTML = craftRecipeOptions(selected);
-        const recipe = craftingRecipeById(select.value);
+        const fabricator = form.dataset.fabricator || 'manny';
+        select.innerHTML = craftRecipeOptions(selected, fabricator);
+        const recipe = craftingRecipeById(select.value, fabricator);
         const canCraft = craftAvailability(recipe).canCraft;
         if (ingredientsNode) {
             ingredientsNode.innerHTML = renderCraftIngredients(recipe);
@@ -288,7 +305,7 @@ export const createCraftingModule = ({state, labels}) => {
     }
 
     function updateMannyCraftForms() {
-        document.querySelectorAll('.manny-craft-form').forEach(updateMannyCraftForm);
+        document.querySelectorAll('.manny-craft-form, .printer-craft-form').forEach(updateCraftForm);
     }
 
     async function loadCraftingRecipes(api) {
@@ -302,11 +319,12 @@ export const createCraftingModule = ({state, labels}) => {
     }
 
     return {
+        atomicPrinterCraftingRecipes,
         canCraftRecipe,
         craftRecipeOptions,
         craftingRecipeById,
         loadCraftingRecipes,
-        updateMannyCraftForm,
+        updateMannyCraftForm: updateCraftForm,
         updateMannyCraftForms,
     };
 };

@@ -33,7 +33,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 21;
+    public const API_VERSION = 22;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -89,6 +89,7 @@ final class ApiKernel
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
                 '/api/probe/storage-containers' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player)),
                 '/api/probe/storage-moves' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeStorageMoveResponse($player, $body)),
+                '/api/probe/atomic-printer/craft' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeAtomicPrinterCraftResponse($player, $body)),
                 '/api/probe/messages/sent' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSentMessagesResponse($player, $query)),
                 '/api/probe/messages' => $this->protectedRoute($method, ['GET', 'POST'], $headers, fn(Player $player): ApiResponse => $method === 'POST' ? $this->probeMessageSendResponse($player, $body) : $this->probeMessagesResponse($player, $query)),
                 '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
@@ -348,6 +349,23 @@ final class ApiKernel
         }
 
         $manny = $this->mannies->startStorageMove($probe, $mannyId, $data);
+
+        return new ApiResponse(202, [
+            'manny' => $this->mannyArray($player, $probe, $manny),
+            'inventory' => $this->inventoryForProbe($probe)->toArray(),
+        ]);
+    }
+
+    private function probeAtomicPrinterCraftResponse(Player $player, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data) || !isset($data['recipe']) || !is_string($data['recipe'])) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain recipe.');
+        }
+
+        $manny = $this->mannies->startAtomicPrinterCrafting($probe, $data['recipe']);
 
         return new ApiResponse(202, [
             'manny' => $this->mannyArray($player, $probe, $manny),
