@@ -15,10 +15,15 @@ const sectorAlertAcknowledgementsStorageKey = 'vng:sector-alert-acknowledgements
 
 export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, onAlertsChanged = () => {}}) => {
     const {
+        asteroidCompositionLabel,
+        dangerLevelLabel,
         mannyStateLabel,
         objectTypeLabel,
+        observationSummaryLabel,
+        planetCategoryLabel,
         pluralWord,
         resourceTypeLabel,
+        sizeCategoryLabel,
         t,
     } = labels;
 
@@ -92,7 +97,7 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
 
     const mineTargetLabel = (target) => {
         const name = target.name || target.id || '';
-        const base = [target.type || 'object', name].filter(Boolean).join(' ');
+        const base = [objectTypeLabel(target.type || 'object'), name].filter(Boolean).join(' ');
 
         return base + ' (' + resourceCompositionLabel(target) + ')';
     };
@@ -103,16 +108,16 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
         }
 
         const name = target.name || target.id || t('unknownMiningTarget', 'unknown target');
-        const type = target.type || t('object', 'object');
+        const type = objectTypeLabel(target.type || 'object');
         const details = [];
         if (target.composition) {
-            details.push(t('composition', 'Composition') + ' ' + target.composition);
+            details.push(t('composition', 'Composition') + ' ' + asteroidCompositionLabel(target.composition));
         }
         if (target.category) {
-            details.push(t('category', 'Category') + ' ' + target.category);
+            details.push(t('category', 'Category') + ' ' + planetCategoryLabel(target.category));
         }
         if (target.sizeCategory) {
-            details.push(t('size', 'Size') + ' ' + target.sizeCategory);
+            details.push(t('size', 'Size') + ' ' + sizeCategoryLabel(target.sizeCategory));
         }
         details.push(resourceCompositionLabel(target));
 
@@ -647,8 +652,10 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
             const danger = object.dangerLevel || 'unknown';
             const classes = ['sector-object', danger === 'extreme' ? 'sector-object-warning' : ''].filter(Boolean).join(' ');
             const countdown = object.noReturnCountdown && Number.isFinite(Number(object.noReturnCountdown.secondsRemaining))
-                ? '<p class="sector-object-countdown">Point de non-retour dans '
-                    + escapeHtml(sectorDuration(Number(object.noReturnCountdown.secondsRemaining)))
+                ? '<p class="sector-object-countdown">'
+                    + escapeHtml(formatText(t('blackHoleNoReturnCountdown', 'Point of no return in {duration}'), {
+                        duration: sectorDuration(Number(object.noReturnCountdown.secondsRemaining)),
+                    }))
                     + '</p>'
                 : '';
             const mannyDetail = object.type === 'manny'
@@ -658,8 +665,8 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
                 ? '<p>' + escapeHtml(t('quantity', 'Quantity') + ' ' + String(object.quantity || 0)) + '</p>'
                 : '';
             return '<article class="' + classes + '">'
-                + '<div class="sector-object-heading"><span>' + escapeHtml(objectTypeLabel(object.type || 'unknown')) + '</span><b>' + escapeHtml(danger) + '</b></div>'
-                + '<p>' + escapeHtml(object.summary || '') + '</p>'
+                + '<div class="sector-object-heading"><span>' + escapeHtml(objectTypeLabel(object.type || 'unknown')) + '</span><b>' + escapeHtml(dangerLevelLabel(danger)) + '</b></div>'
+                + '<p>' + escapeHtml(observationSummaryLabel(object.summary || '')) + '</p>'
                 + mannyDetail
                 + driftingItemDetail
                 + solarSystemDetails(object, index)

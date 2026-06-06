@@ -354,6 +354,26 @@ if ($orphanProbe !== null) {
     );
 }
 
+$englishObserver = $auth->registerPlayerWithPassword('english-observer', 'secret', 'English Observer', 'English probe');
+$englishProbe = $probes->findByPlayerId($englishObserver->id);
+if ($englishProbe !== null) {
+    $sectorRepository->save(new SectorContent($englishProbe->currentSector, [
+        new Asteroid(
+            'english-asteroid',
+            null,
+            'iron',
+            ['iron'],
+            'small',
+            0.01,
+            0.1,
+        ),
+    ]));
+    $englishObservation = (new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies))
+        ->observe($englishObserver, $englishProbe, $englishProbe->currentSector)
+        ->toArray();
+    $test->assertEquals('Wandering asteroid body.', $englishObservation['objects'][0]['summary'] ?? null, 'sector observation summaries stay in API English');
+}
+
 $goodSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'remi', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $goodSession->status, 'POST /api/session with good password returns 200');
 $token = $goodSession->body['token'] ?? null;

@@ -1,4 +1,4 @@
-import {mannyMiningAmountMax, miningResourceTypes} from './sector.js?v=20260604-system-bodies-v2';
+import {mannyMiningAmountMax, miningResourceTypes} from './sector.js?v=20260606-api-en-i18n';
 import {toggleAccordion} from './ui-accordion.js?v=20260604-system-bodies-v2';
 import {
     coordinate,
@@ -12,6 +12,7 @@ import {
 
 export const createMannyModule = ({state, labels, sector, crafting, api, refreshers = {}}) => {
     const {
+        locationTypeLabel,
         objectTypeLabel,
         resourceTypeLabel,
         t,
@@ -222,7 +223,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
     const mannyLocation = (manny) => {
         const location = manny.location || {};
         if (location.type === 'probe') {
-            return t('tabProbe', 'Probe');
+            return locationTypeLabel('probe');
         }
         return location.sector && location.sector.relative
             ? t('sector', 'Sector') + ' ' + coordinate(location.sector.relative)

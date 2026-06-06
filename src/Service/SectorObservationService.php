@@ -449,7 +449,11 @@ final class SectorObservationService
     private function summary(UniverseObject $object): string
     {
         return match (true) {
-            $object instanceof SolarSystem => sprintf('Stellar system with %d star(s) and %d orbital body(ies).', count($object->getStars()), count($object->getOrbitalBodies())),
+            $object instanceof SolarSystem => sprintf(
+                'Stellar system with %d star(s) and %d orbital body(ies).',
+                count($object->getStars()),
+                count($object->getOrbitalBodies()),
+            ),
             $object instanceof Star => 'Isolated star or stellar remnant.',
             $object instanceof Planet => 'Planetary body detected.',
             $object instanceof Asteroid => 'Wandering asteroid body.',
@@ -459,7 +463,10 @@ final class SectorObservationService
                 SectorManny::STATE_FORGOTTEN => 'Manny left behind by a probe.',
                 default => 'Abandoned Manny drifting in this sector.',
             },
-            $object instanceof SectorDriftingItem => sprintf('%d inventory item(s) drifting in open space.', $object->getQuantity()),
+            $object instanceof SectorDriftingItem => sprintf(
+                '%d inventory item(s) drifting in open space.',
+                $object->getQuantity(),
+            ),
             default => 'Unknown astronomical object.',
         };
     }

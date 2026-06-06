@@ -6,6 +6,7 @@ import {
 export const createInventoryModule = ({state, labels, onInventoryChanged = () => {}}) => {
     const {
         inventoryItemTypeLabel,
+        locationTypeLabel,
         resourceTypeLabel,
         t,
         taskLabel,
@@ -22,7 +23,7 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
             t('containerSpace', 'Space') + ' ' + numberValue(entry.containerSpace || 0),
         ];
         if (entry.location && entry.location.type) {
-            details.push(t('location', 'Location') + ' ' + entry.location.type);
+            details.push(t('location', 'Location') + ' ' + locationTypeLabel(entry.location.type));
         }
         if (entry.currentTask) {
             details.push(t('task', 'Task') + ' ' + taskLabel(entry.currentTask));

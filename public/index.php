@@ -12,15 +12,13 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260606-tutorial-chain';
+const ASSET_VERSION = '20260606-api-en-i18n';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path = $_SERVER['REQUEST_URI'] ?? '/';
 $routePath = (string) (parse_url($path, PHP_URL_PATH) ?: '/');
-$language = selectedLanguage();
-$translator = new Translator($language);
 
 if (str_starts_with($routePath, '/api/')) {
     $kernel = $factory->apiKernel();
@@ -36,6 +34,9 @@ if (str_starts_with($routePath, '/api/')) {
     echo json_encode($response->body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     return;
 }
+
+$language = selectedLanguage();
+$translator = new Translator($language);
 
 if (isset($_GET['lang']) && in_array((string) $_GET['lang'], Translator::supportedLanguages(), true)) {
     $language = Translator::normalize((string) $_GET['lang']);

@@ -5,10 +5,10 @@ import {
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
 import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
-import {createInventoryModule} from './inventory.js?v=20260605-bookmark-manny';
-import {createLabels} from './labels.js?v=20260605-bookmark-manny';
-import {createMannyModule} from './manny.js?v=20260605-bookmark-manny';
-import {createSectorModule} from './sector.js?v=20260605-player-ui-alerts';
+import {createInventoryModule} from './inventory.js?v=20260606-api-en-i18n';
+import {createLabels} from './labels.js?v=20260606-api-en-i18n';
+import {createMannyModule} from './manny.js?v=20260606-api-en-i18n';
+import {createSectorModule} from './sector.js?v=20260606-api-en-i18n';
 import {
     bindAccountMenu,
     bindMetricDetails,
@@ -42,10 +42,13 @@ const body = document.body;
 if (body && body.dataset.authenticated === '1') {
     const labels = createLabels(i18n);
     const {
+        probeStatusLabel,
+        sensorModeLabel,
         t,
+        taskLabel,
     } = labels;
     const api = createApiClient({t});
-    const alreadyMovingMessage = 'The probe is already moving between sectors.';
+    const alreadyMovingMessage = t('probeAlreadyMoving', 'The probe is already moving between sectors.');
     const invalidCoordinateMessage = t('invalidCoordinates', 'Invalid relative coordinates: x + y + z must be even.');
     const state = {
         currentCraftingRecipes: [],
@@ -447,8 +450,8 @@ if (body && body.dataset.authenticated === '1') {
                 {label: t('remainingTime', 'Remaining time'), value: formatDuration(Number(movement.secondsRemaining))},
             ]) : null;
             document.getElementById('probe-summary').innerHTML = [
-                metric(t('status', 'Status'), probe.status),
-                metric(t('sensors', 'Sensors'), probe.sensorMode, sensorDetail),
+                metric(t('status', 'Status'), probeStatusLabel(probe.status)),
+                metric(t('sensors', 'Sensors'), sensorModeLabel(probe.sensorMode), sensorDetail),
                 metric(t('deuterium', 'Deuterium'), probe.fuel ? probe.fuel.deuterium + '%' : '-'),
                 metric(t('sector', 'Sector'), sector ? coordinate(sector) : t('transit', 'Transit'), sectorDetail),
                 metric(t('velocityC', 'Velocity c'), nav.velocityC),
@@ -460,7 +463,7 @@ if (body && body.dataset.authenticated === '1') {
                 metric(t('energy', 'Energy'), systems.energyStored),
                 metric(t('storageCapacity', 'Storage capacity'), storageCapacityValue(probe.inventory)),
                 metric(t('internalClock', 'Internal clock'), systems.internalClockRate),
-                metric(t('task', 'Task'), systems.currentTask || t('noTask', 'None')),
+                metric(t('task', 'Task'), systems.currentTask ? taskLabel(systems.currentTask) : t('noTask', 'None')),
             ].join('');
             inventoryModule.renderInventory(probe.inventory || {});
         } catch (error) {
