@@ -121,8 +121,9 @@ export const bindTutorialDialog = ({closeAccountMenus} = {}) => {
         previewDialog.hidden = true;
     });
 
-    document.querySelectorAll('[data-tutorial-target]').forEach((trigger) => {
-        const dialog = document.getElementById(trigger.dataset.tutorialTarget || '');
+    const tutorialControllers = new Map();
+
+    document.querySelectorAll('.tutorial-dialog').forEach((dialog) => {
         const steps = dialog ? Array.from(dialog.querySelectorAll('[data-tutorial-step]')) : [];
         const progress = dialog?.querySelector('[data-tutorial-progress]');
         const nextButton = dialog?.querySelector('[data-tutorial-next]');
@@ -151,12 +152,11 @@ export const bindTutorialDialog = ({closeAccountMenus} = {}) => {
             dialog.hidden = true;
         };
 
-        trigger.addEventListener('click', () => {
-            closeAccountMenus?.();
+        const openDialog = () => {
             currentStep = 0;
             renderStep();
             showDialog(dialog);
-        });
+        };
 
         nextButton.addEventListener('click', () => {
             if (currentStep < steps.length - 1) {
@@ -172,7 +172,58 @@ export const bindTutorialDialog = ({closeAccountMenus} = {}) => {
         dialog.addEventListener('close', () => {
             dialog.hidden = true;
         });
+
+        tutorialControllers.set(dialog.id, {
+            close: closeDialog,
+            open: openDialog,
+        });
     });
+
+    const openTutorial = (targetId) => {
+        const controller = tutorialControllers.get(targetId);
+        if (!controller) {
+            return false;
+        }
+
+        closeAccountMenus?.();
+        tutorialControllers.forEach((candidate) => {
+            if (candidate !== controller) {
+                candidate.close();
+            }
+        });
+        controller.open();
+        return true;
+    };
+
+    document.querySelectorAll('[data-tutorial-target]').forEach((trigger) => {
+        trigger.addEventListener('click', (event) => {
+            if (openTutorial(trigger.dataset.tutorialTarget || '')) {
+                event.preventDefault();
+            }
+        });
+    });
+
+    const tutorialAliases = {
+        context: 'tutorial-context-dialog',
+        contexte: 'tutorial-context-dialog',
+        move: 'tutorial-move-dialog',
+        deplacement: 'tutorial-move-dialog',
+        mannies: 'tutorial-mannies-dialog',
+    };
+    const params = new URLSearchParams(window.location.search);
+    const requestedTutorial = params.get('tutorial') || '';
+    if (requestedTutorial !== '') {
+        const targetId = tutorialAliases[requestedTutorial] || requestedTutorial;
+        if (openTutorial(targetId) && window.history?.replaceState) {
+            params.delete('tutorial');
+            const nextSearch = params.toString();
+            window.history.replaceState(
+                {},
+                '',
+                window.location.pathname + (nextSearch ? '?' + nextSearch : '') + window.location.hash,
+            );
+        }
+    }
 };
 
 export const bindPanelTabs = () => {

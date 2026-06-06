@@ -38,6 +38,7 @@ final class OAuthService
         return match ($provider) {
             'google' => new Google($options),
             'discord' => new Discord($options),
+            'github' => new MinimalGithubProvider($options),
             default => throw new \InvalidArgumentException('Unsupported OAuth provider.'),
         };
     }
@@ -49,12 +50,24 @@ final class OAuthService
     {
         return match (strtolower(trim($provider))) {
             'google', 'discord' => ['scope' => ['openid']],
+            'github' => ['scope' => ['']],
             default => [],
         };
     }
 
     public function subjectFromAccessToken(string $provider, AccessToken $token): string
     {
+        $provider = strtolower(trim($provider));
+        if ($provider === 'github') {
+            $oauthProvider = $this->createProvider($provider, '');
+            $resourceOwner = $oauthProvider->getResourceOwner($token);
+            $subject = (string) $resourceOwner->getId();
+            if ($subject === '') {
+                throw new \RuntimeException('The GitHub resource owner does not contain an ID.');
+            }
+            return $subject;
+        }
+
         $idToken = $token->getValues()['id_token'] ?? null;
         if (!is_string($idToken) || $idToken === '') {
             throw new \RuntimeException('No OpenID token was returned by the provider.');

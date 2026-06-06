@@ -10,6 +10,7 @@ use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\SectorKnowledgeLevel;
 use VonNeumannGame\Domain\SectorObservation;
+use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
@@ -39,6 +40,7 @@ final class SectorObservationService
         private readonly VisitedSectorRepository $visitedSectors,
         ?SectorGrid $grid = null,
         array $config = [],
+        private readonly ?MannyRepository $mannies = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->scanConfig = Config::getArray($config, 'scan', $config);
@@ -54,7 +56,7 @@ final class SectorObservationService
         $requiredSeconds = $this->skipsInitialNeighborDelay($player, $distance)
             ? 0
             : $this->requiredResidenceSeconds($distance);
-        $content = $this->sectors->getOrCreateSector($target);
+        $content = $this->abandonOrphanedForgottenMannies($this->sectors->getOrCreateSector($target));
         $visited = $this->visitedSectors->hasVisited($player, $target);
         $current = $probe->currentSector->equals($target);
         $scan = $this->scanMetadata($residenceSeconds, $requiredSeconds);
@@ -256,6 +258,35 @@ final class SectorObservationService
         }
 
         return $objects;
+    }
+
+    private function abandonOrphanedForgottenMannies(SectorContent $content): SectorContent
+    {
+        if ($this->mannies === null) {
+            return $content;
+        }
+
+        $changed = false;
+        foreach ($content->getObjects() as $object) {
+            if (
+                !$object instanceof SectorManny
+                || $object->getState() !== SectorManny::STATE_FORGOTTEN
+                || $this->mannies->hasExistingOwnerForUid($object->getMannyUid())
+            ) {
+                continue;
+            }
+
+            $changed = $content->replaceObject($object->withState(
+                SectorManny::STATE_ABANDONED,
+                'Manny abandoned after its owner account disappeared.',
+            )) || $changed;
+        }
+
+        if ($changed) {
+            $this->sectors->saveSector($content);
+        }
+
+        return $content;
     }
 
     private function minableTargets(SolarSystem $system): array

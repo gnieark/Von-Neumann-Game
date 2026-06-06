@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use League\OAuth2\Client\Token\AccessToken;
+use VonNeumannGame\Auth\AccountDeletionService;
 use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Auth\OAuthConfig;
 use VonNeumannGame\Auth\OAuthService;
@@ -166,9 +167,14 @@ $oauthConfigPath = $tmp . DIRECTORY_SEPARATOR . 'oauth.json';
 file_put_contents($oauthConfigPath, json_encode([
     'google' => ['web' => ['client_id' => 'google-client', 'client_secret' => 'google-secret']],
     'discord' => ['web' => ['client_id' => 'discord-client', 'client_secret' => 'discord-secret']],
+    'github' => ['web' => ['client_id' => 'github-client', 'client_secret' => 'github-secret']],
 ], JSON_THROW_ON_ERROR));
 $oauthService = new OAuthService(OAuthConfig::fromFile($oauthConfigPath));
-$test->assertEquals(['google', 'discord'], $oauthService->availableProviders(), 'OAuth config exposes configured providers');
+$test->assertEquals(['google', 'discord', 'github'], $oauthService->availableProviders(), 'OAuth config exposes configured providers');
+$githubProvider = $oauthService->createProvider('github', 'http://127.0.0.1:8000/auth/provider/github');
+$githubAuthorizationUrl = $githubProvider->getAuthorizationUrl($oauthService->authorizationOptions('github'));
+parse_str((string) parse_url($githubAuthorizationUrl, PHP_URL_QUERY), $githubAuthorizationQuery);
+$test->assertEquals('', $githubAuthorizationQuery['scope'] ?? null, 'GitHub OAuth requests no additional user scopes');
 $idToken = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'google-client', 'exp' => time() + 3600]);
 $test->assertEquals(
     'google-openid-subject',
@@ -225,7 +231,7 @@ $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors), $movementService, $visitedSectors, $mannyService, $items, $storage);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
@@ -273,6 +279,80 @@ $test->assertThrows(
     fn() => $auth->registerPlayerWithExternalAuth('x', 'google', 'other-google-subject'),
     'OAuth registration rejects invalid pseudonyms'
 );
+
+$deletePlayer = $auth->registerPlayerWithPassword('delete-me', 'secret', 'Delete Me', 'Delete probe');
+$deleteProbe = $probes->findByPlayerId($deletePlayer->id);
+$deleteMannies = $deleteProbe === null ? [] : $mannies->findByProbeId($deleteProbe->id);
+$deleteSession = $auth->createSessionForPlayer($deletePlayer);
+$auth->createApiKeyForPlayer($deletePlayer);
+if ($deleteProbe !== null && count($deleteMannies) >= 2) {
+    $outsideManny = $deleteMannies[0];
+    $onboardManny = $deleteMannies[1];
+    $outsideManny->locationType = 'sector';
+    $outsideManny->sector = $deleteProbe->currentSector;
+    $outsideManny->currentTask = 'mining';
+    $outsideManny->taskStartedAt = gmdate('c', time() - 60);
+    $outsideManny->taskEndsAt = gmdate('c', time() + 60);
+    $outsideManny->taskPayload = ['objectId' => 'delete-test-rock'];
+    $mannies->save($outsideManny);
+
+    $deleteSector = $sectorService->getOrCreateSector($deleteProbe->currentSector);
+    $forgottenMannyObject = new SectorManny(
+        SectorManny::objectIdForUid($outsideManny->uid),
+        $outsideManny->name,
+        $outsideManny->uid,
+        SectorManny::STATE_FORGOTTEN,
+        $outsideManny->cargoArray(),
+        'Manny left behind by its probe.',
+    );
+    if (!$deleteSector->replaceObject($forgottenMannyObject)) {
+        $deleteSector->addObject($forgottenMannyObject);
+    }
+    $sectorService->saveSector($deleteSector);
+
+    $deleteStats = (new AccountDeletionService($pdo, $probes, $mannies, $sectorService))->deletePlayer($deletePlayer);
+    $test->assertEquals(1, $deleteStats['players'] ?? null, 'account deletion reports the deleted player');
+    $test->assertEquals(1, $deleteStats['probes'] ?? null, 'account deletion reports the deleted probe');
+    $test->assertEquals(1, $deleteStats['manniesDetachedAsAbandoned'] ?? null, 'account deletion detaches outside Mannys as abandoned');
+    $test->assert($players->findById($deletePlayer->id) === null, 'account deletion removes the player row');
+    $test->assert($probes->findByPlayerId($deletePlayer->id) === null, 'account deletion removes the player probe');
+    $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
+    $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
+    $detachedManny = $mannies->findByUid($outsideManny->uid);
+    $test->assert($detachedManny !== null, 'account deletion keeps outside Mannys recoverable');
+    $test->assertEquals(null, $detachedManny?->probeId, 'account deletion detaches outside Mannys from the deleted probe');
+    $test->assertEquals(null, $detachedManny?->currentTask, 'account deletion clears outside Manny tasks');
+    $deletedPlayerSector = $sectorRepository->load($deleteProbe->currentSector);
+    $abandonedMannyObject = $deletedPlayerSector->findObjectById(SectorManny::objectIdForUid($outsideManny->uid));
+    $test->assertEquals(SectorManny::STATE_ABANDONED, $abandonedMannyObject?->toArray()['state'] ?? null, 'account deletion marks outside sector Mannys as abandoned');
+}
+
+$orphanObserver = $auth->registerPlayerWithPassword('orphan-observer', 'secret', 'Orphan Observer', 'Orphan observer probe');
+$orphanProbe = $probes->findByPlayerId($orphanObserver->id);
+if ($orphanProbe !== null) {
+    $sectorRepository->save(new SectorContent($orphanProbe->currentSector, [
+        new SectorManny(
+            SectorManny::objectIdForUid('mny_deleted_owner'),
+            'orphaned-manny',
+            'mny_deleted_owner',
+            SectorManny::STATE_FORGOTTEN,
+            [],
+            'Manny left behind by a vanished probe.',
+        ),
+    ]));
+    $orphanObservation = (new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies))
+        ->observe($orphanObserver, $orphanProbe, $orphanProbe->currentSector)
+        ->toArray();
+    $orphanManny = $orphanObservation['objects'][0] ?? null;
+    $test->assertEquals(SectorManny::STATE_ABANDONED, $orphanManny['mannyState'] ?? null, 'orphaned forgotten sector Mannys become abandoned on observation');
+    $test->assertEquals(true, $orphanManny['salvageable'] ?? null, 'orphaned forgotten sector Mannys become salvageable');
+    $persistedOrphanSector = $sectorRepository->load($orphanProbe->currentSector);
+    $test->assertEquals(
+        SectorManny::STATE_ABANDONED,
+        $persistedOrphanSector->findObjectById(SectorManny::objectIdForUid('mny_deleted_owner'))?->toArray()['state'] ?? null,
+        'orphaned forgotten Manny conversion is persisted to sector JSON',
+    );
+}
 
 $goodSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'remi', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $goodSession->status, 'POST /api/session with good password returns 200');

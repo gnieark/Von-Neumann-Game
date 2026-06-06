@@ -535,6 +535,20 @@ button:disabled {
     align-content: start;
 }
 
+.tutorial-followup {
+    margin: 12px 0 0;
+}
+
+.tutorial-followup a {
+    color: var(--cold);
+    font-weight: 700;
+    text-underline-offset: 4px;
+}
+
+.tutorial-followup a:hover {
+    color: #b4d4d9;
+}
+
 .tutorial-actions {
     display: flex;
     justify-content: flex-end;

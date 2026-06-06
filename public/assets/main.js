@@ -15,7 +15,7 @@ import {
     bindPanelTabs,
     bindRefreshButtons,
     bindTutorialDialog,
-} from './ui-accordion.js?v=20260605-tutorial-image-preview';
+} from './ui-accordion.js?v=20260606-tutorial-chain';
 import {
     bindLanguageForm,
     coordinate,

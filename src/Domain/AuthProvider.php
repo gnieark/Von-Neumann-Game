@@ -9,6 +9,7 @@ enum AuthProvider: string
     case Password = 'password';
     case Google = 'google';
     case Discord = 'discord';
+    case GitHub = 'github';
 
     /**
      * @return array<string>
@@ -18,6 +19,7 @@ enum AuthProvider: string
         return [
             self::Google->value,
             self::Discord->value,
+            self::GitHub->value,
         ];
     }
 }

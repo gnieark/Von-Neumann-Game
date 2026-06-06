@@ -12,7 +12,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260605-tutorial-image-preview';
+const ASSET_VERSION = '20260606-tutorial-chain';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -451,7 +451,7 @@ function handleOAuthPseudo(AppFactory $factory, string $projectRoot, Translator 
         $player = $auth->registerPlayerWithExternalAuth($pseudonym, $pending['provider'], $pending['providerUserId']);
         unset($_SESSION['pending_oauth']);
         issueSessionCookie($auth, $player, (bool) ($pending['remember'] ?? false));
-        redirect('/');
+        redirect('/?tutorial=context');
     } catch (InvalidArgumentException $exception) {
         $message = $exception->getMessage() === 'Pseudonym already exists.'
             ? $translator->get('pseudonymAlreadyUsed')
@@ -488,6 +488,7 @@ function oauthProviderLinks(string $projectRoot, Translator $translator): array
         'label' => match ($provider) {
             'google' => $translator->get('oauthLoginGoogle'),
             'discord' => $translator->get('oauthLoginDiscord'),
+            'github' => $translator->get('oauthLoginGitHub'),
             default => $provider,
         },
         'url' => '/auth/provider/' . rawurlencode($provider),

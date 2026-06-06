@@ -73,9 +73,11 @@ fusionnes recursivement et les listes sont remplacees. Ces fichiers locaux sont
 ignores par Git.
 
 L'authentification OAuth est optionnelle. Copier `config/oauth.example.json` vers
-`config/oauth.json`, renseigner Google et/ou Discord, puis declarer les callbacks
-`/auth/provider/google` et `/auth/provider/discord` cote fournisseur. Le serveur
-ne conserve que le nom du fournisseur et le `sub` OpenID.
+`config/oauth.json`, renseigner Google, Discord et/ou GitHub, puis declarer les
+callbacks `/auth/provider/google`, `/auth/provider/discord` et/ou
+`/auth/provider/github` cote fournisseur. Le serveur ne conserve que le nom du
+fournisseur et l'identifiant stable retourne par celui-ci. GitHub est configure
+avec un scope vide pour eviter de demander les adresses email.
 
 ## Organisation Du Code
 

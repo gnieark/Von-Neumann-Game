@@ -44,6 +44,19 @@ final class SectorManny extends UniverseObject
         return $this->cargo;
     }
 
+    public function withState(string $state, ?string $description = null): self
+    {
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->mannyUid,
+            $state,
+            $this->cargo,
+            $description ?? $this->getDescription(),
+            $this->getWaypointBookmarks(),
+        );
+    }
+
     public function toArray(): array
     {
         return parent::toArray() + [

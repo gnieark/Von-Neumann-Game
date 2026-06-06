@@ -99,6 +99,20 @@ final class MannyRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    public function hasExistingOwnerForUid(string $uid): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*)
+             FROM mannies m
+             INNER JOIN neumann_probes p ON p.id = m.probe_id
+             INNER JOIN players pl ON pl.id = p.player_id
+             WHERE m.uid = :uid'
+        );
+        $stmt->execute(['uid' => $uid]);
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
     public function findById(int $id): ?Manny
     {
         $stmt = $this->pdo->prepare('SELECT * FROM mannies WHERE id = :id');

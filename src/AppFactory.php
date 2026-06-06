@@ -78,7 +78,7 @@ final class AppFactory
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
-        $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig);
+        $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig, mannies: $mannies);
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
