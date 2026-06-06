@@ -31,7 +31,10 @@ export const createCraftingModule = ({state, labels}) => {
 
     function mannyCraftingRecipes() {
         const recipes = state.currentCraftingRecipes.filter((recipe) => (
-            recipe && typeof recipe === 'object' && Array.isArray(recipe.craftableBy) && recipe.craftableBy.includes('manny')
+            recipe
+            && typeof recipe === 'object'
+            && Array.isArray(recipe.craftableBy)
+            && (recipe.craftableBy.includes('manny') || recipe.craftableBy.includes('atomic_3d_printer'))
         ));
 
         return recipes.length > 0 ? recipes : fallbackMannyCraftingRecipes();
@@ -78,11 +81,20 @@ export const createCraftingModule = ({state, labels}) => {
     }
 
     function inventoryResourceAmount(type) {
-        if (!state.currentInventory || !Array.isArray(state.currentInventory.resourceStocks)) {
+        if (!state.currentInventory) {
             return 0;
         }
 
         const normalizedType = normalizeResourceType(type);
+        if (normalizedType === 'deuterium') {
+            return (Array.isArray(state.currentInventory.externalTanks) ? state.currentInventory.externalTanks : [])
+                .filter((tank) => normalizeResourceType(tank.type) === 'deuterium')
+                .reduce((total, tank) => total + Math.max(0, numericCount(tank.fillPercent) / 100), 0);
+        }
+        if (!Array.isArray(state.currentInventory.resourceStocks)) {
+            return 0;
+        }
+
         return state.currentInventory.resourceStocks.reduce((total, stock) => (
             normalizeResourceType(stock.type) === normalizedType
                 ? total + numericCount(stock.amount)

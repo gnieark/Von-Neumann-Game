@@ -4,9 +4,9 @@ import {
     createApiClient,
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
-import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
-import {createInventoryModule} from './inventory.js?v=20260606-storage-rule-selects';
-import {createLabels} from './labels.js?v=20260606-sector-radar-bookmarks';
+import {createCraftingModule} from './crafting.js?v=20260606-circuit-recipes';
+import {createInventoryModule} from './inventory.js?v=20260606-circuit-recipes';
+import {createLabels} from './labels.js?v=20260606-circuit-recipes';
 import {createMannyModule} from './manny.js?v=20260606-sector-radar-bookmarks';
 import {createSectorModule} from './sector.js?v=20260606-sector-units';
 import {

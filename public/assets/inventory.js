@@ -69,7 +69,16 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
                 && item.currentTask === null;
         }
 
-        return ['waypoint_bookmark', 'steel_bar', 'steel_plate'].includes(item.type);
+        return [
+            'waypoint_bookmark',
+            'steel_bar',
+            'steel_plate',
+            'micro_conductor',
+            'ceramic_insulator',
+            'crystal_substrate',
+            'dopant_matrix',
+            'integrated_circuit',
+        ].includes(item.type);
     };
 
     const isMovableItem = (item) => (
@@ -167,6 +176,11 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
         'steel_bar',
         'steel_plate',
         'additional_container',
+        'micro_conductor',
+        'ceramic_insulator',
+        'crystal_substrate',
+        'dopant_matrix',
+        'integrated_circuit',
     ];
     const resourceRuleTypes = ['metals', 'ice', 'carbon_compounds'];
     const storageRuleTypeLabel = (type, fallback = type) => {

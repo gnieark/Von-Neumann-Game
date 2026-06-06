@@ -245,7 +245,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(20, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(21, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -442,6 +442,23 @@ $test->assertEquals(15, $recipesById['additional_container']['ingredients'][1]['
 $test->assertEquals(180, $recipesById['additional_container']['durationSeconds'] ?? null, 'additional container base assembly takes three real minutes');
 $test->assertEquals(0.0, $recipesById['additional_container']['output']['containerSpace'] ?? null, 'additional container occupies no storage');
 $test->assertEquals(1.0, $recipesById['additional_container']['output']['capacityBonus'] ?? null, 'additional container adds one container of storage');
+$test->assert(isset($recipesById['micro_conductor']), 'crafting recipes expose micro-etched conductors');
+$test->assertEquals(['atomic_3d_printer'], $recipesById['micro_conductor']['craftableBy'] ?? null, 'micro-conductor recipe uses the atomic printer');
+$test->assertEquals('metals', $recipesById['micro_conductor']['ingredients'][0]['type'] ?? null, 'micro-conductor recipe uses metals');
+$test->assertEquals(0.04, $recipesById['micro_conductor']['ingredients'][0]['quantity'] ?? null, 'micro-conductor recipe consumes 0.04 metal containers');
+$test->assertEquals('deuterium', $recipesById['micro_conductor']['ingredients'][1]['type'] ?? null, 'micro-conductor recipe uses deuterium energy');
+$test->assertEquals(0.01, $recipesById['micro_conductor']['ingredients'][1]['quantity'] ?? null, 'micro-conductor recipe consumes 0.01 deuterium containers');
+$test->assert(isset($recipesById['ceramic_insulator']), 'crafting recipes expose ceramo-organic insulators');
+$test->assertEquals('ice', $recipesById['ceramic_insulator']['ingredients'][0]['type'] ?? null, 'ceramic insulator recipe uses ice');
+$test->assertEquals('carbon_compounds', $recipesById['ceramic_insulator']['ingredients'][1]['type'] ?? null, 'ceramic insulator recipe uses organic compounds');
+$test->assert(isset($recipesById['crystal_substrate']), 'crafting recipes expose crystal substrates');
+$test->assert(isset($recipesById['dopant_matrix']), 'crafting recipes expose dopant matrices');
+$test->assert(isset($recipesById['integrated_circuit']), 'crafting recipes expose integrated circuits');
+$test->assertEquals(['atomic_3d_printer'], $recipesById['integrated_circuit']['craftableBy'] ?? null, 'integrated-circuit recipe uses the atomic printer');
+$test->assertEquals('micro_conductor', $recipesById['integrated_circuit']['ingredients'][0]['type'] ?? null, 'integrated circuit requires micro conductors');
+$test->assertEquals(2, $recipesById['integrated_circuit']['ingredients'][0]['quantity'] ?? null, 'integrated circuit requires two micro conductors');
+$test->assertEquals('integrated_circuit', $recipesById['integrated_circuit']['output']['type'] ?? null, 'integrated circuit recipe exposes its output item');
+$test->assertEquals(0.001, $recipesById['integrated_circuit']['output']['containerSpace'] ?? null, 'integrated circuit occupies a tiny storage space');
 
 $craftPlayer = $auth->registerPlayerWithPassword('crafter', 'secret', 'Crafter');
 $craftProbeEntity = $probes->findByPlayerId($craftPlayer->id);
@@ -507,6 +524,33 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $storageRules->status, 'PATCH /api/probe/storage-containers/{id}/rules updates routing rules');
     $test->assertEquals(['metals'], $storageRules->body['container']['rules']['priority'] ?? null, 'storage priority rule is persisted');
+
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100, metals_stock = 0.2, ice_stock = 0.09, organic_compounds_stock = 0.11 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $integratedCircuitCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'integrated_circuit',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $integratedCircuitCraft->status, 'Manny can operate the atomic printer to craft an integrated circuit');
+    $test->assertEquals('integrated_circuit', $integratedCircuitCraft->body['manny']['task']['recipe'] ?? null, 'integrated-circuit task stores its recipe');
+    $test->assertEquals(5400, $integratedCircuitCraft->body['manny']['task']['durationSeconds'] ?? null, 'raw integrated-circuit craft includes intermediate component fabrication time');
+    $test->assertEquals(0.2, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['metals'] ?? null, 'raw integrated-circuit craft commits metal costs');
+    $test->assertEquals(0.09, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['ice'] ?? null, 'raw integrated-circuit craft commits ice costs');
+    $test->assertEquals(0.11, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'raw integrated-circuit craft commits organic-compound costs');
+    $test->assertEquals(0.13, $integratedCircuitCraft->body['manny']['task']['resourceCosts']['deuterium'] ?? null, 'raw integrated-circuit craft commits deuterium energy costs');
+    $circuitProbeAfterStart = $probes->findByPlayerId($craftPlayer->id);
+    $test->assertEquals(87.0, $circuitProbeAfterStart?->deuteriumStock, 'integrated-circuit craft consumes thirteen percent of the deuterium tank');
+
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $circuitProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $integratedCircuits = array_values(array_filter(
+        $circuitProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === 'integrated_circuit',
+    ));
+    $test->assertEquals(1, count($integratedCircuits), 'completed integrated-circuit craft adds a circuit item');
+    $test->assertEquals(0.001, $integratedCircuits[0]['containerSpace'] ?? null, 'integrated circuit item occupies a tiny storage space');
 
     $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.02 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
     $steelBarCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
@@ -791,8 +835,9 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
 
 $inventoryItems = $sector->body['inventory']['items'] ?? [];
 $printer = $inventoryItems[0] ?? null;
-$test->assertEquals('atomic_3d_printer', $printer['type'] ?? null, 'default inventory starts with an atomic 3D printer');
-$test->assertEquals(0.3, $printer['containerSpace'] ?? null, 'atomic 3D printer occupies 0.3 containers');
+$test->assertEquals('atomic_3d_printer', $printer['type'] ?? null, 'default inventory starts with an atomic printer');
+$test->assertEquals('Imprimante atomique', $printer['name'] ?? null, 'default inventory displays the renamed atomic printer');
+$test->assertEquals(0.3, $printer['containerSpace'] ?? null, 'atomic printer occupies 0.3 containers');
 
 $mannyItems = array_values(array_filter($inventoryItems, static fn(array $item): bool => ($item['type'] ?? null) === 'manny'));
 $test->assertEquals(4, count($mannyItems), 'default inventory contains four mannies');

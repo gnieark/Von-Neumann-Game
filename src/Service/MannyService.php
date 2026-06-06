@@ -217,10 +217,7 @@ final class MannyService
 
         $recipe = CraftingRecipeCatalog::normalizeId($recipe);
         $recipeDefinition = CraftingRecipeCatalog::find($recipe, $this->craftingConfig());
-        if (
-            $recipeDefinition === null
-            || !in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $recipeDefinition['craftableBy'] ?? [], true)
-        ) {
+        if ($recipeDefinition === null || !$this->canMannyOperateRecipe($recipeDefinition)) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
         }
         $craftingPlan = $this->craftingPlan($probe, $recipeDefinition);
@@ -763,7 +760,7 @@ final class MannyService
      */
     private function directResourceCostsForRecipe(array $recipeDefinition): ?array
     {
-        if (!in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $recipeDefinition['craftableBy'] ?? [], true)) {
+        if (!$this->canMannyOperateRecipe($recipeDefinition)) {
             return null;
         }
 
@@ -863,6 +860,20 @@ final class MannyService
     private function resourceStock(NeumannProbe $probe, string $type): float
     {
         return $this->storage->resourceStock($probe, $type);
+    }
+
+    /**
+     * @param array<string, mixed> $recipeDefinition
+     */
+    private function canMannyOperateRecipe(array $recipeDefinition): bool
+    {
+        $craftableBy = $recipeDefinition['craftableBy'] ?? [];
+        if (!is_array($craftableBy)) {
+            return false;
+        }
+
+        return in_array(CraftingRecipeCatalog::FABRICATOR_MANNY, $craftableBy, true)
+            || in_array(CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER, $craftableBy, true);
     }
 
     /**
@@ -1999,6 +2010,11 @@ final class MannyService
             ProbeItem::TYPE_WAYPOINT_BOOKMARK,
             ProbeItem::TYPE_STEEL_BAR,
             ProbeItem::TYPE_STEEL_PLATE,
+            ProbeItem::TYPE_MICRO_CONDUCTOR,
+            ProbeItem::TYPE_CERAMIC_INSULATOR,
+            ProbeItem::TYPE_CRYSTAL_SUBSTRATE,
+            ProbeItem::TYPE_DOPANT_MATRIX,
+            ProbeItem::TYPE_INTEGRATED_CIRCUIT,
         ], true);
     }
 
@@ -2009,6 +2025,11 @@ final class MannyService
             ProbeItem::TYPE_STEEL_BAR => ProbeItem::STEEL_BAR_NAME,
             ProbeItem::TYPE_STEEL_PLATE => ProbeItem::STEEL_PLATE_NAME,
             ProbeItem::TYPE_ADDITIONAL_CONTAINER => ProbeItem::ADDITIONAL_CONTAINER_NAME,
+            ProbeItem::TYPE_MICRO_CONDUCTOR => ProbeItem::MICRO_CONDUCTOR_NAME,
+            ProbeItem::TYPE_CERAMIC_INSULATOR => ProbeItem::CERAMIC_INSULATOR_NAME,
+            ProbeItem::TYPE_CRYSTAL_SUBSTRATE => ProbeItem::CRYSTAL_SUBSTRATE_NAME,
+            ProbeItem::TYPE_DOPANT_MATRIX => ProbeItem::DOPANT_MATRIX_NAME,
+            ProbeItem::TYPE_INTEGRATED_CIRCUIT => ProbeItem::INTEGRATED_CIRCUIT_NAME,
             default => $fallback !== null && trim($fallback) !== '' ? $fallback : $type,
         };
     }

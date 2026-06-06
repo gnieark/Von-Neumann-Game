@@ -112,6 +112,42 @@
       "durationSeconds": 180,
       "capacityBonus": 1.0,
       "containerSpace": 0.0
+    },
+    "micro_conductor": {
+      "metalsCost": 0.04,
+      "deuteriumCost": 0.01,
+      "containerSpace": 0.005,
+      "durationSeconds": 600
+    },
+    "ceramic_insulator": {
+      "iceCost": 0.03,
+      "organicCost": 0.04,
+      "deuteriumCost": 0.01,
+      "containerSpace": 0.005,
+      "durationSeconds": 600
+    },
+    "crystal_substrate": {
+      "metalsCost": 0.08,
+      "iceCost": 0.03,
+      "deuteriumCost": 0.02,
+      "containerSpace": 0.005,
+      "durationSeconds": 900
+    },
+    "dopant_matrix": {
+      "metalsCost": 0.04,
+      "organicCost": 0.03,
+      "deuteriumCost": 0.02,
+      "containerSpace": 0.002,
+      "durationSeconds": 900
+    },
+    "integrated_circuit": {
+      "microConductorCount": 2,
+      "ceramicInsulatorCount": 2,
+      "crystalSubstrateCount": 1,
+      "dopantMatrixCount": 1,
+      "deuteriumCost": 0.05,
+      "containerSpace": 0.001,
+      "durationSeconds": 1200
     }
   }
 }

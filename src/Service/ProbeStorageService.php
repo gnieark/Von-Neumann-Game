@@ -81,7 +81,7 @@ final class ProbeStorageService
             new ProbeInventoryItem(
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
-                'Imprimante 3D atomique',
+                'Imprimante atomique',
                 $this->atomicPrinterSpace(),
                 null,
                 0.0,
@@ -156,7 +156,7 @@ final class ProbeStorageService
             $items[] = (new ProbeInventoryItem(
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
-                'Imprimante 3D atomique',
+                'Imprimante atomique',
                 $this->atomicPrinterSpace(),
                 null,
                 0.0,
@@ -346,7 +346,7 @@ final class ProbeStorageService
     {
         $type = $this->normalizeResourceType($type);
         if ($type === ResourceComposition::DEUTERIUM) {
-            return $probe->deuteriumStock;
+            return round(max(0.0, $probe->deuteriumStock / $this->maxDeuteriumPercent()), 4);
         }
 
         $this->ensureProbeStorage($probe);
@@ -560,7 +560,7 @@ final class ProbeStorageService
             }
             $seen[$itemUid] = true;
             if ($itemUid === 'probe-' . $probe->id . '-atomic-3d-printer') {
-                throw new MannyActionException(422, 'item_not_movable', 'The atomic 3D printer is stored inside the probe and cannot be moved.');
+                throw new MannyActionException(422, 'item_not_movable', 'The atomic printer is stored inside the probe and cannot be moved.');
             }
             $item = $this->items->findByUidForProbe($probe->id, $itemUid)
                 ?? throw new MannyActionException(404, 'not_found', 'Inventory item not found.');

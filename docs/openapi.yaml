@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '20'
+  version: '21'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 20
+                apiVersion: 21
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -130,6 +130,31 @@ paths:
                       type: waypoint_bookmark
                       name: Waypoint bookmark
                       containerSpace: 0.01
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: integrated_circuit
+                    name: Integrated circuit
+                    craftableBy: [atomic_3d_printer]
+                    ingredients:
+                      - type: micro_conductor
+                        quantity: 2
+                        unit: item
+                      - type: ceramic_insulator
+                        quantity: 2
+                        unit: item
+                      - type: crystal_substrate
+                        quantity: 1
+                        unit: item
+                      - type: dopant_matrix
+                        quantity: 1
+                        unit: item
+                      - type: deuterium
+                        quantity: 0.05
+                        unit: earth_container_equivalent
+                    durationSeconds: 1200
+                    output:
+                      type: integrated_circuit
+                      name: Integrated circuit
+                      containerSpace: 0.001
                       containerSpaceUnit: earth_container_equivalent
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -515,7 +540,7 @@ paths:
                   items:
                     - id: probe-1-atomic-3d-printer
                       type: atomic_3d_printer
-                      name: Imprimante 3D atomique
+                      name: Imprimante atomique
                       containerSpace: 0.3
                       currentTask: null
                       taskProgressPercent: 0
@@ -1256,7 +1281,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, invalid_recipe, invalid_mining_target, invalid_salvage_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, invalid_recipe, invalid_mining_target, invalid_salvage_target, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -1326,7 +1351,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
         name:
           type: string
         craftableBy:
@@ -1351,7 +1376,7 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
         quantity:
           type: number
           minimum: 0
@@ -1359,13 +1384,16 @@ components:
         unit:
           type: string
           enum: [earth_container_equivalent, item]
+        kind:
+          type: string
+          enum: [resource, item]
     CraftingRecipeOutput:
       type: object
       required: [type, name, containerSpace, containerSpaceUnit]
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
         name:
           type: string
         containerSpace:
@@ -1863,7 +1891,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
             amount:
               type: number
               description: Present for discarded resources and deuterium.
@@ -1902,7 +1930,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
         name:
           type: string
         containerSpace:
@@ -1934,7 +1962,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
         name:
           type: string
         currentTask:
@@ -2013,7 +2041,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
           description: >
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
@@ -2224,7 +2252,7 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         itemType:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
           description: Present only for drifting item stacks.
         quantity:
           type: integer

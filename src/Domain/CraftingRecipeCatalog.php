@@ -9,6 +9,7 @@ use VonNeumannGame\Config\Config;
 final class CraftingRecipeCatalog
 {
     public const FABRICATOR_MANNY = 'manny';
+    public const FABRICATOR_ATOMIC_PRINTER = 'atomic_3d_printer';
     public const WAYPOINT_BOOKMARK_METALS_COST = 0.01;
     public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = 0.01;
     public const WAYPOINT_BOOKMARK_CRAFTING_SECONDS = 600;
@@ -23,6 +24,32 @@ final class CraftingRecipeCatalog
     public const ADDITIONAL_CONTAINER_CRAFTING_SECONDS = 180;
     public const ADDITIONAL_CONTAINER_CAPACITY_BONUS = 1.0;
     public const ADDITIONAL_CONTAINER_CONTAINER_SPACE = 0.0;
+    public const MICRO_CONDUCTOR_METALS_COST = 0.04;
+    public const MICRO_CONDUCTOR_DEUTERIUM_COST = 0.01;
+    public const MICRO_CONDUCTOR_CONTAINER_SPACE = 0.005;
+    public const MICRO_CONDUCTOR_CRAFTING_SECONDS = 600;
+    public const CERAMIC_INSULATOR_ICE_COST = 0.03;
+    public const CERAMIC_INSULATOR_ORGANIC_COST = 0.04;
+    public const CERAMIC_INSULATOR_DEUTERIUM_COST = 0.01;
+    public const CERAMIC_INSULATOR_CONTAINER_SPACE = 0.005;
+    public const CERAMIC_INSULATOR_CRAFTING_SECONDS = 600;
+    public const CRYSTAL_SUBSTRATE_METALS_COST = 0.08;
+    public const CRYSTAL_SUBSTRATE_ICE_COST = 0.03;
+    public const CRYSTAL_SUBSTRATE_DEUTERIUM_COST = 0.02;
+    public const CRYSTAL_SUBSTRATE_CONTAINER_SPACE = 0.005;
+    public const CRYSTAL_SUBSTRATE_CRAFTING_SECONDS = 900;
+    public const DOPANT_MATRIX_METALS_COST = 0.04;
+    public const DOPANT_MATRIX_ORGANIC_COST = 0.03;
+    public const DOPANT_MATRIX_DEUTERIUM_COST = 0.02;
+    public const DOPANT_MATRIX_CONTAINER_SPACE = 0.002;
+    public const DOPANT_MATRIX_CRAFTING_SECONDS = 900;
+    public const INTEGRATED_CIRCUIT_MICRO_CONDUCTORS = 2;
+    public const INTEGRATED_CIRCUIT_CERAMIC_INSULATORS = 2;
+    public const INTEGRATED_CIRCUIT_CRYSTAL_SUBSTRATES = 1;
+    public const INTEGRATED_CIRCUIT_DOPANT_MATRICES = 1;
+    public const INTEGRATED_CIRCUIT_DEUTERIUM_COST = 0.05;
+    public const INTEGRATED_CIRCUIT_CONTAINER_SPACE = 0.001;
+    public const INTEGRATED_CIRCUIT_CRAFTING_SECONDS = 1200;
 
     /**
      * @return list<array<string, mixed>>
@@ -34,6 +61,11 @@ final class CraftingRecipeCatalog
             self::steelBar($config),
             self::steelPlate($config),
             self::additionalContainer($config),
+            self::microConductor($config),
+            self::ceramicInsulator($config),
+            self::crystalSubstrate($config),
+            self::dopantMatrix($config),
+            self::integratedCircuit($config),
         ];
     }
 
@@ -170,6 +202,161 @@ final class CraftingRecipeCatalog
                 'capacityBonus' => Config::float($config, 'additional_container.capacityBonus', self::ADDITIONAL_CONTAINER_CAPACITY_BONUS),
                 'capacityBonusUnit' => ProbeInventory::CAPACITY_UNIT,
             ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function microConductor(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_MICRO_CONDUCTOR,
+            'name' => ProbeItem::MICRO_CONDUCTOR_NAME,
+            'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
+            'ingredients' => [
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'micro_conductor.metalsCost', self::MICRO_CONDUCTOR_METALS_COST)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'micro_conductor.deuteriumCost', self::MICRO_CONDUCTOR_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'micro_conductor.durationSeconds', self::MICRO_CONDUCTOR_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_MICRO_CONDUCTOR,
+                ProbeItem::MICRO_CONDUCTOR_NAME,
+                Config::float($config, 'micro_conductor.containerSpace', self::MICRO_CONDUCTOR_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function ceramicInsulator(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_CERAMIC_INSULATOR,
+            'name' => ProbeItem::CERAMIC_INSULATOR_NAME,
+            'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
+            'ingredients' => [
+                self::resourceIngredient(ResourceComposition::ICE, Config::float($config, 'ceramic_insulator.iceCost', self::CERAMIC_INSULATOR_ICE_COST)),
+                self::resourceIngredient(ResourceComposition::CARBON_COMPOUNDS, Config::float($config, 'ceramic_insulator.organicCost', self::CERAMIC_INSULATOR_ORGANIC_COST)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'ceramic_insulator.deuteriumCost', self::CERAMIC_INSULATOR_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'ceramic_insulator.durationSeconds', self::CERAMIC_INSULATOR_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_CERAMIC_INSULATOR,
+                ProbeItem::CERAMIC_INSULATOR_NAME,
+                Config::float($config, 'ceramic_insulator.containerSpace', self::CERAMIC_INSULATOR_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function crystalSubstrate(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_CRYSTAL_SUBSTRATE,
+            'name' => ProbeItem::CRYSTAL_SUBSTRATE_NAME,
+            'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
+            'ingredients' => [
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'crystal_substrate.metalsCost', self::CRYSTAL_SUBSTRATE_METALS_COST)),
+                self::resourceIngredient(ResourceComposition::ICE, Config::float($config, 'crystal_substrate.iceCost', self::CRYSTAL_SUBSTRATE_ICE_COST)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'crystal_substrate.deuteriumCost', self::CRYSTAL_SUBSTRATE_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'crystal_substrate.durationSeconds', self::CRYSTAL_SUBSTRATE_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_CRYSTAL_SUBSTRATE,
+                ProbeItem::CRYSTAL_SUBSTRATE_NAME,
+                Config::float($config, 'crystal_substrate.containerSpace', self::CRYSTAL_SUBSTRATE_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function dopantMatrix(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_DOPANT_MATRIX,
+            'name' => ProbeItem::DOPANT_MATRIX_NAME,
+            'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
+            'ingredients' => [
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'dopant_matrix.metalsCost', self::DOPANT_MATRIX_METALS_COST)),
+                self::resourceIngredient(ResourceComposition::CARBON_COMPOUNDS, Config::float($config, 'dopant_matrix.organicCost', self::DOPANT_MATRIX_ORGANIC_COST)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'dopant_matrix.deuteriumCost', self::DOPANT_MATRIX_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'dopant_matrix.durationSeconds', self::DOPANT_MATRIX_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_DOPANT_MATRIX,
+                ProbeItem::DOPANT_MATRIX_NAME,
+                Config::float($config, 'dopant_matrix.containerSpace', self::DOPANT_MATRIX_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function integratedCircuit(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_INTEGRATED_CIRCUIT,
+            'name' => ProbeItem::INTEGRATED_CIRCUIT_NAME,
+            'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_MICRO_CONDUCTOR, Config::int($config, 'integrated_circuit.microConductorCount', self::INTEGRATED_CIRCUIT_MICRO_CONDUCTORS)),
+                self::itemIngredient(ProbeItem::TYPE_CERAMIC_INSULATOR, Config::int($config, 'integrated_circuit.ceramicInsulatorCount', self::INTEGRATED_CIRCUIT_CERAMIC_INSULATORS)),
+                self::itemIngredient(ProbeItem::TYPE_CRYSTAL_SUBSTRATE, Config::int($config, 'integrated_circuit.crystalSubstrateCount', self::INTEGRATED_CIRCUIT_CRYSTAL_SUBSTRATES)),
+                self::itemIngredient(ProbeItem::TYPE_DOPANT_MATRIX, Config::int($config, 'integrated_circuit.dopantMatrixCount', self::INTEGRATED_CIRCUIT_DOPANT_MATRICES)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'integrated_circuit.deuteriumCost', self::INTEGRATED_CIRCUIT_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'integrated_circuit.durationSeconds', self::INTEGRATED_CIRCUIT_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_INTEGRATED_CIRCUIT,
+                ProbeItem::INTEGRATED_CIRCUIT_NAME,
+                Config::float($config, 'integrated_circuit.containerSpace', self::INTEGRATED_CIRCUIT_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function resourceIngredient(string $type, float $quantity): array
+    {
+        return [
+            'type' => $type,
+            'quantity' => $quantity,
+            'unit' => ProbeInventory::CAPACITY_UNIT,
+            'kind' => 'resource',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function itemIngredient(string $type, int $quantity): array
+    {
+        return [
+            'type' => $type,
+            'quantity' => $quantity,
+            'unit' => 'item',
+            'kind' => 'item',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function itemOutput(string $type, string $name, float $containerSpace): array
+    {
+        return [
+            'type' => $type,
+            'name' => $name,
+            'containerSpace' => $containerSpace,
+            'containerSpaceUnit' => ProbeInventory::CAPACITY_UNIT,
         ];
     }
 }

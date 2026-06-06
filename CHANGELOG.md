@@ -23,10 +23,13 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v20 : les objets détaillés de `/api/sector` et `/api/probe/sector` exposent désormais `massUnit` et `radiusUnit` quand `mass` / `radius` sont présents.
 - Interface : les masses et rayons des corps détectés affichent leur unité (`M☉`, `R☉`, `M🜨`, `R🜨`, `km`, `AU`) et l’onglet `Capteurs et radars` explique ces unités.
 - Interface : le dictionnaire de traduction JS est désormais servi via un JSON versionné et cacheable au lieu d’être injecté inline dans le HTML.
+- API v21 : ajout des recettes `micro_conductor`, `ceramic_insulator`, `crystal_substrate`, `dopant_matrix` et `integrated_circuit`, fabriquées via l’imprimante atomique.
+- Interface : l’`Imprimante 3D atomique` est renommée `Imprimante atomique`, et les nouveaux composants de circuit sont affichés dans les inventaires, recettes et règles de stockage.
+- Craft : les coûts de deutérium des recettes sont vérifiés et consommés en ECE de cuve, afin que `0.13 ECE` corresponde à 13% d’une cuve pleine.
 
 ### Breaking Changes
 
-- Les clients typés doivent accepter `apiVersion: 20`, les nouveaux schémas `ProbeMessage*` et le champ `pagination` sur `ProbeMessagesResponse`.
+- Les clients typés doivent accepter `apiVersion: 21`, les nouveaux schémas `ProbeMessage*`, le champ `pagination` sur `ProbeMessagesResponse` et les nouveaux types d’items de craft électronique.
 - Les clients de `GET /api/probe/messages/sent` doivent utiliser `ProbeSentMessagesResponse` : les champs `status`, `readAt` et `updatedAt` ne sont plus présents sur les messages envoyés.
 
 ## 2026-06-05

@@ -29,6 +29,7 @@ export const createLabels = (i18n) => {
         solar_system: t('solarSystemObject', 'Solar system'),
         manny: t('mannyObject', 'Manny'),
         probe: t('tabProbe', 'Probe'),
+        atomic_3d_printer: t('atomicPrinter', 'Atomic printer'),
         waypoint_bookmark: t('waypointBookmark', 'Waypoint bookmark'),
         drifting_item: t('driftingItemObject', 'Drifting item'),
         object: t('object', 'Object'),
@@ -134,10 +135,16 @@ export const createLabels = (i18n) => {
         installing_waypoint_bookmark: t('installingWaypointBookmark', 'Installing waypoint bookmark'),
     }[task] || task || t('noTask', 'None'));
     const inventoryItemTypeLabel = (type, fallback) => ({
+        atomic_3d_printer: t('atomicPrinter', 'Atomic printer'),
         waypoint_bookmark: t('waypointBookmark', 'Waypoint bookmark'),
         steel_bar: t('steelBar', 'Steel bar'),
         steel_plate: t('steelPlate', 'Steel plate'),
         additional_container: t('additionalContainer', 'Additional container'),
+        micro_conductor: t('microConductor', 'Micro-etched conductor'),
+        ceramic_insulator: t('ceramicInsulator', 'Ceramo-organic insulator'),
+        crystal_substrate: t('crystalSubstrate', 'Crystal substrate'),
+        dopant_matrix: t('dopantMatrix', 'Dopant matrix'),
+        integrated_circuit: t('integratedCircuit', 'Integrated circuit'),
     }[type] || fallback || type);
 
     return {

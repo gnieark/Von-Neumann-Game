@@ -32,7 +32,7 @@ final class ProbeInventory
             new ProbeInventoryItem(
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
-                'Imprimante 3D atomique',
+                'Imprimante atomique',
                 0.3,
                 null,
                 0,
