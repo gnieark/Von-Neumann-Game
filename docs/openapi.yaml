@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '19'
+  version: '20'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 19
+                apiVersion: 20
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -497,6 +497,8 @@ paths:
                     - type: solar_system
                       name: System abc123
                       summary: Stellar system with 1 star(s) and 4 orbital body(ies).
+                      radius: 5.4
+                      radiusUnit: astronomical_unit
                   probes:
                     - id: 2
                       name: Probe of nova
@@ -1109,6 +1111,8 @@ paths:
                           name: System abc123
                           estimated: false
                           summary: Stellar system with 1 star(s) and 4 orbital body(ies).
+                          radius: 5.4
+                          radiusUnit: astronomical_unit
                           dangerLevel: low
                       scan:
                         currentSectorResidenceSeconds: 42
@@ -2184,8 +2188,16 @@ components:
           type: string
         mass:
           type: number
+        massUnit:
+          type: string
+          enum: [solar_mass, earth_mass]
+          description: Unit used by mass when present. Stars, black holes and dust clouds use solar_mass; planets and asteroids use earth_mass.
         radius:
           type: number
+        radiusUnit:
+          type: string
+          enum: [solar_radius, earth_radius, kilometer, astronomical_unit]
+          description: Unit used by radius when present. Stars use solar_radius; planets and asteroids use earth_radius; black holes use kilometer; solar systems and dust clouds use astronomical_unit.
         dangerLevel:
           type: string
           enum: [low, moderate, extreme]
@@ -2237,8 +2249,14 @@ components:
           nullable: true
         mass:
           type: number
+        massUnit:
+          type: string
+          enum: [solar_mass, earth_mass]
         radius:
           type: number
+        radiusUnit:
+          type: string
+          enum: [solar_radius, earth_radius, kilometer, astronomical_unit]
         waypointBookmarks:
           type: array
           items:

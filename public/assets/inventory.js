@@ -158,6 +158,89 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
                 + '</ul>'
     );
 
+    const defaultStorageRuleTypes = [
+        'metals',
+        'ice',
+        'carbon_compounds',
+        'manny',
+        'waypoint_bookmark',
+        'steel_bar',
+        'steel_plate',
+        'additional_container',
+    ];
+    const resourceRuleTypes = ['metals', 'ice', 'carbon_compounds'];
+    const storageRuleTypeLabel = (type, fallback = type) => {
+        if (resourceRuleTypes.includes(type)) {
+            return resourceTypeLabel(type);
+        }
+        if (type === 'manny') {
+            return t('mannyObject', 'Manny');
+        }
+
+        return inventoryItemTypeLabel(type, fallback || type);
+    };
+    const addStorageRuleOption = (options, type, label = null) => {
+        const value = String(type || '').trim();
+        if (value === '' || options.has(value)) {
+            return;
+        }
+        options.set(value, label || storageRuleTypeLabel(value));
+    };
+    const storageRuleOptions = (inventory, containers) => {
+        const options = new Map();
+        defaultStorageRuleTypes.forEach((type) => addStorageRuleOption(options, type));
+        (Array.isArray(inventory && inventory.resourceStocks) ? inventory.resourceStocks : []).forEach((stock) => {
+            addStorageRuleOption(options, stock.type, resourceTypeLabel(stock.type));
+        });
+        (Array.isArray(inventory && inventory.items) ? inventory.items : []).forEach((item) => {
+            addStorageRuleOption(options, item.type, storageRuleTypeLabel(item.type, item.name || item.type));
+        });
+        containers.forEach((container) => {
+            const rules = container.rules || {};
+            ['priority', 'exclusion', 'strictExclusion'].forEach((name) => {
+                (Array.isArray(rules[name]) ? rules[name] : []).forEach((type) => {
+                    addStorageRuleOption(options, type);
+                });
+            });
+        });
+
+        return Array.from(options, ([value, label]) => ({value, label}));
+    };
+
+    const syncStorageRuleForm = (form, changedSelect = null) => {
+        if (!form) {
+            return;
+        }
+        const selects = Array.from(form.querySelectorAll('.storage-rule-select'));
+        if (changedSelect) {
+            const selectedValues = new Set(Array.from(changedSelect.selectedOptions).map((option) => option.value));
+            selects
+                .filter((select) => select !== changedSelect)
+                .forEach((select) => {
+                    Array.from(select.options).forEach((option) => {
+                        if (selectedValues.has(option.value)) {
+                            option.selected = false;
+                        }
+                    });
+                });
+            return;
+        }
+
+        const seen = new Set();
+        selects.forEach((select) => {
+            Array.from(select.options).forEach((option) => {
+                if (!option.selected) {
+                    return;
+                }
+                if (seen.has(option.value)) {
+                    option.selected = false;
+                    return;
+                }
+                seen.add(option.value);
+            });
+        });
+    };
+
     const resourceStockDetail = (stock, amount, space) => [
         t('storedAmount', 'Amount') + ' ' + numberValue(amount),
         t('containerSpace', 'Space') + ' ' + numberValue(space),
@@ -180,11 +263,18 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
                 + escapeHtml(containerLabel(container))
                 + '</option>'
             )));
+        const ruleOptions = storageRuleOptions(inventory, containers);
         const ruleFields = (container) => {
             const rules = container.rules || {};
             const field = (name, label) => (
-                '<label>' + escapeHtml(label)
-                + '<input name="' + escapeHtml(name) + '" value="' + escapeHtml((Array.isArray(rules[name]) ? rules[name] : []).join(', ')) + '">'
+                '<label><span>' + escapeHtml(label) + '</span>'
+                + '<select class="storage-rule-select" name="' + escapeHtml(name) + '" multiple size="' + escapeHtml(String(Math.min(Math.max(ruleOptions.length, 4), 8))) + '">'
+                + ruleOptions.map((option) => (
+                    '<option value="' + escapeHtml(option.value) + '"'
+                    + ((Array.isArray(rules[name]) ? rules[name] : []).includes(option.value) ? ' selected' : '')
+                    + '>' + escapeHtml(option.label) + '</option>'
+                )).join('')
+                + '</select>'
                 + '</label>'
             );
 
@@ -195,10 +285,7 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
 
         node.innerHTML = '<details class="storage-rules">'
             + '<summary>' + escapeHtml(t('manageStorageRules', 'Manage storage rules by container')) + '</summary>'
-            + '<div class="inventory-filter-row">'
-            + '<label>' + escapeHtml(t('inventoryContainerFilter', 'Inventory view'))
-            + '<select id="inventory-container-filter">' + options.join('') + '</select></label>'
-            + '</div>'
+            + '<p class="storage-rules-help">' + escapeHtml(t('storageRulesHelp', 'Priority routes matching new items to this container first unless it is full. Exclusion avoids this container unless no other non-strict container can accept the item. Strict exclusion prevents automatic placement into this container.')) + '</p>'
             + '<div class="storage-container-list">'
             + containers.map((container) => (
                 '<form class="storage-rules-form" data-container-id="' + escapeHtml(container.id) + '">'
@@ -210,7 +297,11 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
                 + '</form>'
             )).join('')
             + '</div>'
-            + '</details>';
+            + '</details>'
+            + '<div class="inventory-filter-row">'
+            + '<label>' + escapeHtml(t('inventoryContainerFilter', 'Inventory view'))
+            + '<select id="inventory-container-filter">' + options.join('') + '</select></label>'
+            + '</div>';
 
         const select = node.querySelector('#inventory-container-filter');
         if (select) {
@@ -219,6 +310,14 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
                 renderInventory(state.currentInventory);
             });
         }
+        node.querySelectorAll('.storage-rules-form').forEach((form) => {
+            syncStorageRuleForm(form);
+        });
+        node.querySelectorAll('.storage-rule-select').forEach((select) => {
+            select.addEventListener('change', () => {
+                syncStorageRuleForm(select.closest('.storage-rules-form'), select);
+            });
+        });
     };
 
     const groupInventoryItems = (items) => {

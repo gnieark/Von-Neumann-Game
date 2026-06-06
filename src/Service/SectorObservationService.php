@@ -186,6 +186,7 @@ final class SectorObservationService
             'radius' => $object->getRadius(),
             'dangerLevel' => $object instanceof BlackHole ? 'extreme' : ($object instanceof DustCloud ? 'moderate' : 'low'),
         ];
+        $data += $this->objectUnitFields($object);
 
         if ($object instanceof SolarSystem) {
             $planetCount = 0;
@@ -305,6 +306,7 @@ final class SectorObservationService
                 'type' => $object->getType()->value,
                 'name' => $object->getName(),
                 'mass' => $object->getMass(),
+                'massUnit' => $this->massUnit($object),
                 'resources' => $resources,
                 'resourceTypes' => ResourceComposition::availableTypes($composition),
                 'resourceComposition' => $composition,
@@ -343,11 +345,52 @@ final class SectorObservationService
             'mass' => $object->getMass(),
             'radius' => $object->getRadius(),
         ];
+        $target += $this->objectUnitFields($object);
         if ($object->getWaypointBookmarks() !== []) {
             $target['waypointBookmarks'] = $object->getWaypointBookmarks();
         }
 
         return $target;
+    }
+
+    private function objectUnitFields(UniverseObject $object): array
+    {
+        $units = [];
+        $massUnit = $this->massUnit($object);
+        if ($massUnit !== null) {
+            $units['massUnit'] = $massUnit;
+        }
+        $radiusUnit = $this->radiusUnit($object);
+        if ($radiusUnit !== null) {
+            $units['radiusUnit'] = $radiusUnit;
+        }
+
+        return $units;
+    }
+
+    private function massUnit(UniverseObject $object): ?string
+    {
+        return match (true) {
+            $object instanceof Star,
+            $object instanceof BlackHole,
+            $object instanceof DustCloud => 'solar_mass',
+            $object instanceof Planet,
+            $object instanceof Asteroid => 'earth_mass',
+            default => null,
+        };
+    }
+
+    private function radiusUnit(UniverseObject $object): ?string
+    {
+        return match (true) {
+            $object instanceof Star => 'solar_radius',
+            $object instanceof Planet,
+            $object instanceof Asteroid => 'earth_radius',
+            $object instanceof BlackHole => 'kilometer',
+            $object instanceof SolarSystem,
+            $object instanceof DustCloud => 'astronomical_unit',
+            default => null,
+        };
     }
 
     private function objectResourceHints(UniverseObject $object): array

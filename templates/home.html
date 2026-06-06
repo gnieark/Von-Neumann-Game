@@ -10,14 +10,14 @@
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="/assets/app.css?v={{assetVersion}}">
+    <link rel="preload" href="{{i18nUrl}}" as="fetch" type="application/json" crossorigin="anonymous">
     <!-- BEGIN swaggerassets -->
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" defer></script>
     <!-- END swaggerassets -->
     <script type="module" src="/assets/app.js?v={{assetVersion}}"></script>
 </head>
-<body class="{{bodyClass}}" data-authenticated="{{authenticated}}">
-    <script type="application/json" id="i18n-json">{{i18nJson}}</script>
+<body class="{{bodyClass}}" data-authenticated="{{authenticated}}" data-i18n-url="{{i18nUrl}}">
     <header class="topbar">
         <div>
             <a class="sigil" href="/" aria-label="Von Neumann Game">VN</a>
@@ -251,6 +251,7 @@
                     <p id="sector-context" class="sector-context">{{t.loading}}</p>
                     <p id="sector-summary" class="sector-summary">{{t.loading}}</p>
                     <div id="sector-objects" class="sector-objects"></div>
+                    <p class="sector-units-hint">{{t.sectorUnitsHint}}</p>
                 </article>
 
                 <article id="systems-panel" class="data-panel">

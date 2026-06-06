@@ -594,14 +594,42 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
 
         return type + ' - ' + name;
     };
+    const objectMassUnit = (body) => body.massUnit || ({
+        star: 'solar_mass',
+        black_hole: 'solar_mass',
+        dust_cloud: 'solar_mass',
+        planet: 'earth_mass',
+        asteroid: 'earth_mass',
+    }[body.type] || '');
+    const objectRadiusUnit = (body) => body.radiusUnit || ({
+        star: 'solar_radius',
+        planet: 'earth_radius',
+        asteroid: 'earth_radius',
+        black_hole: 'kilometer',
+        dust_cloud: 'astronomical_unit',
+        solar_system: 'astronomical_unit',
+    }[body.type] || '');
+    const physicalUnitLabel = (unit) => ({
+        solar_mass: 'M☉',
+        solar_radius: 'R☉',
+        earth_mass: 'M🜨',
+        earth_radius: 'R🜨',
+        kilometer: 'km',
+        astronomical_unit: 'AU',
+    }[unit] || '');
+    const physicalValue = (value, unit) => {
+        const label = physicalUnitLabel(unit);
+
+        return label ? numberValue(value) + ' ' + label : numberValue(value);
+    };
 
     const systemBodyDetails = (body) => {
         const details = [];
         if (Number.isFinite(Number(body.mass))) {
-            details.push({label: t('mass', 'Mass'), value: numberValue(body.mass)});
+            details.push({label: t('mass', 'Mass'), value: physicalValue(body.mass, objectMassUnit(body))});
         }
         if (Number.isFinite(Number(body.radius))) {
-            details.push({label: t('radius', 'Radius'), value: numberValue(body.radius)});
+            details.push({label: t('radius', 'Radius'), value: physicalValue(body.radius, objectRadiusUnit(body))});
         }
         if (hasResourceDetails(body)) {
             const resourceTypes = resourceTypesForTarget(body);

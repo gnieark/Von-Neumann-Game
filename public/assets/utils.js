@@ -1,4 +1,8 @@
 export const readI18n = () => {
+    if (globalThis.VNG_I18N && typeof globalThis.VNG_I18N === 'object') {
+        return globalThis.VNG_I18N;
+    }
+
     const i18nNode = document.getElementById('i18n-json');
     return i18nNode ? JSON.parse(i18nNode.textContent || '{}') : {};
 };

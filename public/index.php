@@ -12,7 +12,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260606-messaging-sent-private';
+const ASSET_VERSION = '20260606-i18n-external';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -32,6 +32,17 @@ if (str_starts_with($routePath, '/api/')) {
     }
 
     echo json_encode($response->body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    return;
+}
+
+if ($routePath === '/i18n' && in_array($method, ['GET', 'HEAD'], true)) {
+    renderI18nMessages((string) ($_GET['lang'] ?? ''), $method);
+    return;
+}
+if ($routePath === '/i18n') {
+    http_response_code(405);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'Method not allowed';
     return;
 }
 
@@ -122,7 +133,7 @@ function renderHome(string $projectRoot, Translator $translator, ?Player $player
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
         'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'i18nUrl' => e(i18nMessagesUrl($translator)),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
     ]);
@@ -173,7 +184,7 @@ function renderPasswordAuth(string $projectRoot, Translator $translator, ?string
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
         'tutorialProbeName' => e('N°8421'),
-        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'i18nUrl' => e(i18nMessagesUrl($translator)),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
     ]);
@@ -232,7 +243,7 @@ function renderAbout(string $projectRoot, Translator $translator, ?Player $playe
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
         'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'i18nUrl' => e(i18nMessagesUrl($translator)),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
     ]);
@@ -266,7 +277,7 @@ function renderChangelog(string $projectRoot, Translator $translator, ?Player $p
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
         'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'i18nUrl' => e(i18nMessagesUrl($translator)),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
     ]);
@@ -294,7 +305,7 @@ function renderApiDocs(string $projectRoot, Translator $translator, ?Player $pla
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
         'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'i18nUrl' => e(i18nMessagesUrl($translator)),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
     ]);
@@ -327,6 +338,27 @@ function renderOpenApiSpec(string $projectRoot, string $method): void
     }
 }
 
+function renderI18nMessages(string $language, string $method): void
+{
+    $translator = new Translator(Translator::normalize($language));
+    $body = json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    $etag = '"' . hash('sha256', $body) . '"';
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: public, max-age=31536000, immutable');
+    header('ETag: ' . $etag);
+    header('X-Content-Type-Options: nosniff');
+
+    if ((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) {
+        http_response_code(304);
+        return;
+    }
+
+    if ($method !== 'HEAD') {
+        echo $body;
+    }
+}
+
 function renderOAuthPseudo(string $projectRoot, Translator $translator, string $csrf, ?string $error = null, string $pseudonym = ''): void
 {
     $tpl = new TplBlock();
@@ -338,7 +370,7 @@ function renderOAuthPseudo(string $projectRoot, Translator $translator, string $
         'language' => $translator->language(),
         'assetVersion' => ASSET_VERSION,
         'tutorialProbeName' => e('N°8421'),
-        'i18nJson' => json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR),
+        'i18nUrl' => e(i18nMessagesUrl($translator)),
         'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
         'enSelected' => $translator->language() === 'en' ? 'selected' : '',
     ]);
@@ -680,6 +712,11 @@ function selectedLanguage(): string
     }
 
     return Translator::normalize($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? null);
+}
+
+function i18nMessagesUrl(Translator $translator): string
+{
+    return '/i18n?lang=' . rawurlencode($translator->language()) . '&v=' . rawurlencode(ASSET_VERSION);
 }
 
 function currentPlayer(AppFactory $factory): ?Player

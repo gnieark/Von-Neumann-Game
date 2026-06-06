@@ -19,10 +19,14 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v19 : `GET /api/probe/messages/sent` n’expose plus l’état de lecture du message (`status`, `readAt`, `updatedAt`).
 - Interface : la vue `Messagerie` sépare maintenant `Messages reçus` et `Messages envoyés` en onglets de classeur.
 - Interface : l’onglet `Messages envoyés` n’affiche plus de statut `Lu` / `Non lu`.
+- Interface : les règles de stockage par container utilisent des listes à sélection multiple avec une aide contextualisée et empêchent un même type d’être choisi dans plusieurs règles du même container.
+- API v20 : les objets détaillés de `/api/sector` et `/api/probe/sector` exposent désormais `massUnit` et `radiusUnit` quand `mass` / `radius` sont présents.
+- Interface : les masses et rayons des corps détectés affichent leur unité (`M☉`, `R☉`, `M🜨`, `R🜨`, `km`, `AU`) et l’onglet `Capteurs et radars` explique ces unités.
+- Interface : le dictionnaire de traduction JS est désormais servi via un JSON versionné et cacheable au lieu d’être injecté inline dans le HTML.
 
 ### Breaking Changes
 
-- Les clients typés doivent accepter `apiVersion: 19`, les nouveaux schémas `ProbeMessage*` et le champ `pagination` sur `ProbeMessagesResponse`.
+- Les clients typés doivent accepter `apiVersion: 20`, les nouveaux schémas `ProbeMessage*` et le champ `pagination` sur `ProbeMessagesResponse`.
 - Les clients de `GET /api/probe/messages/sent` doivent utiliser `ProbeSentMessagesResponse` : les champs `status`, `readAt` et `updatedAt` ne sont plus présents sur les messages envoyés.
 
 ## 2026-06-05

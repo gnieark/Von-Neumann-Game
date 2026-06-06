@@ -5,10 +5,10 @@ import {
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
 import {createCraftingModule} from './crafting.js?v=20260604-system-bodies-v2';
-import {createInventoryModule} from './inventory.js?v=20260606-touch-inventory-labels';
+import {createInventoryModule} from './inventory.js?v=20260606-storage-rule-selects';
 import {createLabels} from './labels.js?v=20260606-sector-radar-bookmarks';
 import {createMannyModule} from './manny.js?v=20260606-sector-radar-bookmarks';
-import {createSectorModule} from './sector.js?v=20260606-sector-radar-bookmarks';
+import {createSectorModule} from './sector.js?v=20260606-sector-units';
 import {
     bindAccountMenu,
     bindMetricDetails,
@@ -29,7 +29,7 @@ import {
     setText,
     storageCapacityValue,
     validRelativeCoordinates,
-} from './utils.js?v=20260604-system-bodies-v2';
+} from './utils.js?v=20260606-i18n-external';
 
 const i18n = readI18n();
 bindLanguageForm();
@@ -113,6 +113,9 @@ if (body && body.dataset.authenticated === '1') {
         .split(',')
         .map((entry) => entry.trim())
         .filter(Boolean);
+    const storageRuleValues = (form, name) => (
+        form.getAll(name).flatMap((value) => splitStorageRuleValue(value))
+    );
     const currentStorageContainers = () => (
         Array.isArray(state.currentInventory && state.currentInventory.containers)
             ? state.currentInventory.containers
@@ -937,9 +940,9 @@ if (body && body.dataset.authenticated === '1') {
                 statusId: 'inventory-status',
                 pendingText: t('orderSent', 'Order transmitted...'),
                 request: () => patchJson('/api/probe/storage-containers/' + encodeURIComponent(containerId) + '/rules', {
-                    priority: splitStorageRuleValue(form.get('priority')),
-                    exclusion: splitStorageRuleValue(form.get('exclusion')),
-                    strictExclusion: splitStorageRuleValue(form.get('strictExclusion')),
+                    priority: storageRuleValues(form, 'priority'),
+                    exclusion: storageRuleValues(form, 'exclusion'),
+                    strictExclusion: storageRuleValues(form, 'strictExclusion'),
                 }),
                 onSuccess: (data) => {
                     setText('inventory-status', t('storageRulesSaved', 'Storage rules saved.'));

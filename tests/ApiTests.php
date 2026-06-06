@@ -42,6 +42,7 @@ use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
+use VonNeumannGame\Sector\Star;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -244,7 +245,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(19, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(20, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -858,6 +859,7 @@ if ($createdProbe !== null) {
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
         new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
+        new Star('unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
     ]));
     $mineableSector = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('mine-rock', $mineableSector->body['sector']['objects'][0]['id'] ?? null, 'sector observation exposes object ids for Manny mining orders');
@@ -865,6 +867,14 @@ if ($createdProbe !== null) {
     $test->assertEquals(true, $mineableSector->body['sector']['objects'][1]['mannyMineable'] ?? null, 'all asteroids are marked as Manny-mineable');
     $test->assertEquals(['metals'], $mineableSector->body['sector']['objects'][0]['resourceTypes'] ?? null, 'sector observation exposes mineable resource categories');
     $test->assertEquals(1.0, $mineableSector->body['sector']['objects'][0]['resourceComposition']['metals'] ?? null, 'sector observation exposes resource composition shares');
+    $test->assertEquals('earth_mass', $mineableSector->body['sector']['objects'][0]['massUnit'] ?? null, 'asteroid sector object exposes earth mass unit');
+    $test->assertEquals('earth_radius', $mineableSector->body['sector']['objects'][0]['radiusUnit'] ?? null, 'asteroid sector object exposes earth radius unit');
+    $unitObjectsById = [];
+    foreach ($mineableSector->body['sector']['objects'] ?? [] as $unitObject) {
+        $unitObjectsById[(string) ($unitObject['id'] ?? '')] = $unitObject;
+    }
+    $test->assertEquals('solar_mass', $unitObjectsById['unit-star']['massUnit'] ?? null, 'star sector object exposes solar mass unit');
+    $test->assertEquals('solar_radius', $unitObjectsById['unit-star']['radiusUnit'] ?? null, 'star sector object exposes solar radius unit');
 
     $mineManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
         'objectId' => 'mine-rock',

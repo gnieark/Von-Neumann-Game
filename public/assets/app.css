@@ -877,6 +877,13 @@ button.account-menu-item:hover {
     font-weight: 700;
 }
 
+.sector-units-hint {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.45;
+}
+
 .console-alerts-list {
     display: grid;
     gap: 12px;
@@ -1531,6 +1538,13 @@ button.account-menu-item:hover {
     color: var(--text);
 }
 
+.storage-rules-help {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.45;
+}
+
 .inventory-filter-row {
     margin-top: 12px;
 }
@@ -1573,6 +1587,10 @@ button.account-menu-item:hover {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
+}
+
+.storage-rule-fields select[multiple] {
+    min-height: 8.5rem;
 }
 
 .inventory-card {
