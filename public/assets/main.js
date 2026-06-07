@@ -9,6 +9,8 @@ import {createInventoryModule} from './inventory.js?v=20260606-circuit-recipes';
 import {createLabels} from './labels.js?v=20260606-printer-workshop';
 import {createMannyModule} from './manny.js?v=20260606-printer-workshop';
 import {createSectorModule} from './sector.js?v=20260606-sector-units';
+import {createInventoryActions} from './inventory-actions.js?v=20260607-split-main';
+import {createMessageModule} from './messages.js?v=20260607-split-main';
 import {
     bindAccountMenu,
     bindMetricDetails,
@@ -109,183 +111,22 @@ if (body && body.dataset.authenticated === '1') {
         method: 'PATCH',
         body: JSON.stringify(bodyValue),
     });
-    const messagePageSize = 50;
-    const splitStorageRuleValue = (value) => String(value || '')
-        .split(',')
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-    const storageRuleValues = (form, name) => (
-        form.getAll(name).flatMap((value) => splitStorageRuleValue(value))
-    );
-    const currentStorageContainers = () => (
-        Array.isArray(state.currentInventory && state.currentInventory.containers)
-            ? state.currentInventory.containers
-            : []
-    );
-    const storageContainerLabel = (container) => (
-        container && (container.label || container.id)
-            ? (container.label || container.id)
-            : t('unknownContainer', 'Unknown container')
-    );
-    const splitLineIds = (value) => String(value || '')
-        .split(',')
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-    const availableStorageMoveMannies = (excludedIds = []) => {
-        const excluded = new Set(excludedIds.map(String));
-        return (Array.isArray(state.currentMannies) ? state.currentMannies : [])
-            .filter((manny) => (
-                manny
-                && manny.id
-                && !excluded.has(String(manny.id))
-                && manny.currentTask === null
-                && manny.location
-                && manny.location.type === 'probe'
-            ));
-    };
-    const closeInventoryLineForms = (exceptSlot = null) => {
-        document.querySelectorAll('.inventory-line-form-slot').forEach((slot) => {
-            if (slot !== exceptSlot) {
-                slot.innerHTML = '';
-            }
-        });
-    };
-    const storageMovePayloadFromForm = (form) => {
-        const formData = new FormData(form);
-        const actorMannyId = String(formData.get('actorMannyId') || '');
-        const toContainerId = String(formData.get('toContainerId') || '');
-        const kind = form.dataset.lineKind || '';
-        if (!actorMannyId || !toContainerId || !kind) {
-            return null;
-        }
+    const messageModule = createMessageModule({state, api, labels});
+    const inventoryActions = createInventoryActions({state, api, labels, mannyModule});
+    const {
+        renderMessageRecipients,
+        renderMessages,
+        loadMessages,
+        activateMessageFolder,
+        markMessageRead,
+    } = messageModule;
+    const {
+        storageRuleValues,
+        renderStorageMoveForm,
+        jettisonInventoryLine,
+        storageMovePayloadFromForm,
+    } = inventoryActions;
 
-        if (kind === 'resource') {
-            const amount = Math.min(
-                Number.parseFloat(form.dataset.maxAmount || '0'),
-                Number.parseFloat(String(formData.get('quantity') || '0')),
-            );
-            if (!Number.isFinite(amount) || amount <= 0) {
-                return null;
-            }
-
-            return {
-                actorMannyId,
-                kind,
-                resourceType: form.dataset.resourceType || '',
-                amount: Math.round(amount * 10000) / 10000,
-                fromContainerId: form.dataset.sourceContainerId || '',
-                toContainerId,
-            };
-        }
-
-        const itemIds = splitLineIds(form.dataset.itemIds);
-        const quantity = Math.min(itemIds.length, Math.max(1, Number.parseInt(String(formData.get('quantity') || '0'), 10)));
-        const selectedIds = itemIds.slice(0, quantity);
-        if (selectedIds.length === 0) {
-            return null;
-        }
-
-        if (kind === 'manny') {
-            return {
-                actorMannyId,
-                kind,
-                targetMannyIds: selectedIds,
-                quantity: selectedIds.length,
-                toContainerId,
-            };
-        }
-
-        return {
-            actorMannyId,
-            kind: 'item',
-            itemIds: selectedIds,
-            quantity: selectedIds.length,
-            toContainerId,
-        };
-    };
-    const runApiOrder = async ({statusId, pendingText, request, onSuccess, onError}) => {
-        setText(statusId, pendingText);
-        try {
-            const data = await request();
-            await onSuccess(data);
-        } catch (error) {
-            if (onError) {
-                onError(error);
-            } else {
-                setText(statusId, error.message);
-            }
-        }
-    };
-    async function renderStorageMoveForm(line) {
-        const slot = line.querySelector('.inventory-line-form-slot');
-        if (!slot) {
-            return;
-        }
-        if (slot.querySelector('.inventory-move-form')) {
-            slot.innerHTML = '';
-            return;
-        }
-        closeInventoryLineForms(slot);
-
-        if (!Array.isArray(state.currentMannies)) {
-            await mannyModule.loadMannies();
-        }
-
-        const kind = line.dataset.lineKind || '';
-        const sourceContainerId = line.dataset.containerId || '';
-        const itemIds = splitLineIds(line.dataset.itemIds);
-        const excludedMannyIds = kind === 'manny' ? itemIds : [];
-        const mannies = availableStorageMoveMannies(excludedMannyIds);
-        const destinations = currentStorageContainers()
-            .filter((container) => container && container.id && container.id !== sourceContainerId);
-        const isResource = kind === 'resource';
-        const maxQuantity = isResource
-            ? Number.parseFloat(line.dataset.maxAmount || '0')
-            : Number.parseInt(line.dataset.maxQuantity || '0', 10);
-        const hasFormChoices = mannies.length > 0 && destinations.length > 0 && Number.isFinite(maxQuantity) && maxQuantity > 0;
-        const quantityAttributes = isResource
-            ? 'type="number" min="0.0001" max="' + escapeHtml(String(maxQuantity)) + '" step="0.0001" value="' + escapeHtml(String(maxQuantity)) + '"'
-            : 'type="number" min="1" max="' + escapeHtml(String(maxQuantity)) + '" step="1" value="' + escapeHtml(String(maxQuantity)) + '"';
-        const mannyOptions = mannies.map((manny) => (
-            '<option value="' + escapeHtml(manny.id) + '">' + escapeHtml(manny.name || manny.id) + '</option>'
-        )).join('');
-        const destinationOptions = destinations.map((container) => (
-            '<option value="' + escapeHtml(container.id) + '">' + escapeHtml(storageContainerLabel(container)) + '</option>'
-        )).join('');
-        const unavailableMessage = mannies.length === 0
-            ? t('noAvailableManny', 'No available Manny.')
-            : t('noDestinationContainer', 'No destination container available.');
-
-        slot.innerHTML = '<form class="inventory-move-form"'
-            + ' data-line-kind="' + escapeHtml(kind) + '"'
-            + ' data-source-container-id="' + escapeHtml(sourceContainerId) + '"'
-            + ' data-resource-type="' + escapeHtml(line.dataset.resourceType || '') + '"'
-            + ' data-max-amount="' + escapeHtml(line.dataset.maxAmount || '') + '"'
-            + ' data-item-ids="' + escapeHtml(itemIds.join(',')) + '">'
-            + '<label>' + escapeHtml(t('moveQuantity', 'Quantity')) + '<input name="quantity" ' + quantityAttributes + ' required></label>'
-            + '<label>' + escapeHtml(t('actorManny', 'Manny')) + '<select name="actorMannyId" required>' + mannyOptions + '</select></label>'
-            + '<label>' + escapeHtml(t('destinationContainer', 'Destination container')) + '<select name="toContainerId" required>' + destinationOptions + '</select></label>'
-            + '<button type="submit"' + (hasFormChoices ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('moveStorageLine', 'Move')) + '</button>'
-            + (hasFormChoices ? '' : '<p class="inventory-muted">' + escapeHtml(unavailableMessage) + '</p>')
-            + '</form>';
-    }
-
-    async function jettisonInventoryLine(line) {
-        const kind = line.dataset.lineKind || '';
-        if (kind === 'resource') {
-            return postJson('/api/probe/inventory/' + encodeURIComponent(line.dataset.stockId || line.dataset.resourceType || '' ) + '/jettison', {
-                amount: Number.parseFloat(line.dataset.maxAmount || '0'),
-                containerId: line.dataset.containerId || '',
-            });
-        }
-
-        let latest = null;
-        for (const itemId of splitLineIds(line.dataset.itemIds)) {
-            latest = await postJson('/api/probe/inventory/' + encodeURIComponent(itemId) + '/jettison', {});
-        }
-
-        return latest || {};
-    }
     const relativeCoordinates = (value) => {
         if (!value || !Number.isFinite(Number(value.x)) || !Number.isFinite(Number(value.y)) || !Number.isFinite(Number(value.z))) {
             return null;
@@ -303,11 +144,6 @@ if (body && body.dataset.authenticated === '1') {
 
         return a !== null && b !== null && a.x === b.x && a.y === b.y && a.z === b.z;
     };
-    const manniesOutsideProbeInCurrentSector = (mannies) => (Array.isArray(mannies) ? mannies : [])
-        .filter((manny) => (
-            (manny.location && manny.location.type) !== 'probe'
-            && sameRelativeCoordinates(manny.location && manny.location.sector && manny.location.sector.relative, state.currentProbeSectorRelative)
-        ));
 
     function activatePanel(panelId) {
         document.querySelectorAll('.panel-tab').forEach((item) => item.classList.remove('active'));
@@ -340,231 +176,6 @@ if (body && body.dataset.authenticated === '1') {
         const messages = Array.isArray(state.receivedMessages) ? state.receivedMessages : [];
         const hasUnreadMessages = messages.some((message) => message && message.status === 'unread');
         tab.classList.toggle('alerts-pending', hasUnreadMessages);
-    }
-
-    const normalizeMessageFolder = (folder) => (folder === 'sent' ? 'sent' : 'received');
-    const messagesForFolder = (folder) => (
-        normalizeMessageFolder(folder) === 'sent' ? state.sentMessages : state.receivedMessages
-    );
-    const paginationForFolder = (folder) => (
-        normalizeMessageFolder(folder) === 'sent' ? state.sentMessagePagination : state.receivedMessagePagination
-    );
-    const messageEndpointForFolder = (folder) => (
-        normalizeMessageFolder(folder) === 'sent' ? '/api/probe/messages/sent' : '/api/probe/messages'
-    );
-    const setMessagesForFolder = (folder, messages, append) => {
-        if (normalizeMessageFolder(folder) === 'sent') {
-            state.sentMessages = append ? state.sentMessages.concat(messages) : messages;
-            return;
-        }
-
-        state.receivedMessages = append ? state.receivedMessages.concat(messages) : messages;
-    };
-    const setPaginationForFolder = (folder, pagination) => {
-        if (normalizeMessageFolder(folder) === 'sent') {
-            state.sentMessagePagination = pagination;
-            return;
-        }
-
-        state.receivedMessagePagination = pagination;
-    };
-
-    function syncMessageFolderTabs() {
-        const activeFolder = normalizeMessageFolder(state.currentMessageFolder);
-        document.querySelectorAll('[data-message-folder]').forEach((button) => {
-            const isActive = normalizeMessageFolder(button.dataset.messageFolder) === activeFolder;
-            button.classList.toggle('active', isActive);
-            button.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            button.setAttribute('tabindex', isActive ? '0' : '-1');
-        });
-
-        const list = document.getElementById('messages-list');
-        if (list) {
-            list.setAttribute('aria-labelledby', activeFolder === 'sent' ? 'messages-sent-tab' : 'messages-received-tab');
-        }
-
-        const empty = document.getElementById('messages-empty');
-        if (empty) {
-            empty.textContent = activeFolder === 'sent'
-                ? t('noSentMessages', 'No sent messages.')
-                : t('noReceivedMessages', 'No received messages.');
-        }
-    }
-
-    const sectorProbeRecipients = () => (
-        Array.isArray(state.currentSectorProbes)
-            ? state.currentSectorProbes.filter((probe) => probe && probe.id)
-            : []
-    );
-
-    function renderMessageRecipients() {
-        const select = document.getElementById('message-recipient');
-        const submit = document.getElementById('message-submit');
-        if (!select) {
-            return;
-        }
-
-        const previousValue = select.value;
-        const probes = sectorProbeRecipients();
-        if (probes.length === 0) {
-            select.innerHTML = '<option value="">' + escapeHtml(t('noMessageRecipients', 'No other probe detected in the sector.')) + '</option>';
-            select.disabled = true;
-            if (submit) {
-                submit.disabled = true;
-                submit.setAttribute('aria-disabled', 'true');
-            }
-            return;
-        }
-
-        select.innerHTML = probes.map((probe) => (
-            '<option value="' + escapeHtml(probe.id) + '">' + escapeHtml(probe.name || t('unknownProbe', 'Unknown probe')) + '</option>'
-        )).join('');
-        if (previousValue && probes.some((probe) => String(probe.id) === previousValue)) {
-            select.value = previousValue;
-        }
-        select.disabled = false;
-        if (submit) {
-            submit.disabled = false;
-            submit.setAttribute('aria-disabled', 'false');
-        }
-    }
-
-    const formatMessageDate = (value) => {
-        if (!value) {
-            return '-';
-        }
-
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) {
-            return String(value);
-        }
-
-        return new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
-            dateStyle: 'short',
-            timeStyle: 'short',
-        }).format(date);
-    };
-
-    function renderMessages() {
-        const activeFolder = normalizeMessageFolder(state.currentMessageFolder);
-        const list = document.getElementById('messages-list');
-        const empty = document.getElementById('messages-empty');
-        const loadMore = document.getElementById('messages-load-more');
-        syncMessageFolderTabs();
-        if (!list) {
-            syncMessageTab();
-            return;
-        }
-
-        const messages = Array.isArray(messagesForFolder(activeFolder)) ? messagesForFolder(activeFolder) : [];
-        const pagination = paginationForFolder(activeFolder);
-        if (empty) {
-            empty.hidden = messages.length > 0;
-        }
-        if (loadMore) {
-            loadMore.hidden = !(pagination && pagination.hasMore);
-        }
-
-        list.innerHTML = messages.map((message) => {
-            const counterpart = activeFolder === 'sent' ? (message.recipient || {}) : (message.sender || {});
-            const sector = message.sector && message.sector.relative ? message.sector.relative : null;
-            const statusIsUnread = message.status === 'unread';
-            const isUnread = activeFolder === 'received' && statusIsUnread;
-            const counterpartLabel = activeFolder === 'sent' ? t('messageTo', 'To') : t('messageFrom', 'From');
-            const statusBadge = activeFolder === 'received'
-                ? '<span class="probe-message-status">' + escapeHtml(statusIsUnread ? t('messageUnread', 'Unread') : t('messageRead', 'Read')) + '</span>'
-                : '';
-
-            return '<article class="probe-message ' + (isUnread ? 'unread' : 'read') + '">'
-                + '<div class="probe-message-header">'
-                    + '<div>'
-                        + '<div class="probe-message-sender">' + escapeHtml(counterpartLabel) + ' : ' + escapeHtml(counterpart.name || t('unknownProbe', 'Unknown probe')) + '</div>'
-                        + '<div class="probe-message-meta">'
-                            + '<span>' + escapeHtml(formatMessageDate(message.createdAt)) + '</span>'
-                            + '<span>' + escapeHtml(t('messageSector', 'Sector')) + ' ' + escapeHtml(coordinate(sector)) + '</span>'
-                        + '</div>'
-                    + '</div>'
-                    + statusBadge
-                + '</div>'
-                + '<p class="probe-message-body">' + escapeHtml(message.body || '') + '</p>'
-                + '<div class="probe-message-actions">'
-                    + '<button class="probe-message-read-button" data-message-read-id="' + escapeHtml(message.id) + '" type="button"' + (isUnread ? '' : ' hidden') + '>'
-                        + escapeHtml(t('markMessageRead', 'Mark read'))
-                    + '</button>'
-                + '</div>'
-            + '</article>';
-        }).join('');
-
-        list.querySelectorAll('[data-message-read-id]').forEach((button) => {
-            button.addEventListener('click', () => {
-                markMessageRead(button.dataset.messageReadId || '');
-            });
-        });
-        syncMessageTab();
-    }
-
-    async function loadMessages({folder = state.currentMessageFolder, offset = 0, append = false, silent = false} = {}) {
-        const messageFolder = normalizeMessageFolder(folder);
-        const query = new URLSearchParams({
-            limit: String(messagePageSize),
-            offset: String(offset),
-        });
-
-        try {
-            const data = await api(messageEndpointForFolder(messageFolder) + '?' + query.toString());
-            const messages = Array.isArray(data.messages) ? data.messages : [];
-            setMessagesForFolder(messageFolder, messages, append);
-            setPaginationForFolder(messageFolder, data.pagination || null);
-            if (messageFolder === normalizeMessageFolder(state.currentMessageFolder)) {
-                renderMessages();
-            } else {
-                syncMessageTab();
-            }
-            if (!silent) {
-                setText('message-status', '');
-            }
-        } catch (error) {
-            if (!append) {
-                setMessagesForFolder(messageFolder, [], false);
-                setPaginationForFolder(messageFolder, null);
-                renderMessages();
-            }
-            setText('message-status', error.message);
-        }
-    }
-
-    function activateMessageFolder(folder) {
-        const nextFolder = normalizeMessageFolder(folder);
-        state.currentMessageFolder = nextFolder;
-        renderMessages();
-        if (messagesForFolder(nextFolder).length === 0 && paginationForFolder(nextFolder) === null) {
-            loadMessages({folder: nextFolder, silent: true});
-        }
-    }
-
-    async function markMessageRead(messageId) {
-        if (!messageId) {
-            return;
-        }
-
-        setText('message-status', t('orderSent', 'Order transmitted...'));
-        try {
-            const data = await patchJson('/api/probe/messages/' + encodeURIComponent(messageId) + '/read', {});
-            const updated = data.message || null;
-            if (updated) {
-                state.receivedMessages = state.receivedMessages.map((message) => (
-                    String(message.id) === String(updated.id) ? updated : message
-                ));
-            }
-            if (normalizeMessageFolder(state.currentMessageFolder) === 'received') {
-                renderMessages();
-            } else {
-                syncMessageTab();
-            }
-            setText('message-status', t('messageMarkedRead', 'Message marked as read.'));
-        } catch (error) {
-            setText('message-status', error.message);
-        }
     }
 
     const sectorScanTarget = (sector) => relativeCoordinates(sector && sector.relativeCoordinates);
@@ -803,8 +414,9 @@ if (body && body.dataset.authenticated === '1') {
     });
 
     document.getElementById('messages-load-more')?.addEventListener('click', () => {
-        const folder = normalizeMessageFolder(state.currentMessageFolder);
-        loadMessages({folder, offset: messagesForFolder(folder).length, append: true});
+        const folder = state.currentMessageFolder;
+        const messageList = folder === 'sent' ? state.sentMessages : state.receivedMessages;
+        loadMessages({folder, offset: Array.isArray(messageList) ? messageList.length : 0, append: true});
     });
 
     document.getElementById('message-form')?.addEventListener('submit', async (event) => {
@@ -831,7 +443,7 @@ if (body && body.dataset.authenticated === '1') {
                 state.sentMessages = [];
                 state.sentMessagePagination = null;
                 setText('message-status', t('messageSent', 'Message transmitted.'));
-                if (normalizeMessageFolder(state.currentMessageFolder) === 'sent') {
+                if (state.currentMessageFolder === 'sent') {
                     await loadMessages({folder: 'sent', silent: true});
                 }
             },
