@@ -2,6 +2,18 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-08
+
+### Changed
+
+- Interface : amélioration de l’onglet `Capteurs et radars`, qui désactive désormais le bouton `Scanner` quand la somme des coordonnées relatives est impaire.
+- Interface : dans `Mannys & imprimante`, une Manny située dans un autre secteur affiche `Trop éloignée` dans son accordéon et ne conserve que la métrique `Position` au dépliage.
+
+### Fixed
+
+- JS : une tentative de scan avec des coordonnées relatives invalides efface maintenant le résultat du scan précédent tout en conservant le message d’erreur existant.
+- JS : la liste des Mannys est resynchronisée après le chargement du secteur courant de la sonde afin d’afficher correctement les Mannys trop éloignées.
+
 ## 2026-06-06
 
 ### Added
