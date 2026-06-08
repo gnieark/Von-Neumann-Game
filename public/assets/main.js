@@ -7,7 +7,7 @@ import {
 import {createCraftingModule} from './crafting.js?v=20260606-printer-workshop';
 import {createInventoryModule} from './inventory.js?v=20260606-circuit-recipes';
 import {createLabels} from './labels.js?v=20260606-printer-workshop';
-import {createMannyModule} from './manny.js?v=20260606-printer-workshop';
+import {createMannyModule} from './manny.js?v=20260608-manny-checklist-refresh';
 import {createSectorModule} from './sector.js?v=20260606-sector-units';
 import {createInventoryActions} from './inventory-actions.js?v=20260607-split-main';
 import {createMessageModule} from './messages.js?v=20260607-split-main';
@@ -111,6 +111,19 @@ if (body && body.dataset.authenticated === '1') {
         method: 'PATCH',
         body: JSON.stringify(bodyValue),
     });
+    const runApiOrder = async ({statusId, pendingText, request, onSuccess, onError}) => {
+        setText(statusId, pendingText);
+        try {
+            const data = await request();
+            await onSuccess?.(data);
+        } catch (error) {
+            if (onError) {
+                await onError(error);
+            } else {
+                setText(statusId, error.message);
+            }
+        }
+    };
     const messageModule = createMessageModule({state, api, labels});
     const inventoryActions = createInventoryActions({state, api, labels, mannyModule});
     const {
@@ -143,6 +156,19 @@ if (body && body.dataset.authenticated === '1') {
         const b = relativeCoordinates(right);
 
         return a !== null && b !== null && a.x === b.x && a.y === b.y && a.z === b.z;
+    };
+    const manniesOutsideProbeInCurrentSector = (mannies) => {
+        const currentSector = state.currentProbeSectorRelative;
+
+        return (Array.isArray(mannies) ? mannies : []).filter((manny) => {
+            const location = manny && manny.location ? manny.location : {};
+            if (location.type === 'probe') {
+                return false;
+            }
+
+            const mannySector = location.sector && location.sector.relative;
+            return currentSector === null || sameRelativeCoordinates(mannySector, currentSector);
+        });
     };
 
     function activatePanel(panelId) {
@@ -223,15 +249,15 @@ if (body && body.dataset.authenticated === '1') {
     }
 
     const checklistValue = (ok) => (
-        '<span class="checklist-value ' + (ok ? 'ok' : 'warn') + '">'
-        + escapeHtml(ok ? t('checklistYes', 'Yes') : t('checklistNo', 'No'))
+        '<span class="checklist-value ' + (ok === true ? 'ok' : 'warn') + '">'
+        + escapeHtml(ok === null ? '-' : (ok ? t('checklistYes', 'Yes') : t('checklistNo', 'No')))
         + '</span>'
     );
 
     const allManniesAboard = () => (
         Array.isArray(state.currentMannies)
             ? state.currentMannies.every((manny) => (manny.location && manny.location.type) === 'probe')
-            : false
+            : null
     );
 
     function renderJumpChecklist() {
@@ -361,6 +387,7 @@ if (body && body.dataset.authenticated === '1') {
     refreshers.loadProbe = loadProbe;
     refreshers.loadCurrentSector = loadCurrentSector;
     refreshers.loadMessages = loadMessages;
+    refreshers.onManniesChanged = renderJumpChecklist;
 
     bindApiKeyDialog({api, t, closeAccountMenus});
     bindPanelTabs();

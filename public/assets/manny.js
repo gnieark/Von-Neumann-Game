@@ -703,11 +703,13 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             const mannies = Array.isArray(data.mannies) ? data.mannies : [];
             state.currentMannies = mannies;
             renderMannyList(mannies);
+            refreshers.onManniesChanged?.(mannies);
             setText('manny-json', pretty(data));
             return mannies;
         } catch (error) {
             state.currentMannies = null;
             renderMannyList([]);
+            refreshers.onManniesChanged?.(null);
             setText('manny-json', error.message);
             return null;
         }
