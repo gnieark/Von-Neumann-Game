@@ -586,7 +586,11 @@ final class ApiKernel
         return match ($itemId) {
             'metals', 'probe-' . $probe->id . '-stock-metals' => 'metals',
             'ice', 'probe-' . $probe->id . '-stock-ice' => 'ice',
-            'carbon_compounds', 'organic_compounds', 'organicCompounds', 'probe-' . $probe->id . '-stock-organic-compounds' => 'carbon_compounds',
+            'carbon_compounds',
+            'organic_compounds',
+            'organicCompounds',
+            'probe-' . $probe->id . '-stock-carbon-compounds',
+            'probe-' . $probe->id . '-stock-organic-compounds' => 'carbon_compounds',
             default => null,
         };
     }

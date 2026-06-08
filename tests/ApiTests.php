@@ -642,6 +642,16 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $test->assertEquals(0.2, $storageContainers->resourceAmounts($coreStorageContainer->id)['metals'] ?? null, 'container-targeted jettison keeps the core stock untouched');
         $test->assertEquals(0.2, $storageContainers->resourceAmounts($additionalStorageContainerEntity->id)['metals'] ?? null, 'container-targeted jettison consumes the selected container stock');
         $test->assertEquals(0.4, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'container-targeted jettison syncs the global resource total');
+
+        $storageContainers->setResourceAmount($additionalStorageContainerEntity->id, 'carbon_compounds', 0.3);
+        $pdo->prepare('UPDATE neumann_probes SET organic_compounds_stock = 0.3 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+        $jettisonContainerCarbonCompounds = $kernel->handle('POST', '/api/probe/inventory/probe-' . $craftProbeEntity->id . '-stock-carbon-compounds/jettison', $craftHeaders, json_encode([
+            'amount' => 0.1,
+            'containerId' => $additionalStorageContainer['id'] ?? '',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(200, $jettisonContainerCarbonCompounds->status, 'POST /api/probe/inventory/{itemId}/jettison accepts exposed carbon-compound stock ids');
+        $test->assertEquals(0.2, $storageContainers->resourceAmounts($additionalStorageContainerEntity->id)['carbon_compounds'] ?? null, 'container-targeted carbon-compound jettison consumes the selected container stock');
+        $test->assertEquals(0.2, $probes->findByPlayerId($craftPlayer->id)?->organicCompoundsStock, 'carbon-compound jettison syncs the global organic-compound total');
     }
 }
 
