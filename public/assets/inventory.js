@@ -63,6 +63,9 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
         .filter((placement) => selectedContainerId() === 'all'
             || (placement.container && placement.container.id === selectedContainerId()));
     const isJettisonableItem = (item) => {
+        if (item.type === 'additional_container') {
+            return true;
+        }
         if (item.type === 'manny') {
             return item.location
                 && item.location.type === 'probe'
@@ -146,9 +149,16 @@ export const createInventoryModule = ({state, labels, onInventoryChanged = () =>
 
     const renderLineActions = (action, placement) => {
         const flags = lineActionFlags(action, placement);
+        const isAdditionalContainer = action && action.kind === 'item' && action.itemType === 'additional_container';
+        const jettisonLabel = isAdditionalContainer
+            ? t('detachStorageContainer', 'Detach container')
+            : t('jettisonLine', 'Jettison line');
+        const jettisonVisibleLabel = isAdditionalContainer
+            ? t('detachStorageContainerShort', 'Detach')
+            : t('jettison', 'Jettison');
         return '<span class="inventory-line-controls">'
             + lineIconButton('inventory-line-move', t('moveStorageLine', 'Move'), 'move', !flags.canMove)
-            + lineIconButton('inventory-line-jettison', t('jettisonLine', 'Jettison line'), 'jettison', !flags.canJettison, t('jettison', 'Jettison'))
+            + lineIconButton('inventory-line-jettison', jettisonLabel, 'jettison', !flags.canJettison, jettisonVisibleLabel)
             + '</span>'
             + '<div class="inventory-line-form-slot"></div>';
     };

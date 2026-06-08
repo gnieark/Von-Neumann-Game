@@ -97,6 +97,116 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
 
     const atomicPrinterHasRecipes = () => crafting.atomicPrinterCraftingRecipes().length > 0;
 
+    const currentStorageContainers = () => (
+        Array.isArray(state.currentInventory && state.currentInventory.containers)
+            ? state.currentInventory.containers
+            : []
+    );
+
+    const storageContainerLabel = (container) => (
+        container && (container.label || container.id)
+            ? (container.label || container.id)
+            : t('unknownContainer', 'Unknown container')
+    );
+
+    const detachableStorageContainers = () => (
+        currentStorageContainers()
+            .filter((container) => (
+                container
+                && container.id
+                && container.id !== 'probe-core'
+                && (container.kind === undefined || container.kind === 'container' || String(container.id).startsWith('container-'))
+            ))
+    );
+
+    const asteroidTargets = () => {
+        const targets = [];
+        const seen = new Set();
+        const collect = (object) => {
+            if (!object || typeof object !== 'object') {
+                return;
+            }
+            if (object.type === 'asteroid' && object.id && !seen.has(object.id)) {
+                seen.add(object.id);
+                targets.push(object);
+            }
+            ['bookmarkTargets', 'minableTargets'].forEach((key) => {
+                if (Array.isArray(object[key])) {
+                    object[key].forEach(collect);
+                }
+            });
+        };
+        (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : []).forEach(collect);
+
+        return targets;
+    };
+
+    const asteroidTargetLabel = (target) => (
+        [objectTypeLabel('asteroid'), target && (target.name || target.id)].filter(Boolean).join(' ')
+    );
+
+    const artificialObjectDetection = (payload) => (
+        payload && payload.artificialObjectDetected && typeof payload.artificialObjectDetected === 'object'
+            ? payload.artificialObjectDetected
+            : null
+    );
+
+    const detectedDetachedContainerTargets = () => {
+        const targets = [];
+        const seen = new Set();
+        const add = (target) => {
+            if (!target || !target.id || seen.has(target.id)) {
+                return;
+            }
+            seen.add(target.id);
+            targets.push(target);
+        };
+
+        (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
+            .filter((object) => object && object.type === 'detached_container' && object.id)
+            .forEach((object) => add({
+                id: object.id,
+                name: object.name || object.id,
+                source: object.mode === 'hidden_on_asteroid' ? 'asteroid' : 'drifting',
+                hidden: object.mode === 'hidden_on_asteroid',
+            }));
+
+        (Array.isArray(state.currentMannies) ? state.currentMannies : []).forEach((manny) => {
+            const detection = artificialObjectDetection(manny && manny.task);
+            if (detection && detection.type === 'detached_storage_container' && detection.objectId) {
+                add({
+                    id: detection.objectId,
+                    name: t('detectedDetachedContainer', 'Detected detached container'),
+                    source: 'asteroid',
+                    hidden: true,
+                });
+            }
+        });
+
+        return targets;
+    };
+
+    const detachedContainerRecoveryTargetLabel = (target) => {
+        const name = target && (target.name || target.id) ? (target.name || target.id) : t('detachedContainerObject', 'Detached container');
+        return name + (target && target.hidden ? ' - ' + t('hiddenOnAsteroid', 'hidden on asteroid') : '');
+    };
+
+    const artificialObjectDetectionHtml = (payload) => {
+        const detection = artificialObjectDetection(payload);
+        if (!detection || detection.type !== 'detached_storage_container') {
+            return '';
+        }
+
+        const objectId = detection.objectId || '';
+        return '<div class="manny-detection-alert">'
+            + '<p>' + escapeHtml(t('artificialObjectDetected', 'Artificial object detected: detached storage container.')) + '</p>'
+            + (objectId
+                ? '<p><code>' + escapeHtml(objectId) + '</code></p>'
+                    + '<p>' + escapeHtml(t('recoverDetectedContainerHint', 'Assign an idle Manny to recover it from the recovery task list.')) + '</p>'
+                : '')
+            + '</div>';
+    };
+
     const renderMannyTaskPanel = (manny, observedAt) => {
         const payload = manny.task || {};
         const progress = mannyProgressValueHtml(manny, observedAt);
@@ -119,6 +229,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                     target: sector.miningTargetDetails(miningTaskTarget(payload)),
                 })) + '</p>'
                 + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
+                + artificialObjectDetectionHtml(payload)
                 + '<button class="manny-recall-button" type="button">' + escapeHtml(t('recall', 'Recall')) + '</button>'
                 + '</section>';
         }
@@ -162,6 +273,30 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                     target: bookmarkTargetLabel(target),
                 })) + '</p>'
                 + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
+                + '</section>';
+        }
+        if (manny.currentTask === 'detaching_storage_container') {
+            const modeLabel = payload.mode === 'hidden_on_asteroid'
+                ? t('detachModeHiddenOnAsteroid', 'Hide on an asteroid')
+                : t('detachModeDrifting', 'Leave drifting');
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('detachStorageInProgress', 'Container detachment in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('detachStorageTaskDetail', '{container} will be detached: {mode}.'), {
+                    container: payload.containerId || t('storageContainer', 'Container'),
+                    mode: modeLabel,
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
+                + '</section>';
+        }
+        if (manny.currentTask === 'inspecting_asteroid') {
+            const target = payload.target || {};
+            return '<section class="manny-task-panel">'
+                + '<h4>' + escapeHtml(t('asteroidInspectionInProgress', 'Asteroid inspection in progress')) + '</h4>'
+                + '<p>' + escapeHtml(formatText(t('asteroidInspectionTaskDetail', '{target} is being inspected.'), {
+                    target: bookmarkTargetLabel(target),
+                })) + '</p>'
+                + '<p>' + escapeHtml(t('taskProgress', 'Progress')) + ' ' + progress + '</p>'
+                + artificialObjectDetectionHtml(payload)
                 + '</section>';
         }
 
@@ -211,6 +346,45 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             + '<label>' + escapeHtml(t('salvageTarget', 'Drifting object')) + '<select class="manny-salvage-target" name="objectId">' + salvageTargetOptions('') + '</select></label>'
             + '<button class="manny-salvage-button" type="submit"' + (salvageTarget ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('salvage', 'Salvage')) + '</button>'
             + '<p class="manny-salvage-hint">' + escapeHtml(t('mannySalvageHint', 'A recovered object is checked again at the end of the five-minute recovery delay.')) + '</p>'
+            + '</form>';
+    };
+
+    const renderInspectAsteroidForm = () => {
+        const targets = asteroidTargets();
+        const hasTarget = targets.length > 0;
+
+        return '<form class="manny-inspect-asteroid-form manny-form">'
+            + '<label>' + escapeHtml(t('asteroidObject', 'Asteroid')) + '<select class="manny-inspect-asteroid-target" name="objectId">' + inspectAsteroidTargetOptions('') + '</select></label>'
+            + '<button class="manny-inspect-asteroid-button" type="submit"' + (hasTarget ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('inspectAsteroid', 'Inspect')) + '</button>'
+            + '<p class="manny-inspect-asteroid-hint">' + escapeHtml(hasTarget ? t('inspectAsteroidHint', 'Inspection can reveal a hidden detached container without mining.') : t('noAsteroidTarget', 'No asteroid available in the current sector.')) + '</p>'
+            + '</form>';
+    };
+
+    const renderDetachStorageContainerForm = () => {
+        const containers = detachableStorageContainers();
+        const asteroids = asteroidTargets();
+        const hasContainer = containers.length > 0;
+
+        return '<form class="manny-detach-storage-container-form manny-form">'
+            + '<label>' + escapeHtml(t('storageContainer', 'Container')) + '<select class="manny-detach-container" name="containerId" required>' + detachStorageContainerOptions('') + '</select></label>'
+            + '<label>' + escapeHtml(t('detachStorageMode', 'Mode')) + '<select class="manny-detach-storage-mode" name="mode" required>'
+            + '<option value="drifting">' + escapeHtml(t('detachModeDrifting', 'Leave drifting')) + '</option>'
+            + '<option value="hidden_on_asteroid">' + escapeHtml(t('detachModeHiddenOnAsteroid', 'Hide on an asteroid')) + '</option>'
+            + '</select></label>'
+            + '<label class="manny-detach-asteroid-label" hidden>' + escapeHtml(t('asteroidObject', 'Asteroid')) + '<select class="manny-detach-asteroid-target" name="objectId">' + detachAsteroidTargetOptions('') + '</select></label>'
+            + '<button class="manny-detach-storage-button" type="submit"' + (hasContainer ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('detachStorageContainerShort', 'Detach')) + '</button>'
+            + '<p class="manny-detach-storage-hint">' + escapeHtml(hasContainer ? t('detachStorageHint', 'The container and its content leave the probe when the order is accepted.') : t('noDetachableContainer', 'No additional container can be detached.')) + (asteroids.length === 0 ? ' ' + escapeHtml(t('noAsteroidTarget', 'No asteroid available in the current sector.')) : '') + '</p>'
+            + '</form>';
+    };
+
+    const renderRecoverStorageContainerForm = () => {
+        const targets = detectedDetachedContainerTargets();
+        const hasTarget = targets.length > 0;
+
+        return '<form class="manny-recover-storage-container-form manny-form">'
+            + '<label>' + escapeHtml(t('detachedContainerObject', 'Detached container')) + '<select class="manny-recover-storage-container-target" name="objectId">' + recoverStorageContainerTargetOptions('') + '</select></label>'
+            + '<button class="manny-recover-storage-container-button" type="submit"' + (hasTarget ? '' : ' disabled aria-disabled="true"') + '>' + escapeHtml(t('recoverStorageContainer', 'Recover container')) + '</button>'
+            + '<p class="manny-recover-storage-container-hint">' + escapeHtml(hasTarget ? t('recoverStorageContainerHint', 'Visible containers and detected hidden containers can be recovered here.') : t('noRecoverableStorageContainer', 'No detached container has been detected in this sector.')) + '</p>'
             + '</form>';
     };
 
@@ -264,6 +438,9 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             {id: 'repair', title: t('repairActionTitle', 'Repair'), render: renderRepairForm},
             {id: 'mine', title: t('miningActionTitle', 'Mine'), render: renderMineForm},
             {id: 'salvage', title: t('salvageActionTitle', 'Recover a drifting object'), render: renderSalvageForm},
+            {id: 'inspect-asteroid', title: t('inspectAsteroidActionTitle', 'Inspect an asteroid'), render: renderInspectAsteroidForm},
+            {id: 'detach-storage', title: t('detachStorageActionTitle', 'Detach a container'), render: renderDetachStorageContainerForm},
+            {id: 'recover-storage', title: t('recoverStorageContainerActionTitle', 'Recover a detached container'), render: renderRecoverStorageContainerForm},
             {id: 'bookmark', title: t('installBookmarkActionTitle', 'Install a waypoint-bookmark'), render: renderBookmarkForm},
             {id: 'craft', title: t('craftingActionTitle', 'Craft'), render: renderCraftForm},
         ];
@@ -415,6 +592,49 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         )).join('');
     }
 
+    function inspectAsteroidTargetOptions(selected) {
+        const targets = asteroidTargets();
+        if (targets.length === 0) {
+            return '<option value="">-</option>';
+        }
+
+        return targets.map((target) => (
+            '<option value="' + escapeHtml(target.id) + '"' + (target.id === selected ? ' selected' : '') + '>'
+            + escapeHtml(asteroidTargetLabel(target))
+            + '</option>'
+        )).join('');
+    }
+
+    function detachAsteroidTargetOptions(selected) {
+        return inspectAsteroidTargetOptions(selected);
+    }
+
+    function detachStorageContainerOptions(selected) {
+        const containers = detachableStorageContainers();
+        if (containers.length === 0) {
+            return '<option value="">-</option>';
+        }
+
+        return containers.map((container) => (
+            '<option value="' + escapeHtml(container.id) + '"' + (container.id === selected ? ' selected' : '') + '>'
+            + escapeHtml(storageContainerLabel(container))
+            + '</option>'
+        )).join('');
+    }
+
+    function recoverStorageContainerTargetOptions(selected) {
+        const targets = detectedDetachedContainerTargets();
+        if (targets.length === 0) {
+            return '<option value="">-</option>';
+        }
+
+        return targets.map((target) => (
+            '<option value="' + escapeHtml(target.id) + '" data-source="' + escapeHtml(target.source || '') + '"' + (target.id === selected ? ' selected' : '') + '>'
+            + escapeHtml(detachedContainerRecoveryTargetLabel(target))
+            + '</option>'
+        )).join('');
+    }
+
     function resourceProfileForMineSelection(target, selectedResources) {
         const available = sector.resourceTypesForTarget(target);
         const selected = selectedResources.filter((type) => available.includes(type));
@@ -560,7 +780,108 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 button.setAttribute('aria-disabled', hasTarget ? 'false' : 'true');
             }
         });
+        updateMannyInspectAsteroidForms();
+        updateMannyDetachStorageContainerForms();
+        updateMannyRecoverStorageContainerForms();
         updateMannyBookmarkForms();
+    }
+
+    function updateMannyInspectAsteroidForms() {
+        document.querySelectorAll('.manny-inspect-asteroid-form').forEach((form) => {
+            const targetSelect = form.querySelector('.manny-inspect-asteroid-target');
+            const button = form.querySelector('.manny-inspect-asteroid-button');
+            const hint = form.querySelector('.manny-inspect-asteroid-hint');
+            const selected = targetSelect ? targetSelect.value : '';
+            const targets = asteroidTargets();
+            if (targetSelect) {
+                targetSelect.innerHTML = inspectAsteroidTargetOptions(selected);
+                if (!targets.some((target) => target.id === targetSelect.value)) {
+                    targetSelect.value = targets[0] ? targets[0].id : '';
+                }
+            }
+            if (button) {
+                const disabled = targets.length === 0;
+                button.disabled = disabled;
+                button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            }
+            if (hint) {
+                hint.textContent = targets.length > 0
+                    ? t('inspectAsteroidHint', 'Inspection can reveal a hidden detached container without mining.')
+                    : t('noAsteroidTarget', 'No asteroid available in the current sector.');
+            }
+        });
+    }
+
+    function updateMannyDetachStorageContainerForms() {
+        document.querySelectorAll('.manny-detach-storage-container-form').forEach((form) => {
+            const containerSelect = form.querySelector('.manny-detach-container');
+            const modeSelect = form.querySelector('.manny-detach-storage-mode');
+            const asteroidLabel = form.querySelector('.manny-detach-asteroid-label');
+            const asteroidSelect = form.querySelector('.manny-detach-asteroid-target');
+            const button = form.querySelector('.manny-detach-storage-button');
+            const hint = form.querySelector('.manny-detach-storage-hint');
+            const selectedContainer = containerSelect ? containerSelect.value : '';
+            const selectedAsteroid = asteroidSelect ? asteroidSelect.value : '';
+            const containers = detachableStorageContainers();
+            const asteroids = asteroidTargets();
+            const hiddenMode = modeSelect && modeSelect.value === 'hidden_on_asteroid';
+
+            if (containerSelect) {
+                containerSelect.innerHTML = detachStorageContainerOptions(selectedContainer);
+                if (!containers.some((container) => container.id === containerSelect.value)) {
+                    containerSelect.value = containers[0] ? containers[0].id : '';
+                }
+            }
+            if (asteroidSelect) {
+                asteroidSelect.innerHTML = detachAsteroidTargetOptions(selectedAsteroid);
+                if (!asteroids.some((target) => target.id === asteroidSelect.value)) {
+                    asteroidSelect.value = asteroids[0] ? asteroids[0].id : '';
+                }
+                asteroidSelect.required = Boolean(hiddenMode);
+                asteroidSelect.disabled = !hiddenMode;
+            }
+            if (asteroidLabel) {
+                asteroidLabel.hidden = !hiddenMode;
+            }
+            if (button) {
+                const disabled = containers.length === 0 || (hiddenMode && asteroids.length === 0);
+                button.disabled = disabled;
+                button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            }
+            if (hint) {
+                hint.textContent = containers.length === 0
+                    ? t('noDetachableContainer', 'No additional container can be detached.')
+                    : (hiddenMode && asteroids.length === 0
+                        ? t('noAsteroidTarget', 'No asteroid available in the current sector.')
+                        : t('detachStorageHint', 'The container and its content leave the probe when the order is accepted.'));
+            }
+        });
+    }
+
+    function updateMannyRecoverStorageContainerForms() {
+        document.querySelectorAll('.manny-recover-storage-container-form').forEach((form) => {
+            const targetSelect = form.querySelector('.manny-recover-storage-container-target');
+            const button = form.querySelector('.manny-recover-storage-container-button');
+            const hint = form.querySelector('.manny-recover-storage-container-hint');
+            const selected = targetSelect ? targetSelect.value : '';
+            const targets = detectedDetachedContainerTargets();
+            if (targetSelect) {
+                targetSelect.innerHTML = recoverStorageContainerTargetOptions(selected);
+                if (!targets.some((target) => target.id === targetSelect.value)) {
+                    targetSelect.value = targets[0] ? targets[0].id : '';
+                }
+            }
+            if (button) {
+                const disabled = targets.length === 0;
+                button.disabled = disabled;
+                button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            }
+            if (hint) {
+                hint.textContent = targets.length > 0
+                    ? t('recoverStorageContainerHint', 'Visible containers and detected hidden containers can be recovered here.')
+                    : t('noRecoverableStorageContainer', 'No detached container has been detected in this sector.');
+            }
+        });
     }
 
     function updateMannyBookmarkForms() {
@@ -737,6 +1058,9 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         crafting.updateMannyCraftForms();
         updatePrinterCraftForms();
         updateMannyBookmarkForms();
+        updateMannyInspectAsteroidForms();
+        updateMannyDetachStorageContainerForms();
+        updateMannyRecoverStorageContainerForms();
     }
 
     async function loadMannies() {
@@ -812,6 +1136,65 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 return api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/salvage', {
                     method: 'POST',
                     body: JSON.stringify({objectId: formData.get('objectId')}),
+                });
+            },
+        },
+        {
+            matches: (form) => form.classList.contains('manny-inspect-asteroid-form'),
+            submit: ({form, formData, mannyId}) => {
+                const targetSelect = form.querySelector('.manny-inspect-asteroid-target');
+                if (!targetSelect || !targetSelect.value) {
+                    updateMannyInspectAsteroidForms();
+                    setText('manny-status', t('noAsteroidTarget', 'No asteroid available in the current sector.'));
+                    return null;
+                }
+
+                return api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/inspect-asteroid', {
+                    method: 'POST',
+                    body: JSON.stringify({objectId: formData.get('objectId')}),
+                });
+            },
+        },
+        {
+            matches: (form) => form.classList.contains('manny-detach-storage-container-form'),
+            submit: ({form, formData, mannyId}) => {
+                updateMannyDetachStorageContainerForms();
+                const containerId = String(formData.get('containerId') || '');
+                const mode = String(formData.get('mode') || '');
+                const objectId = String(formData.get('objectId') || '');
+                if (!containerId || !['drifting', 'hidden_on_asteroid'].includes(mode) || (mode === 'hidden_on_asteroid' && !objectId)) {
+                    setText('manny-status', t('invalidDetachStorageOrder', 'Invalid container detachment order.'));
+                    return null;
+                }
+
+                return api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/detach-storage-container', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        containerId,
+                        mode,
+                        ...(mode === 'hidden_on_asteroid' ? {objectId} : {}),
+                    }),
+                });
+            },
+        },
+        {
+            matches: (form) => form.classList.contains('manny-recover-storage-container-form'),
+            submit: ({form, formData, mannyId}) => {
+                const targetSelect = form.querySelector('.manny-recover-storage-container-target');
+                if (!targetSelect || !targetSelect.value) {
+                    updateMannyRecoverStorageContainerForms();
+                    setText('manny-status', t('noRecoverableStorageContainer', 'No detached container has been detected in this sector.'));
+                    return null;
+                }
+                const selectedOption = targetSelect.selectedOptions[0] || null;
+                const source = selectedOption && selectedOption.dataset.source ? selectedOption.dataset.source : undefined;
+
+                return api('/api/probe/mannies/' + encodeURIComponent(mannyId) + '/recover-storage-container', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        objectId: formData.get('objectId'),
+                        ...(source ? {source} : {}),
+                    }),
                 });
             },
         },
@@ -921,6 +1304,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 }
                 setText('manny-status', t('mannyOrderAccepted', 'Manny order accepted.'));
                 refreshers.loadProbe?.();
+                refreshers.loadCurrentSector?.();
                 loadMannies();
             } catch (error) {
                 setText('manny-status', error.message);
@@ -936,6 +1320,15 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             }
             if (event.target.classList.contains('manny-salvage-target')) {
                 updateMannyTargetOptions();
+            }
+            if (event.target.classList.contains('manny-inspect-asteroid-target')) {
+                updateMannyInspectAsteroidForms();
+            }
+            if (event.target.classList.contains('manny-detach-container') || event.target.classList.contains('manny-detach-storage-mode') || event.target.classList.contains('manny-detach-asteroid-target')) {
+                updateMannyDetachStorageContainerForms();
+            }
+            if (event.target.classList.contains('manny-recover-storage-container-target')) {
+                updateMannyRecoverStorageContainerForms();
             }
             if (event.target.classList.contains('manny-bookmark-target')) {
                 updateMannyBookmarkForms();
@@ -1028,6 +1421,9 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
         loadMannies,
         renderMannyList,
         updateMannyBookmarkForms,
+        updateMannyDetachStorageContainerForms,
+        updateMannyInspectAsteroidForms,
+        updateMannyRecoverStorageContainerForms,
         updatePrinterCraftForms,
         updateMannyMineFormState,
         updateMannyTargetOptions,

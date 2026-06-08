@@ -432,9 +432,33 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
         }));
     };
 
+    const sectorDetachedContainerAlert = (sector) => {
+        const containers = (Array.isArray(sector && sector.objects) ? sector.objects : [])
+            .filter((object) => object && object.type === 'detached_container' && object.id);
+        if (containers.length === 0) {
+            return null;
+        }
+
+        const message = formatText(t('sectorDetachedContainerAlert', 'Detached container detected in sector: {containers}'), {
+            containers: containers.map((container) => container.name || container.id).join(', '),
+        });
+        const signature = containers
+            .map((container) => [container.id, container.name || '', container.mode || ''].join(':'))
+            .sort()
+            .join('|');
+
+        return {
+            type: 'detached_container',
+            className: 'sector-detached-container-alert',
+            message,
+            signature,
+        };
+    };
+
     const sectorAlerts = (sector) => [
         sectorBookmarkAlert(sector),
         sectorProbeAlert(sector),
+        sectorDetachedContainerAlert(sector),
     ].filter(Boolean).map((alert) => ({
         ...alert,
         acknowledged: isSectorAlertAcknowledged(alert.type, sector, alert.signature),
@@ -732,6 +756,12 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
             const driftingItemDetail = object.type === 'drifting_item'
                 ? '<p>' + escapeHtml(t('quantity', 'Quantity') + ' ' + String(object.quantity || 0)) + '</p>'
                 : '';
+            const detachedContainerDetail = object.type === 'detached_container'
+                ? '<p>' + escapeHtml([
+                    t('detachStorageMode', 'Mode') + ' ' + (object.mode === 'hidden_on_asteroid' ? t('hiddenOnAsteroid', 'hidden on asteroid') : t('detachModeDrifting', 'Leave drifting')),
+                    t('storageCapacity', 'Storage capacity') + ' ' + numberValue(object.capacity || 0),
+                ].filter(Boolean).join(' · ')) + '</p>'
+                : '';
             const bookmarkDetail = object.type === 'waypoint_bookmark'
                 ? '<p>' + escapeHtml(t('bookmarkTarget', 'Target') + ' ' + (object.targetLabel || '-')) + '</p>'
                     + '<p>' + escapeHtml(t('bookmarkName', 'Name') + ' ' + (Array.isArray(object.bookmarkNames) && object.bookmarkNames.length > 0 ? object.bookmarkNames.join(', ') : (object.name || '-'))) + '</p>'
@@ -748,6 +778,7 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
                 + '<p>' + escapeHtml(observationSummaryLabel(object.summary || '')) + '</p>'
                 + mannyDetail
                 + driftingItemDetail
+                + detachedContainerDetail
                 + bookmarkDetail
                 + probeDetail
                 + solarSystemDetails(object, index)

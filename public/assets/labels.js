@@ -32,6 +32,7 @@ export const createLabels = (i18n) => {
         atomic_3d_printer: t('atomicPrinter', 'Atomic printer'),
         waypoint_bookmark: t('waypointBookmark', 'Waypoint bookmark'),
         drifting_item: t('driftingItemObject', 'Drifting item'),
+        detached_container: t('detachedContainerObject', 'Detached container'),
         object: t('object', 'Object'),
         unknown: t('unknownObject', 'Unknown object'),
     }[type] || type);
@@ -121,6 +122,8 @@ export const createLabels = (i18n) => {
             'Abandoned Manny drifting in this sector.': t('observationSummaryAbandonedManny', 'Abandoned Manny drifting in this sector.'),
             'Another probe is present in this sector.': t('observationSummaryProbePresence', 'Another probe is present in this sector.'),
             'Waypoint bookmark detected in this sector.': t('observationSummaryWaypointBookmark', 'Waypoint bookmark detected in this sector.'),
+            'Detached storage container drifting in open space.': t('observationSummaryDetachedContainerDrifting', 'Detached storage container drifting in open space.'),
+            'Detached storage container hidden on an asteroid.': t('observationSummaryDetachedContainerHidden', 'Detached storage container hidden on an asteroid.'),
             'Unknown astronomical object.': t('observationSummaryUnknown', 'Unknown astronomical object.'),
         }[value] || value;
     };
@@ -133,6 +136,8 @@ export const createLabels = (i18n) => {
         waiting_for_space: t('waitingForSpace', 'Waiting for space'),
         moving_stockage: t('movingStorage', 'Moving storage'),
         installing_waypoint_bookmark: t('installingWaypointBookmark', 'Installing waypoint bookmark'),
+        detaching_storage_container: t('detachingStorageContainer', 'Detaching storage container'),
+        inspecting_asteroid: t('inspectingAsteroid', 'Inspecting asteroid'),
         assisting_atomic_printer: t('assistingAtomicPrinter', 'Assisting the atomic printer'),
         atomic_printing: t('atomicPrinting', 'Atomic printing'),
     }[task] || task || t('noTask', 'None'));

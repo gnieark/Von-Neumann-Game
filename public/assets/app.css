@@ -890,7 +890,8 @@ button.account-menu-item:hover {
 }
 
 .sector-bookmark-alert,
-.sector-probe-alert {
+.sector-probe-alert,
+.sector-detached-container-alert {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -906,12 +907,14 @@ button.account-menu-item:hover {
 }
 
 .sector-bookmark-alert[hidden],
-.sector-probe-alert[hidden] {
+.sector-probe-alert[hidden],
+.sector-detached-container-alert[hidden] {
     display: none;
 }
 
 .sector-bookmark-alert.acknowledged,
-.sector-probe-alert.acknowledged {
+.sector-probe-alert.acknowledged,
+.sector-detached-container-alert.acknowledged {
     animation: none;
     border-color: rgba(143, 182, 189, .28);
     background: rgba(143, 182, 189, .08);
@@ -1426,6 +1429,24 @@ button.account-menu-item:hover {
     line-height: 1.5;
 }
 
+.manny-detection-alert {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid #20ff84;
+    background: rgba(12, 255, 119, .14);
+    color: #d8ffe6;
+}
+
+.manny-detection-alert p {
+    color: inherit;
+}
+
+.manny-detection-alert code {
+    color: #eef9fb;
+    overflow-wrap: anywhere;
+}
+
 .manny-form select {
     width: 100%;
     min-height: 42px;
@@ -1442,6 +1463,9 @@ button.account-menu-item:hover {
 
 .manny-mine-hint,
 .manny-salvage-hint,
+.manny-inspect-asteroid-hint,
+.manny-detach-storage-hint,
+.manny-recover-storage-container-hint,
 .manny-bookmark-hint,
 .printer-craft-hint {
     grid-column: 1 / -1;
@@ -1700,9 +1724,10 @@ button.account-menu-item:hover {
     grid-column: 1 / -1;
 }
 
-.inventory-move-form {
+.inventory-move-form,
+.inventory-detach-container-form {
     display: grid;
-    grid-template-columns: minmax(100px, 130px) minmax(150px, 1fr) minmax(170px, 1.1fr) auto;
+    grid-template-columns: minmax(130px, 1fr) minmax(150px, 1fr) minmax(170px, 1fr) minmax(170px, 1fr) auto;
     gap: 10px;
     align-items: end;
     margin-top: 4px;
@@ -1711,9 +1736,15 @@ button.account-menu-item:hover {
     background: rgba(255,255,255,.04);
 }
 
-.inventory-move-form p {
+.inventory-move-form p,
+.inventory-detach-container-form p {
     grid-column: 1 / -1;
     margin: 0;
+}
+
+.detach-asteroid-label[hidden],
+.manny-detach-asteroid-label[hidden] {
+    display: none;
 }
 
 .inventory-muted {
@@ -1802,7 +1833,8 @@ button.account-menu-item:hover {
     .manny-form,
     .inventory-card,
     .storage-rules-form,
-    .inventory-move-form {
+    .inventory-move-form,
+    .inventory-detach-container-form {
         grid-template-columns: 1fr;
     }
 
@@ -1820,6 +1852,7 @@ button.account-menu-item:hover {
     }
 
     .inventory-move-form,
+    .inventory-detach-container-form,
     .storage-rules-form button,
     .inventory-muted {
         justify-self: stretch;

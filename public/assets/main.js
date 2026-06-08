@@ -5,11 +5,11 @@ import {
     initSwaggerUi,
 } from './api.js?v=20260604-system-bodies-v2';
 import {createCraftingModule} from './crafting.js?v=20260606-printer-workshop';
-import {createInventoryModule} from './inventory.js?v=20260606-circuit-recipes';
-import {createLabels} from './labels.js?v=20260606-printer-workshop';
-import {createMannyModule} from './manny.js?v=20260608-manny-checklist-refresh';
-import {createSectorModule} from './sector.js?v=20260608-estimated-sector-summary';
-import {createInventoryActions} from './inventory-actions.js?v=20260607-split-main';
+import {createInventoryModule} from './inventory.js?v=20260608-storage-container-detach-ui';
+import {createLabels} from './labels.js?v=20260608-storage-container-detach-ui';
+import {createMannyModule} from './manny.js?v=20260608-storage-container-detach-ui';
+import {createSectorModule} from './sector.js?v=20260608-storage-container-detach-ui';
+import {createInventoryActions} from './inventory-actions.js?v=20260608-storage-container-detach-ui';
 import {createMessageModule} from './messages.js?v=20260607-split-main';
 import {
     bindAccountMenu,
@@ -91,6 +91,8 @@ if (body && body.dataset.authenticated === '1') {
         onInventoryChanged: () => {
             craftingModule.updateMannyCraftForms();
             mannyModule?.updateMannyBookmarkForms();
+            mannyModule?.updateMannyDetachStorageContainerForms();
+            mannyModule?.updateMannyRecoverStorageContainerForms();
             mannyModule?.updatePrinterCraftForms();
         },
     });
@@ -141,7 +143,10 @@ if (body && body.dataset.authenticated === '1') {
     const {
         storageRuleValues,
         renderStorageMoveForm,
+        renderDetachStorageContainerForm,
+        updateDetachStorageContainerForm,
         jettisonInventoryLine,
+        detachStorageContainerPayloadFromForm,
         storageMovePayloadFromForm,
     } = inventoryActions;
 
@@ -692,6 +697,11 @@ if (body && body.dataset.authenticated === '1') {
         }
 
         const line = jettisonButton.closest('.inventory-container-line');
+        if (line && line.dataset.itemType === 'additional_container') {
+            await renderDetachStorageContainerForm(line);
+            return;
+        }
+
         if (!line || !window.confirm(t('confirmJettisonLine', 'Jettison this storage line into space?'))) {
             return;
         }
@@ -739,6 +749,28 @@ if (body && body.dataset.authenticated === '1') {
             return;
         }
 
+        if (event.target.classList.contains('inventory-detach-container-form')) {
+            event.preventDefault();
+            const order = detachStorageContainerPayloadFromForm(event.target);
+            if (!order) {
+                setText('inventory-status', t('invalidDetachStorageOrder', 'Invalid container detachment order.'));
+                return;
+            }
+
+            await runApiOrder({
+                statusId: 'inventory-status',
+                pendingText: t('orderSent', 'Order transmitted...'),
+                request: () => postJson('/api/probe/mannies/' + encodeURIComponent(order.mannyId) + '/detach-storage-container', order.payload),
+                onSuccess: (data) => {
+                    setText('inventory-status', t('detachStorageAccepted', 'Container detachment assigned.'));
+                    loadProbe();
+                    loadCurrentSector();
+                    loadMannies();
+                },
+            });
+            return;
+        }
+
         if (event.target.classList.contains('inventory-move-form')) {
             event.preventDefault();
             const payload = storageMovePayloadFromForm(event.target);
@@ -760,6 +792,16 @@ if (body && body.dataset.authenticated === '1') {
                     loadMannies();
                 },
             });
+        }
+    });
+
+    systemsPanel?.addEventListener('change', (event) => {
+        if (!(event.target instanceof Element)) {
+            return;
+        }
+        const form = event.target.closest('.inventory-detach-container-form');
+        if (form && systemsPanel.contains(form)) {
+            updateDetachStorageContainerForm(form);
         }
     });
 
