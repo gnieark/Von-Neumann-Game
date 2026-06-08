@@ -75,7 +75,9 @@ export const duration = (seconds, t = (key, fallback) => fallback) => {
 
 export const detailList = (items) => (
     '<dl>' + items.map((item) => (
-        '<div><dt>' + escapeHtml(item.label) + '</dt><dd>' + escapeHtml(item.value) + '</dd></div>'
+        '<div><dt>' + escapeHtml(item.label) + '</dt><dd>'
+        + (Object.prototype.hasOwnProperty.call(item, 'htmlValue') ? String(item.htmlValue ?? '') : escapeHtml(item.value))
+        + '</dd></div>'
     )).join('') + '</dl>'
 );
 

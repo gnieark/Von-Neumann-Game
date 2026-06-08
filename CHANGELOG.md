@@ -12,6 +12,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Interface : le temps restant d’un déplacement dans l’onglet `Sonde` se met maintenant à jour localement et rafraîchit les données à l’arrivée.
 - Interface : amélioration de l’onglet `Capteurs et radars`, qui désactive désormais le bouton `Scanner` quand la somme des coordonnées relatives est impaire.
 - Interface : dans `Mannys & imprimante`, une Manny située dans un autre secteur affiche `Trop éloignée` dans son accordéon et ne conserve que la métrique `Position` au dépliage.
 - Les clients typés doivent accepter `apiVersion: 23`, les tâches Manny `detaching_storage_container` et `inspecting_asteroid`, ainsi que le type de secteur `detached_container`.

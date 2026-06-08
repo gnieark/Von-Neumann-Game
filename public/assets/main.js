@@ -31,7 +31,7 @@ import {
     setText,
     storageCapacityValue,
     validRelativeCoordinates,
-} from './utils.js?v=20260606-i18n-external';
+} from './utils.js?v=20260608-probe-movement-countdown';
 
 const i18n = readI18n();
 bindLanguageForm();
@@ -104,6 +104,10 @@ if (body && body.dataset.authenticated === '1') {
     });
 
     const formatDuration = (seconds) => duration(seconds, t);
+    let probeMovementTickTimer = null;
+    let probeMovementCompletionTimer = null;
+    let probeMovementRefreshPending = false;
+
     const postJson = (path, bodyValue = {}) => api(path, {
         method: 'POST',
         body: JSON.stringify(bodyValue),
@@ -206,6 +210,80 @@ if (body && body.dataset.authenticated === '1') {
     }
 
     const sectorScanTarget = (sector) => relativeCoordinates(sector && sector.relativeCoordinates);
+
+    function clearProbeMovementTimers() {
+        if (probeMovementTickTimer !== null) {
+            window.clearTimeout(probeMovementTickTimer);
+            probeMovementTickTimer = null;
+        }
+        if (probeMovementCompletionTimer !== null) {
+            window.clearTimeout(probeMovementCompletionTimer);
+            probeMovementCompletionTimer = null;
+        }
+    }
+
+    function movementRemainingHtml(movement, observedAt) {
+        const secondsRemaining = Number(movement && movement.secondsRemaining);
+        if (!Number.isFinite(secondsRemaining)) {
+            return escapeHtml(formatDuration(secondsRemaining));
+        }
+
+        const endAt = observedAt + (Math.max(0, secondsRemaining) * 1000);
+        return '<span class="probe-movement-remaining-value" data-movement-end-at="' + escapeHtml(String(endAt)) + '">'
+            + escapeHtml(formatDuration(secondsRemaining))
+            + '</span>';
+    }
+
+    function updateLiveProbeMovementRemainingValues() {
+        const nodes = Array.from(document.querySelectorAll('#probe-summary .probe-movement-remaining-value[data-movement-end-at]'));
+        const now = Date.now();
+        let hasPendingMovement = false;
+        nodes.forEach((node) => {
+            const endAt = Number(node.dataset.movementEndAt);
+            if (!Number.isFinite(endAt)) {
+                return;
+            }
+
+            const remainingSeconds = Math.max(0, Math.ceil((endAt - now) / 1000));
+            node.textContent = formatDuration(remainingSeconds);
+            if (remainingSeconds > 0 && now < endAt) {
+                hasPendingMovement = true;
+            }
+        });
+
+        probeMovementTickTimer = hasPendingMovement
+            ? window.setTimeout(updateLiveProbeMovementRemainingValues, 1000)
+            : null;
+    }
+
+    function refreshProbeAfterMovementEnd() {
+        if (probeMovementRefreshPending) {
+            return;
+        }
+        probeMovementRefreshPending = true;
+        window.setTimeout(async () => {
+            try {
+                await loadProbe();
+                await loadCurrentSector();
+                await loadMannies();
+            } finally {
+                probeMovementRefreshPending = false;
+            }
+        }, 150);
+    }
+
+    function scheduleProbeMovementUpdates() {
+        const endTimes = Array.from(document.querySelectorAll('#probe-summary .probe-movement-remaining-value[data-movement-end-at]'))
+            .map((node) => Number(node.dataset.movementEndAt))
+            .filter((endAt) => Number.isFinite(endAt));
+        if (endTimes.length === 0) {
+            return;
+        }
+
+        updateLiveProbeMovementRemainingValues();
+        const nextEndAt = Math.min(...endTimes);
+        probeMovementCompletionTimer = window.setTimeout(refreshProbeAfterMovementEnd, Math.max(0, nextEndAt - Date.now()) + 500);
+    }
 
     function syncPrepareJumpButton(sector) {
         const button = document.getElementById('prepare-jump-button');
@@ -357,6 +435,7 @@ if (body && body.dataset.authenticated === '1') {
     }
 
     async function loadProbe() {
+        clearProbeMovementTimers();
         try {
             const data = await api('/api/probe');
             const probe = data.probe || {};
@@ -373,10 +452,11 @@ if (body && body.dataset.authenticated === '1') {
             const sensorDetail = probe.sensorMode === 'degraded'
                 ? t('sensorDegradedInfo', 'At relativistic speeds, external sensors cannot analyze the environment in detail.')
                 : (probe.sensorMode === 'blind' ? t('sensorBlindInfo', 'At this relativistic speed, external sensors are blinded.') : null);
+            const observedAt = Date.now();
             const sectorDetail = !sector && movement ? detailList([
                 {label: t('originSector', 'Origin sector'), value: coordinate(movement.origin)},
                 {label: t('destinationSector', 'Arrival sector'), value: coordinate(movement.target)},
-                {label: t('remainingTime', 'Remaining time'), value: formatDuration(Number(movement.secondsRemaining))},
+                {label: t('remainingTime', 'Remaining time'), htmlValue: movementRemainingHtml(movement, observedAt)},
             ]) : null;
             document.getElementById('probe-summary').innerHTML = [
                 metric(t('status', 'Status'), probeStatusLabel(probe.status)),
@@ -387,6 +467,7 @@ if (body && body.dataset.authenticated === '1') {
                 metric(t('heading', 'Heading'), nav.direction ? [nav.direction.x, nav.direction.y, nav.direction.z].join(':') : '-'),
             ].join('');
             bindMetricDetails();
+            scheduleProbeMovementUpdates();
             document.getElementById('systems-summary').innerHTML = [
                 metric(t('integrity', 'Integrity'), numberValue(systems.integrityPercent, '%')),
                 metric(t('energy', 'Energy'), systems.energyStored),
