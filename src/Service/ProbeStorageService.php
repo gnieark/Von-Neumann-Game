@@ -428,6 +428,143 @@ final class ProbeStorageService
         return $item;
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function detachAdditionalContainerSnapshot(NeumannProbe $probe, string $containerUid, int $ownerPlayerId): array
+    {
+        $this->ensureProbeStorage($probe);
+        if ($containerUid === StorageContainer::CORE_UID) {
+            throw new MannyActionException(422, 'storage_container_not_detachable', 'The probe core storage cannot be detached.');
+        }
+
+        $container = $this->containers->findByUidForProbe($probe->id, $containerUid)
+            ?? throw new MannyActionException(404, 'invalid_storage_container', 'Storage container not found.');
+        if ($container->kind !== StorageContainer::KIND_CONTAINER || !str_starts_with($container->uid, 'container-')) {
+            throw new MannyActionException(422, 'storage_container_not_detachable', 'Only additional storage containers can be detached.');
+        }
+
+        $containerItemUid = substr($container->uid, strlen('container-'));
+        $containerItem = $this->items->findByUidForProbe($probe->id, $containerItemUid)
+            ?? throw new MannyActionException(422, 'storage_container_not_detachable', 'The backing additional container item is missing.');
+        if ($containerItem->type !== ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
+            throw new MannyActionException(422, 'storage_container_not_detachable', 'Only additional storage containers can be detached.');
+        }
+
+        $items = [];
+        foreach ($this->items->findByProbeId($probe->id) as $item) {
+            if ($item->storageContainerId !== $container->id || $item->uid === $containerItem->uid) {
+                continue;
+            }
+            if ($item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
+                throw new MannyActionException(422, 'storage_container_not_detachable', 'Nested additional containers cannot be detached.');
+            }
+            $items[] = $this->probeItemPayload($item);
+        }
+
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->isOnProbe() && $manny->storageContainerId === $container->id) {
+                throw new MannyActionException(422, 'storage_container_not_detachable', 'Move Mannies out of this container before detaching it.');
+            }
+        }
+
+        $resources = $this->containers->resourceAmounts($container->id);
+        $snapshot = [
+            'sourceContainerId' => $container->uid,
+            'ownerProbeId' => $probe->id,
+            'ownerPlayerId' => $ownerPlayerId,
+            'container' => $container->toArray(),
+            'containerItem' => $this->probeItemPayload($containerItem),
+            'resources' => $resources,
+            'items' => $items,
+            'detachedAt' => gmdate('c'),
+        ];
+
+        foreach ($items as $item) {
+            $stored = $this->items->findByUidForProbe($probe->id, (string) $item['uid']);
+            if ($stored !== null) {
+                $this->items->delete($stored);
+            }
+        }
+        $this->items->delete($containerItem);
+        $this->containers->delete($container);
+        $this->syncLegacyResourceTotals($probe);
+
+        return $snapshot;
+    }
+
+    /**
+     * @param array<string, mixed> $snapshot
+     */
+    public function restoreDetachedContainerSnapshot(NeumannProbe $probe, array $snapshot): void
+    {
+        $this->ensureProbeStorage($probe);
+        $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
+        $containerItemData = is_array($snapshot['containerItem'] ?? null) ? $snapshot['containerItem'] : [];
+        $containerUid = (string) ($snapshot['sourceContainerId'] ?? $containerData['id'] ?? '');
+        $itemUid = (string) ($containerItemData['uid'] ?? ($containerUid !== '' && str_starts_with($containerUid, 'container-') ? substr($containerUid, 10) : ''));
+        if ($containerUid === '' || $itemUid === '') {
+            throw new MannyActionException(422, 'detached_container_not_recoverable', 'Detached container data is incomplete.');
+        }
+        if ($this->containers->findByUidForProbe($probe->id, $containerUid) !== null || $this->items->findByUidForProbe($probe->id, $itemUid) !== null) {
+            throw new MannyActionException(409, 'detached_container_not_recoverable', 'A storage container with this identifier already exists on the probe.');
+        }
+
+        $itemContainer = $this->placeUnit($probe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, (float) ($containerItemData['containerSpace'] ?? 0.0))
+            ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity to attach this container.');
+        $this->items->create(
+            $probe->id,
+            ProbeItem::TYPE_ADDITIONAL_CONTAINER,
+            (string) ($containerItemData['name'] ?? ProbeItem::ADDITIONAL_CONTAINER_NAME),
+            round(max(0.0, (float) ($containerItemData['containerSpace'] ?? 0.0)), 4),
+            is_array($containerItemData['metadata'] ?? null) ? $containerItemData['metadata'] : [],
+            $itemContainer->id,
+            $itemUid,
+        );
+
+        $rules = is_array($containerData['rules'] ?? null) ? $containerData['rules'] : [];
+        $restoredContainer = $this->containers->createDetachedRestoredContainer(
+            $probe->id,
+            $containerUid,
+            (string) ($containerData['label'] ?? 'Container'),
+            (int) ($containerData['sortOrder'] ?? 1),
+            (float) ($containerData['capacity'] ?? 0.0),
+            is_array($rules['priority'] ?? null) ? $rules['priority'] : [],
+            is_array($rules['exclusion'] ?? null) ? $rules['exclusion'] : [],
+            is_array($rules['strictExclusion'] ?? null) ? $rules['strictExclusion'] : [],
+        );
+
+        $resources = is_array($snapshot['resources'] ?? null) ? $snapshot['resources'] : [];
+        foreach ($resources as $type => $amount) {
+            if ((float) $amount > 0.0) {
+                $this->containers->setResourceAmount($restoredContainer->id, (string) $type, (float) $amount);
+            }
+        }
+
+        $items = is_array($snapshot['items'] ?? null) ? $snapshot['items'] : [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $type = (string) ($item['type'] ?? '');
+            if ($type === '') {
+                continue;
+            }
+            $uid = trim((string) ($item['uid'] ?? ''));
+            $this->items->create(
+                $probe->id,
+                $type,
+                (string) ($item['name'] ?? $type),
+                round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4),
+                is_array($item['metadata'] ?? null) ? $item['metadata'] : [],
+                $restoredContainer->id,
+                $uid !== '' ? $uid : null,
+            );
+        }
+
+        $this->syncLegacyResourceTotals($probe);
+    }
+
     public function placeMannyOnProbe(NeumannProbe $probe, Manny $manny): bool
     {
         $this->ensureProbeStorage($probe);
@@ -647,6 +784,21 @@ final class ProbeStorageService
             $container = $this->placeUnit($probe, $item->type, $item->containerSpace) ?? $fallback;
             $this->items->saveStorageContainer($item, $container->id);
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function probeItemPayload(ProbeItem $item): array
+    {
+        return [
+            'uid' => $item->uid,
+            'type' => $item->type,
+            'name' => $item->name,
+            'containerSpace' => $item->containerSpace,
+            'metadata' => $item->metadata,
+            'createdAt' => $item->createdAt,
+        ];
     }
 
     private function assignUnplacedMannies(NeumannProbe $probe, StorageContainer $fallback): void

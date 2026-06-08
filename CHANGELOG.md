@@ -4,10 +4,17 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-06-08
 
+### Added
+
+- API v23 : ajout du détachement de containers additionnels par Manny, en mode dérivant (`drifting`) ou caché sur astéroïde (`hidden_on_asteroid`), avec conservation du contenu et des règles de routing.
+- API : ajout de `POST /api/probe/mannies/{mannyId}/detach-storage-container`, `POST /api/probe/mannies/{mannyId}/inspect-asteroid` et `POST /api/probe/mannies/{mannyId}/recover-storage-container`; le salvage existant peut aussi récupérer un container détaché dérivant.
+- API : les containers cachés sur astéroïde peuvent être détectés lors du minage ou d’une inspection Manny via `artificialObjectDetected`, sans exposer leur contenu.
+
 ### Changed
 
 - Interface : amélioration de l’onglet `Capteurs et radars`, qui désactive désormais le bouton `Scanner` quand la somme des coordonnées relatives est impaire.
 - Interface : dans `Mannys & imprimante`, une Manny située dans un autre secteur affiche `Trop éloignée` dans son accordéon et ne conserve que la métrique `Position` au dépliage.
+- Les clients typés doivent accepter `apiVersion: 23`, les tâches Manny `detaching_storage_container` et `inspecting_asteroid`, ainsi que le type de secteur `detached_container`.
 
 ### Fixed
 

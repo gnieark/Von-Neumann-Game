@@ -33,7 +33,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 22;
+    public const API_VERSION = 23;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -70,7 +70,7 @@ final class ApiKernel
             if (preg_match('#^/api/probe/storage-containers/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainerResponse($player, rawurldecode($matches[1])));
             }
-            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|recall)$#', $routePath, $matches) === 1) {
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|inspect-asteroid|recover-storage-container|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
@@ -758,6 +758,40 @@ final class ApiKernel
             }
 
             $manny = $this->mannies->startSalvage($probe, $uid, $data['objectId']);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        if ($action === 'detach-storage-container') {
+            $this->movements->ensureProbeOperational($probe);
+            if ($this->movements->activeMovementForProbe($probe) !== null) {
+                return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
+            }
+            if (!isset($data['containerId'], $data['mode']) || !is_string($data['containerId']) || !is_string($data['mode'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain containerId and mode.');
+            }
+            $objectId = isset($data['objectId']) && is_string($data['objectId']) ? $data['objectId'] : null;
+            $manny = $this->mannies->startDetachStorageContainer($probe, $player->id, $uid, $data['containerId'], $data['mode'], $objectId);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        if ($action === 'inspect-asteroid') {
+            if (!isset($data['objectId']) || !is_string($data['objectId'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
+            }
+
+            $manny = $this->mannies->startInspectAsteroid($probe, $uid, $data['objectId']);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        if ($action === 'recover-storage-container') {
+            if (!isset($data['objectId']) || !is_string($data['objectId'])) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
+            }
+
+            $manny = $this->mannies->startRecoverDetachedContainer($probe, $uid, $data['objectId']);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }

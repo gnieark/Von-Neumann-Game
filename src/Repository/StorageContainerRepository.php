@@ -148,6 +148,15 @@ final class StorageContainerRepository
         ]);
     }
 
+    public function delete(StorageContainer $container): void
+    {
+        $resources = $this->pdo->prepare('DELETE FROM storage_container_resources WHERE container_id = :container_id');
+        $resources->execute(['container_id' => $container->id]);
+
+        $stmt = $this->pdo->prepare('DELETE FROM storage_containers WHERE id = :id');
+        $stmt->execute(['id' => $container->id]);
+    }
+
     public function clearResourcesForProbe(int $probeId): void
     {
         $stmt = $this->pdo->prepare(
@@ -175,7 +184,35 @@ final class StorageContainerRepository
         return $this->findByUidForProbe($container->probeId, $container->uid) ?? $container;
     }
 
-    private function create(int $probeId, string $uid, string $kind, string $label, int $sortOrder, float $capacity): StorageContainer
+    /**
+     * @param array<string> $priority
+     * @param array<string> $exclusion
+     * @param array<string> $strictExclusion
+     */
+    public function createDetachedRestoredContainer(
+        int $probeId,
+        string $uid,
+        string $label,
+        int $sortOrder,
+        float $capacity,
+        array $priority,
+        array $exclusion,
+        array $strictExclusion,
+    ): StorageContainer {
+        return $this->create(
+            $probeId,
+            $uid,
+            StorageContainer::KIND_CONTAINER,
+            $label,
+            max(1, $sortOrder),
+            round(max(0.0, $capacity), 4),
+            $priority,
+            $exclusion,
+            $strictExclusion,
+        );
+    }
+
+    private function create(int $probeId, string $uid, string $kind, string $label, int $sortOrder, float $capacity, array $priority = [], array $exclusion = [], array $strictExclusion = []): StorageContainer
     {
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
@@ -190,9 +227,9 @@ final class StorageContainerRepository
             'label' => $label,
             'sort_order' => $sortOrder,
             'capacity' => $capacity,
-            'priority' => '[]',
-            'exclusion' => '[]',
-            'strict_exclusion' => '[]',
+            'priority' => json_encode(array_values($priority), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'exclusion' => json_encode(array_values($exclusion), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'strict_exclusion' => json_encode(array_values($strictExclusion), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'created_at' => $now,
             'updated_at' => $now,
         ]);

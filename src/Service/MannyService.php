@@ -19,6 +19,7 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
+use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
@@ -165,6 +166,9 @@ final class MannyService
         if ($target instanceof Asteroid && $availableAmounts !== null) {
             $this->ensureAsteroidHasResources($availableAmounts, $resourceProfile, $targetAmount);
         }
+        $artificialObjectDetected = $target instanceof Asteroid
+            ? $this->hiddenDetachedContainerDetection($this->sectors->getOrCreateSector($probe->currentSector), $target->getId())
+            : null;
         if (!$this->storage->canStoreIncoming(
             $probe,
             $this->resourceAmountsForTotal($targetAmount, $resourceProfile),
@@ -192,7 +196,7 @@ final class MannyService
             'resourceComposition' => $composition,
             'resourceProfile' => $resourceProfile,
             'target' => $this->miningTargetArray($target),
-        ];
+        ] + ($artificialObjectDetected !== null ? ['artificialObjectDetected' => $artificialObjectDetected] : []);
         $manny->cargoDeuterium = 0.0;
         $manny->cargoMetals = 0.0;
         $manny->cargoIce = 0.0;
@@ -321,6 +325,9 @@ final class MannyService
         $reservedItem = $target instanceof SectorDriftingItem
             ? $this->reserveDriftingItemForSalvage($probe, $target)
             : null;
+        $reservedDetachedContainer = $target instanceof SectorDetachedContainer
+            ? $this->reserveDetachedContainerForSalvage($probe, $target)
+            : null;
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $manny->locationType = Manny::LOCATION_SECTOR;
@@ -334,7 +341,131 @@ final class MannyService
             'durationSeconds' => $salvageSeconds,
             'target' => $this->salvageTargetArray($target),
             'result' => 'pending',
-        ] + ($reservedItem !== null ? ['reservedItem' => $reservedItem] : []);
+        ] + ($reservedItem !== null ? ['reservedItem' => $reservedItem] : [])
+            + ($reservedDetachedContainer !== null ? ['reservedDetachedContainer' => $reservedDetachedContainer] : []);
+        $this->storage->releaseMannyFromStorage($manny);
+        $this->removeMannyFromSector($manny);
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
+    public function startDetachStorageContainer(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $mode, ?string $objectId = null): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to detach storage.');
+        }
+
+        $mode = strtolower(trim($mode));
+        if (!in_array($mode, [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID], true)) {
+            throw new MannyActionException(400, 'bad_request', 'Detach mode must be drifting or hidden_on_asteroid.');
+        }
+
+        $target = null;
+        if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+            if ($objectId === null || trim($objectId) === '') {
+                throw new MannyActionException(400, 'bad_request', 'objectId is required for hidden_on_asteroid mode.');
+            }
+            $target = $this->findObjectInCurrentSector($probe, $objectId);
+            if (!$target instanceof Asteroid) {
+                throw new MannyActionException(422, 'invalid_asteroid_target', 'Hidden containers must be attached to an asteroid in the current sector.');
+            }
+        }
+
+        $snapshot = $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, $ownerPlayerId);
+        $objectId = $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID ? $objectId : null;
+        $detachedObjectId = SectorDetachedContainer::objectIdForContainer((string) $snapshot['sourceContainerId']);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $durationSeconds = $this->detachStorageContainerSeconds();
+
+        $manny->currentTask = Manny::TASK_DETACHING_STORAGE_CONTAINER;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'containerId' => $containerId,
+            'objectId' => $detachedObjectId,
+            'mode' => $mode,
+            'targetObjectId' => $objectId,
+            'durationSeconds' => $durationSeconds,
+            'snapshot' => $snapshot,
+            'target' => $target instanceof Asteroid ? $this->bookmarkTargetArray($target) : null,
+        ];
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
+    public function startInspectAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+
+        $target = $this->findObjectInCurrentSector($probe, $objectId);
+        if (!$target instanceof Asteroid) {
+            throw new MannyActionException(422, 'invalid_asteroid_target', 'This object cannot be inspected by a Manny.');
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $detection = $this->hiddenDetachedContainerDetection($sector, $objectId);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $durationSeconds = $this->miningTravelSeconds() * 2;
+        $manny->locationType = Manny::LOCATION_SECTOR;
+        $manny->sector = $probe->currentSector;
+        $manny->currentTask = Manny::TASK_INSPECTING_ASTEROID;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'objectId' => $objectId,
+            'durationSeconds' => $durationSeconds,
+            'target' => $this->bookmarkTargetArray($target),
+        ] + ($detection !== null ? ['artificialObjectDetected' => $detection] : []);
+        $this->storage->releaseMannyFromStorage($manny);
+        $this->removeMannyFromSector($manny);
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
+    public function startRecoverDetachedContainer(NeumannProbe $probe, string $uid, string $objectId): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $target = $sector->findObjectById($objectId);
+        if (!$target instanceof SectorDetachedContainer) {
+            $target = $sector->findHiddenDetachedContainerById($objectId);
+        }
+        if (!$target instanceof SectorDetachedContainer) {
+            throw new MannyActionException(404, 'detached_container_not_found', 'Detached storage container not found.');
+        }
+
+        $reservedDetachedContainer = $this->reserveDetachedContainerForSalvage($probe, $target);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $salvageSeconds = $this->salvageSeconds();
+        $manny->locationType = Manny::LOCATION_SECTOR;
+        $manny->sector = $probe->currentSector;
+        $manny->currentTask = Manny::TASK_SALVAGE;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $salvageSeconds . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'objectId' => $objectId,
+            'durationSeconds' => $salvageSeconds,
+            'target' => $this->salvageTargetArray($target),
+            'result' => 'pending',
+            'reservedDetachedContainer' => $reservedDetachedContainer,
+        ];
         $this->storage->releaseMannyFromStorage($manny);
         $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
@@ -499,11 +630,22 @@ final class MannyService
 
             return $this->requiredManny($probe, $uid);
         }
-        if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE && $this->reservedSalvageItemPayload($manny) !== null) {
+        if ($manny->currentTask === Manny::TASK_DETACHING_STORAGE_CONTAINER) {
+            $snapshot = is_array($manny->taskPayload['snapshot'] ?? null) ? $manny->taskPayload['snapshot'] : null;
+            if ($snapshot !== null) {
+                $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+            }
+            $this->clearTask($manny);
+            $this->mannies->save($manny);
+
+            return $this->requiredManny($probe, $uid);
+        }
+        if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE && ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null)) {
             return $manny;
         }
         if ($manny->currentTask === Manny::TASK_SALVAGE) {
             $this->restoreReservedSalvageItem($manny);
+            $this->restoreReservedDetachedContainer($manny);
         }
         if ($manny->isOnProbe()) {
             return $manny;
@@ -598,6 +740,12 @@ final class MannyService
         if ($manny->currentTask === Manny::TASK_INSTALLING_WAYPOINT_BOOKMARK) {
             return $this->refreshWaypointBookmarkInstallation($manny, $probe, $now);
         }
+        if ($manny->currentTask === Manny::TASK_DETACHING_STORAGE_CONTAINER) {
+            return $this->refreshDetachStorageContainer($manny, $probe, $now);
+        }
+        if ($manny->currentTask === Manny::TASK_INSPECTING_ASTEROID) {
+            return $this->refreshInspectAsteroid($manny, $probe, $now);
+        }
         if ($manny->currentTask === Manny::TASK_RETURNING) {
             return $this->refreshReturning($manny, $probe, $now);
         }
@@ -688,6 +836,23 @@ final class MannyService
                 'name' => $reservedItem['name'],
                 'quantity' => $reservedItem['quantity'],
                 'containerSpace' => $reservedItem['containerSpace'],
+            ];
+            $this->finishSalvageActor($manny, $probe, $result);
+            $this->probes->save($probe);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+        $reservedDetachedContainer = $this->reservedDetachedContainerPayload($manny);
+        if ($reservedDetachedContainer !== null) {
+            $result['result'] = 'success';
+            $result['reservedDetachedContainer'] = $reservedDetachedContainer;
+            $result['salvaged'] = [
+                'type' => 'detached_storage_container',
+                'id' => $reservedDetachedContainer['objectId'],
+                'mode' => $reservedDetachedContainer['mode'],
+                'capacity' => $reservedDetachedContainer['capacity'],
+                'capacityUnit' => $reservedDetachedContainer['capacityUnit'],
             ];
             $this->finishSalvageActor($manny, $probe, $result);
             $this->probes->save($probe);
@@ -1180,8 +1345,9 @@ final class MannyService
 
         $this->transferMannyCargoToProbe($manny, $probe);
         $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
+        $this->deliverReservedDetachedContainer($probe, $manny->taskPayload);
         if ($this->mannyCargoIsEmpty($manny)) {
-            $finalPayload = $this->reservedSalvageItemPayload($manny) !== null ? $manny->taskPayload : [];
+            $finalPayload = ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null) ? $manny->taskPayload : [];
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
                 $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
                 $this->probes->save($probe);
@@ -1210,8 +1376,9 @@ final class MannyService
 
         $this->transferMannyCargoToProbe($manny, $probe);
         $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
+        $this->deliverReservedDetachedContainer($probe, $manny->taskPayload);
         if ($this->mannyCargoIsEmpty($manny)) {
-            $finalPayload = $this->reservedSalvageItemPayload($manny) !== null ? $manny->taskPayload : [];
+            $finalPayload = ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null) ? $manny->taskPayload : [];
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
                 $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
                 $this->probes->save($probe);
@@ -1308,6 +1475,93 @@ final class MannyService
             $result['failureReason'] = $e->errorCode;
         }
 
+        $this->clearTask($manny, $result);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function refreshDetachStorageContainer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        $snapshot = is_array($manny->taskPayload['snapshot'] ?? null) ? $manny->taskPayload['snapshot'] : [];
+        $mode = (string) ($manny->taskPayload['mode'] ?? SectorDetachedContainer::MODE_DRIFTING);
+        $objectId = (string) ($manny->taskPayload['objectId'] ?? SectorDetachedContainer::objectIdForContainer((string) ($snapshot['sourceContainerId'] ?? 'storage')));
+        $targetObjectId = isset($manny->taskPayload['targetObjectId']) ? (string) $manny->taskPayload['targetObjectId'] : null;
+        $sectorCoordinates = $probe->currentSector;
+        $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
+        $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
+
+        $object = new SectorDetachedContainer(
+            $objectId,
+            (string) ($containerData['label'] ?? 'Detached storage container'),
+            $mode,
+            (int) ($snapshot['ownerProbeId'] ?? $probe->id),
+            (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
+            $targetObjectId,
+            (float) ($containerData['capacity'] ?? 0.0),
+            ProbeInventory::CAPACITY_UNIT,
+            gmdate('c'),
+            $snapshot + [
+                'mode' => $mode,
+                'sector' => $sectorCoordinates->toArray(),
+                'targetObjectId' => $targetObjectId,
+            ],
+            $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
+                ? 'Detached storage container hidden on an asteroid.'
+                : 'Detached storage container drifting in open space.',
+        );
+
+        if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+            $sector->addHiddenDetachedContainer($object);
+        } else {
+            if (!$sector->replaceObject($object)) {
+                $sector->addObject($object);
+            }
+        }
+        $this->sectors->saveSector($sector);
+
+        $this->clearTask($manny, [
+            'lastTask' => Manny::TASK_DETACHING_STORAGE_CONTAINER,
+            'result' => 'success',
+            'objectId' => $object->getId(),
+            'mode' => $mode,
+            'targetObjectId' => $targetObjectId,
+            'detachedContainer' => $this->detachedContainerPublicArray($object),
+        ]);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function refreshInspectAsteroid(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($manny->sector ?? $probe->currentSector);
+        $detection = $this->hiddenDetachedContainerDetection($sector, (string) ($manny->taskPayload['objectId'] ?? ''));
+        $result = [
+            'lastTask' => Manny::TASK_INSPECTING_ASTEROID,
+            'result' => 'success',
+            'objectId' => (string) ($manny->taskPayload['objectId'] ?? ''),
+            'target' => $manny->taskPayload['target'] ?? null,
+        ] + ($detection !== null ? ['artificialObjectDetected' => $detection] : []);
+
+        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+            $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe'] + $result);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+
+        $this->removeMannyFromSector($manny);
+        $manny->locationType = Manny::LOCATION_PROBE;
+        $manny->sector = null;
         $this->clearTask($manny, $result);
         $this->mannies->save($manny);
 
@@ -1426,7 +1680,8 @@ final class MannyService
     private function isSalvageableObject(UniverseObject $object): bool
     {
         return ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_ABANDONED)
-            || ($object instanceof SectorDriftingItem && $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0);
+            || ($object instanceof SectorDriftingItem && $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0)
+            || $object instanceof SectorDetachedContainer;
     }
 
     private function salvageTargetArray(UniverseObject $object): array
@@ -1443,6 +1698,11 @@ final class MannyService
             'quantity' => $object->getQuantity(),
             'containerSpace' => $object->getContainerSpace(),
             'capacityUnit' => $object->getCapacityUnit(),
+        ] : []) + ($object instanceof SectorDetachedContainer ? [
+            'mode' => $object->getMode(),
+            'capacity' => $object->getCapacity(),
+            'capacityUnit' => $object->getCapacityUnit(),
+            'targetObjectId' => $object->getTargetObjectId(),
         ] : []);
     }
 
@@ -1452,6 +1712,40 @@ final class MannyService
             'id' => $object->getId(),
             'type' => $object->getType()->value,
             'name' => $object->getName(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function hiddenDetachedContainerDetection(SectorContent $sector, string $objectId): ?array
+    {
+        $hidden = $sector->hiddenDetachedContainersForObject($objectId);
+        if ($hidden === []) {
+            return null;
+        }
+
+        return [
+            'type' => 'detached_storage_container',
+            'detection' => SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
+            'objectId' => $hidden[0]->getId(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function detachedContainerPublicArray(SectorDetachedContainer $container): array
+    {
+        return [
+            'id' => $container->getId(),
+            'type' => $container->getType()->value,
+            'name' => $container->getName(),
+            'mode' => $container->getMode(),
+            'targetObjectId' => $container->getTargetObjectId(),
+            'capacity' => $container->getCapacity(),
+            'capacityUnit' => $container->getCapacityUnit(),
+            'salvageable' => true,
         ];
     }
 
@@ -1517,6 +1811,7 @@ final class MannyService
 
         $this->transferMannyCargoToProbe($manny, $probe);
         $this->deliverReservedSalvageItems($probe, $manny, $resultPayload);
+        $this->deliverReservedDetachedContainer($probe, $resultPayload);
         if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
             $this->waitForStorageSpace($manny, ['reason' => 'salvage_return'] + $resultPayload);
             return;
@@ -1585,6 +1880,44 @@ final class MannyService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function reserveDetachedContainerForSalvage(NeumannProbe $probe, SectorDetachedContainer $target): array
+    {
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        if ($target->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+            $removed = $sector->removeHiddenDetachedContainerById($target->getId());
+        } else {
+            $removed = $sector->removeObjectById($target->getId()) ? $target : null;
+        }
+        if (!$removed instanceof SectorDetachedContainer) {
+            throw new MannyActionException(422, 'detached_container_not_recoverable', 'This detached container is no longer recoverable.');
+        }
+        $this->sectors->saveSector($sector);
+
+        return $this->detachedContainerReservedPayload($removed);
+    }
+
+    private function restoreReservedDetachedContainer(Manny $manny): void
+    {
+        $reserved = $this->reservedDetachedContainerPayload($manny);
+        if ($reserved === null || $manny->sector === null) {
+            return;
+        }
+
+        $container = SectorDetachedContainer::fromArray($reserved['object']);
+        $sector = $this->sectors->getOrCreateSector($manny->sector);
+        if ($container->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+            if ($sector->findHiddenDetachedContainerById($container->getId()) === null) {
+                $sector->addHiddenDetachedContainer($container);
+            }
+        } elseif (!$sector->replaceObject($container)) {
+            $sector->addObject($container);
+        }
+        $this->sectors->saveSector($sector);
+    }
+
+    /**
      * @param array<string, mixed> $payload
      */
     private function deliverReservedSalvageItems(NeumannProbe $probe, Manny $manny, array $payload): void
@@ -1611,9 +1944,29 @@ final class MannyService
         }
     }
 
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function deliverReservedDetachedContainer(NeumannProbe $probe, array $payload): void
+    {
+        $reserved = $this->reservedDetachedContainerPayloadFrom($payload);
+        if ($reserved === null) {
+            return;
+        }
+
+        $object = is_array($reserved['object'] ?? null) ? $reserved['object'] : [];
+        $snapshot = is_array($object['payload'] ?? null) ? $object['payload'] : [];
+        $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+    }
+
     private function reservedSalvageItemPayload(Manny $manny): ?array
     {
         return $this->reservedSalvageItemPayloadFrom($manny->taskPayload);
+    }
+
+    private function reservedDetachedContainerPayload(Manny $manny): ?array
+    {
+        return $this->reservedDetachedContainerPayloadFrom($manny->taskPayload);
     }
 
     /**
@@ -1642,6 +1995,43 @@ final class MannyService
             'quantity' => $quantity,
             'containerSpace' => $containerSpace,
             'capacityUnit' => (string) ($reservedItem['capacityUnit'] ?? ProbeInventory::CAPACITY_UNIT),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>|null
+     */
+    private function reservedDetachedContainerPayloadFrom(array $payload): ?array
+    {
+        $reserved = $payload['reservedDetachedContainer'] ?? null;
+        if (!is_array($reserved) || !is_array($reserved['object'] ?? null)) {
+            return null;
+        }
+        $object = SectorDetachedContainer::fromArray($reserved['object']);
+
+        return [
+            'objectId' => $object->getId(),
+            'mode' => $object->getMode(),
+            'capacity' => $object->getCapacity(),
+            'capacityUnit' => $object->getCapacityUnit(),
+            'targetObjectId' => $object->getTargetObjectId(),
+            'object' => $object->toArray(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function detachedContainerReservedPayload(SectorDetachedContainer $container): array
+    {
+        return [
+            'objectId' => $container->getId(),
+            'mode' => $container->getMode(),
+            'capacity' => $container->getCapacity(),
+            'capacityUnit' => $container->getCapacityUnit(),
+            'targetObjectId' => $container->getTargetObjectId(),
+            'object' => $container->toArray(),
         ];
     }
 
@@ -2155,6 +2545,11 @@ final class MannyService
     private function salvageSeconds(): int
     {
         return max(1, Config::int($this->config, 'manny.actions.salvageSeconds', self::SALVAGE_SECONDS));
+    }
+
+    private function detachStorageContainerSeconds(): int
+    {
+        return $this->salvageSeconds() + 60;
     }
 
     private function waypointBookmarkInstallSeconds(): int

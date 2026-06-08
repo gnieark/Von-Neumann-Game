@@ -14,4 +14,5 @@ enum UniverseObjectType: string
     case SolarSystem = 'solar_system';
     case Manny = 'manny';
     case DriftingItem = 'drifting_item';
+    case DetachedContainer = 'detached_container';
 }

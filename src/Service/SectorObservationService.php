@@ -19,6 +19,7 @@ use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
+use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorManny;
@@ -235,6 +236,13 @@ final class SectorObservationService
             $data['containerSpace'] = $object->getContainerSpace();
             $data['capacityUnit'] = $object->getCapacityUnit();
             $data['salvageable'] = $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0;
+        }
+
+        if ($object instanceof SectorDetachedContainer) {
+            $data['mode'] = $object->getMode();
+            $data['capacity'] = $object->getCapacity();
+            $data['capacityUnit'] = $object->getCapacityUnit();
+            $data['salvageable'] = true;
         }
 
         if ($object->getWaypointBookmarks() !== []) {
@@ -510,6 +518,7 @@ final class SectorObservationService
                 '%d inventory item(s) drifting in open space.',
                 $object->getQuantity(),
             ),
+            $object instanceof SectorDetachedContainer => 'Detached storage container detected.',
             default => 'Unknown astronomical object.',
         };
     }

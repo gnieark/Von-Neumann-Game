@@ -11,10 +11,15 @@ final class ProbeItemRepository
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function create(int $probeId, string $type, string $name, float $containerSpace, array $metadata = [], ?int $storageContainerId = null): ProbeItem
+    public function create(int $probeId, string $type, string $name, float $containerSpace, array $metadata = [], ?int $storageContainerId = null, ?string $uid = null): ProbeItem
     {
         $now = gmdate('c');
-        $uid = $this->uniqueUid();
+        $uid ??= $this->uniqueUid();
+        $exists = $this->pdo->prepare('SELECT COUNT(*) FROM probe_items WHERE uid = :uid');
+        $exists->execute(['uid' => $uid]);
+        if ((int) $exists->fetchColumn() > 0) {
+            throw new \RuntimeException('Probe item uid already exists.');
+        }
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_items
              (uid, probe_id, storage_container_id, type, name, container_space, metadata_json, created_at, updated_at)

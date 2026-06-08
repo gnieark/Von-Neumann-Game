@@ -19,6 +19,7 @@ final class UniverseObjectFactory
             UniverseObjectType::SolarSystem => SolarSystem::fromArray($data),
             UniverseObjectType::Manny => SectorManny::fromArray($data),
             UniverseObjectType::DriftingItem => SectorDriftingItem::fromArray($data),
+            UniverseObjectType::DetachedContainer => SectorDetachedContainer::fromArray($data),
         };
     }
 }
