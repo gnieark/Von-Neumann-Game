@@ -705,7 +705,10 @@ export const createSectorModule = ({state, labels, onTargetsChanged = () => {}, 
         renderConsoleAlerts(sector);
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         const displayObjects = objects.concat(sectorBookmarkObjects(sector), sectorProbeObjects(sector));
-        setText('sector-summary', sectorSummary(sector ? {...sector, objects: displayObjects} : sector));
+        const summarySector = sector && (Array.isArray(sector.objects) || displayObjects.length > 0)
+            ? {...sector, objects: displayObjects}
+            : sector;
+        setText('sector-summary', sectorSummary(summarySector));
         const distance = Number(sector && sector.distance);
         const syncMannyTargets = options.syncMannyTargets ?? (Boolean(sector) && Number.isFinite(distance) && distance === 0);
         if (syncMannyTargets) {

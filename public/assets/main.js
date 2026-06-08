@@ -8,7 +8,7 @@ import {createCraftingModule} from './crafting.js?v=20260606-printer-workshop';
 import {createInventoryModule} from './inventory.js?v=20260606-circuit-recipes';
 import {createLabels} from './labels.js?v=20260606-printer-workshop';
 import {createMannyModule} from './manny.js?v=20260608-manny-checklist-refresh';
-import {createSectorModule} from './sector.js?v=20260606-sector-units';
+import {createSectorModule} from './sector.js?v=20260608-estimated-sector-summary';
 import {createInventoryActions} from './inventory-actions.js?v=20260607-split-main';
 import {createMessageModule} from './messages.js?v=20260607-split-main';
 import {
@@ -69,6 +69,7 @@ if (body && body.dataset.authenticated === '1') {
         currentSectorObjects: [],
         probeAlreadyMoving: false,
         probeDeuteriumSufficient: false,
+        moveFormTargetSource: 'default',
     };
 
     const refreshers = {};
@@ -225,7 +226,7 @@ if (body && body.dataset.authenticated === '1') {
         button.setAttribute('aria-disabled', isRemoteSector ? 'false' : 'true');
     }
 
-    function fillMoveForm(target) {
+    function fillMoveForm(target, source = 'default') {
         const form = document.getElementById('move-form');
         if (!form || !target) {
             return;
@@ -236,6 +237,15 @@ if (body && body.dataset.authenticated === '1') {
                 form.elements[field].value = target[field] ?? 0;
             }
         });
+        state.moveFormTargetSource = source;
+    }
+
+    function syncMoveFormDefaultTarget() {
+        if (state.moveFormTargetSource !== 'default' || state.currentProbeSectorRelative === null) {
+            return;
+        }
+
+        fillMoveForm(state.currentProbeSectorRelative, 'default');
     }
 
     function prepareJumpFromScannedSector() {
@@ -244,7 +254,7 @@ if (body && body.dataset.authenticated === '1') {
             return;
         }
 
-        fillMoveForm(target);
+        fillMoveForm(target, 'prepared');
         activatePanel('actions-panel');
     }
 
@@ -325,6 +335,7 @@ if (body && body.dataset.authenticated === '1') {
             const movement = probe.movement || null;
             const sector = probe.sector && probe.sector.relative ? probe.sector.relative : null;
             state.currentProbeSectorRelative = sector ? relativeCoordinates(sector) : null;
+            syncMoveFormDefaultTarget();
             const sensorDetail = probe.sensorMode === 'degraded'
                 ? t('sensorDegradedInfo', 'At relativistic speeds, external sensors cannot analyze the environment in detail.')
                 : (probe.sensorMode === 'blind' ? t('sensorBlindInfo', 'At this relativistic speed, external sensors are blinded.') : null);
@@ -429,6 +440,10 @@ if (body && body.dataset.authenticated === '1') {
 
     document.getElementById('prepare-jump-button')?.addEventListener('click', prepareJumpFromScannedSector);
 
+    document.getElementById('move-form')?.addEventListener('input', () => {
+        state.moveFormTargetSource = 'manual';
+    });
+
     document.getElementById('messages-tab')?.addEventListener('click', () => {
         loadCurrentSector();
         loadMessages({folder: state.currentMessageFolder, silent: true});
@@ -520,6 +535,7 @@ if (body && body.dataset.authenticated === '1') {
             request: () => postJson('/api/probe/move', {target}),
             onSuccess: (data) => {
                 setText('action-status', t('movementAccepted', 'Movement accepted.'));
+                state.moveFormTargetSource = 'default';
                 loadProbe();
             },
             onError: (error) => {
