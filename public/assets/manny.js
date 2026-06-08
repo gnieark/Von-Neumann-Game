@@ -324,6 +324,40 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             : t('sector', 'Sector');
     };
 
+    const mannyRelativeSector = (manny) => {
+        const relative = manny && manny.location && manny.location.sector
+            ? manny.location.sector.relative
+            : null;
+        if (!relative || !Number.isFinite(Number(relative.x)) || !Number.isFinite(Number(relative.y)) || !Number.isFinite(Number(relative.z))) {
+            return null;
+        }
+
+        return {
+            x: Number(relative.x),
+            y: Number(relative.y),
+            z: Number(relative.z),
+        };
+    };
+
+    const sameRelativeSector = (left, right) => (
+        left !== null
+        && right !== null
+        && Number(left.x) === Number(right.x)
+        && Number(left.y) === Number(right.y)
+        && Number(left.z) === Number(right.z)
+    );
+
+    const mannyIsTooFar = (manny) => {
+        if (!manny || !manny.location || manny.location.type !== 'sector') {
+            return false;
+        }
+
+        const currentSector = state.currentProbeSectorRelative;
+        const mannySector = mannyRelativeSector(manny);
+
+        return currentSector !== null && mannySector !== null && !sameRelativeSector(mannySector, currentSector);
+    };
+
     const mannyCargoAmounts = (manny) => {
         const cargo = manny.cargo || {};
         return {
@@ -662,11 +696,31 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
             + mannyItems.map((manny) => {
             const busy = manny.currentTask !== null;
             const mannyId = String(manny.id ?? '');
-            const taskName = manny.currentTask ? taskLabel(manny.currentTask) : t('mannyInactive', 'Inactive');
+            const tooFar = mannyIsTooFar(manny);
+            const taskName = tooFar
+                ? t('mannyTooFar', 'Too far away')
+                : (manny.currentTask ? taskLabel(manny.currentTask) : t('mannyInactive', 'Inactive'));
             const panelId = 'manny-panel-' + mannyId.replace(/[^a-zA-Z0-9_-]/g, '-');
             const expanded = openMannyIds.has(mannyId);
             const buttonTitle = manny.name + ' - ' + taskName;
-            const progressAttributes = busy ? mannyProgressDataAttributes(manny, observedAt) : '';
+            const progressAttributes = busy && !tooFar ? mannyProgressDataAttributes(manny, observedAt) : '';
+            const panelContent = tooFar
+                ? '<div class="manny-metrics">'
+                    + metric(t('location', 'Location'), mannyLocation(manny))
+                    + '</div>'
+                : '<div class="manny-card-tools">'
+                    + '<button class="manny-settings-button icon-button" type="button" aria-expanded="false" title="' + escapeHtml(t('mannySettings', 'Manny settings')) + '" aria-label="' + escapeHtml(t('mannySettings', 'Manny settings')) + '">&#9881;</button>'
+                    + '</div>'
+                    + '<div class="manny-metrics">'
+                    + metric(t('location', 'Location'), mannyLocation(manny))
+                    + metric(t('cargo', 'Cargo'), mannyCargo(manny), null, 'manny-cargo-value')
+                    + metric(t('task', 'Task'), busy ? mannyProgressText(manny) : t('noTask', 'None'), null, busy ? 'manny-task-progress-value' : null, progressAttributes)
+                    + '</div>'
+                    + '<form class="manny-rename-form manny-form" hidden>'
+                    + '<label>' + escapeHtml(t('rename', 'Rename')) + '<input name="name" value="' + escapeHtml(manny.name) + '" maxlength="40"></label>'
+                    + '<button type="submit">' + escapeHtml(t('rename', 'Rename')) + '</button>'
+                    + '</form>'
+                    + (busy ? renderMannyTaskPanel(manny, observedAt) : renderMannyActionForms(panelId));
             return '<article class="manny-card" data-manny-id="' + escapeHtml(manny.id) + '">'
                 + '<button class="manny-accordion-trigger" type="button" aria-expanded="' + (expanded ? 'true' : 'false') + '" aria-controls="' + escapeHtml(panelId) + '" title="' + escapeHtml(buttonTitle) + '" aria-label="' + escapeHtml(buttonTitle) + '">'
                 + '<span class="manny-accordion-title">'
@@ -675,19 +729,7 @@ export const createMannyModule = ({state, labels, sector, crafting, api, refresh
                 + '</span>'
                 + '</button>'
                 + '<div id="' + escapeHtml(panelId) + '" class="manny-accordion-panel"' + (expanded ? '' : ' hidden') + '>'
-                + '<div class="manny-card-tools">'
-                + '<button class="manny-settings-button icon-button" type="button" aria-expanded="false" title="' + escapeHtml(t('mannySettings', 'Manny settings')) + '" aria-label="' + escapeHtml(t('mannySettings', 'Manny settings')) + '">&#9881;</button>'
-                + '</div>'
-                + '<div class="manny-metrics">'
-                + metric(t('location', 'Location'), mannyLocation(manny))
-                + metric(t('cargo', 'Cargo'), mannyCargo(manny), null, 'manny-cargo-value')
-                + metric(t('task', 'Task'), busy ? mannyProgressText(manny) : t('noTask', 'None'), null, busy ? 'manny-task-progress-value' : null, progressAttributes)
-                + '</div>'
-                + '<form class="manny-rename-form manny-form" hidden>'
-                + '<label>' + escapeHtml(t('rename', 'Rename')) + '<input name="name" value="' + escapeHtml(manny.name) + '" maxlength="40"></label>'
-                + '<button type="submit">' + escapeHtml(t('rename', 'Rename')) + '</button>'
-                + '</form>'
-                + (busy ? renderMannyTaskPanel(manny, observedAt) : renderMannyActionForms(panelId))
+                + panelContent
                 + '</div>'
                 + '</article>';
         }).join('');

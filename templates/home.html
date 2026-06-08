@@ -246,7 +246,9 @@
                         <label>Y<input name="y" type="number" step="1" value="0"></label>
                         <label>Z<input name="z" type="number" step="1" value="0"></label>
                         <button id="prepare-jump-button" type="button" hidden>{{t.prepareJump}}</button>
-                        <button type="submit">{{t.scan}}</button>
+                        <span id="sector-scan-control" class="scan-control">
+                            <button id="sector-scan-submit" type="submit">{{t.scan}}</button>
+                        </span>
                     </form>
                     <p id="sector-context" class="sector-context">{{t.loading}}</p>
                     <p id="sector-summary" class="sector-summary">{{t.loading}}</p>

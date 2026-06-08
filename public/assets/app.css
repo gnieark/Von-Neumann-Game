@@ -1735,15 +1735,22 @@ button.account-menu-item:hover {
     grid-template-columns: repeat(3, minmax(86px, 1fr)) minmax(150px, auto);
 }
 
-.jump-control {
+.jump-control,
+.scan-control {
     display: block;
 }
 
-.jump-control button {
+.scan-control.disabled {
+    cursor: not-allowed;
+}
+
+.jump-control button,
+.scan-control button {
     width: 100%;
 }
 
-.jump-control button:disabled {
+.jump-control button:disabled,
+.scan-control button:disabled {
     pointer-events: none;
 }
 

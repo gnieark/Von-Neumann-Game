@@ -297,6 +297,37 @@ if (body && body.dataset.authenticated === '1') {
         button.setAttribute('aria-disabled', button.disabled ? 'true' : 'false');
     }
 
+    const sectorFormTarget = (form) => ({
+        x: Number.parseInt(form.elements.x?.value, 10),
+        y: Number.parseInt(form.elements.y?.value, 10),
+        z: Number.parseInt(form.elements.z?.value, 10),
+    });
+
+    function rejectInvalidSectorScan() {
+        sectorModule.renderSectorObjects(null, {syncMannyTargets: false});
+        syncPrepareJumpButton(null);
+        setText('sector-context', invalidCoordinateMessage);
+    }
+
+    function applySectorScanButtonState() {
+        const form = document.getElementById('sector-form');
+        const button = document.getElementById('sector-scan-submit');
+        const control = document.getElementById('sector-scan-control');
+        if (!form || !button) {
+            return;
+        }
+
+        const invalid = !validRelativeCoordinates(sectorFormTarget(form));
+        button.disabled = invalid;
+        button.title = invalid ? invalidCoordinateMessage : '';
+        button.setAttribute('aria-disabled', invalid ? 'true' : 'false');
+        if (control) {
+            control.classList.toggle('disabled', invalid);
+            control.title = invalid ? invalidCoordinateMessage : '';
+            control.setAttribute('aria-disabled', invalid ? 'true' : 'false');
+        }
+    }
+
     async function confirmJumpWithMannies() {
         if (state.currentProbeSectorRelative === null) {
             await loadProbe();
@@ -336,6 +367,9 @@ if (body && body.dataset.authenticated === '1') {
             const sector = probe.sector && probe.sector.relative ? probe.sector.relative : null;
             state.currentProbeSectorRelative = sector ? relativeCoordinates(sector) : null;
             syncMoveFormDefaultTarget();
+            if (Array.isArray(state.currentMannies)) {
+                mannyModule?.renderMannyList(state.currentMannies);
+            }
             const sensorDetail = probe.sensorMode === 'degraded'
                 ? t('sensorDegradedInfo', 'At relativistic speeds, external sensors cannot analyze the environment in detail.')
                 : (probe.sensorMode === 'blind' ? t('sensorBlindInfo', 'At this relativistic speed, external sensors are blinded.') : null);
@@ -384,6 +418,7 @@ if (body && body.dataset.authenticated === '1') {
             state.currentSectorProbes = Array.isArray(data.sector && data.sector.probes) ? data.sector.probes : [];
             renderMessageRecipients();
             sectorModule.syncSectorForm(data.sector);
+            applySectorScanButtonState();
             sectorModule.renderSectorObjects(data.sector);
             syncPrepareJumpButton(data.sector);
         } catch (error) {
@@ -422,8 +457,8 @@ if (body && body.dataset.authenticated === '1') {
             z: Number.parseInt(form.get('z'), 10),
         };
         if (!validRelativeCoordinates(target)) {
-            syncPrepareJumpButton(null);
-            setText('sector-context', invalidCoordinateMessage);
+            rejectInvalidSectorScan();
+            applySectorScanButtonState();
             return;
         }
         try {
@@ -431,12 +466,23 @@ if (body && body.dataset.authenticated === '1') {
             sectorModule.syncSectorForm(data.sector);
             sectorModule.renderSectorObjects(data.sector);
             syncPrepareJumpButton(data.sector);
+            applySectorScanButtonState();
         } catch (error) {
             sectorModule.renderSectorObjects(null, {syncMannyTargets: false});
             syncPrepareJumpButton(null);
             setText('sector-context', error.message);
+            applySectorScanButtonState();
         }
     });
+
+    document.getElementById('sector-form')?.addEventListener('input', applySectorScanButtonState);
+    document.getElementById('sector-scan-control')?.addEventListener('click', () => {
+        const form = document.getElementById('sector-form');
+        if (form && !validRelativeCoordinates(sectorFormTarget(form))) {
+            rejectInvalidSectorScan();
+        }
+    });
+    applySectorScanButtonState();
 
     document.getElementById('prepare-jump-button')?.addEventListener('click', prepareJumpFromScannedSector);
 

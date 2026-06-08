@@ -12,7 +12,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260608-estimated-sector-summary';
+const ASSET_VERSION = '20260608-manny-too-far';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
