@@ -66,6 +66,7 @@ final class MannyService
         foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
             $this->refreshMannyState($manny, $probe);
         }
+        $this->recoverForgottenManniesInCurrentSector($probe);
 
         return $this->mannies->findByProbeId($probe->id);
     }
@@ -2635,6 +2636,42 @@ final class MannyService
             $sector->addObject($object);
         }
         $this->sectors->saveSector($sector);
+    }
+
+    private function recoverForgottenManniesInCurrentSector(NeumannProbe $probe): void
+    {
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $changed = false;
+        foreach ($sector->getObjects() as $object) {
+            if (!$object instanceof SectorManny || $object->getState() !== SectorManny::STATE_FORGOTTEN) {
+                continue;
+            }
+
+            $manny = $this->mannies->findByUidForProbe($probe->id, $object->getMannyUid());
+            if (
+                $manny === null
+                || !$manny->isInSameSectorAs($probe)
+                || $manny->currentTask !== null
+                || $manny->isOnProbe()
+            ) {
+                continue;
+            }
+
+            if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+                continue;
+            }
+
+            $sector->removeObjectById($object->getId());
+            $manny->locationType = Manny::LOCATION_PROBE;
+            $manny->sector = null;
+            $this->clearTask($manny);
+            $this->mannies->save($manny);
+            $changed = true;
+        }
+
+        if ($changed) {
+            $this->sectors->saveSector($sector);
+        }
     }
 
     private function removeMannyFromSector(Manny $manny): void

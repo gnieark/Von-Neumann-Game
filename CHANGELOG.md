@@ -18,6 +18,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- API : lorsqu’une sonde revient dans le secteur d’une Manny `forgotten` qui lui appartient encore, la Manny inactive est automatiquement remise à bord si une place de stockage est disponible, et l’objet de secteur `forgotten` est supprimé.
 - JS : une tentative de scan avec des coordonnées relatives invalides efface maintenant le résultat du scan précédent tout en conservant le message d’erreur existant.
 - JS : la liste des Mannys est resynchronisée après le chargement du secteur courant de la sonde afin d’afficher correctement les Mannys trop éloignées.
 

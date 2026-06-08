@@ -1636,6 +1636,24 @@ if ($moveProbe !== null) {
                 static fn(array $object): bool => ($object['type'] ?? null) === 'manny'
             ));
             $test->assertEquals(0, count($oldSectorMannyObjects), 'visited-sector scan hides abandoned and forgotten Mannys when the probe is no longer in that sector');
+
+            $returnToForgottenMannySector = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 0, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+            $test->assertEquals(202, $returnToForgottenMannySector->status, 'probe can return to a sector containing one of its forgotten Mannys');
+            $returnMovement = $movements->findActiveByProbeId($moveProbe->id);
+            if ($returnMovement !== null) {
+                $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+                    'id' => $returnMovement->id,
+                    'arrival' => gmdate('c', time() - 60),
+                ]);
+                $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $returnMovement->id, gmdate('c'), ['probeId' => $returnMovement->probeId, 'phase' => 'arrived']);
+                $scheduler->processDueEvents();
+                $kernel->handle('GET', '/api/probe', $moveHeaders);
+                $returnedManny = $mannies->findByUidForProbe($moveProbe->id, $firstMannyId);
+                $test->assertEquals('probe', $returnedManny?->locationType, 'returning to a forgotten Manny sector brings the owned idle Manny back aboard');
+                $test->assertEquals(null, $returnedManny?->sector, 'recovered forgotten Manny no longer exposes an exterior sector position');
+                $revisitedForgottenSector = $sectorRepository->load($originBeforeMove);
+                $test->assertEquals(null, $revisitedForgottenSector->findObjectById(SectorManny::objectIdForUid($firstMannyId)), 'recovered forgotten Manny is removed from the sector object list');
+            }
         }
     }
 }
