@@ -301,7 +301,8 @@ button:disabled {
     object-fit: cover;
 }
 
-.about-page {
+.about-page,
+.stats-page {
     max-width: 780px;
     margin: 0 auto;
     padding: 28px;
@@ -313,6 +314,7 @@ button:disabled {
 }
 
 .about-page h1,
+.stats-page h1,
 .changelog-page h1 {
     margin-bottom: 18px;
 }
@@ -360,6 +362,53 @@ button:disabled {
 .about-source a,
 .site-footer a {
     color: var(--cold);
+}
+
+.stats-page {
+    max-width: 980px;
+}
+
+.stats-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: start;
+    margin-bottom: 18px;
+}
+
+.stats-heading p:last-child {
+    margin: 0;
+    color: var(--muted);
+    font-size: .82rem;
+    text-align: right;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 10px;
+}
+
+.stats-card {
+    display: grid;
+    align-content: space-between;
+    min-height: 108px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,.1);
+    background: rgba(0,0,0,.18);
+}
+
+.stats-card span {
+    color: var(--muted);
+    line-height: 1.35;
+}
+
+.stats-card strong {
+    margin-top: 14px;
+    color: #f0f3f3;
+    font-size: 1.55rem;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
 }
 
 .api-docs-page {
@@ -1818,9 +1867,14 @@ button.account-menu-item:hover {
         flex-wrap: wrap;
     }
 
-    .api-docs-heading {
+    .api-docs-heading,
+    .stats-heading {
         align-items: start;
         flex-direction: column;
+    }
+
+    .stats-heading p:last-child {
+        text-align: left;
     }
 
     .game-brief,

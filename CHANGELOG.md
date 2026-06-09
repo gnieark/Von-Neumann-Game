@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-09
+
+### Added
+
+- Ajout de la page publique `/stats`, accessible depuis le pied de page, qui affiche les statistiques agrégées de l’univers depuis `var/stats.json`.
+- Ajout du script `scripts/generate-stats.php` pour générer le JSON de statistiques destiné à une tâche CRON quotidienne.
+- Les statistiques couvrent notamment les sondes, secteurs générés et visités, trous noirs, astéroïdes par ressource minable, Mannys perdus ou oubliés, containers détachés et distances extrêmes entre sondes.
+
 ## 2026-06-08
 
 ### Added

@@ -12,7 +12,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260608-storage-container-detach-ui';
+const ASSET_VERSION = '20260609-stats-page';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -98,6 +98,12 @@ if ($routePath === '/about' && in_array($method, ['GET', 'HEAD'], true)) {
 if ($routePath === '/changelog' && in_array($method, ['GET', 'HEAD'], true)) {
     $player = currentPlayer($factory);
     renderChangelog($projectRoot, $translator, $player, currentProbeName($factory, $player));
+    return;
+}
+
+if ($routePath === '/stats' && in_array($method, ['GET', 'HEAD'], true)) {
+    $player = currentPlayer($factory);
+    renderStats($projectRoot, $translator, $player, currentProbeName($factory, $player));
     return;
 }
 
@@ -285,6 +291,43 @@ function renderChangelog(string $projectRoot, Translator $translator, ?Player $p
     $tpl->addSubBlock((new TplBlock('changelogview'))->addVars([
         'html' => renderMarkdownHtml((string) file_get_contents($path)),
     ]));
+
+    if ($player !== null) {
+        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
+    }
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
+}
+
+function renderStats(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
+{
+    $stats = loadStats($projectRoot . '/var/stats.json');
+    $tpl = new TplBlock();
+    $tpl->addVars([
+        'pageTitle' => 'Von Neumann Game - ' . $translator->get('statsFooterLink'),
+        'metaDescription' => e($translator->get('statsMetaDescription')),
+        'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
+        'authenticated' => $player === null ? '0' : '1',
+        'language' => $translator->language(),
+        'assetVersion' => ASSET_VERSION,
+        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
+        'i18nUrl' => e(i18nMessagesUrl($translator)),
+        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
+        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
+    ]);
+    $tpl->addPrefixedVars('t', $translator->allEscaped());
+
+    $statsView = (new TplBlock('statsview'))->addVars([
+        'generatedAt' => e(formatStatsGeneratedAt($stats['generatedAt'], $translator)),
+    ]);
+    foreach (statsMetricRows($stats['metrics'], $translator) as $metric) {
+        $statsView->addSubBlock((new TplBlock('metric'))->addVars([
+            'label' => e($metric['label']),
+            'value' => e($metric['value']),
+        ]));
+    }
+    $tpl->addSubBlock($statsView);
 
     if ($player !== null) {
         addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
@@ -565,6 +608,105 @@ function addAuthenticatedUi(TplBlock $tpl, string $displayName): void
         'displayName' => $displayName,
     ]));
     $tpl->addSubBlock(new TplBlock('apikeydialog'));
+}
+
+/**
+ * @return array{generatedAt: ?string, metrics: array<string, mixed>}
+ */
+function loadStats(string $path): array
+{
+    $fallbackMetrics = [
+        'probesInUniverse' => 0,
+        'generatedSectors' => 0,
+        'visitedSectors' => 0,
+        'blackHoles' => 0,
+        'asteroidsByResource' => [
+            'deuterium' => 0,
+            'metals' => 0,
+            'ice' => 0,
+            'carbon_compounds' => 0,
+        ],
+        'lostMannies' => 0,
+        'forgottenMannies' => 0,
+        'driftingContainers' => 0,
+        'hiddenContainers' => 0,
+        'furthestProbeDistance' => 0,
+        'closestProbeDistance' => 0,
+        'intelligentLifeWorlds' => 0,
+        'successfulMissions' => 0,
+        'failedMissions' => 0,
+    ];
+
+    $json = is_file($path) ? file_get_contents($path) : false;
+    if ($json === false) {
+        return ['generatedAt' => null, 'metrics' => $fallbackMetrics];
+    }
+
+    try {
+        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        return ['generatedAt' => null, 'metrics' => $fallbackMetrics];
+    }
+
+    if (!is_array($data) || !is_array($data['metrics'] ?? null)) {
+        return ['generatedAt' => null, 'metrics' => $fallbackMetrics];
+    }
+
+    $metrics = array_replace_recursive($fallbackMetrics, $data['metrics']);
+
+    return [
+        'generatedAt' => is_string($data['generatedAt'] ?? null) ? $data['generatedAt'] : null,
+        'metrics' => $metrics,
+    ];
+}
+
+/**
+ * @param array<string, mixed> $metrics
+ * @return array<int, array{label: string, value: string}>
+ */
+function statsMetricRows(array $metrics, Translator $translator): array
+{
+    $asteroidsByResource = is_array($metrics['asteroidsByResource'] ?? null) ? $metrics['asteroidsByResource'] : [];
+
+    return [
+        ['label' => $translator->get('statsProbesInUniverse'), 'value' => formatStatsNumber($metrics['probesInUniverse'] ?? 0)],
+        ['label' => $translator->get('statsGeneratedSectors'), 'value' => formatStatsNumber($metrics['generatedSectors'] ?? 0)],
+        ['label' => $translator->get('statsVisitedSectors'), 'value' => formatStatsNumber($metrics['visitedSectors'] ?? 0)],
+        ['label' => $translator->get('statsBlackHoles'), 'value' => formatStatsNumber($metrics['blackHoles'] ?? 0)],
+        ['label' => $translator->get('statsAsteroidsDeuterium'), 'value' => formatStatsNumber($asteroidsByResource['deuterium'] ?? 0)],
+        ['label' => $translator->get('statsAsteroidsMetals'), 'value' => formatStatsNumber($asteroidsByResource['metals'] ?? 0)],
+        ['label' => $translator->get('statsAsteroidsIce'), 'value' => formatStatsNumber($asteroidsByResource['ice'] ?? 0)],
+        ['label' => $translator->get('statsAsteroidsCarbonCompounds'), 'value' => formatStatsNumber($asteroidsByResource['carbon_compounds'] ?? 0)],
+        ['label' => $translator->get('statsLostMannies'), 'value' => formatStatsNumber($metrics['lostMannies'] ?? 0)],
+        ['label' => $translator->get('statsForgottenMannies'), 'value' => formatStatsNumber($metrics['forgottenMannies'] ?? 0)],
+        ['label' => $translator->get('statsDriftingContainers'), 'value' => formatStatsNumber($metrics['driftingContainers'] ?? 0)],
+        ['label' => $translator->get('statsHiddenContainers'), 'value' => formatStatsNumber($metrics['hiddenContainers'] ?? 0)],
+        ['label' => $translator->get('statsFurthestProbeDistance'), 'value' => formatStatsNumber($metrics['furthestProbeDistance'] ?? 0)],
+        ['label' => $translator->get('statsClosestProbeDistance'), 'value' => formatStatsNumber($metrics['closestProbeDistance'] ?? 0)],
+        ['label' => $translator->get('statsIntelligentLifeWorlds'), 'value' => formatStatsNumber($metrics['intelligentLifeWorlds'] ?? 0)],
+        ['label' => $translator->get('statsSuccessfulMissions'), 'value' => formatStatsNumber($metrics['successfulMissions'] ?? 0)],
+        ['label' => $translator->get('statsFailedMissions'), 'value' => formatStatsNumber($metrics['failedMissions'] ?? 0)],
+    ];
+}
+
+function formatStatsNumber(mixed $value): string
+{
+    return number_format(max(0, (int) $value), 0, ',', ' ');
+}
+
+function formatStatsGeneratedAt(?string $value, Translator $translator): string
+{
+    if ($value === null || trim($value) === '') {
+        return $translator->get('statsNeverGenerated');
+    }
+
+    try {
+        $date = new DateTimeImmutable($value);
+    } catch (Throwable) {
+        return $translator->get('statsNeverGenerated');
+    }
+
+    return $date->setTimezone(new DateTimeZone('Europe/Paris'))->format('Y-m-d H:i T');
 }
 
 function renderMarkdownHtml(string $markdown): string

@@ -196,6 +196,26 @@
         </section>
         <!-- END changelogview -->
 
+        <!-- BEGIN statsview -->
+        <section class="stats-page">
+            <div class="stats-heading">
+                <div>
+                    <p class="eyebrow">{{t.statsEyebrow}}</p>
+                    <h1>{{t.statsTitle}}</h1>
+                </div>
+                <p>{{t.statsUpdatedAt}} {{statsview.generatedAt}}</p>
+            </div>
+            <div class="stats-grid">
+                <!-- BEGIN statsview.metric -->
+                <article class="stats-card">
+                    <span>{{statsview.metric.label}}</span>
+                    <strong>{{statsview.metric.value}}</strong>
+                </article>
+                <!-- END statsview.metric -->
+            </div>
+        </section>
+        <!-- END statsview -->
+
         <!-- BEGIN apidocsview -->
         <section class="api-docs-page">
             <div class="api-docs-heading">
@@ -528,6 +548,7 @@
     <footer class="site-footer">
         <a href="/about">{{t.aboutFooterLink}}</a>
         <a href="/changelog">{{t.changelogFooterLink}}</a>
+        <a href="/stats">{{t.statsFooterLink}}</a>
         <a href="/api-docs">{{t.apiDocsFooterLink}}</a>
     </footer>
 </body>
