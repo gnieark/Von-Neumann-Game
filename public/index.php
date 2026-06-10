@@ -20,6 +20,8 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path = $_SERVER['REQUEST_URI'] ?? '/';
 $routePath = (string) (parse_url($path, PHP_URL_PATH) ?: '/');
 
+
+// Handle API requests 
 if (str_starts_with($routePath, '/api/')) {
     $kernel = $factory->apiKernel();
     $headers = function_exists('getallheaders') ? getallheaders() : [];
@@ -35,11 +37,130 @@ if (str_starts_with($routePath, '/api/')) {
     return;
 }
 
+
+// Handle frontend routes
+$routes = [
+    'i18n' => [
+        'name' => 'i18n',
+        'methods' => ['GET', 'HEAD'],
+        'needAuth' => false,
+        'uriPattern' => '#^/i18n$#',
+        'linkUri' => '/i18n',
+        'routeClass' => 'Routei18n',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+
+    ],
+    'about' => [
+        'name' => e($translator->get('aboutPageTitle')),
+        'methods' => ['GET', 'HEAD'],
+        'needAuth' => false,
+        'uriPattern' => '#^/about$#',
+        'linkUri' => '/about',
+        'routeClass' => 'RouteAbout',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => true,
+    ],
+    'auth' =>[
+        'name' => 'auth',
+        'methods' => ['GET', 'POST'],
+        'needAuth' => false,
+        'uriPattern' => '#^/auth/#',
+        'linkUri' => '/authbypwd',
+        'routeClass' => 'RouteAuth',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+    ],
+    'authbypwd' =>[
+        'name' => 'authbypwd',
+        'methods' => ['GET', 'POST'],
+        'needAuth' => false,
+        'uriPattern' => '#^/authbypwd$#',
+        'linkUri' => '/authbypwd',
+        'routeClass' => 'RouteAuthByPwd',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+    ],
+    'logout' =>[
+        'name' => 'logout',
+        'methods' => ['GET', 'POST'],
+        'needAuth' => true,
+        'uriPattern' => '#^/logout$#',
+        'linkUri' => '/logout',
+        'routeClass' => 'RouteLogout',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+    ],
+    "changelog" =>[
+        'name'  => 'changelog',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/changelog$#',
+        'linkUri' => '/changelog',
+        'routeClass' => 'RouteChangelog',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,   
+    ],
+    "stats" => [
+        'name'  => e($translator->get('StatistiquesPageTitle')),
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/stats$#',
+        'linkUri' => '/stats',
+        'routeClass' => 'RouteStats',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => true,   
+    ],
+    "api-docs" => [
+        'name'  => 'API Docs',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => false,
+        'uriPattern' => '#^/(api-docs|openapi\.yaml)$#',
+        'linkUri' => '/api-docs',
+        'routeClass' => 'RouteApiDocs',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => true,   
+    ],
+
+];
+
+foreach($routes as $route){
+    if(preg_match($route['uriPattern'], $routePath) === 1){
+        if(!in_array($method, $route['methods'], true)){
+            http_response_code(405);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Method not allowed';
+            return;
+        }
+
+        if($route['needAuth'] && currentPlayer($factory) === null){
+            http_response_code(401);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Unauthorized';
+            return;
+        }
+
+        $className = 'VonNeumannGame\\FrontRoute\\' . $route['routeClass'];
+        if (!class_exists($className)) {
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Route class not found';
+            return;
+        }
+        /** @var \VonNeumannGame\FrontRoute\FrontRoute $controller */
+        $controller = new $className($factory, $projectRoot, $translator);
+        $controller->handle($method, $routePath);
+        return;
+    }
+
+}
+
+/*
+
 if ($routePath === '/i18n' && in_array($method, ['GET', 'HEAD'], true)) {
     renderI18nMessages((string) ($_GET['lang'] ?? ''), $method);
     return;
-}
-if ($routePath === '/i18n') {
+}elseif ($routePath === '/i18n') {
     http_response_code(405);
     header('Content-Type: text/plain; charset=utf-8');
     echo 'Method not allowed';
