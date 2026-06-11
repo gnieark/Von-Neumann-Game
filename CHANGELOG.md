@@ -2,6 +2,20 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-11
+
+### Changed
+
+- Réécriture complète de la Web UI : l’ancien template monolithique a été remplacé par un shell commun `templates/main.html`, des templates dédiés par page et des scripts JavaScript spécifiques par écran.
+- Les anciens panneaux console sont désormais accessibles comme pages web autonomes : `/`, `/sensors`, `/movement`, `/inventories`, `/mannies`, `/messaging` et `/alerts`.
+- Les pages publiques `/about`, `/changelog`, `/stats` et `/api-docs` ont été intégrées au même système de routes frontend, avec Swagger UI sur `/api-docs`.
+- Le sélecteur de langue persiste maintenant le choix dans un cookie, reste sur la route courante et recharge le dictionnaire i18n avec une URL versionnée.
+- Le menu tutoriel du header ouvre les tutoriels intégrés; après une première connexion OAuth et le choix du pseudonyme, le joueur est redirigé vers `/?tutorial=context`.
+
+### Removed
+
+- Suppression de l’ancien template `templates/home.html`, qui n’était plus utilisé depuis la migration vers les routes frontend dédiées.
+
 ## 2026-06-09
 
 ### Added
