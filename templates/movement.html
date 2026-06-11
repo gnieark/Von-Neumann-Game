@@ -1,0 +1,18 @@
+<article id="actions-panel" class="data-panel active">
+    <div class="panel-heading">
+        <div>
+            <h2>{{t.tabActions}}</h2>
+        </div>
+        <button class="icon-button" data-refresh="movement" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+    </div>
+    <div id="jump-checklist" class="jump-checklist" aria-live="polite"></div>
+    <form id="move-form" class="action-panel">
+        <label>{{t.targetX}}<input name="x" type="number" step="1" value="{{initialX}}"></label>
+        <label>{{t.targetY}}<input name="y" type="number" step="1" value="{{initialY}}"></label>
+        <label>{{t.targetZ}}<input name="z" type="number" step="1" value="{{initialZ}}"></label>
+        <span id="jump-control" class="jump-control">
+            <button id="move-submit" class="primary" type="submit">{{t.initiateJump}}</button>
+        </span>
+    </form>
+    <p id="action-status" class="action-status" aria-live="polite"></p>
+</article>

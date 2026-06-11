@@ -7,6 +7,7 @@
     let refreshTimer = null;
     let countdownTimer = null;
     let loadInProgress = false;
+    let currentProbeSectorRelative = null;
     let currentScanTarget = null;
 
     function withVng(callback) {
@@ -147,6 +148,25 @@
         if (node) {
             node.textContent = value;
         }
+    }
+
+    function relativeCoordinates(value) {
+        if (!value || !Number.isFinite(Number(value.x)) || !Number.isFinite(Number(value.y)) || !Number.isFinite(Number(value.z))) {
+            return null;
+        }
+
+        return {
+            "x": Number(value.x),
+            "y": Number(value.y),
+            "z": Number(value.z),
+        };
+    }
+
+    function sameRelativeCoordinates(left, right) {
+        const a = relativeCoordinates(left);
+        const b = relativeCoordinates(right);
+
+        return a !== null && b !== null && a.x === b.x && a.y === b.y && a.z === b.z;
     }
 
     function numericCount(value) {
@@ -601,6 +621,28 @@
         });
     }
 
+    function syncPrepareJumpButton(sector) {
+        const button = document.getElementById("prepare-jump-button");
+        if (!button) {
+            return;
+        }
+
+        const target = relativeCoordinates(sector && sector.relativeCoordinates);
+        const distance = Number(sector && sector.distance);
+        const isRemoteSector = target !== null && (
+            Number.isFinite(distance)
+                ? distance !== 0
+                : !sameRelativeCoordinates(target, currentProbeSectorRelative)
+        );
+
+        button.hidden = !isRemoteSector;
+        button.disabled = !isRemoteSector;
+        button.setAttribute("aria-disabled", isRemoteSector ? "false" : "true");
+        button.dataset.targetX = isRemoteSector ? String(target.x) : "";
+        button.dataset.targetY = isRemoteSector ? String(target.y) : "";
+        button.dataset.targetZ = isRemoteSector ? String(target.z) : "";
+    }
+
     function sectorFormTarget() {
         const form = document.getElementById("sector-form");
         if (!form) {
@@ -715,12 +757,17 @@
 
         try {
             const data = await window.VNG.apiJson(path, {"method": "GET"});
+            if (path === "/api/probe/sector") {
+                currentProbeSectorRelative = relativeCoordinates(data.sector && data.sector.relativeCoordinates);
+            }
             syncSectorForm(data.sector);
             renderSectorObjects(data.sector);
+            syncPrepareJumpButton(data.sector);
             applySectorScanButtonState();
             scheduleRefresh(data);
         } catch (error) {
             renderSectorObjects(null);
+            syncPrepareJumpButton(null);
             setText("sector-context", error.message || tr("requestDenied", "Request denied"));
             applySectorScanButtonState();
             scheduleRefresh(null);
@@ -764,6 +811,19 @@
     function bindPage() {
         document.getElementById("sector-form")?.addEventListener("submit", scanSubmittedSector);
         document.getElementById("sector-form")?.addEventListener("input", applySectorScanButtonState);
+        document.getElementById("prepare-jump-button")?.addEventListener("click", (event) => {
+            const button = event.currentTarget;
+            const target = {
+                "x": Number.parseInt(button.dataset.targetX || "", 10),
+                "y": Number.parseInt(button.dataset.targetY || "", 10),
+                "z": Number.parseInt(button.dataset.targetZ || "", 10),
+            };
+            if (!window.VNG.validRelativeCoordinates(target)) {
+                return;
+            }
+
+            window.location.assign("/movement/" + encodeURIComponent(String(target.x)) + "/" + encodeURIComponent(String(target.y)) + "/" + encodeURIComponent(String(target.z)));
+        });
         document.querySelector("[data-refresh=\"sector\"]")?.addEventListener("click", () => {
             loadDisplayedSector();
         });
