@@ -92,6 +92,7 @@ class FrontRoute{
             "assetVersion" => defined('ASSET_VERSION') ? ASSET_VERSION : '',
             "authenticated" => is_null($bearer) ? '0' : '1',
             "i18nUrl" => "/i18n?lang=" . rawurlencode($translator->language()),
+            "languageFormAction" => self::e((string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/')),
             "customJs" => $this->getCustomJs(),
             "customCss" => $this->getCustomCss(),
             "mainContent" => "",

@@ -63,13 +63,37 @@ function selectedBearer(): ?string
     return 'Bearer ' . $token;
 }
 
+function isHttps(): bool
+{
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+}
+
+function translatedRouteName(Translator $translator, string $key): string
+{
+    return htmlspecialchars($translator->get($key), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
 $language = selectedLanguage();
 $bearer = selectedBearer();
 $translator = new Translator($language);
 
+if ($routePath !== '/i18n' && isset($_GET['lang']) && in_array((string) $_GET['lang'], Translator::supportedLanguages(), true)) {
+    $language = Translator::normalize((string) $_GET['lang']);
+    setcookie(LANGUAGE_COOKIE, $language, [
+        'expires' => time() + 365 * 24 * 3600,
+        'path' => '/',
+        'secure' => isHttps(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    header('Location: ' . ($routePath === '' ? '/' : $routePath), true, 303);
+    return;
+}
+
 $availableroutes = [
     'home' => [
-        'name' => 'home',
+        'name' => translatedRouteName($translator, 'tabProbe'),
         'methods' => ['GET', 'HEAD'],
         'needAuth' => false,
         'uriPattern' => '#^/$#',
@@ -90,7 +114,7 @@ $availableroutes = [
 
     ],
     'about' => [
-        'name' => htmlspecialchars($translator->get('aboutPageTitle'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+        'name' => translatedRouteName($translator, 'aboutPageTitle'),
         'methods' => ['GET', 'HEAD'],
         'needAuth' => false,
         'uriPattern' => '#^/about$#',
@@ -120,7 +144,7 @@ $availableroutes = [
         'displayOnFooter' => false,
     ],
     'logout' =>[
-        'name' => 'logout',
+        'name' => translatedRouteName($translator, 'logout'),
         'methods' => ['GET', 'POST'],
         'needAuth' => true,
         'uriPattern' => '#^/logout$#',
@@ -140,7 +164,7 @@ $availableroutes = [
         'displayOnFooter' => false,   
     ],
     "stats" => [
-        'name'  =>   htmlspecialchars($translator->get('statsFooterLink'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+        'name'  => translatedRouteName($translator, 'statsFooterLink'),
         'methods' => ['GET','HEAD'],
         'needAuth' => false,
         'uriPattern' => '#^/stats$#',
@@ -160,7 +184,7 @@ $availableroutes = [
         'displayOnFooter' => true,   
     ],
     "Sensors" => [
-        'name'  => 'Sensors and radars',
+        'name'  => translatedRouteName($translator, 'tabEnvironment'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
         'uriPattern' => '#^/sensors$#',
@@ -170,7 +194,7 @@ $availableroutes = [
         'displayOnFooter' => false,   
     ],
     "Inventories" => [
-        'name'  => 'Inventories',
+        'name'  => translatedRouteName($translator, 'tabSystems'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
         'uriPattern' => '#^/inventories$#',
@@ -180,7 +204,7 @@ $availableroutes = [
         'displayOnFooter' => false,   
     ],
     "Mannys" => [
-        'name'  => 'Mannies & printer',
+        'name'  => translatedRouteName($translator, 'tabMannies'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
         'uriPattern' => '#^/mannies$#',
@@ -190,7 +214,7 @@ $availableroutes = [
         'displayOnFooter' => false,   
     ],
     "Movement" => [
-        'name'  => 'Movement',
+        'name'  => translatedRouteName($translator, 'tabActions'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
         'uriPattern' => '#^/movement(?:/-?\d+/-?\d+/-?\d+)?$#',
@@ -200,7 +224,7 @@ $availableroutes = [
         'displayOnFooter' => false,   
     ],
     "Messaging" => [
-        'name'  => 'Messaging',
+        'name'  => translatedRouteName($translator, 'tabMessages'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
         'uriPattern' => '#^/messaging$#',
@@ -210,7 +234,7 @@ $availableroutes = [
         'displayOnFooter' => false,   
     ],
     "Alerts" => [
-        'name'  => 'Alerts',
+        'name'  => translatedRouteName($translator, 'tabAlerts'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
         'uriPattern' => '#^/alerts$#',
