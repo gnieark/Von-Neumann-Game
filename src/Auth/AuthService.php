@@ -107,6 +107,15 @@ final class AuthService
         return ['token' => $token, 'expiresAt' => $expiresAt];
     }
 
+    public function revokeSessionToken(string $token): void
+    {
+        if ($token === '') {
+            return;
+        }
+
+        $this->sessions->revokeSession($token);
+    }
+
     public function getPlayerFromBearerToken(?string $authorizationHeader): ?Player
     {
         $token = $this->extractBearerToken($authorizationHeader);
