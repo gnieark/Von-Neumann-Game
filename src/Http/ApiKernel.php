@@ -104,7 +104,7 @@ final class ApiKernel
         } catch (MannyActionException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (ObservationAccessException $e) {
-            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
+            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage(), $e->details);
         } catch (InvalidSectorCoordinatesException|\InvalidArgumentException $e) {
             return ApiResponse::error(400, 'bad_request', $e->getMessage());
         } catch (\Throwable) {

@@ -286,6 +286,9 @@
         if (!sector) {
             return tr("sectorSummaryUnavailable", "No sector analysis available.");
         }
+        if (sector.sensorMode === "degraded" || sector.message === "Sensors are degraded during intersector maneuvering.") {
+            return tr("sectorSummarySensorsDegradedMovement", "Sensors are too degraded by travel velocity; inventory impossible.");
+        }
         if (Array.isArray(sector.objects)) {
             return detailedSectorSummary(sector.objects);
         }
@@ -297,6 +300,18 @@
         }
 
         return tr("sectorSummaryLongRange", "Long-range estimate: not enough detail for a reliable inventory.");
+    }
+
+    function scanErrorMessage(error) {
+        const retryAfterSeconds = Number(error && error.details && error.details.retryAfterSeconds);
+        if (error && error.errorCode === "insufficient_scan_data" && Number.isFinite(retryAfterSeconds)) {
+            return window.VNG.formatText(
+                tr("sectorScanInsufficientDataRetry", "The probe has not collected enough data from the current sector to display this scan. Try again in {duration}."),
+                {"duration": window.VNG.duration(retryAfterSeconds, tr)}
+            );
+        }
+
+        return error && error.message ? error.message : tr("requestDenied", "Request denied");
     }
 
     function resourceTypesForTarget(target) {
@@ -799,7 +814,7 @@
     function neighborTileHtml(target, sector, error) {
         const coordinates = window.VNG.coordinate(target);
         const summary = error
-            ? (error.message || tr("sectorNeighborScanFailed", "Scan unavailable for this sector."))
+            ? scanErrorMessage(error)
             : sectorSummary(sector);
         const context = error ? "" : sectorContext(sector);
 
@@ -899,7 +914,7 @@
 
             setNeighborScanStatus("");
         } catch (error) {
-            setNeighborScanStatus(error.message || tr("requestDenied", "Request denied"));
+            setNeighborScanStatus(scanErrorMessage(error));
         } finally {
             if (runId === neighborScanRunId) {
                 neighborScanInProgress = false;
@@ -934,7 +949,7 @@
         } catch (error) {
             renderSectorObjects(null);
             syncPrepareJumpButton(null);
-            setText("sector-context", error.message || tr("requestDenied", "Request denied"));
+            setText("sector-context", scanErrorMessage(error));
             applySectorScanButtonState();
             scheduleRefresh(null);
             return null;

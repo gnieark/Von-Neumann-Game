@@ -688,14 +688,15 @@ button.account-menu-item:hover {
 
 .language-form {
     display: flex;
-    align-items: end;
+    align-items: center;
     gap: 8px;
     margin-left: auto;
 }
 
 .language-form label {
-    display: grid;
-    gap: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 120px;
     font-size: .78rem;
 }
@@ -1988,6 +1989,14 @@ button.account-menu-item:hover {
 
     .language-form {
         margin-left: 0;
+    }
+
+    .language-form label {
+        min-width: auto;
+    }
+
+    .language-form label span {
+        display: none;
     }
 
     .tutorial-menu .account-menu-panel {

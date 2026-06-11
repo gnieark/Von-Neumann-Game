@@ -63,7 +63,13 @@ async function apiJson(path, options) {
         const message = data && data.error && data.error.message
             ? data.error.message
             : labels().requestDenied;
-        throw new Error(message);
+        const error = new Error(message);
+        if (data && data.error) {
+            error.errorCode = data.error.code || "";
+            error.details = data.error.details || {};
+            error.responseBody = data;
+        }
+        throw error;
     }
 
     return data;

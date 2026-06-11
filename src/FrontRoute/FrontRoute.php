@@ -83,15 +83,16 @@ class FrontRoute{
     {
         $projectRoot = dirname(__DIR__, 2);
         $translator = new Translator(Translator::normalize($language));
+        $assetVersion = defined('ASSET_VERSION') ? ASSET_VERSION : '';
 
         $tpl = new TplBlock("");
         $tpl->addVars([
             "pageTitle" => $this->getPageTitle($bearer, $language),
             "metaDescription" => $this->getMetaDescription($bearer, $language),
             "language" => $translator->language(),
-            "assetVersion" => defined('ASSET_VERSION') ? ASSET_VERSION : '',
+            "assetVersion" => $assetVersion,
             "authenticated" => is_null($bearer) ? '0' : '1',
-            "i18nUrl" => "/i18n?lang=" . rawurlencode($translator->language()),
+            "i18nUrl" => "/i18n?lang=" . rawurlencode($translator->language()) . ($assetVersion !== '' ? '&v=' . rawurlencode($assetVersion) : ''),
             "languageFormAction" => self::e((string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/')),
             "customJs" => $this->getCustomJs(),
             "customCss" => $this->getCustomCss(),
