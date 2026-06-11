@@ -1,815 +1,896 @@
-import {
-    bindApiKeyDialog,
-    bindOAuthRememberLinks,
-    createApiClient,
-    initSwaggerUi,
-} from './api.js?v=20260604-system-bodies-v2';
-import {createCraftingModule} from './crafting.js?v=20260606-printer-workshop';
-import {createInventoryModule} from './inventory.js?v=20260608-storage-container-detach-ui';
-import {createLabels} from './labels.js?v=20260608-storage-container-detach-ui';
-import {createMannyModule} from './manny.js?v=20260608-storage-container-detach-ui';
-import {createSectorModule} from './sector.js?v=20260608-storage-container-detach-ui';
-import {createInventoryActions} from './inventory-actions.js?v=20260608-storage-container-detach-ui';
-import {createMessageModule} from './messages.js?v=20260607-split-main';
-import {
-    bindAccountMenu,
+function createElem(type, attributes) {
+    var elem = document.createElement(type);
+    for (var i in attributes || {}) {
+        elem.setAttribute(i, attributes[i]);
+    }
+    return elem;
+}
+
+function cookieValue(name) {
+    return document.cookie
+        .split("; ")
+        .find((row) => row.startsWith(name + "="))
+        ?.split("=")
+        .slice(1)
+        .join("=") || "";
+}
+
+function safeDecode(value) {
+    try {
+        return decodeURIComponent(value || "");
+    } catch (error) {
+        return value || "";
+    }
+}
+
+function labels() {
+    const isFrench = document.documentElement.lang === "fr";
+    return {
+        account: isFrench ? "Compte" : "Account",
+        apiKeyCopyFallback: isFrench ? "Sélectionne la clef et copie-la manuellement." : "Select the key and copy it manually.",
+        apiKeyCopied: isFrench ? "Clef API copiée." : "API key copied.",
+        apiKeyGenerating: isFrench ? "Génération de la clef API..." : "Generating API key...",
+        apiKeyHelp: isFrench
+            ? "Cette clef peut être utilisée comme Bearer token sur les endpoints API. Elle est affichée une seule fois."
+            : "This key can be used as a Bearer token on API endpoints. It is shown only once.",
+        apiKeyReady: isFrench ? "Clef API prête. Elle est affichée une seule fois." : "API key ready. It is shown only once.",
+        apiKeyTitle: isFrench ? "Clef d'API" : "API key",
+        close: isFrench ? "Fermer" : "Close",
+        copyApiKey: isFrench ? "Copier la clef" : "Copy key",
+        logout: isFrench ? "Déconnexion" : "Log out",
+        requestDenied: isFrench ? "Requête refusée" : "Request denied",
+        retrieveApiKey: isFrench ? "Récupérer une clef d'API" : "Retrieve an API key",
+    };
+}
+
+function sessionToken() {
+    return safeDecode(cookieValue("vn_session"));
+}
+
+async function apiJson(path, options) {
+    const token = sessionToken();
+    const response = await fetch(path, {
+        ...options,
+        headers: {
+            "Authorization": token ? "Bearer " + token : "",
+            "Content-Type": "application/json",
+            ...(options && options.headers ? options.headers : {}),
+        },
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+    if (!response.ok) {
+        const message = data && data.error && data.error.message
+            ? data.error.message
+            : labels().requestDenied;
+        const error = new Error(message);
+        if (data && data.error) {
+            error.errorCode = data.error.code || "";
+            error.details = data.error.details || {};
+            error.responseBody = data;
+        }
+        throw error;
+    }
+
+    return data;
+}
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+let i18nPromise = null;
+let navigationWarningTimer = null;
+const sectorAlertAcknowledgementsStorageKey = "vng:sector-alert-acknowledgements:v1";
+
+function loadI18n() {
+    if (window.VNG_I18N && typeof window.VNG_I18N === "object") {
+        return Promise.resolve(window.VNG_I18N);
+    }
+    if (i18nPromise) {
+        return i18nPromise;
+    }
+
+    const preload = document.querySelector("link[rel=\"preload\"][as=\"fetch\"]");
+    const url = preload?.getAttribute("href") || "/i18n?lang=" + encodeURIComponent(document.documentElement.lang || "en");
+    i18nPromise = fetch(url, {"headers": {"Accept": "application/json"}})
+        .then((response) => response.ok ? response.json() : {})
+        .then((messages) => {
+            window.VNG_I18N = messages && typeof messages === "object" ? messages : {};
+            return window.VNG_I18N;
+        })
+        .catch(() => ({}));
+
+    return i18nPromise;
+}
+
+function t(messages, key, fallback) {
+    return messages && Object.prototype.hasOwnProperty.call(messages, key)
+        ? messages[key]
+        : fallback;
+}
+
+function formatText(template, values) {
+    return Object.entries(values || {}).reduce(
+        (text, [key, value]) => text.replaceAll("{" + key + "}", String(value)),
+        String(template || "")
+    );
+}
+
+function validRelativeCoordinates(target) {
+    return target
+        && Number.isFinite(Number(target.x))
+        && Number.isFinite(Number(target.y))
+        && Number.isFinite(Number(target.z))
+        && (Number(target.x) + Number(target.y) + Number(target.z)) % 2 === 0;
+}
+
+function coordinate(value) {
+    return value ? value.x + ":" + value.y + ":" + value.z : "-";
+}
+
+function numberValue(value, suffix) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+        return "-";
+    }
+
+    return number.toFixed(2).replace(/\.?0+$/, "") + (suffix || "");
+}
+
+function duration(seconds, translate) {
+    const number = Number(seconds);
+    const text = typeof translate === "function" ? translate : ((key, fallback) => fallback);
+    if (!Number.isFinite(number) || number < 0) {
+        return "-";
+    }
+    if (number < 60) {
+        return Math.round(number) + " " + text("secondsShort", "s");
+    }
+
+    const hours = Math.floor(number / 3600);
+    const minutes = Math.floor((number % 3600) / 60);
+    const remainingSeconds = Math.round(number % 60);
+    return [
+        hours > 0 ? hours + " h" : "",
+        minutes > 0 ? minutes + " min" : "",
+        hours === 0 ? remainingSeconds + " " + text("secondsShort", "s") : "",
+    ].filter(Boolean).join(" ");
+}
+
+function detailList(items) {
+    return "<dl>" + items.map((item) => (
+        "<div><dt>" + escapeHtml(item.label) + "</dt><dd>"
+        + (Object.prototype.hasOwnProperty.call(item, "htmlValue") ? String(item.htmlValue ?? "") : escapeHtml(item.value))
+        + "</dd></div>"
+    )).join("") + "</dl>";
+}
+
+function metricHtml(metric) {
+    const valueClass = metric.valueClass ? " class=\"" + escapeHtml(metric.valueClass) + "\"" : "";
+    const valueId = metric.valueId ? " id=\"" + escapeHtml(metric.valueId) + "\"" : "";
+    const extraAttributes = metric.valueAttributes ? " " + metric.valueAttributes : "";
+    const metricName = metric.name ? " data-metric=\"" + escapeHtml(metric.name) + "\"" : "";
+    const content = "<span>" + escapeHtml(metric.label) + "</span><b" + valueId + valueClass + extraAttributes + ">"
+        + escapeHtml(String(metric.value ?? "-")) + "</b>";
+
+    if (!metric.detail) {
+        return "<div class=\"metric\"" + metricName + ">" + content + "</div>";
+    }
+
+    return "<button class=\"metric interactive-metric\" type=\"button\" aria-expanded=\"false\"" + metricName + ">"
+        + content
+        + "<span class=\"metric-detail\" role=\"status\">" + metric.detail + "</span>"
+        + "</button>";
+}
+
+function bindMetricDetails(root) {
+    (root || document).querySelectorAll(".interactive-metric").forEach((metricNode) => {
+        if (metricNode.dataset.metricDetailsBound === "1") {
+            return;
+        }
+        metricNode.dataset.metricDetailsBound = "1";
+        metricNode.addEventListener("click", () => {
+            const expanded = metricNode.getAttribute("aria-expanded") === "true";
+            document.querySelectorAll(".interactive-metric[aria-expanded=\"true\"]").forEach((openNode) => {
+                if (openNode !== metricNode) {
+                    openNode.setAttribute("aria-expanded", "false");
+                }
+            });
+            metricNode.setAttribute("aria-expanded", expanded ? "false" : "true");
+        });
+    });
+}
+
+function renderMetrics(container, metrics) {
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = metrics.map(metricHtml).join("");
+    bindMetricDetails(container);
+}
+
+function collectRefreshTimes(value, observedAt, times) {
+    if (!value || typeof value !== "object") {
+        return times;
+    }
+
+    Object.entries(value).forEach(([key, item]) => {
+        const normalizedKey = key.toLowerCase();
+        if (typeof item === "number" && (
+            normalizedKey.endsWith("secondsremaining")
+            || normalizedKey.endsWith("remainingseconds")
+            || normalizedKey === "refreshafterseconds"
+            || normalizedKey === "nextrefreshseconds"
+        )) {
+            times.push(observedAt + Math.max(0, item) * 1000);
+            return;
+        }
+
+        if (typeof item === "string" && (
+            normalizedKey.endsWith("endsat")
+            || normalizedKey.endsWith("endat")
+            || normalizedKey.endsWith("dueat")
+            || normalizedKey.endsWith("runat")
+            || normalizedKey.endsWith("arrivalat")
+            || normalizedKey === "estimatedcompletionat"
+            || normalizedKey === "taskestimatedendtime"
+        )) {
+            const timestamp = Date.parse(item);
+            if (Number.isFinite(timestamp)) {
+                times.push(timestamp);
+            }
+        }
+
+        if (item && typeof item === "object") {
+            collectRefreshTimes(item, observedAt, times);
+        }
+    });
+
+    return times;
+}
+
+function nextRefreshDelay(payload, defaultDelayMs, minimumDelayMs, cushionMs) {
+    const observedAt = Date.now();
+    const defaultDelay = Number.isFinite(Number(defaultDelayMs)) ? Number(defaultDelayMs) : 15000;
+    const minimumDelay = Number.isFinite(Number(minimumDelayMs)) ? Number(minimumDelayMs) : 500;
+    const cushion = Number.isFinite(Number(cushionMs)) ? Number(cushionMs) : 500;
+    const futureTimes = collectRefreshTimes(payload, observedAt, [])
+        .filter((timestamp) => Number.isFinite(timestamp) && timestamp >= observedAt)
+        .sort((a, b) => a - b);
+
+    if (futureTimes.length === 0) {
+        return defaultDelay;
+    }
+
+    return Math.max(minimumDelay, Math.min(defaultDelay, futureTimes[0] - observedAt + cushion));
+}
+
+function navLinkNodes(path) {
+    return Array.from(document.querySelectorAll(".nav-panel a.panel-tab")).filter((node) => {
+        const href = node.getAttribute("href") || "";
+        const navLink = node.dataset.navLink || "";
+        return href === path || navLink === path;
+    });
+}
+
+function setNavigationWarning(path, active) {
+    navLinkNodes(path).forEach((node) => {
+        node.classList.toggle("alerts-pending", Boolean(active));
+    });
+}
+
+function sectorAlertStorageKey(type, sector, signature) {
+    const relative = sector && sector.relativeCoordinates ? sector.relativeCoordinates : null;
+    return [
+        type,
+        relative ? coordinate(relative) : "unknown",
+        signature || "",
+    ].join("|");
+}
+
+function readSectorAlertAcknowledgements() {
+    try {
+        const value = window.localStorage.getItem(sectorAlertAcknowledgementsStorageKey);
+        const parsed = value ? JSON.parse(value) : [];
+        return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch (error) {
+        return new Set();
+    }
+}
+
+function writeSectorAlertAcknowledgements(items) {
+    try {
+        window.localStorage.setItem(sectorAlertAcknowledgementsStorageKey, JSON.stringify(Array.from(items)));
+    } catch (error) {
+        // Local storage can be unavailable in private contexts; alerts still render.
+    }
+}
+
+function isSectorAlertAcknowledged(type, sector, signature) {
+    return readSectorAlertAcknowledgements().has(sectorAlertStorageKey(type, sector, signature));
+}
+
+function acknowledgeSectorAlert(type, sector, signature) {
+    const acknowledgements = readSectorAlertAcknowledgements();
+    acknowledgements.add(sectorAlertStorageKey(type, sector, signature));
+    writeSectorAlertAcknowledgements(acknowledgements);
+}
+
+function alertObjectTypeLabel(messages, type) {
+    return {
+        "asteroid": t(messages, "asteroidObject", "Asteroid"),
+        "planet": t(messages, "planetObject", "Planet"),
+        "star": t(messages, "starObject", "Star"),
+        "solar_system": t(messages, "solarSystemObject", "Solar system"),
+        "black_hole": t(messages, "blackHoleObject", "Black hole"),
+        "dust_cloud": t(messages, "dustCloudObject", "Dust cloud"),
+        "object": t(messages, "object", "Object"),
+    }[type] || type || t(messages, "object", "Object");
+}
+
+function bookmarkedSectorObjects(sector, messages) {
+    if (!sector || !Array.isArray(sector.objects)) {
+        return [];
+    }
+
+    const result = [];
+    const seen = new Set();
+    const collect = (object) => {
+        if (!object || typeof object !== "object") {
+            return;
+        }
+        if (Array.isArray(object.waypointBookmarks) && object.waypointBookmarks.length > 0) {
+            const label = [alertObjectTypeLabel(messages, object.type || "object"), object.name || object.id].filter(Boolean).join(" ");
+            const key = String(object.id || object.name || label);
+            if (!seen.has(key)) {
+                seen.add(key);
+                result.push({
+                    key,
+                    "label": label || key,
+                    "bookmarks": object.waypointBookmarks,
+                });
+            }
+        }
+        ["bookmarkTargets", "minableTargets"].forEach((childKey) => {
+            if (Array.isArray(object[childKey])) {
+                object[childKey].forEach(collect);
+            }
+        });
+    };
+    sector.objects.forEach(collect);
+
+    return result;
+}
+
+function sectorAlerts(sector, messages) {
+    const alerts = [];
+    const bookmarkedObjects = bookmarkedSectorObjects(sector, messages);
+    if (bookmarkedObjects.length > 0) {
+        const signature = bookmarkedObjects.map((object) => object.key).sort().join("|");
+        alerts.push({
+            "type": "bookmark",
+            "className": "sector-bookmark-alert",
+            "message": formatText(t(messages, "sectorWaypointBookmarkAlert", "Waypoint bookmark detected on object(s): {objects}"), {
+                "objects": bookmarkedObjects.map((object) => object.label).join(", "),
+            }),
+            signature,
+        });
+    }
+
+    const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
+    if (probes.length > 0) {
+        const probeLabels = probes.map((probe) => formatText(t(messages, "sectorProbeAlertEntry", "{name} ({movement})"), {
+            "name": probe && probe.name ? probe.name : t(messages, "unknownProbe", "Unknown probe"),
+            "movement": probe && probe.moving
+                ? t(messages, "probeMovementActive", "movement in progress")
+                : t(messages, "probeMovementInactive", "no movement in progress"),
+        }));
+        const signature = probes.map((probe) => [
+            probe && probe.id ? probe.id : "unknown",
+            probe && probe.name ? probe.name : t(messages, "unknownProbe", "Unknown probe"),
+            probe && probe.moving ? "moving" : "idle",
+        ].join(":")).sort().join("|");
+        alerts.push({
+            "type": "probe",
+            "className": "sector-probe-alert",
+            "message": formatText(t(messages, "sectorProbeAlert", "Probe detected in sector: {probes}"), {
+                "probes": probeLabels.join(", "),
+            }),
+            signature,
+        });
+    }
+
+    const containers = (Array.isArray(sector && sector.objects) ? sector.objects : [])
+        .filter((object) => object && object.type === "detached_container" && object.id);
+    if (containers.length > 0) {
+        const signature = containers.map((container) => [container.id, container.name || "", container.mode || ""].join(":")).sort().join("|");
+        alerts.push({
+            "type": "detached_container",
+            "className": "sector-detached-container-alert",
+            "message": formatText(t(messages, "sectorDetachedContainerAlert", "Detached container detected in sector: {containers}"), {
+                "containers": containers.map((container) => container.name || container.id).join(", "),
+            }),
+            signature,
+        });
+    }
+
+    return alerts.map((alert) => ({
+        ...alert,
+        "acknowledged": isSectorAlertAcknowledged(alert.type, sector, alert.signature),
+    }));
+}
+
+async function syncNavigationWarnings() {
+    if (document.body.dataset.authenticated !== "1") {
+        return;
+    }
+
+    const messages = await loadI18n();
+    const [messageData, sectorData] = await Promise.all([
+        apiJson("/api/probe/messages?limit=50&offset=0", {"method": "GET"}).catch(() => null),
+        apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
+    ]);
+
+    if (messageData) {
+        const receivedMessages = Array.isArray(messageData.messages) ? messageData.messages : [];
+        setNavigationWarning("/messaging", receivedMessages.some((message) => message && message.status === "unread"));
+    }
+    if (sectorData) {
+        const alerts = sectorAlerts(sectorData.sector || {}, messages);
+        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged));
+    }
+}
+
+function startNavigationWarningSync() {
+    if (document.body.dataset.authenticated !== "1" || navigationWarningTimer !== null) {
+        return;
+    }
+
+    syncNavigationWarnings();
+    navigationWarningTimer = window.setInterval(syncNavigationWarnings, 15000);
+}
+
+window.VNG = {
+    ...(window.VNG || {}),
+    acknowledgeSectorAlert,
+    apiJson,
     bindMetricDetails,
-    bindPanelTabs,
-    bindRefreshButtons,
-    bindTutorialDialog,
-} from './ui-accordion.js?v=20260606-messaging-ui';
-import {
-    bindLanguageForm,
     coordinate,
     detailList,
     duration,
     escapeHtml,
     formatText,
-    metric,
+    labels,
+    loadI18n,
+    metricHtml,
+    nextRefreshDelay,
     numberValue,
-    readI18n,
-    setText,
-    storageCapacityValue,
+    renderMetrics,
+    sectorAlerts,
+    setNavigationWarning,
+    startNavigationWarningSync,
+    syncNavigationWarnings,
+    t,
     validRelativeCoordinates,
-} from './utils.js?v=20260608-probe-movement-countdown';
+};
+window.dispatchEvent(new CustomEvent("VNGReady"));
 
-const i18n = readI18n();
-bindLanguageForm();
-bindOAuthRememberLinks();
-initSwaggerUi();
-const closeAccountMenus = bindAccountMenu();
-bindTutorialDialog({closeAccountMenus});
-
-const body = document.body;
-if (body && body.dataset.authenticated === '1') {
-    const labels = createLabels(i18n);
-    const {
-        probeStatusLabel,
-        sensorModeLabel,
-        t,
-        taskLabel,
-    } = labels;
-    const api = createApiClient({t});
-    const alreadyMovingMessage = t('probeAlreadyMoving', 'The probe is already moving between sectors.');
-    const invalidCoordinateMessage = t('invalidCoordinates', 'Invalid relative coordinates: x + y + z must be even.');
-    const state = {
-        currentCraftingRecipes: [],
-        currentInventory: null,
-        currentMannyMineTargets: [],
-        currentMannies: null,
-        currentMannySalvageTargets: [],
-        currentProbeSectorRelative: null,
-        currentScannedSectorRelative: null,
-        currentSectorProbes: [],
-        currentMessageFolder: 'received',
-        receivedMessages: [],
-        receivedMessagePagination: null,
-        sentMessages: [],
-        sentMessagePagination: null,
-        currentSectorObjects: [],
-        probeAlreadyMoving: false,
-        probeDeuteriumSufficient: false,
-        moveFormTargetSource: 'default',
-    };
-
-    const refreshers = {};
-    let inventoryModule;
-    let mannyModule;
-
-    const sectorModule = createSectorModule({
-        state,
-        labels,
-        onTargetsChanged: () => {
-            mannyModule?.updateMannyTargetOptions();
-        },
-        onAlertsChanged: syncAlertTab,
-    });
-    const craftingModule = createCraftingModule({state, labels});
-    inventoryModule = createInventoryModule({
-        state,
-        labels,
-        onInventoryChanged: () => {
-            craftingModule.updateMannyCraftForms();
-            mannyModule?.updateMannyBookmarkForms();
-            mannyModule?.updateMannyDetachStorageContainerForms();
-            mannyModule?.updateMannyRecoverStorageContainerForms();
-            mannyModule?.updatePrinterCraftForms();
-        },
-    });
-    mannyModule = createMannyModule({
-        state,
-        labels,
-        sector: sectorModule,
-        crafting: craftingModule,
-        api,
-        refreshers,
-    });
-
-    const formatDuration = (seconds) => duration(seconds, t);
-    let probeMovementTickTimer = null;
-    let probeMovementCompletionTimer = null;
-    let probeMovementRefreshPending = false;
-
-    const postJson = (path, bodyValue = {}) => api(path, {
-        method: 'POST',
-        body: JSON.stringify(bodyValue),
-    });
-    const patchJson = (path, bodyValue = {}) => api(path, {
-        method: 'PATCH',
-        body: JSON.stringify(bodyValue),
-    });
-    const runApiOrder = async ({statusId, pendingText, request, onSuccess, onError}) => {
-        setText(statusId, pendingText);
-        try {
-            const data = await request();
-            await onSuccess?.(data);
-        } catch (error) {
-            if (onError) {
-                await onError(error);
-            } else {
-                setText(statusId, error.message);
-            }
-        }
-    };
-    const messageModule = createMessageModule({state, api, labels});
-    const inventoryActions = createInventoryActions({state, api, labels, mannyModule});
-    const {
-        renderMessageRecipients,
-        renderMessages,
-        loadMessages,
-        activateMessageFolder,
-        markMessageRead,
-    } = messageModule;
-    const {
-        storageRuleValues,
-        renderStorageMoveForm,
-        renderDetachStorageContainerForm,
-        updateDetachStorageContainerForm,
-        jettisonInventoryLine,
-        detachStorageContainerPayloadFromForm,
-        storageMovePayloadFromForm,
-    } = inventoryActions;
-
-    const relativeCoordinates = (value) => {
-        if (!value || !Number.isFinite(Number(value.x)) || !Number.isFinite(Number(value.y)) || !Number.isFinite(Number(value.z))) {
-            return null;
-        }
-
-        return {
-            x: Number(value.x),
-            y: Number(value.y),
-            z: Number(value.z),
-        };
-    };
-    const sameRelativeCoordinates = (left, right) => {
-        const a = relativeCoordinates(left);
-        const b = relativeCoordinates(right);
-
-        return a !== null && b !== null && a.x === b.x && a.y === b.y && a.z === b.z;
-    };
-    const manniesOutsideProbeInCurrentSector = (mannies) => {
-        const currentSector = state.currentProbeSectorRelative;
-
-        return (Array.isArray(mannies) ? mannies : []).filter((manny) => {
-            const location = manny && manny.location ? manny.location : {};
-            if (location.type === 'probe') {
-                return false;
-            }
-
-            const mannySector = location.sector && location.sector.relative;
-            return currentSector === null || sameRelativeCoordinates(mannySector, currentSector);
-        });
-    };
-
-    function activatePanel(panelId) {
-        document.querySelectorAll('.panel-tab').forEach((item) => item.classList.remove('active'));
-        document.querySelectorAll('.data-panel').forEach((panel) => panel.classList.remove('active'));
-        const tab = document.querySelector('.panel-tab[data-panel-target="' + panelId + '"]');
-        tab?.classList.add('active');
-        document.getElementById(panelId)?.classList.add('active');
+function showDialog(dialog) {
+    if (!dialog) {
+        return;
     }
-
-    function syncAlertTab(alerts) {
-        const tab = document.getElementById('alerts-tab');
-        if (!tab) {
-            return;
-        }
-
-        const alertList = Array.isArray(alerts) ? alerts : [];
-        const hasAlerts = alertList.length > 0;
-        const hasPendingAlerts = alertList.some((alert) => !alert.acknowledged);
-        tab.disabled = !hasAlerts;
-        tab.setAttribute('aria-disabled', hasAlerts ? 'false' : 'true');
-        tab.classList.toggle('alerts-pending', hasPendingAlerts);
-    }
-
-    function syncMessageTab() {
-        const tab = document.getElementById('messages-tab');
-        if (!tab) {
-            return;
-        }
-
-        const messages = Array.isArray(state.receivedMessages) ? state.receivedMessages : [];
-        const hasUnreadMessages = messages.some((message) => message && message.status === 'unread');
-        tab.classList.toggle('alerts-pending', hasUnreadMessages);
-    }
-
-    const sectorScanTarget = (sector) => relativeCoordinates(sector && sector.relativeCoordinates);
-
-    function clearProbeMovementTimers() {
-        if (probeMovementTickTimer !== null) {
-            window.clearTimeout(probeMovementTickTimer);
-            probeMovementTickTimer = null;
-        }
-        if (probeMovementCompletionTimer !== null) {
-            window.clearTimeout(probeMovementCompletionTimer);
-            probeMovementCompletionTimer = null;
-        }
-    }
-
-    function movementRemainingHtml(movement, observedAt) {
-        const secondsRemaining = Number(movement && movement.secondsRemaining);
-        if (!Number.isFinite(secondsRemaining)) {
-            return escapeHtml(formatDuration(secondsRemaining));
-        }
-
-        const endAt = observedAt + (Math.max(0, secondsRemaining) * 1000);
-        return '<span class="probe-movement-remaining-value" data-movement-end-at="' + escapeHtml(String(endAt)) + '">'
-            + escapeHtml(formatDuration(secondsRemaining))
-            + '</span>';
-    }
-
-    function updateLiveProbeMovementRemainingValues() {
-        const nodes = Array.from(document.querySelectorAll('#probe-summary .probe-movement-remaining-value[data-movement-end-at]'));
-        const now = Date.now();
-        let hasPendingMovement = false;
-        nodes.forEach((node) => {
-            const endAt = Number(node.dataset.movementEndAt);
-            if (!Number.isFinite(endAt)) {
-                return;
-            }
-
-            const remainingSeconds = Math.max(0, Math.ceil((endAt - now) / 1000));
-            node.textContent = formatDuration(remainingSeconds);
-            if (remainingSeconds > 0 && now < endAt) {
-                hasPendingMovement = true;
-            }
-        });
-
-        probeMovementTickTimer = hasPendingMovement
-            ? window.setTimeout(updateLiveProbeMovementRemainingValues, 1000)
-            : null;
-    }
-
-    function refreshProbeAfterMovementEnd() {
-        if (probeMovementRefreshPending) {
-            return;
-        }
-        probeMovementRefreshPending = true;
-        window.setTimeout(async () => {
-            try {
-                await loadProbe();
-                await loadCurrentSector();
-                await loadMannies();
-            } finally {
-                probeMovementRefreshPending = false;
-            }
-        }, 150);
-    }
-
-    function scheduleProbeMovementUpdates() {
-        const endTimes = Array.from(document.querySelectorAll('#probe-summary .probe-movement-remaining-value[data-movement-end-at]'))
-            .map((node) => Number(node.dataset.movementEndAt))
-            .filter((endAt) => Number.isFinite(endAt));
-        if (endTimes.length === 0) {
-            return;
-        }
-
-        updateLiveProbeMovementRemainingValues();
-        const nextEndAt = Math.min(...endTimes);
-        probeMovementCompletionTimer = window.setTimeout(refreshProbeAfterMovementEnd, Math.max(0, nextEndAt - Date.now()) + 500);
-    }
-
-    function syncPrepareJumpButton(sector) {
-        const button = document.getElementById('prepare-jump-button');
-        if (!button) {
-            return;
-        }
-
-        const target = sectorScanTarget(sector);
-        const distance = Number(sector && sector.distance);
-        const isRemoteSector = target !== null && (
-            Number.isFinite(distance)
-                ? distance !== 0
-                : !sameRelativeCoordinates(target, state.currentProbeSectorRelative)
-        );
-        state.currentScannedSectorRelative = isRemoteSector ? target : null;
-        button.hidden = !isRemoteSector;
-        button.disabled = !isRemoteSector;
-        button.setAttribute('aria-disabled', isRemoteSector ? 'false' : 'true');
-    }
-
-    function fillMoveForm(target, source = 'default') {
-        const form = document.getElementById('move-form');
-        if (!form || !target) {
-            return;
-        }
-
-        ['x', 'y', 'z'].forEach((field) => {
-            if (form.elements[field]) {
-                form.elements[field].value = target[field] ?? 0;
-            }
-        });
-        state.moveFormTargetSource = source;
-    }
-
-    function syncMoveFormDefaultTarget() {
-        if (state.moveFormTargetSource !== 'default' || state.currentProbeSectorRelative === null) {
-            return;
-        }
-
-        fillMoveForm(state.currentProbeSectorRelative, 'default');
-    }
-
-    function prepareJumpFromScannedSector() {
-        const target = state.currentScannedSectorRelative;
-        if (!target) {
-            return;
-        }
-
-        fillMoveForm(target, 'prepared');
-        activatePanel('actions-panel');
-    }
-
-    const checklistValue = (ok) => (
-        '<span class="checklist-value ' + (ok === true ? 'ok' : 'warn') + '">'
-        + escapeHtml(ok === null ? '-' : (ok ? t('checklistYes', 'Yes') : t('checklistNo', 'No')))
-        + '</span>'
-    );
-
-    const allManniesAboard = () => (
-        Array.isArray(state.currentMannies)
-            ? state.currentMannies.every((manny) => (manny.location && manny.location.type) === 'probe')
-            : null
-    );
-
-    function renderJumpChecklist() {
-        const node = document.getElementById('jump-checklist');
-        if (!node) {
-            return;
-        }
-
-        node.innerHTML = '<h3>' + escapeHtml(t('jumpPreparationChecklist', 'Preparation')) + '</h3>'
-            + '<ul>'
-            + '<li><span>' + escapeHtml(t('deuteriumSufficient', 'Sufficient deuterium')) + '</span>' + checklistValue(state.probeDeuteriumSufficient) + '</li>'
-            + '<li><span>' + escapeHtml(t('manniesAboard', 'Mannys aboard')) + '</span>' + checklistValue(allManniesAboard()) + '</li>'
-            + '</ul>';
-    }
-
-    function applyMoveButtonState() {
-        const button = document.getElementById('move-submit');
-        if (!button) {
-            return;
-        }
-
-        const blockedByFuel = !state.probeDeuteriumSufficient;
-        button.disabled = state.probeAlreadyMoving || blockedByFuel;
-        button.title = state.probeAlreadyMoving
-            ? alreadyMovingMessage
-            : (blockedByFuel ? t('insufficientFuelForJump', 'Insufficient deuterium to initiate a jump.') : '');
-        button.setAttribute('aria-disabled', button.disabled ? 'true' : 'false');
-    }
-
-    const sectorFormTarget = (form) => ({
-        x: Number.parseInt(form.elements.x?.value, 10),
-        y: Number.parseInt(form.elements.y?.value, 10),
-        z: Number.parseInt(form.elements.z?.value, 10),
-    });
-
-    function rejectInvalidSectorScan() {
-        sectorModule.renderSectorObjects(null, {syncMannyTargets: false});
-        syncPrepareJumpButton(null);
-        setText('sector-context', invalidCoordinateMessage);
-    }
-
-    function applySectorScanButtonState() {
-        const form = document.getElementById('sector-form');
-        const button = document.getElementById('sector-scan-submit');
-        const control = document.getElementById('sector-scan-control');
-        if (!form || !button) {
-            return;
-        }
-
-        const invalid = !validRelativeCoordinates(sectorFormTarget(form));
-        button.disabled = invalid;
-        button.title = invalid ? invalidCoordinateMessage : '';
-        button.setAttribute('aria-disabled', invalid ? 'true' : 'false');
-        if (control) {
-            control.classList.toggle('disabled', invalid);
-            control.title = invalid ? invalidCoordinateMessage : '';
-            control.setAttribute('aria-disabled', invalid ? 'true' : 'false');
-        }
-    }
-
-    async function confirmJumpWithMannies() {
-        if (state.currentProbeSectorRelative === null) {
-            await loadProbe();
-        }
-        const refreshedMannies = await mannyModule.loadMannies();
-        const mannies = Array.isArray(refreshedMannies)
-            ? refreshedMannies
-            : (Array.isArray(state.currentMannies) ? state.currentMannies : []);
-        const absentMannies = manniesOutsideProbeInCurrentSector(mannies);
-        if (absentMannies.length === 0) {
-            return true;
-        }
-
-        const names = absentMannies.map((manny) => manny.name || manny.id || t('mannyObject', 'Manny')).join(', ');
-        return window.confirm(formatText(t('jumpWithAbsentManniesConfirm', 'Some Mannys are not aboard the probe: {names}. If you initiate the jump now, they will be left in this sector. Confirm jump?'), {
-            names,
-            count: absentMannies.length,
-        }));
-    }
-
-    function updateMoveButtonState(probe) {
-        const movement = probe && probe.movement ? probe.movement : null;
-        state.probeAlreadyMoving = Boolean(movement && ['preparing', 'accelerating', 'cruising', 'decelerating'].includes(movement.phase || movement.status));
-        state.probeDeuteriumSufficient = Number(probe && probe.fuel ? probe.fuel.deuterium : 0) > 0.0001;
-        applyMoveButtonState();
-        renderJumpChecklist();
-    }
-
-    async function loadProbe() {
-        clearProbeMovementTimers();
-        try {
-            const data = await api('/api/probe');
-            const probe = data.probe || {};
-            updateMoveButtonState(probe);
-            const systems = probe.systems || {};
-            const nav = probe.navigation || {};
-            const movement = probe.movement || null;
-            const sector = probe.sector && probe.sector.relative ? probe.sector.relative : null;
-            state.currentProbeSectorRelative = sector ? relativeCoordinates(sector) : null;
-            syncMoveFormDefaultTarget();
-            if (Array.isArray(state.currentMannies)) {
-                mannyModule?.renderMannyList(state.currentMannies);
-            }
-            const sensorDetail = probe.sensorMode === 'degraded'
-                ? t('sensorDegradedInfo', 'At relativistic speeds, external sensors cannot analyze the environment in detail.')
-                : (probe.sensorMode === 'blind' ? t('sensorBlindInfo', 'At this relativistic speed, external sensors are blinded.') : null);
-            const observedAt = Date.now();
-            const sectorDetail = !sector && movement ? detailList([
-                {label: t('originSector', 'Origin sector'), value: coordinate(movement.origin)},
-                {label: t('destinationSector', 'Arrival sector'), value: coordinate(movement.target)},
-                {label: t('remainingTime', 'Remaining time'), htmlValue: movementRemainingHtml(movement, observedAt)},
-            ]) : null;
-            document.getElementById('probe-summary').innerHTML = [
-                metric(t('status', 'Status'), probeStatusLabel(probe.status)),
-                metric(t('sensors', 'Sensors'), sensorModeLabel(probe.sensorMode), sensorDetail),
-                metric(t('deuterium', 'Deuterium'), probe.fuel ? probe.fuel.deuterium + '%' : '-'),
-                metric(t('sector', 'Sector'), sector ? coordinate(sector) : t('transit', 'Transit'), sectorDetail),
-                metric(t('velocityC', 'Velocity c'), nav.velocityC),
-                metric(t('heading', 'Heading'), nav.direction ? [nav.direction.x, nav.direction.y, nav.direction.z].join(':') : '-'),
-            ].join('');
-            bindMetricDetails();
-            scheduleProbeMovementUpdates();
-            document.getElementById('systems-summary').innerHTML = [
-                metric(t('integrity', 'Integrity'), numberValue(systems.integrityPercent, '%')),
-                metric(t('energy', 'Energy'), systems.energyStored),
-                metric(t('storageCapacity', 'Storage capacity'), storageCapacityValue(probe.inventory)),
-                metric(t('internalClock', 'Internal clock'), systems.internalClockRate),
-                metric(t('task', 'Task'), systems.currentTask ? taskLabel(systems.currentTask) : t('noTask', 'None')),
-            ].join('');
-            inventoryModule.renderInventory(probe.inventory || {});
-        } catch (error) {
-            updateMoveButtonState(null);
-            state.currentProbeSectorRelative = null;
-            inventoryModule.renderInventory(null);
-        }
-    }
-
-    async function loadCraftingRecipes() {
-        await craftingModule.loadCraftingRecipes(api);
-        mannyModule?.updatePrinterCraftForms();
-    }
-
-    async function loadMannies() {
-        await mannyModule.loadMannies();
-        renderJumpChecklist();
-    }
-
-    async function loadCurrentSector() {
-        try {
-            const data = await api('/api/probe/sector');
-            state.currentSectorProbes = Array.isArray(data.sector && data.sector.probes) ? data.sector.probes : [];
-            renderMessageRecipients();
-            sectorModule.syncSectorForm(data.sector);
-            applySectorScanButtonState();
-            sectorModule.renderSectorObjects(data.sector);
-            syncPrepareJumpButton(data.sector);
-        } catch (error) {
-            state.currentSectorProbes = [];
-            renderMessageRecipients();
-            sectorModule.renderSectorObjects(null, {syncMannyTargets: true});
-            syncPrepareJumpButton(null);
-            setText('sector-context', error.message);
-        }
-    }
-
-    refreshers.loadProbe = loadProbe;
-    refreshers.loadCurrentSector = loadCurrentSector;
-    refreshers.loadMessages = loadMessages;
-    refreshers.onManniesChanged = renderJumpChecklist;
-
-    bindApiKeyDialog({api, t, closeAccountMenus});
-    bindPanelTabs();
-    bindRefreshButtons({loadCurrentSector, loadMannies, loadMessages, loadProbe});
-    mannyModule.bindMannyEvents();
-    renderJumpChecklist();
-    renderMessageRecipients();
-    renderMessages();
-
-    document.getElementById('sector-form')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        const query = new URLSearchParams({
-            x: form.get('x'),
-            y: form.get('y'),
-            z: form.get('z'),
-        });
-        const target = {
-            x: Number.parseInt(form.get('x'), 10),
-            y: Number.parseInt(form.get('y'), 10),
-            z: Number.parseInt(form.get('z'), 10),
-        };
-        if (!validRelativeCoordinates(target)) {
-            rejectInvalidSectorScan();
-            applySectorScanButtonState();
-            return;
-        }
-        try {
-            const data = await api('/api/sector?' + query.toString());
-            sectorModule.syncSectorForm(data.sector);
-            sectorModule.renderSectorObjects(data.sector);
-            syncPrepareJumpButton(data.sector);
-            applySectorScanButtonState();
-        } catch (error) {
-            sectorModule.renderSectorObjects(null, {syncMannyTargets: false});
-            syncPrepareJumpButton(null);
-            setText('sector-context', error.message);
-            applySectorScanButtonState();
-        }
-    });
-
-    document.getElementById('sector-form')?.addEventListener('input', applySectorScanButtonState);
-    document.getElementById('sector-scan-control')?.addEventListener('click', () => {
-        const form = document.getElementById('sector-form');
-        if (form && !validRelativeCoordinates(sectorFormTarget(form))) {
-            rejectInvalidSectorScan();
-        }
-    });
-    applySectorScanButtonState();
-
-    document.getElementById('prepare-jump-button')?.addEventListener('click', prepareJumpFromScannedSector);
-
-    document.getElementById('move-form')?.addEventListener('input', () => {
-        state.moveFormTargetSource = 'manual';
-    });
-
-    document.getElementById('messages-tab')?.addEventListener('click', () => {
-        loadCurrentSector();
-        loadMessages({folder: state.currentMessageFolder, silent: true});
-    });
-
-    document.querySelectorAll('[data-message-folder]').forEach((button) => {
-        button.addEventListener('click', () => {
-            activateMessageFolder(button.dataset.messageFolder || 'received');
-        });
-    });
-
-    document.getElementById('messages-load-more')?.addEventListener('click', () => {
-        const folder = state.currentMessageFolder;
-        const messageList = folder === 'sent' ? state.sentMessages : state.receivedMessages;
-        loadMessages({folder, offset: Array.isArray(messageList) ? messageList.length : 0, append: true});
-    });
-
-    document.getElementById('message-form')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const messageForm = event.currentTarget;
-        const form = new FormData(messageForm);
-        const recipientProbeId = Number.parseInt(String(form.get('recipientProbeId') || ''), 10);
-        const bodyValue = String(form.get('body') || '').trim();
-        if (!Number.isFinite(recipientProbeId) || recipientProbeId <= 0 || bodyValue === '') {
-            setText('message-status', t('requestDenied', 'Request denied'));
-            return;
-        }
-
-        await runApiOrder({
-            statusId: 'message-status',
-            pendingText: t('orderSent', 'Order transmitted...'),
-            request: () => postJson('/api/probe/messages', {
-                recipientProbeId,
-                body: bodyValue,
-            }),
-            onSuccess: async () => {
-                messageForm.reset();
-                renderMessageRecipients();
-                state.sentMessages = [];
-                state.sentMessagePagination = null;
-                setText('message-status', t('messageSent', 'Message transmitted.'));
-                if (state.currentMessageFolder === 'sent') {
-                    await loadMessages({folder: 'sent', silent: true});
-                }
-            },
-            onError: (error) => {
-                setText('message-status', error.message);
-            },
-        });
-    });
-
-    document.getElementById('jump-control')?.addEventListener('click', () => {
-        if (state.probeAlreadyMoving) {
-            setText('action-status', alreadyMovingMessage);
-            return;
-        }
-        if (!state.probeDeuteriumSufficient) {
-            setText('action-status', t('insufficientFuelForJump', 'Insufficient deuterium to initiate a jump.'));
-        }
-    });
-
-    document.getElementById('move-form')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        if (state.probeAlreadyMoving) {
-            setText('action-status', alreadyMovingMessage);
-            return;
-        }
-        if (!state.probeDeuteriumSufficient) {
-            setText('action-status', t('insufficientFuelForJump', 'Insufficient deuterium to initiate a jump.'));
-            return;
-        }
-        const form = new FormData(event.currentTarget);
-        const target = {
-            x: Number.parseInt(form.get('x'), 10),
-            y: Number.parseInt(form.get('y'), 10),
-            z: Number.parseInt(form.get('z'), 10),
-        };
-        if (!validRelativeCoordinates(target)) {
-            setText('action-status', invalidCoordinateMessage);
-            return;
-        }
-        if (!await confirmJumpWithMannies()) {
-            setText('action-status', t('movementCancelled', 'Movement cancelled.'));
-            return;
-        }
-        await runApiOrder({
-            statusId: 'action-status',
-            pendingText: t('orderSent', 'Order transmitted...'),
-            request: () => postJson('/api/probe/move', {target}),
-            onSuccess: (data) => {
-                setText('action-status', t('movementAccepted', 'Movement accepted.'));
-                state.moveFormTargetSource = 'default';
-                loadProbe();
-            },
-            onError: (error) => {
-                setText('action-status', error.message);
-            },
-        });
-    });
-
-    const systemsPanel = document.getElementById('systems-panel');
-    systemsPanel?.addEventListener('click', async (event) => {
-        if (!(event.target instanceof Element)) {
-            return;
-        }
-
-        const moveButton = event.target.closest('.inventory-line-move');
-        if (moveButton && systemsPanel.contains(moveButton)) {
-            const line = moveButton.closest('.inventory-container-line');
-            if (line) {
-                await renderStorageMoveForm(line);
-            }
-            return;
-        }
-
-        const jettisonButton = event.target.closest('.inventory-line-jettison');
-        if (!jettisonButton || !systemsPanel.contains(jettisonButton)) {
-            return;
-        }
-
-        const line = jettisonButton.closest('.inventory-container-line');
-        if (line && line.dataset.itemType === 'additional_container') {
-            await renderDetachStorageContainerForm(line);
-            return;
-        }
-
-        if (!line || !window.confirm(t('confirmJettisonLine', 'Jettison this storage line into space?'))) {
-            return;
-        }
-
-        await runApiOrder({
-            statusId: 'inventory-status',
-            pendingText: t('orderSent', 'Order transmitted...'),
-            request: () => jettisonInventoryLine(line),
-            onSuccess: (data) => {
-                setText('inventory-status', t('jettisonAccepted', 'Inventory entry jettisoned into space.'));
-                if (data.inventory) {
-                    inventoryModule.renderInventory(data.inventory);
-                }
-                loadProbe();
-                loadCurrentSector();
-                loadMannies();
-            },
-        });
-    });
-
-    systemsPanel?.addEventListener('submit', async (event) => {
-        if (event.target.classList.contains('storage-rules-form')) {
-            event.preventDefault();
-            const containerId = event.target.dataset.containerId;
-            if (!containerId) {
-                return;
-            }
-            const form = new FormData(event.target);
-            await runApiOrder({
-                statusId: 'inventory-status',
-                pendingText: t('orderSent', 'Order transmitted...'),
-                request: () => patchJson('/api/probe/storage-containers/' + encodeURIComponent(containerId) + '/rules', {
-                    priority: storageRuleValues(form, 'priority'),
-                    exclusion: storageRuleValues(form, 'exclusion'),
-                    strictExclusion: storageRuleValues(form, 'strictExclusion'),
-                }),
-                onSuccess: (data) => {
-                    setText('inventory-status', t('storageRulesSaved', 'Storage rules saved.'));
-                    if (data.inventory) {
-                        inventoryModule.renderInventory(data.inventory);
-                    }
-                    loadProbe();
-                },
-            });
-            return;
-        }
-
-        if (event.target.classList.contains('inventory-detach-container-form')) {
-            event.preventDefault();
-            const order = detachStorageContainerPayloadFromForm(event.target);
-            if (!order) {
-                setText('inventory-status', t('invalidDetachStorageOrder', 'Invalid container detachment order.'));
-                return;
-            }
-
-            await runApiOrder({
-                statusId: 'inventory-status',
-                pendingText: t('orderSent', 'Order transmitted...'),
-                request: () => postJson('/api/probe/mannies/' + encodeURIComponent(order.mannyId) + '/detach-storage-container', order.payload),
-                onSuccess: (data) => {
-                    setText('inventory-status', t('detachStorageAccepted', 'Container detachment assigned.'));
-                    loadProbe();
-                    loadCurrentSector();
-                    loadMannies();
-                },
-            });
-            return;
-        }
-
-        if (event.target.classList.contains('inventory-move-form')) {
-            event.preventDefault();
-            const payload = storageMovePayloadFromForm(event.target);
-            if (!payload) {
-                setText('inventory-status', t('invalidStorageMove', 'Invalid storage move order.'));
-                return;
-            }
-
-            await runApiOrder({
-                statusId: 'inventory-status',
-                pendingText: t('orderSent', 'Order transmitted...'),
-                request: () => postJson('/api/probe/storage-moves', payload),
-                onSuccess: (data) => {
-                    setText('inventory-status', t('storageMoveAccepted', 'Storage move assigned.'));
-                    if (data.inventory) {
-                        inventoryModule.renderInventory(data.inventory);
-                    }
-                    loadProbe();
-                    loadMannies();
-                },
-            });
-        }
-    });
-
-    systemsPanel?.addEventListener('change', (event) => {
-        if (!(event.target instanceof Element)) {
-            return;
-        }
-        const form = event.target.closest('.inventory-detach-container-form');
-        if (form && systemsPanel.contains(form)) {
-            updateDetachStorageContainerForm(form);
-        }
-    });
-
-    if (document.querySelector('.console-grid')) {
-        loadProbe();
-        loadCurrentSector();
-        loadCraftingRecipes();
-        loadMannies();
-        loadMessages({folder: 'received', silent: true});
+    dialog.hidden = false;
+    if (typeof dialog.showModal === "function" && !dialog.open) {
+        dialog.showModal();
     }
 }
+
+function closeDialog(dialog) {
+    if (!dialog) {
+        return;
+    }
+    if (typeof dialog.close === "function" && dialog.open) {
+        dialog.close();
+    }
+    dialog.hidden = true;
+}
+
+function bindTutorialDialog(closeAccountMenus) {
+    const previewDialog = document.getElementById("tutorial-image-preview-dialog");
+    const previewImage = document.getElementById("tutorial-image-preview");
+    const closePreview = () => {
+        if (!previewDialog) {
+            return;
+        }
+        closeDialog(previewDialog);
+        previewImage?.removeAttribute("src");
+    };
+
+    document.querySelectorAll("[data-tutorial-image-preview]").forEach((button) => {
+        if (button.dataset.tutorialImagePreviewBound === "1") {
+            return;
+        }
+        button.dataset.tutorialImagePreviewBound = "1";
+        button.addEventListener("click", () => {
+            if (!previewDialog || !previewImage) {
+                return;
+            }
+            const image = button.querySelector("img");
+            previewImage.src = button.dataset.tutorialImagePreview || image?.src || "";
+            previewImage.alt = image?.alt || "";
+            showDialog(previewDialog);
+        });
+    });
+
+    const previewClose = previewDialog?.querySelector("[data-tutorial-image-preview-close]");
+    if (previewClose && previewClose.dataset.tutorialPreviewCloseBound !== "1") {
+        previewClose.dataset.tutorialPreviewCloseBound = "1";
+        previewClose.addEventListener("click", closePreview);
+    }
+    if (previewDialog && previewDialog.dataset.tutorialPreviewDialogBound !== "1") {
+        previewDialog.dataset.tutorialPreviewDialogBound = "1";
+        previewDialog.addEventListener("click", (event) => {
+            if (event.target === previewDialog) {
+                closePreview();
+            }
+        });
+        previewDialog.addEventListener("close", () => {
+            previewDialog.hidden = true;
+        });
+    }
+
+    const tutorialControllers = new Map();
+
+    document.querySelectorAll(".tutorial-dialog").forEach((dialog) => {
+        const steps = dialog ? Array.from(dialog.querySelectorAll("[data-tutorial-step]")) : [];
+        const progress = dialog?.querySelector("[data-tutorial-progress]");
+        const nextButton = dialog?.querySelector("[data-tutorial-next]");
+        const closeButton = dialog?.querySelector("[data-tutorial-close-final]");
+        let currentStep = 0;
+
+        if (!dialog || steps.length === 0 || !nextButton || !closeButton) {
+            return;
+        }
+
+        const renderStep = () => {
+            steps.forEach((step, index) => {
+                step.hidden = index !== currentStep;
+            });
+            if (progress) {
+                progress.textContent = String(currentStep + 1) + " / " + String(steps.length);
+            }
+            nextButton.hidden = currentStep >= steps.length - 1;
+            closeButton.hidden = currentStep < steps.length - 1;
+        };
+
+        const closeTutorial = () => closeDialog(dialog);
+        const openTutorial = () => {
+            currentStep = 0;
+            renderStep();
+            showDialog(dialog);
+        };
+
+        if (nextButton.dataset.tutorialNextBound !== "1") {
+            nextButton.dataset.tutorialNextBound = "1";
+            nextButton.addEventListener("click", () => {
+                if (currentStep < steps.length - 1) {
+                    currentStep += 1;
+                    renderStep();
+                }
+            });
+        }
+
+        dialog.querySelectorAll("[data-tutorial-close]").forEach((button) => {
+            if (button.dataset.tutorialCloseBound === "1") {
+                return;
+            }
+            button.dataset.tutorialCloseBound = "1";
+            button.addEventListener("click", closeTutorial);
+        });
+
+        if (dialog.dataset.tutorialDialogBound !== "1") {
+            dialog.dataset.tutorialDialogBound = "1";
+            dialog.addEventListener("close", () => {
+                dialog.hidden = true;
+            });
+        }
+
+        tutorialControllers.set(dialog.id, {
+            "close": closeTutorial,
+            "open": openTutorial,
+        });
+    });
+
+    const openTutorialById = (targetId) => {
+        const controller = tutorialControllers.get(targetId);
+        if (!controller) {
+            return false;
+        }
+
+        closeAccountMenus?.();
+        tutorialControllers.forEach((candidate) => {
+            if (candidate !== controller) {
+                candidate.close();
+            }
+        });
+        controller.open();
+        return true;
+    };
+
+    document.querySelectorAll("[data-tutorial-target]").forEach((trigger) => {
+        if (trigger.dataset.tutorialTargetBound === "1") {
+            return;
+        }
+        trigger.dataset.tutorialTargetBound = "1";
+        trigger.addEventListener("click", (event) => {
+            if (openTutorialById(trigger.dataset.tutorialTarget || "")) {
+                event.preventDefault();
+            }
+        });
+    });
+
+    const tutorialAliases = {
+        "context": "tutorial-context-dialog",
+        "contexte": "tutorial-context-dialog",
+        "move": "tutorial-move-dialog",
+        "deplacement": "tutorial-move-dialog",
+        "mannies": "tutorial-mannies-dialog",
+    };
+    const params = new URLSearchParams(window.location.search);
+    const requestedTutorial = params.get("tutorial") || "";
+    if (requestedTutorial !== "" && document.body.dataset.tutorialQueryHandled !== "1") {
+        document.body.dataset.tutorialQueryHandled = "1";
+        const targetId = tutorialAliases[requestedTutorial] || requestedTutorial;
+        if (openTutorialById(targetId) && window.history?.replaceState) {
+            params.delete("tutorial");
+            const nextSearch = params.toString();
+            window.history.replaceState(
+                {},
+                "",
+                window.location.pathname + (nextSearch ? "?" + nextSearch : "") + window.location.hash
+            );
+        }
+    }
+}
+
+function bindAccountMenus() {
+    const closeAccountMenus = () => {
+        document.querySelectorAll(".account-menu-button[aria-expanded=\"true\"]").forEach((button) => {
+            button.setAttribute("aria-expanded", "false");
+            const panel = button.closest(".account-menu")?.querySelector(".account-menu-panel");
+            if (panel) {
+                panel.hidden = true;
+            }
+        });
+    };
+
+    document.querySelectorAll(".account-menu-button").forEach((button) => {
+        if (button.dataset.accountMenuBound === "1") {
+            return;
+        }
+        button.dataset.accountMenuBound = "1";
+        button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const panel = button.closest(".account-menu")?.querySelector(".account-menu-panel");
+            const willOpen = button.getAttribute("aria-expanded") !== "true";
+            closeAccountMenus();
+            button.setAttribute("aria-expanded", willOpen ? "true" : "false");
+            if (panel) {
+                panel.hidden = !willOpen;
+            }
+        });
+    });
+
+    if (document.body.dataset.accountMenuDocumentBound !== "1") {
+        document.body.dataset.accountMenuDocumentBound = "1";
+        document.addEventListener("click", (event) => {
+            if (!event.target.closest(".account-menu")) {
+                closeAccountMenus();
+            }
+        });
+    }
+
+    return closeAccountMenus;
+}
+
+function ensureApiKeyDialog(copyLabel) {
+    let dialog = document.getElementById("api-key-dialog");
+    if (dialog) {
+        return dialog;
+    }
+
+    const text = labels();
+    dialog = createElem("dialog", {
+        "id": "api-key-dialog",
+        "class": "api-key-dialog",
+        "hidden": "",
+    });
+
+    const closeButton = createElem("button", {
+        "class": "dialog-close icon-button",
+        "type": "button",
+        "aria-label": text.close,
+    });
+    closeButton.textContent = "×";
+    closeButton.addEventListener("click", () => closeDialog(dialog));
+
+    const eyebrow = createElem("p", {"class": "eyebrow"});
+    eyebrow.textContent = "API";
+    const title = createElem("h2");
+    title.textContent = text.apiKeyTitle;
+    const help = createElem("p");
+    help.textContent = text.apiKeyHelp;
+    const value = createElem("textarea", {
+        "id": "api-key-value",
+        "readonly": "",
+        "rows": "3",
+    });
+    const actions = createElem("div", {"class": "api-key-actions"});
+    const copy = createElem("button", {
+        "id": "copy-api-key",
+        "type": "button",
+    });
+    copy.textContent = copyLabel || text.copyApiKey;
+    const close = createElem("button", {"type": "button"});
+    close.textContent = text.close;
+    close.addEventListener("click", () => closeDialog(dialog));
+    const status = createElem("p", {
+        "id": "api-key-status",
+        "class": "action-status",
+    });
+
+    actions.appendChild(copy);
+    actions.appendChild(close);
+    dialog.appendChild(closeButton);
+    dialog.appendChild(eyebrow);
+    dialog.appendChild(title);
+    dialog.appendChild(help);
+    dialog.appendChild(value);
+    dialog.appendChild(actions);
+    dialog.appendChild(status);
+    document.body.appendChild(dialog);
+
+    copy.addEventListener("click", async () => {
+        if (!value.value) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(value.value);
+            status.textContent = text.apiKeyCopied;
+        } catch (error) {
+            value.focus();
+            value.select();
+            status.textContent = text.apiKeyCopyFallback;
+        }
+    });
+
+    dialog.addEventListener("close", () => {
+        dialog.hidden = true;
+    });
+
+    return dialog;
+}
+
+function createSessionBar() {
+    const text = labels();
+    const sessionbar = createElem("div", {"class": "sessionbar"});
+    const accountmenu = createElem("div", {"class": "account-menu"});
+    const accountmenubouton = createElem("button", {
+        "class": "account-menu-button",
+        "type": "button",
+        "aria-expanded": "false",
+    });
+    const spanOperator = createElem("span", {"class": "operator"});
+    spanOperator.textContent = text.account;
+    const spanFleche = createElem("span", {"aria-hidden": "true"});
+    spanFleche.textContent = "▾";
+    const panel = createElem("div", {
+        "class": "account-menu-panel",
+        "hidden": "",
+    });
+    const apiKeyButton = createElem("button", {
+        "class": "account-menu-item",
+        "data-api-key-action": "",
+        "type": "button",
+    });
+    apiKeyButton.textContent = text.retrieveApiKey;
+    const logoutForm = createElem("form", {
+        "class": "logout-form",
+        "method": "post",
+        "action": "/logout",
+    });
+    const logoutButton = createElem("button", {"type": "submit"});
+    logoutButton.textContent = text.logout;
+
+    accountmenubouton.appendChild(spanOperator);
+    accountmenubouton.appendChild(spanFleche);
+    panel.appendChild(apiKeyButton);
+    accountmenu.appendChild(accountmenubouton);
+    accountmenu.appendChild(panel);
+    logoutForm.appendChild(logoutButton);
+    sessionbar.appendChild(accountmenu);
+    sessionbar.appendChild(logoutForm);
+
+    return {
+        apiKeyButton,
+        sessionbar,
+        spanOperator,
+    };
+}
+
+function bindApiKeyButton(button, closeAccountMenus) {
+    button.addEventListener("click", async () => {
+        const text = labels();
+        closeAccountMenus();
+        const dialog = ensureApiKeyDialog(text.copyApiKey);
+        const value = document.getElementById("api-key-value");
+        const status = document.getElementById("api-key-status");
+
+        if (value) {
+            value.value = "";
+        }
+        if (status) {
+            status.textContent = text.apiKeyGenerating;
+        }
+        showDialog(dialog);
+
+        try {
+            const data = await apiJson("/api/me/api-key", {
+                "method": "POST",
+                "body": JSON.stringify({}),
+            });
+            if (value) {
+                value.value = data.apiKey && data.apiKey.token ? data.apiKey.token : "";
+                value.focus();
+                value.select();
+            }
+            if (status) {
+                status.textContent = text.apiKeyReady;
+            }
+        } catch (error) {
+            if (status) {
+                status.textContent = error.message;
+            }
+        }
+    });
+}
+
+async function loadCurrentPlayer(spanOperator) {
+    try {
+        const data = await apiJson("/api/me", {"method": "GET"});
+        const player = data && data.player ? data.player : {};
+        spanOperator.textContent = player.displayName || player.username || labels().account;
+    } catch (error) {
+        spanOperator.textContent = labels().account;
+    }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    if (document.body.dataset.authenticated !== "1") {
+        const closeAccountMenus = bindAccountMenus();
+        bindTutorialDialog(closeAccountMenus);
+        return;
+    }
+
+    const header = document.querySelector("header.topbar");
+    if (!header || header.querySelector(".sessionbar")) {
+        const closeAccountMenus = bindAccountMenus();
+        bindTutorialDialog(closeAccountMenus);
+        return;
+    }
+
+    const {apiKeyButton, sessionbar, spanOperator} = createSessionBar();
+    header.appendChild(sessionbar);
+    const closeAccountMenus = bindAccountMenus();
+    bindTutorialDialog(closeAccountMenus);
+    bindApiKeyButton(apiKeyButton, closeAccountMenus);
+    loadCurrentPlayer(spanOperator);
+    startNavigationWarningSync();
+});

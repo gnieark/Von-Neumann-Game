@@ -11,9 +11,9 @@ invariants du domaine.
 
 
 Le projet est en iteration active. L'application expose a la fois une interface
-web simple et une API JSON. La documentation utilisateur n'est pas maintenue ici:
-le contrat REST vit dans [docs/openapi.yaml](docs/openapi.yaml), et une future
-documentation de jeu pourra etre faite ailleurs.
+web modulaire et une API JSON. Le contrat REST vit dans
+[docs/openapi.yaml](docs/openapi.yaml); les premiers tutoriels de jeu sont
+integres directement a l'interface web.
 
 ## Demarrage Local
 
@@ -82,9 +82,10 @@ avec un scope vide pour eviter de demander les adresses email.
 ## Organisation Du Code
 
 ```text
-public/index.php        Point d'entree HTTP: routes web, auth web, delegation API.
-public/assets/          JavaScript et CSS sans pipeline de build.
-templates/home.html     Template HTML principal, rendu avec src/View/TplBlock.php.
+public/index.php        Point d'entree HTTP: routes web, choix de langue, delegation API.
+public/assets/          JavaScript et CSS sans pipeline de build; main.js est global, les autres fichiers sont par page.
+templates/main.html     Shell HTML commun: header, menus, layout console, footer et tutoriels.
+templates/*.html        Templates de pages rendus par les FrontRoute dedies.
 src/AppFactory.php      Composition des dependances applicatives.
 src/Http/               ApiKernel et format des reponses JSON.
 src/Auth/               Authentification mot de passe, OAuth, sessions.
@@ -107,6 +108,12 @@ Composer charge l'espace de noms applicatif `VonNeumannGame\` depuis `src/`.
 l'API, il cree les repositories PDO, le service d'authentification, le service de
 secteurs base sur fichiers JSON, puis les services metier injectes dans
 `ApiKernel`.
+
+Les pages web sont routees par `public/index.php` puis par les classes
+`src/FrontRoute/FrontRoute*.php`. `FrontRoute` rend le shell commun
+`templates/main.html`; les routes specialisees injectent ensuite leur template de
+page (`Probe.html`, `sensors.html`, `movement.html`, `inventories.html`,
+`mannies.html`, `messaging.html`, etc.) et leur JavaScript dedie.
 
 Le stockage est hybride:
 
@@ -190,6 +197,14 @@ Routes principales:
 - `POST /api/me/api-key`
 - `GET /api/crafting-recipes`
 - `GET /api/probe`
+- `GET /api/probe/storage-containers`
+- `GET /api/probe/storage-containers/{containerId}`
+- `PATCH /api/probe/storage-containers/{containerId}/rules`
+- `POST /api/probe/storage-moves`
+- `GET /api/probe/messages`
+- `POST /api/probe/messages`
+- `GET /api/probe/messages/sent`
+- `PATCH /api/probe/messages/{messageId}/read`
 - `GET /api/probe/visited-sectors`
 - `GET /api/probe/sector`
 - `POST /api/probe/move`
@@ -200,7 +215,11 @@ Routes principales:
 - `POST /api/probe/mannies/{mannyId}/repair`
 - `POST /api/probe/mannies/{mannyId}/mine`
 - `POST /api/probe/mannies/{mannyId}/craft`
+- `POST /api/probe/atomic-printer/craft`
 - `POST /api/probe/mannies/{mannyId}/salvage`
+- `POST /api/probe/mannies/{mannyId}/detach-storage-container`
+- `POST /api/probe/mannies/{mannyId}/inspect-asteroid`
+- `POST /api/probe/mannies/{mannyId}/recover-storage-container`
 - `POST /api/probe/mannies/{mannyId}/install-bookmark`
 - `POST /api/probe/mannies/{mannyId}/recall`
 - `GET /api/sector?x=...&y=...&z=...`

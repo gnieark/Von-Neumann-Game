@@ -12,8 +12,13 @@ final class ApiResponse
         public readonly array $headers = ['Content-Type' => 'application/json'],
     ) {}
 
-    public static function error(int $status, string $code, string $message): self
+    public static function error(int $status, string $code, string $message, array $details = []): self
     {
-        return new self($status, ['error' => ['code' => $code, 'message' => $message]]);
+        $error = ['code' => $code, 'message' => $message];
+        if ($details !== []) {
+            $error['details'] = $details;
+        }
+
+        return new self($status, ['error' => $error]);
     }
 }

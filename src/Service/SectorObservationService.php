@@ -74,11 +74,19 @@ final class SectorObservationService
         }
 
         if ($residenceSeconds < $requiredSeconds) {
+            $retryAfterSeconds = max(0, $requiredSeconds - $residenceSeconds);
             throw new ObservationAccessException(
                 'insufficient_scan_data',
                 $distance === 1
-                    ? 'Too little passive scan data available to estimate nearby objects.'
-                    : 'Too little passive scan data available to estimate distant object trajectories.',
+                    ? 'Insufficient data collection time in the current sector to display a nearby sector scan.'
+                    : 'Insufficient data collection time in the current sector to display a distant sector scan.',
+                400,
+                [
+                    'distance' => $distance,
+                    'currentSectorResidenceSeconds' => $residenceSeconds,
+                    'requiredResidenceSeconds' => $requiredSeconds,
+                    'retryAfterSeconds' => $retryAfterSeconds,
+                ],
             );
         }
 

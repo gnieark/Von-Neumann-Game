@@ -1,0 +1,17 @@
+<section class="auth-shell">
+    <form class="login-panel" method="post" action="/auth/pseudo">
+        <div>
+            <p class="eyebrow">{{t.oauthPseudoEyebrow}}</p>
+            <h1>{{t.oauthPseudoTitle}}</h1>
+        </div>
+        <!-- BEGIN oauthpseudoview.error -->
+        <p class="form-error">{{oauthpseudoview.error.message}}</p>
+        <!-- END oauthpseudoview.error -->
+        <input name="csrf" type="hidden" value="{{oauthpseudoview.csrf}}">
+        <label>
+            {{t.pseudonym}}
+            <input name="pseudonym" value="{{oauthpseudoview.pseudonym}}" autocomplete="nickname" minlength="3" maxlength="40" required>
+        </label>
+        <button class="primary" type="submit">{{t.createProbe}}</button>
+    </form>
+</section>

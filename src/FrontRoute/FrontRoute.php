@@ -1,0 +1,139 @@
+<?php
+namespace VonNeumannGame\FrontRoute;
+
+use VonNeumannGame\I18n\Translator;
+use VonNeumannGame\View\TplBlock;
+use VonNeumannGame\FrontRoute\MenuLinkItem;
+
+
+class FrontRoute{
+    /*
+    * Classe mère, sert à centraliser des méthodes pour les classes filles
+    */
+
+    protected array $leftMenuItems = []; 
+
+    public function __construct()
+    {
+        
+    }
+    public function addLeftMenuItem(MenuLinkItem $item): void
+    {
+        $this->leftMenuItems[] = $item;
+    }
+    public function getCustomJs(): string
+    {
+        return "";
+    }
+    public function getCustomCss(): string
+    {
+        return "";
+    }
+    public function handle(string $method, string $routePath, ?string $bearer, string $language): void
+    {
+
+        if(isset($this->displayOnMainPage) && $this->displayOnMainPage === false){
+            // Si la route n'est pas censée être affichée sur la page principale, on l'affiche seule
+            echo $this->getContent($method, $routePath, $bearer, $language);
+        }
+        else{
+            echo $this->renderMainPage(
+                $this->getContent($method, $routePath, $bearer, $language),
+                $bearer,
+                $language
+            );
+        
+        }
+        
+    }
+
+    public function getPageTitle(?string $bearer, string $language): string
+    {
+        return "";
+    }
+
+    public function getMetaDescription(?string $bearer, string $language): string
+    {
+        return "";
+    }
+
+    protected function addLanguageOptions(TplBlock $tpl, Translator $translator): void
+    {
+        foreach (Translator::supportedLanguages() as $availableLanguage) {
+            $labelKey = match ($availableLanguage) {
+                'fr' => 'languageFrench',
+                'en' => 'languageEnglish',
+                default => 'languageLabel',
+            };
+
+            $tpl->addSubBlock((new TplBlock('languageoptions'))->addVars([
+                'value' => self::e($availableLanguage),
+                'selected' => $translator->language() === $availableLanguage ? 'selected' : '',
+                'name' => self::e($translator->get($labelKey)),
+            ]));
+        }
+    }
+
+    protected static function e(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    protected function renderMainPage(string $content, ?string $bearer, string $language): string
+    {
+        $projectRoot = dirname(__DIR__, 2);
+        $translator = new Translator(Translator::normalize($language));
+        $assetVersion = defined('ASSET_VERSION') ? ASSET_VERSION : '';
+
+        $tpl = new TplBlock("");
+        $tpl->addVars([
+            "pageTitle" => $this->getPageTitle($bearer, $language),
+            "metaDescription" => $this->getMetaDescription($bearer, $language),
+            "language" => $translator->language(),
+            "assetVersion" => $assetVersion,
+            "authenticated" => is_null($bearer) ? '0' : '1',
+            "i18nUrl" => "/i18n?lang=" . rawurlencode($translator->language()) . ($assetVersion !== '' ? '&v=' . rawurlencode($assetVersion) : ''),
+            "languageFormAction" => self::e((string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/')),
+            "customJs" => $this->getCustomJs(),
+            "customCss" => $this->getCustomCss(),
+            "mainContent" => "",
+            "tutorialProbeName" => self::e('N°8421'),
+        ]);
+        $tpl->addPrefixedVars('t', $translator->allEscaped());
+        $this->addLanguageOptions($tpl, $translator);
+
+        if(is_null($bearer)){
+            //user deconnecté
+            $tpl->addSubBlock((new TplBlock('anonymousUserContent'))->addVars([
+                'mainContent' => $content,
+            ]));
+        }else{
+            //user connecté, on affiche la console, le content ira dedans
+            $tplauthenticatedUserContent = new TplBlock('authenticatedUserContent');
+            $tplauthenticatedUserContent->addVars([
+                'mainContent' => $content,
+            ]); 
+
+
+            //menu panel
+            
+            foreach($this->leftMenuItems as $menuLinkItem){
+                $tplauthenticatedUserContent->addSubBlock((new TplBlock('navpanellinks'))->addVars([
+                    'title' => $menuLinkItem->getTitle(),
+                    'href' => $menuLinkItem->getHref(),
+                    'class' => $menuLinkItem->isActive() ? 'panel-tab active' : 'panel-tab',
+                ]));
+            }
+
+            $tpl->addSubBlock($tplauthenticatedUserContent);
+            
+
+
+
+
+        }
+
+        return $tpl->applyTplFile($projectRoot . '/templates/main.html');
+    }
+
+}
