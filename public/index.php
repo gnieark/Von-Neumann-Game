@@ -6,6 +6,8 @@ use VonNeumannGame\AppFactory;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\FrontRoute\FrontRouteFactory;
+
 use VonNeumannGame\View\TplBlock;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -39,932 +41,6 @@ if (str_starts_with($routePath, '/api/')) {
 
 
 // Handle frontend routes
-$routes = [
-    'i18n' => [
-        'name' => 'i18n',
-        'methods' => ['GET', 'HEAD'],
-        'needAuth' => false,
-        'uriPattern' => '#^/i18n$#',
-        'linkUri' => '/i18n',
-        'routeClass' => 'Routei18n',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => false,
-
-    ],
-    'about' => [
-        'name' => e($translator->get('aboutPageTitle')),
-        'methods' => ['GET', 'HEAD'],
-        'needAuth' => false,
-        'uriPattern' => '#^/about$#',
-        'linkUri' => '/about',
-        'routeClass' => 'RouteAbout',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => true,
-    ],
-    'auth' =>[
-        'name' => 'auth',
-        'methods' => ['GET', 'POST'],
-        'needAuth' => false,
-        'uriPattern' => '#^/auth/#',
-        'linkUri' => '/authbypwd',
-        'routeClass' => 'RouteAuth',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => false,
-    ],
-    'authbypwd' =>[
-        'name' => 'authbypwd',
-        'methods' => ['GET', 'POST'],
-        'needAuth' => false,
-        'uriPattern' => '#^/authbypwd$#',
-        'linkUri' => '/authbypwd',
-        'routeClass' => 'RouteAuthByPwd',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => false,
-    ],
-    'logout' =>[
-        'name' => 'logout',
-        'methods' => ['GET', 'POST'],
-        'needAuth' => true,
-        'uriPattern' => '#^/logout$#',
-        'linkUri' => '/logout',
-        'routeClass' => 'RouteLogout',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => false,
-    ],
-    "changelog" =>[
-        'name'  => 'changelog',
-        'methods' => ['GET','HEAD'],
-        'needAuth' => true,
-        'uriPattern' => '#^/changelog$#',
-        'linkUri' => '/changelog',
-        'routeClass' => 'RouteChangelog',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => false,   
-    ],
-    "stats" => [
-        'name'  => e($translator->get('StatistiquesPageTitle')),
-        'methods' => ['GET','HEAD'],
-        'needAuth' => true,
-        'uriPattern' => '#^/stats$#',
-        'linkUri' => '/stats',
-        'routeClass' => 'RouteStats',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => true,   
-    ],
-    "api-docs" => [
-        'name'  => 'API Docs',
-        'methods' => ['GET','HEAD'],
-        'needAuth' => false,
-        'uriPattern' => '#^/(api-docs|openapi\.yaml)$#',
-        'linkUri' => '/api-docs',
-        'routeClass' => 'RouteApiDocs',
-        'displayOnMainMenu' => false,
-        'displayOnFooter' => true,   
-    ],
-
-];
-
-foreach($routes as $route){
-    if(preg_match($route['uriPattern'], $routePath) === 1){
-        if(!in_array($method, $route['methods'], true)){
-            http_response_code(405);
-            header('Content-Type: text/plain; charset=utf-8');
-            echo 'Method not allowed';
-            return;
-        }
-
-        if($route['needAuth'] && currentPlayer($factory) === null){
-            http_response_code(401);
-            header('Content-Type: text/plain; charset=utf-8');
-            echo 'Unauthorized';
-            return;
-        }
-
-        $className = 'VonNeumannGame\\FrontRoute\\' . $route['routeClass'];
-        if (!class_exists($className)) {
-            http_response_code(500);
-            header('Content-Type: text/plain; charset=utf-8');
-            echo 'Route class not found';
-            return;
-        }
-        /** @var \VonNeumannGame\FrontRoute\FrontRoute $controller */
-        $controller = new $className($factory, $projectRoot, $translator);
-        $controller->handle($method, $routePath);
-        return;
-    }
-
-}
-
-/*
-
-if ($routePath === '/i18n' && in_array($method, ['GET', 'HEAD'], true)) {
-    renderI18nMessages((string) ($_GET['lang'] ?? ''), $method);
-    return;
-}elseif ($routePath === '/i18n') {
-    http_response_code(405);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo 'Method not allowed';
-    return;
-}
-
-$language = selectedLanguage();
-$translator = new Translator($language);
-
-if (isset($_GET['lang']) && in_array((string) $_GET['lang'], Translator::supportedLanguages(), true)) {
-    $language = Translator::normalize((string) $_GET['lang']);
-    setcookie(LANGUAGE_COOKIE, $language, [
-        'expires' => time() + 365 * 24 * 3600,
-        'path' => '/',
-        'secure' => isHttps(),
-        'httponly' => true,
-        'samesite' => 'Lax',
-    ]);
-    redirect($routePath === '' ? '/' : $routePath);
-    return;
-}
-
-if ($method === 'GET' && preg_match('#^/auth/provider/([^/]+)$#', $routePath, $matches) === 1) {
-    handleOAuthProvider($factory, $projectRoot, $translator, strtolower(rawurldecode($matches[1])));
-    return;
-}
-
-if ($routePath === '/auth/pseudo') {
-    handleOAuthPseudo($factory, $projectRoot, $translator, $method);
-    return;
-}
-
-if ($routePath === '/authbypwd') {
-    handlePasswordAuth($factory, $projectRoot, $translator, $method);
-    return;
-}
-
-if ($routePath === '/logout' && $method === 'POST') {
-    setcookie(SESSION_COOKIE, '', [
-        'expires' => time() - 3600,
-        'path' => '/',
-        'secure' => isHttps(),
-        'httponly' => false,
-        'samesite' => 'Lax',
-    ]);
-    redirect('/');
-    return;
-}
-
-if ($routePath === '/about' && in_array($method, ['GET', 'HEAD'], true)) {
-    $player = currentPlayer($factory);
-    renderAbout($projectRoot, $translator, $player, currentProbeName($factory, $player));
-    return;
-}
-
-if ($routePath === '/changelog' && in_array($method, ['GET', 'HEAD'], true)) {
-    $player = currentPlayer($factory);
-    renderChangelog($projectRoot, $translator, $player, currentProbeName($factory, $player));
-    return;
-}
-
-if ($routePath === '/stats' && in_array($method, ['GET', 'HEAD'], true)) {
-    $player = currentPlayer($factory);
-    renderStats($projectRoot, $translator, $player, currentProbeName($factory, $player));
-    return;
-}
-
-if ($routePath === '/api-docs' && in_array($method, ['GET', 'HEAD'], true)) {
-    $player = currentPlayer($factory);
-    renderApiDocs($projectRoot, $translator, $player, currentProbeName($factory, $player));
-    return;
-}
-
-if ($routePath === '/openapi.yaml' && in_array($method, ['GET', 'HEAD'], true)) {
-    renderOpenApiSpec($projectRoot, $method);
-    return;
-}
-
-if ($routePath !== '/' || $method !== 'GET') {
-    http_response_code(404);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo 'Not found';
-    return;
-}
-
-$player = currentPlayer($factory);
-renderHome($projectRoot, $translator, $player, null, currentProbeName($factory, $player));
-
-function renderHome(string $projectRoot, Translator $translator, ?Player $player, ?string $loginError = null, ?string $tutorialProbeName = null): void
-{
-    $tpl = new TplBlock();
-    $tpl->addVars([
-        'pageTitle' => 'Von Neumann Game',
-        'metaDescription' => e($translator->get('homeMetaDescription')),
-        'bodyClass' => $player === null ? 'is-login is-guest' : 'is-authenticated',
-        'authenticated' => $player === null ? '0' : '1',
-        'language' => $translator->language(),
-        'assetVersion' => ASSET_VERSION,
-        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nUrl' => e(i18nMessagesUrl($translator)),
-        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
-        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
-    ]);
-    $tpl->addPrefixedVars('t', $translator->allEscaped());
-
-    if ($player === null) {
-        $loginView = new TplBlock('loginview');
-        if ($loginError !== null) {
-            $loginView->addSubBlock((new TplBlock('loginerror'))->addVars([
-                'message' => e($loginError),
-            ]));
-        }
-        $oauthProviderLinks = oauthProviderLinks($projectRoot, $translator);
-        if ($oauthProviderLinks !== []) {
-            $oauthSection = new TplBlock('oauthsection');
-            foreach ($oauthProviderLinks as $provider) {
-                $oauthSection->addSubBlock((new TplBlock('oauthprovider'))->addVars([
-                    'class' => e($provider['class']),
-                    'label' => e($provider['label']),
-                    'url' => e($provider['url']),
-                ]));
-            }
-            $loginView->addSubBlock($oauthSection);
-        } else {
-            $loginView->addSubBlock(new TplBlock('oauthmissing'));
-        }
-        $tpl->addSubBlock($loginView);
-    } else {
-        $displayName = e($player->displayName ?? $player->username);
-        addAuthenticatedUi($tpl, $displayName);
-        $tpl->addSubBlock((new TplBlock('consoleview'))->addVars([
-            'displayName' => $displayName,
-        ]));
-    }
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
-}
-
-function renderPasswordAuth(string $projectRoot, Translator $translator, ?string $loginError = null): void
-{
-    $tpl = new TplBlock();
-    $tpl->addVars([
-        'pageTitle' => 'Von Neumann Game',
-        'metaDescription' => e($translator->get('homeMetaDescription')),
-        'bodyClass' => 'is-guest',
-        'authenticated' => '0',
-        'language' => $translator->language(),
-        'assetVersion' => ASSET_VERSION,
-        'tutorialProbeName' => e('N°8421'),
-        'i18nUrl' => e(i18nMessagesUrl($translator)),
-        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
-        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
-    ]);
-    $tpl->addPrefixedVars('t', $translator->allEscaped());
-
-    $passwordView = new TplBlock('passwordauthview');
-    if ($loginError !== null) {
-        $passwordView->addSubBlock((new TplBlock('loginerror'))->addVars([
-            'message' => e($loginError),
-        ]));
-    }
-    $tpl->addSubBlock($passwordView);
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
-}
-
-function handlePasswordAuth(AppFactory $factory, string $projectRoot, Translator $translator, string $method): void
-{
-    if ($method === 'GET') {
-        if (currentPlayer($factory) !== null) {
-            redirect('/');
-            return;
-        }
-
-        renderPasswordAuth($projectRoot, $translator);
-        return;
-    }
-
-    if ($method !== 'POST') {
-        http_response_code(405);
-        header('Content-Type: text/plain; charset=utf-8');
-        echo 'Method not allowed';
-        return;
-    }
-
-    $auth = $factory->authService($factory->pdo(initializeSchema: true));
-    $player = $auth->authenticateWithPassword((string) ($_POST['username'] ?? ''), (string) ($_POST['password'] ?? ''));
-    if ($player === null) {
-        renderPasswordAuth($projectRoot, $translator, $translator->get('loginInvalid'));
-        return;
-    }
-
-    issueSessionCookie($auth, $player, isset($_POST['remember']));
-    header('Location: /', true, 303);
-}
-
-function renderAbout(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
-{
-    $tpl = new TplBlock();
-    $tpl->addVars([
-        'pageTitle' => 'Von Neumann Game - ' . $translator->get('aboutFooterLink'),
-        'metaDescription' => e($translator->get('aboutMetaDescription')),
-        'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
-        'authenticated' => $player === null ? '0' : '1',
-        'language' => $translator->language(),
-        'assetVersion' => ASSET_VERSION,
-        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nUrl' => e(i18nMessagesUrl($translator)),
-        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
-        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
-    ]);
-    $tpl->addPrefixedVars('t', $translator->allEscaped());
-    $tpl->addSubBlock(new TplBlock('aboutview'));
-
-    if ($player !== null) {
-        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
-    }
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
-}
-
-function renderChangelog(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
-{
-    $path = $projectRoot . '/CHANGELOG.md';
-    if (!is_file($path)) {
-        http_response_code(404);
-        header('Content-Type: text/plain; charset=utf-8');
-        echo 'Changelog not found';
-        return;
-    }
-
-    $tpl = new TplBlock();
-    $tpl->addVars([
-        'pageTitle' => 'Von Neumann Game - ' . $translator->get('changelogFooterLink'),
-        'metaDescription' => e($translator->get('changelogMetaDescription')),
-        'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
-        'authenticated' => $player === null ? '0' : '1',
-        'language' => $translator->language(),
-        'assetVersion' => ASSET_VERSION,
-        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nUrl' => e(i18nMessagesUrl($translator)),
-        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
-        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
-    ]);
-    $tpl->addPrefixedVars('t', $translator->allEscaped());
-    $tpl->addSubBlock((new TplBlock('changelogview'))->addVars([
-        'html' => renderMarkdownHtml((string) file_get_contents($path)),
-    ]));
-
-    if ($player !== null) {
-        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
-    }
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
-}
-
-function renderStats(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
-{
-    $stats = loadStats($projectRoot . '/var/stats.json');
-    $tpl = new TplBlock();
-    $tpl->addVars([
-        'pageTitle' => 'Von Neumann Game - ' . $translator->get('statsFooterLink'),
-        'metaDescription' => e($translator->get('statsMetaDescription')),
-        'bodyClass' => $player === null ? 'is-guest' : 'is-authenticated',
-        'authenticated' => $player === null ? '0' : '1',
-        'language' => $translator->language(),
-        'assetVersion' => ASSET_VERSION,
-        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nUrl' => e(i18nMessagesUrl($translator)),
-        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
-        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
-    ]);
-    $tpl->addPrefixedVars('t', $translator->allEscaped());
-
-    $statsView = (new TplBlock('statsview'))->addVars([
-        'generatedAt' => e(formatStatsGeneratedAt($stats['generatedAt'], $translator)),
-    ]);
-    foreach (statsMetricRows($stats['metrics'], $translator) as $metric) {
-        $statsView->addSubBlock((new TplBlock('metric'))->addVars([
-            'label' => e($metric['label']),
-            'value' => e($metric['value']),
-        ]));
-    }
-    $tpl->addSubBlock($statsView);
-
-    if ($player !== null) {
-        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
-    }
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
-}
-
-function renderApiDocs(string $projectRoot, Translator $translator, ?Player $player, ?string $tutorialProbeName = null): void
-{
-    $tpl = new TplBlock();
-    $tpl->addVars([
-        'pageTitle' => 'Von Neumann Game - API',
-        'metaDescription' => e($translator->get('apiDocsMetaDescription')),
-        'bodyClass' => $player === null ? 'is-api-docs is-guest' : 'is-api-docs is-authenticated',
-        'authenticated' => $player === null ? '0' : '1',
-        'language' => $translator->language(),
-        'assetVersion' => ASSET_VERSION,
-        'tutorialProbeName' => e($tutorialProbeName ?? 'N°8421'),
-        'i18nUrl' => e(i18nMessagesUrl($translator)),
-        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
-        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
-    ]);
-    $tpl->addPrefixedVars('t', $translator->allEscaped());
-    $tpl->addSubBlock(new TplBlock('swaggerassets'));
-    $tpl->addSubBlock(new TplBlock('apidocsview'));
-
-    if ($player !== null) {
-        addAuthenticatedUi($tpl, e($player->displayName ?? $player->username));
-    }
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
-}
-
-function renderOpenApiSpec(string $projectRoot, string $method): void
-{
-    $path = $projectRoot . '/docs/openapi.yaml';
-    if (!is_file($path)) {
-        http_response_code(404);
-        header('Content-Type: text/plain; charset=utf-8');
-        echo 'OpenAPI specification not found';
-        return;
-    }
-
-    header('Content-Type: application/yaml; charset=utf-8');
-    header('Cache-Control: no-store');
-    if ($method !== 'HEAD') {
-        readfile($path);
-    }
-}
-
-function renderI18nMessages(string $language, string $method): void
-{
-    $translator = new Translator(Translator::normalize($language));
-    $body = json_encode($translator->jsMessages(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-    $etag = '"' . hash('sha256', $body) . '"';
-
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: public, max-age=31536000, immutable');
-    header('ETag: ' . $etag);
-    header('X-Content-Type-Options: nosniff');
-
-    if ((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) {
-        http_response_code(304);
-        return;
-    }
-
-    if ($method !== 'HEAD') {
-        echo $body;
-    }
-}
-
-function renderOAuthPseudo(string $projectRoot, Translator $translator, string $csrf, ?string $error = null, string $pseudonym = ''): void
-{
-    $tpl = new TplBlock();
-    $tpl->addVars([
-        'pageTitle' => 'Von Neumann Game',
-        'metaDescription' => e($translator->get('homeMetaDescription')),
-        'bodyClass' => 'is-guest',
-        'authenticated' => '0',
-        'language' => $translator->language(),
-        'assetVersion' => ASSET_VERSION,
-        'tutorialProbeName' => e('N°8421'),
-        'i18nUrl' => e(i18nMessagesUrl($translator)),
-        'frSelected' => $translator->language() === 'fr' ? 'selected' : '',
-        'enSelected' => $translator->language() === 'en' ? 'selected' : '',
-    ]);
-    $tpl->addPrefixedVars('t', $translator->allEscaped());
-
-    $pseudoView = (new TplBlock('oauthpseudoview'))->addVars([
-        'csrf' => e($csrf),
-        'pseudonym' => e($pseudonym),
-    ]);
-    if ($error !== null) {
-        $pseudoView->addSubBlock((new TplBlock('error'))->addVars([
-            'message' => e($error),
-        ]));
-    }
-    $tpl->addSubBlock($pseudoView);
-
-    header('Content-Type: text/html; charset=utf-8');
-    echo $tpl->applyTplFile($projectRoot . '/templates/home.html');
-}
-
-function handleOAuthProvider(AppFactory $factory, string $projectRoot, Translator $translator, string $providerName): void
-{
-    ensurePhpSession();
-
-    try {
-        $oauth = $factory->oauthService();
-        $provider = $oauth->createProvider($providerName, absoluteUrl('/auth/provider/' . rawurlencode($providerName)));
-    } catch (Throwable) {
-        renderHome($projectRoot, $translator, null, $translator->get('oauthProviderUnavailable'));
-        return;
-    }
-
-    if (isset($_GET['error'])) {
-        unset($_SESSION['oauth2state'][$providerName]);
-        renderHome($projectRoot, $translator, null, $translator->get('oauthLoginCancelled'));
-        return;
-    }
-
-    if (!isset($_GET['code'])) {
-        $authorizationUrl = $provider->getAuthorizationUrl($oauth->authorizationOptions($providerName));
-        $_SESSION['oauth2state'][$providerName] = $provider->getState();
-        $_SESSION['oauth_remember'][$providerName] = (string) ($_GET['remember'] ?? '') === '1';
-        header('Location: ' . $authorizationUrl);
-        return;
-    }
-
-    $expectedState = $_SESSION['oauth2state'][$providerName] ?? null;
-    $actualState = isset($_GET['state']) ? (string) $_GET['state'] : '';
-    unset($_SESSION['oauth2state'][$providerName]);
-    if (!is_string($expectedState) || !hash_equals($expectedState, $actualState)) {
-        renderHome($projectRoot, $translator, null, $translator->get('oauthStateInvalid'));
-        return;
-    }
-
-    try {
-        $token = $provider->getAccessToken('authorization_code', [
-            'code' => (string) $_GET['code'],
-        ]);
-        $providerUserId = $oauth->subjectFromAccessToken($providerName, $token);
-        $auth = $factory->authService($factory->pdo(initializeSchema: true));
-        $player = $auth->authenticateWithExternal($providerName, $providerUserId);
-        if ($player !== null) {
-            unset($_SESSION['pending_oauth']);
-            issueSessionCookie($auth, $player, oauthRememberChoice($providerName));
-            redirect('/');
-            return;
-        }
-
-        $_SESSION['pending_oauth'] = [
-            'provider' => $providerName,
-            'providerUserId' => $providerUserId,
-            'csrf' => randomToken(),
-            'remember' => oauthRememberChoice($providerName),
-        ];
-        redirect('/auth/pseudo');
-    } catch (Throwable) {
-        renderHome($projectRoot, $translator, null, $translator->get('oauthLoginFailed'));
-    }
-}
-
-function handleOAuthPseudo(AppFactory $factory, string $projectRoot, Translator $translator, string $method): void
-{
-    ensurePhpSession();
-    $pending = pendingOAuthIdentity();
-    if ($pending === null) {
-        redirect('/');
-        return;
-    }
-
-    if ($method === 'GET') {
-        renderOAuthPseudo($projectRoot, $translator, $pending['csrf']);
-        return;
-    }
-
-    if ($method !== 'POST') {
-        http_response_code(405);
-        header('Content-Type: text/plain; charset=utf-8');
-        echo 'Method not allowed';
-        return;
-    }
-
-    $pseudonym = (string) ($_POST['pseudonym'] ?? '');
-    $csrf = (string) ($_POST['csrf'] ?? '');
-    if (!hash_equals($pending['csrf'], $csrf)) {
-        renderOAuthPseudo($projectRoot, $translator, $pending['csrf'], $translator->get('oauthStateInvalid'), $pseudonym);
-        return;
-    }
-
-    $auth = $factory->authService($factory->pdo(initializeSchema: true));
-    try {
-        $player = $auth->registerPlayerWithExternalAuth($pseudonym, $pending['provider'], $pending['providerUserId']);
-        unset($_SESSION['pending_oauth']);
-        issueSessionCookie($auth, $player, (bool) ($pending['remember'] ?? false));
-        redirect('/?tutorial=context');
-    } catch (InvalidArgumentException $exception) {
-        $message = $exception->getMessage() === 'Pseudonym already exists.'
-            ? $translator->get('pseudonymAlreadyUsed')
-            : $translator->get('pseudonymInvalid');
-        renderOAuthPseudo($projectRoot, $translator, $pending['csrf'], $message, $pseudonym);
-    } catch (Throwable) {
-        $player = $auth->authenticateWithExternal($pending['provider'], $pending['providerUserId']);
-        if ($player !== null) {
-            unset($_SESSION['pending_oauth']);
-            issueSessionCookie($auth, $player, (bool) ($pending['remember'] ?? false));
-            redirect('/');
-            return;
-        }
-
-        renderOAuthPseudo($projectRoot, $translator, $pending['csrf'], $translator->get('oauthRegistrationFailed'), $pseudonym);
-    }
-}
-
-/**
- * @return array<int, array{class: string, label: string, url: string}>
- */
-function oauthProviderLinks(string $projectRoot, Translator $translator): array
-{
-    try {
-        $oauth = new VonNeumannGame\Auth\OAuthService(
-            VonNeumannGame\Auth\OAuthConfig::fromFile($projectRoot . '/config/oauth.json')
-        );
-    } catch (Throwable) {
-        return [];
-    }
-
-    return array_map(static fn(string $provider): array => [
-        'class' => $provider,
-        'label' => match ($provider) {
-            'google' => $translator->get('oauthLoginGoogle'),
-            'discord' => $translator->get('oauthLoginDiscord'),
-            'github' => $translator->get('oauthLoginGitHub'),
-            default => $provider,
-        },
-        'url' => '/auth/provider/' . rawurlencode($provider),
-    ], $oauth->availableProviders());
-}
-
-/**
- * @return array{provider: string, providerUserId: string, csrf: string}|null
- */
-function pendingOAuthIdentity(): ?array
-{
-    $pending = $_SESSION['pending_oauth'] ?? null;
-    if (!is_array($pending)
-        || !isset($pending['provider'], $pending['providerUserId'], $pending['csrf'])
-        || !is_string($pending['provider'])
-        || !is_string($pending['providerUserId'])
-        || !is_string($pending['csrf'])
-    ) {
-        return null;
-    }
-
-    return [
-        'provider' => $pending['provider'],
-        'providerUserId' => $pending['providerUserId'],
-        'csrf' => $pending['csrf'],
-        'remember' => (bool) ($pending['remember'] ?? false),
-    ];
-}
-
-function oauthRememberChoice(string $providerName): bool
-{
-    $remember = (bool) ($_SESSION['oauth_remember'][$providerName] ?? false);
-    unset($_SESSION['oauth_remember'][$providerName]);
-
-    return $remember;
-}
-
-function addAuthenticatedUi(TplBlock $tpl, string $displayName): void
-{
-    $tpl->addSubBlock((new TplBlock('sessionbar'))->addVars([
-        'displayName' => $displayName,
-    ]));
-    $tpl->addSubBlock(new TplBlock('apikeydialog'));
-}
-
-/**
- * @return array{generatedAt: ?string, metrics: array<string, mixed>}
- */
-function loadStats(string $path): array
-{
-    $fallbackMetrics = [
-        'probesInUniverse' => 0,
-        'generatedSectors' => 0,
-        'visitedSectors' => 0,
-        'blackHoles' => 0,
-        'asteroidsByResource' => [
-            'deuterium' => 0,
-            'metals' => 0,
-            'ice' => 0,
-            'carbon_compounds' => 0,
-        ],
-        'lostMannies' => 0,
-        'forgottenMannies' => 0,
-        'driftingContainers' => 0,
-        'hiddenContainers' => 0,
-        'furthestProbeDistance' => 0,
-        'closestProbeDistance' => 0,
-        'intelligentLifeWorlds' => 0,
-        'successfulMissions' => 0,
-        'failedMissions' => 0,
-    ];
-
-    $json = is_file($path) ? file_get_contents($path) : false;
-    if ($json === false) {
-        return ['generatedAt' => null, 'metrics' => $fallbackMetrics];
-    }
-
-    try {
-        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-    } catch (JsonException) {
-        return ['generatedAt' => null, 'metrics' => $fallbackMetrics];
-    }
-
-    if (!is_array($data) || !is_array($data['metrics'] ?? null)) {
-        return ['generatedAt' => null, 'metrics' => $fallbackMetrics];
-    }
-
-    $metrics = array_replace_recursive($fallbackMetrics, $data['metrics']);
-
-    return [
-        'generatedAt' => is_string($data['generatedAt'] ?? null) ? $data['generatedAt'] : null,
-        'metrics' => $metrics,
-    ];
-}
-
-/**
- * @param array<string, mixed> $metrics
- * @return array<int, array{label: string, value: string}>
- */
-function statsMetricRows(array $metrics, Translator $translator): array
-{
-    $asteroidsByResource = is_array($metrics['asteroidsByResource'] ?? null) ? $metrics['asteroidsByResource'] : [];
-
-    return [
-        ['label' => $translator->get('statsProbesInUniverse'), 'value' => formatStatsNumber($metrics['probesInUniverse'] ?? 0)],
-        ['label' => $translator->get('statsGeneratedSectors'), 'value' => formatStatsNumber($metrics['generatedSectors'] ?? 0)],
-        ['label' => $translator->get('statsVisitedSectors'), 'value' => formatStatsNumber($metrics['visitedSectors'] ?? 0)],
-        ['label' => $translator->get('statsBlackHoles'), 'value' => formatStatsNumber($metrics['blackHoles'] ?? 0)],
-        ['label' => $translator->get('statsAsteroidsDeuterium'), 'value' => formatStatsNumber($asteroidsByResource['deuterium'] ?? 0)],
-        ['label' => $translator->get('statsAsteroidsMetals'), 'value' => formatStatsNumber($asteroidsByResource['metals'] ?? 0)],
-        ['label' => $translator->get('statsAsteroidsIce'), 'value' => formatStatsNumber($asteroidsByResource['ice'] ?? 0)],
-        ['label' => $translator->get('statsAsteroidsCarbonCompounds'), 'value' => formatStatsNumber($asteroidsByResource['carbon_compounds'] ?? 0)],
-        ['label' => $translator->get('statsLostMannies'), 'value' => formatStatsNumber($metrics['lostMannies'] ?? 0)],
-        ['label' => $translator->get('statsForgottenMannies'), 'value' => formatStatsNumber($metrics['forgottenMannies'] ?? 0)],
-        ['label' => $translator->get('statsDriftingContainers'), 'value' => formatStatsNumber($metrics['driftingContainers'] ?? 0)],
-        ['label' => $translator->get('statsHiddenContainers'), 'value' => formatStatsNumber($metrics['hiddenContainers'] ?? 0)],
-        ['label' => $translator->get('statsFurthestProbeDistance'), 'value' => formatStatsNumber($metrics['furthestProbeDistance'] ?? 0)],
-        ['label' => $translator->get('statsClosestProbeDistance'), 'value' => formatStatsNumber($metrics['closestProbeDistance'] ?? 0)],
-        ['label' => $translator->get('statsIntelligentLifeWorlds'), 'value' => formatStatsNumber($metrics['intelligentLifeWorlds'] ?? 0)],
-        ['label' => $translator->get('statsSuccessfulMissions'), 'value' => formatStatsNumber($metrics['successfulMissions'] ?? 0)],
-        ['label' => $translator->get('statsFailedMissions'), 'value' => formatStatsNumber($metrics['failedMissions'] ?? 0)],
-    ];
-}
-
-function formatStatsNumber(mixed $value): string
-{
-    return number_format(max(0, (int) $value), 0, ',', ' ');
-}
-
-function formatStatsGeneratedAt(?string $value, Translator $translator): string
-{
-    if ($value === null || trim($value) === '') {
-        return $translator->get('statsNeverGenerated');
-    }
-
-    try {
-        $date = new DateTimeImmutable($value);
-    } catch (Throwable) {
-        return $translator->get('statsNeverGenerated');
-    }
-
-    return $date->setTimezone(new DateTimeZone('Europe/Paris'))->format('Y-m-d H:i T');
-}
-
-function renderMarkdownHtml(string $markdown): string
-{
-    $lines = preg_split('/\R/', $markdown) ?: [];
-    $html = [];
-    $paragraph = [];
-    $listOpen = false;
-
-    $flushParagraph = static function () use (&$html, &$paragraph): void {
-        if ($paragraph === []) {
-            return;
-        }
-
-        $html[] = '<p>' . renderMarkdownInline(implode(' ', $paragraph)) . '</p>';
-        $paragraph = [];
-    };
-    $closeList = static function () use (&$html, &$listOpen): void {
-        if (!$listOpen) {
-            return;
-        }
-
-        $html[] = '</ul>';
-        $listOpen = false;
-    };
-
-    foreach ($lines as $line) {
-        $line = rtrim($line);
-        if (trim($line) === '') {
-            $flushParagraph();
-            $closeList();
-            continue;
-        }
-
-        if (preg_match('/^(#{1,6})\s+(.+)$/', $line, $matches) === 1) {
-            $flushParagraph();
-            $closeList();
-            $level = strlen($matches[1]);
-            $html[] = '<h' . $level . '>' . renderMarkdownInline(trim($matches[2])) . '</h' . $level . '>';
-            continue;
-        }
-
-        if (preg_match('/^-\s+(.+)$/', $line, $matches) === 1) {
-            $flushParagraph();
-            if (!$listOpen) {
-                $html[] = '<ul>';
-                $listOpen = true;
-            }
-            $html[] = '<li>' . renderMarkdownInline(trim($matches[1])) . '</li>';
-            continue;
-        }
-
-        $paragraph[] = trim($line);
-    }
-
-    $flushParagraph();
-    $closeList();
-
-    return implode("\n", $html);
-}
-
-function renderMarkdownInline(string $text): string
-{
-    $segments = preg_split('/(`[^`]+`)/', $text, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
-    $html = '';
-    foreach ($segments as $segment) {
-        if (str_starts_with($segment, '`') && str_ends_with($segment, '`') && strlen($segment) >= 2) {
-            $html .= '<code>' . e(substr($segment, 1, -1)) . '</code>';
-            continue;
-        }
-
-        $html .= renderMarkdownLinks($segment);
-    }
-
-    return $html;
-}
-
-function renderMarkdownLinks(string $text): string
-{
-    if (preg_match_all('/\[([^\]]+)\]\(([^)\s]+)\)/', $text, $matches, PREG_OFFSET_CAPTURE) === 0) {
-        return e($text);
-    }
-
-    $html = '';
-    $offset = 0;
-    foreach ($matches[0] as $index => $match) {
-        [$whole, $position] = $match;
-        $html .= e(substr($text, $offset, $position - $offset));
-        $label = $matches[1][$index][0];
-        $url = $matches[2][$index][0];
-        $html .= preg_match('#^(https?://|/)#', $url) === 1
-            ? '<a href="' . e($url) . '">' . e($label) . '</a>'
-            : e($whole);
-        $offset = $position + strlen($whole);
-    }
-
-    return $html . e(substr($text, $offset));
-}
-
-function issueSessionCookie(VonNeumannGame\Auth\AuthService $auth, Player $player, bool $remember = false): void
-{
-    $session = $auth->createSessionForPlayer($player);
-    $expiresAt = new DateTimeImmutable((string) $session['expiresAt']);
-    setcookie(SESSION_COOKIE, (string) $session['token'], [
-        'expires' => $remember ? $expiresAt->getTimestamp() : 0,
-        'path' => '/',
-        'secure' => isHttps(),
-        'httponly' => false,
-        'samesite' => 'Lax',
-    ]);
-}
-
-function ensurePhpSession(): void
-{
-    if (session_status() === PHP_SESSION_ACTIVE) {
-        return;
-    }
-
-    session_start([
-        'cookie_httponly' => true,
-        'cookie_secure' => isHttps(),
-        'cookie_samesite' => 'Lax',
-    ]);
-}
-
-function absoluteUrl(string $path): string
-{
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-
-    return (isHttps() ? 'https' : 'http') . '://' . $host . $path;
-}
-
-function randomToken(): string
-{
-    return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-}
-
 function selectedLanguage(): string
 {
     if (isset($_GET['lang'])) {
@@ -977,44 +53,173 @@ function selectedLanguage(): string
     return Translator::normalize($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? null);
 }
 
-function i18nMessagesUrl(Translator $translator): string
-{
-    return '/i18n?lang=' . rawurlencode($translator->language()) . '&v=' . rawurlencode(ASSET_VERSION);
-}
-
-function currentPlayer(AppFactory $factory): ?Player
+function selectedBearer(): ?string
 {
     $token = (string) ($_COOKIE[SESSION_COOKIE] ?? '');
     if ($token === '') {
         return null;
     }
 
-    return $factory->authService($factory->pdo(initializeSchema: true))->getPlayerFromBearerToken('Bearer ' . $token);
+    return 'Bearer ' . $token;
 }
 
-function currentProbeName(AppFactory $factory, ?Player $player): ?string
-{
-    if ($player === null) {
-        return null;
-    }
+$language = selectedLanguage();
+$bearer = selectedBearer();
+$translator = new Translator($language);
 
-    $probes = new NeumannProbeRepository($factory->pdo(initializeSchema: true), $factory->gameplayConfig());
+$availableroutes = [
+    'home' => [
+        'name' => 'home',
+        'methods' => ['GET', 'HEAD'],
+        'needAuth' => false,
+        'uriPattern' => '#^/$#',
+        'linkUri' => '/',
+        'routeClass' => 'FrontRouteHome',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+    ],
+    'i18n' => [
+        'name' => 'i18n',
+        'methods' => ['GET', 'HEAD'],
+        'needAuth' => false,
+        'uriPattern' => '#^/i18n$#',
+        'linkUri' => '/i18n',
+        'routeClass' => 'FrontRoutei18n',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
 
-    return $probes->findByPlayerId($player->id)?->name;
-}
+    ],
+    'about' => [
+        'name' => htmlspecialchars($translator->get('aboutPageTitle'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+        'methods' => ['GET', 'HEAD'],
+        'needAuth' => false,
+        'uriPattern' => '#^/about$#',
+        'linkUri' => '/about',
+        'routeClass' => 'FrontRouteAbout',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => true,
+    ],
+    'auth' =>[
+        'name' => 'auth',
+        'methods' => ['GET', 'POST'],
+        'needAuth' => false,
+        'uriPattern' => '#^/auth/(provider/[^/]+|pseudo)$#',
+        'linkUri' => '/authbypwd',
+        'routeClass' => 'FrontRouteAuth',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+    ],
+    'authbypwd' =>[
+        'name' => 'authbypwd',
+        'methods' => ['GET', 'POST'],
+        'needAuth' => false,
+        'uriPattern' => '#^/authbypwd$#',
+        'linkUri' => '/authbypwd',
+        'routeClass' => 'FrontRouteAuthByPwd',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+    ],
+    'logout' =>[
+        'name' => 'logout',
+        'methods' => ['GET', 'POST'],
+        'needAuth' => true,
+        'uriPattern' => '#^/logout$#',
+        'linkUri' => '/logout',
+        'routeClass' => 'FrontRouteLogout',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
+    ],
+    "changelog" =>[
+        'name'  => 'changelog',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/changelog$#',
+        'linkUri' => '/changelog',
+        'routeClass' => 'FrontRouteChangelog',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,   
+    ],
+    "stats" => [
+        'name'  =>   htmlspecialchars($translator->get('StatistiquesPageTitle'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/stats$#',
+        'linkUri' => '/stats',
+        'routeClass' => 'FrontRouteStats',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => true,   
+    ],
+    "api-docs" => [
+        'name'  => 'API Docs',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => false,
+        'uriPattern' => '#^/(api-docs|openapi\.yaml)$#',
+        'linkUri' => '/api-docs',
+        'routeClass' => 'FrontRouteApiDocs',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => true,   
+    ],
+    "Sensors" => [
+        'name'  => 'Sensors and radars',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/sensors$#',
+        'linkUri' => '/sensors',
+        'routeClass' => 'FrontRouteSensors',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,   
+    ],
+    "Inventories" => [
+        'name'  => 'Inventories',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/inventories$#',
+        'linkUri' => '/inventories',
+        'routeClass' => 'FrontRouteInventories',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,   
+    ],
+    "Mannys" => [
+        'name'  => 'Mannies & printer',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/mannies$#',
+        'linkUri' => '/mannies',
+        'routeClass' => 'FrontRouteMannies',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,   
+    ],
+    "Movement" => [
+        'name'  => 'Movement',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/movement$#',
+        'linkUri' => '/movement',
+        'routeClass' => 'FrontRouteMovement',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,   
+    ],
+    "Messaging" => [
+        'name'  => 'Messaging',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/messaging$#',
+        'linkUri' => '/messaging',
+        'routeClass' => 'FrontRouteMessaging',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,   
+    ],
+    "Alerts" => [
+        'name'  => 'Alerts',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/alerts$#',
+        'linkUri' => '/alerts',
+        'routeClass' => 'FrontRouteAlerts',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,   
+    ]
 
-function redirect(string $location): void
-{
-    header('Location: ' . $location, true, 303);
-}
-
-function isHttps(): bool
-{
-    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-}
-
-function e(string $value): string
-{
-    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-}
+];
+$route = FrontRouteFactory::getRoute($availableroutes, $method, $routePath, $bearer, $language);
+$route->handle($method, $routePath, $bearer, $language);

@@ -11,17 +11,62 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="/assets/app.css?v={{assetVersion}}">
     <link rel="preload" href="{{i18nUrl}}" as="fetch" type="application/json" crossorigin="anonymous">
+
     <!-- BEGIN swaggerassets -->
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" defer></script>
     <!-- END swaggerassets -->
-    <script type="module" src="/assets/app.js?v={{assetVersion}}"></script>
+
+    <script type="module" src="/assets/main.js?v={{assetVersion}}"></script>
+    {{customJs}}
+    {{customCss}}
 </head>
-<body>
+<body data-authenticated="{{authenticated}}">
+
     <header class="topbar">
+        <div>
+            <a class="sigil" href="/" aria-label="Von Neumann Game">VN</a>
+            <span class="system-name">Von Neumann Game</span>
+        </div>
+        <form class="language-form" method="get" action="/">
+            <label>
+                <span>Language</span>
+                <select name="lang">
+                    <!-- BEGIN languageoptions -->
+                     <option value="{{languageoptions.value}}" {{languageoptions.selected}}>{{languageoptions.name}}</option>
+                     <!-- END languageoptions -->
+                </select>
+            </label>
+            <button type="submit">OK</button>
+        </form>
+        <div class="account-menu tutorial-menu">
+            <button class="account-menu-button" type="button" aria-expanded="false">
+                <span>Tutorial</span>
+                <span aria-hidden="true">▾</span>
+            </button>
+            <div class="account-menu-panel" hidden="">
+                <button class="account-menu-item" data-tutorial-target="tutorial-context-dialog" type="button">Context</button>
+                <button class="account-menu-item" data-tutorial-target="tutorial-move-dialog" type="button">Move the probe</button>
+                <button class="account-menu-item" data-tutorial-target="tutorial-mannies-dialog" type="button">Use the Mannys</button>
+            </div>
+        </div>
         {{topheader}}
     </header>
     <main>
+        <!-- BEGIN authenticatedUserContent -->
+        <section class="console-grid">
+            <aside class="nav-panel">
+
+            </aside>
+            <section class="workspace">
+                {{authenticatedUserContent.mainContent}}
+            </section>
+        </section>
+           
+        <!-- END authenticatedUserContent -->
+        <!-- BEGIN anonymousUserContent -->
+            {{anonymousUserContent.mainContent}}
+        <!-- END anonymousUserContent -->
         {{mainContent}}
     </main>
     <footer class="site-footer">

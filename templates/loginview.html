@@ -1,0 +1,44 @@
+<section class="game-brief">
+    <div class="brief-copy">
+        <p class="eyebrow">{{t.briefEyebrow}}</p>
+        <h2>{{t.briefTitle}}</h2>
+        <p class="brief-text">{{t.briefText}}</p>
+    </div>
+    <div class="brief-placeholder">
+        <img class="brief-image" src="/images/une_sonde.png" alt="{{t.briefImageAlt}}">
+    </div>
+</section>
+
+<section class="auth-shell access-auth-shell">
+    <div class="login-panel access-login-panel">
+        <div class="access-login-copy">
+            <div>
+                <p class="eyebrow">{{t.loginEyebrow}}</p>
+                <h1>{{t.loginTitle}}</h1>
+            </div>
+            <!-- BEGIN loginview.loginerror -->
+            <p class="form-error">{{loginview.loginerror.message}}</p>
+            <!-- END loginview.loginerror -->
+            <label class="remember">
+                <input id="oauth-remember" name="remember" type="checkbox" value="1">
+                <span>{{t.rememberMe}}</span>
+            </label>
+        </div>
+
+        <div class="access-login-actions">
+            <!-- BEGIN loginview.oauthsection -->
+            <div class="oauth-section">
+                <p>{{t.oauthSeparator}}</p>
+                <div class="oauth-buttons">
+                    <!-- BEGIN loginview.oauthsection.oauthprovider -->
+                    <a class="oauth-button {{loginview.oauthsection.oauthprovider.class}}" href="{{loginview.oauthsection.oauthprovider.url}}" data-oauth-url="{{loginview.oauthsection.oauthprovider.url}}">{{loginview.oauthsection.oauthprovider.label}}</a>
+                    <!-- END loginview.oauthsection.oauthprovider -->
+                </div>
+            </div>
+            <!-- END loginview.oauthsection -->
+            <!-- BEGIN loginview.oauthmissing -->
+            <p class="form-error">{{t.oauthUnavailable}}</p>
+            <!-- END loginview.oauthmissing -->
+        </div>
+    </div>
+</section>

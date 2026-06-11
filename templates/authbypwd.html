@@ -1,0 +1,24 @@
+<section class="auth-shell">
+    <form class="login-panel" method="post" action="/authbypwd">
+        <div>
+            <p class="eyebrow">{{t.passwordDebugEyebrow}}</p>
+            <h1>{{t.passwordDebugTitle}}</h1>
+        </div>
+        <!-- BEGIN passwordauthview.loginerror -->
+        <p class="form-error">{{passwordauthview.loginerror.message}}</p>
+        <!-- END passwordauthview.loginerror -->
+        <label>
+            {{t.username}}
+            <input name="username" autocomplete="username" required>
+        </label>
+        <label>
+            {{t.password}}
+            <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <label class="remember">
+            <input name="remember" type="checkbox" value="1">
+            <span>{{t.rememberMe}}</span>
+        </label>
+        <button class="primary" type="submit">{{t.authenticate}}</button>
+    </form>
+</section>
