@@ -56,7 +56,11 @@
         <!-- BEGIN authenticatedUserContent -->
         <section class="console-grid">
             <aside class="nav-panel">
-
+                <p class="eyebrow">Active console</p>
+                <h1 id="navpanelPalyer"></h1>
+                <!-- BEGIN authenticatedUserContent.navpanellinks -->
+                 <a class="{{authenticatedUserContent.navpanellinks.class}}"  href="{{authenticatedUserContent.navpanellinks.href}}">{{authenticatedUserContent.navpanellinks.title}}</a>
+                <!-- END authenticatedUserContent.navpanellinks -->  
             </aside>
             <section class="workspace">
                 {{authenticatedUserContent.mainContent}}

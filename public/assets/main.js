@@ -69,6 +69,221 @@ async function apiJson(path, options) {
     return data;
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+let i18nPromise = null;
+
+function loadI18n() {
+    if (window.VNG_I18N && typeof window.VNG_I18N === "object") {
+        return Promise.resolve(window.VNG_I18N);
+    }
+    if (i18nPromise) {
+        return i18nPromise;
+    }
+
+    const preload = document.querySelector("link[rel=\"preload\"][as=\"fetch\"]");
+    const url = preload?.getAttribute("href") || "/i18n?lang=" + encodeURIComponent(document.documentElement.lang || "en");
+    i18nPromise = fetch(url, {"headers": {"Accept": "application/json"}})
+        .then((response) => response.ok ? response.json() : {})
+        .then((messages) => {
+            window.VNG_I18N = messages && typeof messages === "object" ? messages : {};
+            return window.VNG_I18N;
+        })
+        .catch(() => ({}));
+
+    return i18nPromise;
+}
+
+function t(messages, key, fallback) {
+    return messages && Object.prototype.hasOwnProperty.call(messages, key)
+        ? messages[key]
+        : fallback;
+}
+
+function formatText(template, values) {
+    return Object.entries(values || {}).reduce(
+        (text, [key, value]) => text.replaceAll("{" + key + "}", String(value)),
+        String(template || "")
+    );
+}
+
+function validRelativeCoordinates(target) {
+    return target
+        && Number.isFinite(Number(target.x))
+        && Number.isFinite(Number(target.y))
+        && Number.isFinite(Number(target.z))
+        && (Number(target.x) + Number(target.y) + Number(target.z)) % 2 === 0;
+}
+
+function coordinate(value) {
+    return value ? value.x + ":" + value.y + ":" + value.z : "-";
+}
+
+function numberValue(value, suffix) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+        return "-";
+    }
+
+    return number.toFixed(2).replace(/\.?0+$/, "") + (suffix || "");
+}
+
+function duration(seconds, translate) {
+    const number = Number(seconds);
+    const text = typeof translate === "function" ? translate : ((key, fallback) => fallback);
+    if (!Number.isFinite(number) || number < 0) {
+        return "-";
+    }
+    if (number < 60) {
+        return Math.round(number) + " " + text("secondsShort", "s");
+    }
+
+    const hours = Math.floor(number / 3600);
+    const minutes = Math.floor((number % 3600) / 60);
+    const remainingSeconds = Math.round(number % 60);
+    return [
+        hours > 0 ? hours + " h" : "",
+        minutes > 0 ? minutes + " min" : "",
+        hours === 0 ? remainingSeconds + " " + text("secondsShort", "s") : "",
+    ].filter(Boolean).join(" ");
+}
+
+function detailList(items) {
+    return "<dl>" + items.map((item) => (
+        "<div><dt>" + escapeHtml(item.label) + "</dt><dd>"
+        + (Object.prototype.hasOwnProperty.call(item, "htmlValue") ? String(item.htmlValue ?? "") : escapeHtml(item.value))
+        + "</dd></div>"
+    )).join("") + "</dl>";
+}
+
+function metricHtml(metric) {
+    const valueClass = metric.valueClass ? " class=\"" + escapeHtml(metric.valueClass) + "\"" : "";
+    const valueId = metric.valueId ? " id=\"" + escapeHtml(metric.valueId) + "\"" : "";
+    const extraAttributes = metric.valueAttributes ? " " + metric.valueAttributes : "";
+    const metricName = metric.name ? " data-metric=\"" + escapeHtml(metric.name) + "\"" : "";
+    const content = "<span>" + escapeHtml(metric.label) + "</span><b" + valueId + valueClass + extraAttributes + ">"
+        + escapeHtml(String(metric.value ?? "-")) + "</b>";
+
+    if (!metric.detail) {
+        return "<div class=\"metric\"" + metricName + ">" + content + "</div>";
+    }
+
+    return "<button class=\"metric interactive-metric\" type=\"button\" aria-expanded=\"false\"" + metricName + ">"
+        + content
+        + "<span class=\"metric-detail\" role=\"status\">" + metric.detail + "</span>"
+        + "</button>";
+}
+
+function bindMetricDetails(root) {
+    (root || document).querySelectorAll(".interactive-metric").forEach((metricNode) => {
+        if (metricNode.dataset.metricDetailsBound === "1") {
+            return;
+        }
+        metricNode.dataset.metricDetailsBound = "1";
+        metricNode.addEventListener("click", () => {
+            const expanded = metricNode.getAttribute("aria-expanded") === "true";
+            document.querySelectorAll(".interactive-metric[aria-expanded=\"true\"]").forEach((openNode) => {
+                if (openNode !== metricNode) {
+                    openNode.setAttribute("aria-expanded", "false");
+                }
+            });
+            metricNode.setAttribute("aria-expanded", expanded ? "false" : "true");
+        });
+    });
+}
+
+function renderMetrics(container, metrics) {
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = metrics.map(metricHtml).join("");
+    bindMetricDetails(container);
+}
+
+function collectRefreshTimes(value, observedAt, times) {
+    if (!value || typeof value !== "object") {
+        return times;
+    }
+
+    Object.entries(value).forEach(([key, item]) => {
+        const normalizedKey = key.toLowerCase();
+        if (typeof item === "number" && (
+            normalizedKey.endsWith("secondsremaining")
+            || normalizedKey.endsWith("remainingseconds")
+            || normalizedKey === "refreshafterseconds"
+            || normalizedKey === "nextrefreshseconds"
+        )) {
+            times.push(observedAt + Math.max(0, item) * 1000);
+            return;
+        }
+
+        if (typeof item === "string" && (
+            normalizedKey.endsWith("endsat")
+            || normalizedKey.endsWith("endat")
+            || normalizedKey.endsWith("dueat")
+            || normalizedKey.endsWith("runat")
+            || normalizedKey.endsWith("arrivalat")
+            || normalizedKey === "estimatedcompletionat"
+            || normalizedKey === "taskestimatedendtime"
+        )) {
+            const timestamp = Date.parse(item);
+            if (Number.isFinite(timestamp)) {
+                times.push(timestamp);
+            }
+        }
+
+        if (item && typeof item === "object") {
+            collectRefreshTimes(item, observedAt, times);
+        }
+    });
+
+    return times;
+}
+
+function nextRefreshDelay(payload, defaultDelayMs, minimumDelayMs, cushionMs) {
+    const observedAt = Date.now();
+    const defaultDelay = Number.isFinite(Number(defaultDelayMs)) ? Number(defaultDelayMs) : 15000;
+    const minimumDelay = Number.isFinite(Number(minimumDelayMs)) ? Number(minimumDelayMs) : 500;
+    const cushion = Number.isFinite(Number(cushionMs)) ? Number(cushionMs) : 500;
+    const futureTimes = collectRefreshTimes(payload, observedAt, [])
+        .filter((timestamp) => Number.isFinite(timestamp) && timestamp >= observedAt)
+        .sort((a, b) => a - b);
+
+    if (futureTimes.length === 0) {
+        return defaultDelay;
+    }
+
+    return Math.max(minimumDelay, Math.min(defaultDelay, futureTimes[0] - observedAt + cushion));
+}
+
+window.VNG = {
+    ...(window.VNG || {}),
+    apiJson,
+    bindMetricDetails,
+    coordinate,
+    detailList,
+    duration,
+    escapeHtml,
+    formatText,
+    labels,
+    loadI18n,
+    metricHtml,
+    nextRefreshDelay,
+    numberValue,
+    renderMetrics,
+    t,
+    validRelativeCoordinates,
+};
+window.dispatchEvent(new CustomEvent("VNGReady"));
+
 function showDialog(dialog) {
     if (!dialog) {
         return;

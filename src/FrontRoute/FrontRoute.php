@@ -3,6 +3,7 @@ namespace VonNeumannGame\FrontRoute;
 
 use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\View\TplBlock;
+use VonNeumannGame\FrontRoute\MenuLinkItem;
 
 
 class FrontRoute{
@@ -10,11 +11,15 @@ class FrontRoute{
     * Classe mère, sert à centraliser des méthodes pour les classes filles
     */
 
-   
+    protected array $leftMenuItems = []; 
 
     public function __construct()
     {
         
+    }
+    public function addLeftMenuItem(MenuLinkItem $item): void
+    {
+        $this->leftMenuItems[] = $item;
     }
     public function getCustomJs(): string
     {
@@ -29,7 +34,7 @@ class FrontRoute{
 
         if(isset($this->displayOnMainPage) && $this->displayOnMainPage === false){
             // Si la route n'est pas censée être affichée sur la page principale, on l'affiche seule
-            echo $this->getContent($method, $routePath);
+            echo $this->getContent($method, $routePath, $bearer, $language);
         }
         else{
             echo $this->renderMainPage(
@@ -101,9 +106,28 @@ class FrontRoute{
             ]));
         }else{
             //user connecté, on affiche la console, le content ira dedans
-            $tpl->addSubBlock((new TplBlock('authenticatedUserContent'))->addVars([
+            $tplauthenticatedUserContent = new TplBlock('authenticatedUserContent');
+            $tplauthenticatedUserContent->addVars([
                 'mainContent' => $content,
-            ]));
+            ]); 
+
+
+            //menu panel
+            
+            foreach($this->leftMenuItems as $menuLinkItem){
+                $tplauthenticatedUserContent->addSubBlock((new TplBlock('navpanellinks'))->addVars([
+                    'title' => $menuLinkItem->getTitle(),
+                    'href' => $menuLinkItem->getHref(),
+                    'class' => $menuLinkItem->isActive() ? 'panel-tab active' : 'panel-tab',
+                ]));
+            }
+
+            $tpl->addSubBlock($tplauthenticatedUserContent);
+            
+
+
+
+
         }
 
         return $tpl->applyTplFile($projectRoot . '/templates/main.html');

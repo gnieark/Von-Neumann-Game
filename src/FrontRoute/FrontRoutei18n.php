@@ -4,6 +4,8 @@ namespace VonNeumannGame\FrontRoute;
 use VonNeumannGame\I18n\Translator;
 
 class FrontRoutei18n extends FrontRoute{
+    protected bool $displayOnMainPage = false;
+
     public function getContent(string $method, string $routePath, ?string $bearer, string $language): string
     {
         $translator = new Translator(Translator::normalize($language));

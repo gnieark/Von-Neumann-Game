@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260609-stats-page';
+const ASSET_VERSION = '20260611-sensors-page';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -75,7 +75,7 @@ $availableroutes = [
         'uriPattern' => '#^/$#',
         'linkUri' => '/',
         'routeClass' => 'FrontRouteHome',
-        'displayOnMainMenu' => false,
+        'displayOnMainMenu' => true,
         'displayOnFooter' => false,
     ],
     'i18n' => [

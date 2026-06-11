@@ -731,11 +731,29 @@ button.account-menu-item:hover {
 }
 
 .panel-tab {
-    display: block;
+    display: flex;
+    align-items: center;
     width: 100%;
+    min-height: 40px;
     margin-top: 8px;
-    text-align: left;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: linear-gradient(180deg, #3a4043, #1c2022);
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
     padding: 10px 12px;
+    text-align: left;
+    text-decoration: none;
+}
+
+.panel-tab:hover {
+    border-color: var(--cold);
+}
+
+.panel-tab:focus-visible {
+    outline: 2px solid rgba(143, 182, 189, .4);
+    outline-offset: 1px;
 }
 
 .panel-tab.active {

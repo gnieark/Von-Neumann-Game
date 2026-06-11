@@ -8,14 +8,13 @@ use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\View\TplBlock;
 
 class FrontRouteHome extends FrontRoute{
+
     public function getContent(string $method, string $routePath, ?string $bearer, string $language): string
     {
         if ($bearer === null) {
             return $this->handleHome($language);
         }
         return $this->handleProbe($routePath,$language);
-
-
     }
 
     public function getPageTitle(?string $bearer, string $language): string
@@ -26,6 +25,12 @@ class FrontRouteHome extends FrontRoute{
         return 'Von Neumann Game - Probe';
     }
 
+    public function getCustomJs(): string
+    {
+        return '<script src="/assets/probe.js?v=' . (defined('ASSET_VERSION') ? ASSET_VERSION : '') .'" defer></script>';
+    }
+
+
     public function getMetaDescription(?string $bearer, string $language): string
     {
         $translator = new Translator(Translator::normalize($language));
@@ -35,7 +40,13 @@ class FrontRouteHome extends FrontRoute{
 
     private function handleProbe(string $routePath, string $language): string
     {
-            return "<h1>Probe</h1>";
+        $projectRoot = dirname(__DIR__, 2);
+        $translator = new Translator(Translator::normalize($language));
+        $tpl = new TplBlock();
+        $tpl->addPrefixedVars('t', $translator->allEscaped());
+
+        return $tpl->applyTplFile($projectRoot . '/templates/Probe.html');
+        
     }
     private function handleHome(string $language): string
     {

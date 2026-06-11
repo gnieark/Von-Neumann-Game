@@ -1,0 +1,34 @@
+<article id="probe-panel" class="data-panel active">
+    <div class="panel-heading">
+        <div>
+            <h2>{{t.tabProbe}}</h2>
+        </div>
+        <button class="icon-button" data-refresh="probe" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">⟳</button>
+    </div>
+    <div id="probe-summary" class="metrics" aria-live="polite">
+        <div class="metric" data-metric="status">
+            <span>{{t.status}}</span>
+            <b id="probe-metric-status">-</b>
+        </div>
+        <div class="metric" data-metric="sensors">
+            <span>{{t.sensors}}</span>
+            <b id="probe-metric-sensors">-</b>
+        </div>
+        <div class="metric" data-metric="deuterium">
+            <span>{{t.deuterium}}</span>
+            <b id="probe-metric-deuterium">-</b>
+        </div>
+        <div class="metric" data-metric="sector">
+            <span>{{t.sector}}</span>
+            <b id="probe-metric-sector">-</b>
+        </div>
+        <div class="metric" data-metric="velocity">
+            <span>{{t.velocityC}}</span>
+            <b id="probe-metric-velocity">-</b>
+        </div>
+        <div class="metric" data-metric="heading">
+            <span>{{t.heading}}</span>
+            <b id="probe-metric-heading">-</b>
+        </div>
+    </div>
+</article>

@@ -1,0 +1,20 @@
+<article id="environment-panel" class="data-panel active">
+    <div class="panel-heading">
+        <div>
+            <h2>{{t.tabEnvironment}}</h2>
+        </div>
+        <button class="icon-button" data-refresh="sector" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+    </div>
+    <form id="sector-form" class="coordinate-form">
+        <label>X<input name="x" type="number" step="1" value="0"></label>
+        <label>Y<input name="y" type="number" step="1" value="0"></label>
+        <label>Z<input name="z" type="number" step="1" value="0"></label>
+        <span id="sector-scan-control" class="scan-control">
+            <button id="sector-scan-submit" type="submit">{{t.scan}}</button>
+        </span>
+    </form>
+    <p id="sector-context" class="sector-context" aria-live="polite">{{t.loading}}</p>
+    <p id="sector-summary" class="sector-summary" aria-live="polite">{{t.loading}}</p>
+    <div id="sector-objects" class="sector-objects"></div>
+    <p class="sector-units-hint">{{t.sectorUnitsHint}}</p>
+</article>
