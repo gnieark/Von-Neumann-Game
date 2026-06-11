@@ -9,6 +9,8 @@
     let loadInProgress = false;
     let currentProbeSectorRelative = null;
     let currentScanTarget = null;
+    let neighborScanRunId = 0;
+    let neighborScanInProgress = false;
 
     function withVng(callback) {
         if (window.VNG) {
@@ -167,6 +169,14 @@
         const b = relativeCoordinates(right);
 
         return a !== null && b !== null && a.x === b.x && a.y === b.y && a.z === b.z;
+    }
+
+    function sleep(ms) {
+        return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    function movementUrl(target) {
+        return "/movement/" + encodeURIComponent(String(target.x)) + "/" + encodeURIComponent(String(target.y)) + "/" + encodeURIComponent(String(target.z));
     }
 
     function numericCount(value) {
@@ -746,6 +756,161 @@
         updateLiveCountdowns();
     }
 
+    function neighborSectorDeltas() {
+        return [
+            {"x": 1, "y": 1, "z": 0},
+            {"x": 1, "y": -1, "z": 0},
+            {"x": -1, "y": 1, "z": 0},
+            {"x": -1, "y": -1, "z": 0},
+            {"x": 1, "y": 0, "z": 1},
+            {"x": 1, "y": 0, "z": -1},
+            {"x": -1, "y": 0, "z": 1},
+            {"x": -1, "y": 0, "z": -1},
+            {"x": 0, "y": 1, "z": 1},
+            {"x": 0, "y": 1, "z": -1},
+            {"x": 0, "y": -1, "z": 1},
+            {"x": 0, "y": -1, "z": -1},
+        ];
+    }
+
+    function neighborSectorTargets(origin) {
+        const base = relativeCoordinates(origin);
+        if (!base) {
+            return [];
+        }
+
+        return neighborSectorDeltas().map((delta) => ({
+            "x": base.x + delta.x,
+            "y": base.y + delta.y,
+            "z": base.z + delta.z,
+        }));
+    }
+
+    function setNeighborScanStatus(message) {
+        const node = document.getElementById("neighbor-scan-status");
+        if (!node) {
+            return;
+        }
+
+        node.textContent = message;
+        node.hidden = message === "";
+    }
+
+    function neighborTileHtml(target, sector, error) {
+        const coordinates = window.VNG.coordinate(target);
+        const summary = error
+            ? (error.message || tr("sectorNeighborScanFailed", "Scan unavailable for this sector."))
+            : sectorSummary(sector);
+        const context = error ? "" : sectorContext(sector);
+
+        return "<article class=\"neighbor-sector-tile\">"
+            + "<h4>" + window.VNG.escapeHtml(coordinates) + "</h4>"
+            + (context ? "<p class=\"neighbor-sector-context\">" + window.VNG.escapeHtml(context) + "</p>" : "")
+            + "<p>" + window.VNG.escapeHtml(summary) + "</p>"
+            + "<a class=\"button-link neighbor-sector-jump\" href=\"" + window.VNG.escapeHtml(movementUrl(target)) + "\">" + window.VNG.escapeHtml(tr("prepareJump", "Prepare jump")) + "</a>"
+            + "</article>";
+    }
+
+    function appendNeighborTile(target, sector, error) {
+        const grid = document.getElementById("neighbor-sector-grid");
+        if (!grid) {
+            return;
+        }
+
+        const holder = document.createElement("div");
+        holder.innerHTML = neighborTileHtml(target, sector, error);
+        const tile = holder.firstElementChild;
+        if (tile) {
+            grid.appendChild(tile);
+        }
+    }
+
+    async function fetchProbeSectorRelative() {
+        const data = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
+        currentProbeSectorRelative = relativeCoordinates(data.sector && data.sector.relativeCoordinates);
+
+        return currentProbeSectorRelative;
+    }
+
+    async function fetchSectorScan(target) {
+        const query = new URLSearchParams({
+            "x": String(target.x),
+            "y": String(target.y),
+            "z": String(target.z),
+        });
+        const data = await window.VNG.apiJson("/api/sector?" + query.toString(), {"method": "GET"});
+
+        return data && data.sector ? data.sector : null;
+    }
+
+    async function scanNeighborSectors() {
+        if (neighborScanInProgress) {
+            return;
+        }
+
+        const button = document.getElementById("neighbor-scan-button");
+        const grid = document.getElementById("neighbor-sector-grid");
+        const runId = neighborScanRunId + 1;
+        neighborScanRunId = runId;
+        neighborScanInProgress = true;
+        if (button) {
+            button.disabled = true;
+            button.setAttribute("aria-disabled", "true");
+        }
+        if (grid) {
+            grid.innerHTML = "";
+        }
+
+        try {
+            const origin = await fetchProbeSectorRelative();
+            const targets = neighborSectorTargets(origin);
+            if (targets.length === 0) {
+                setNeighborScanStatus(tr("sectorNeighborScanFailed", "Scan unavailable for this sector."));
+                return;
+            }
+
+            for (let index = 0; index < targets.length; index += 1) {
+                if (runId !== neighborScanRunId) {
+                    return;
+                }
+
+                const target = targets[index];
+                setNeighborScanStatus(window.VNG.formatText(
+                    tr("sectorNeighborScanStatus", "Scan sector {current}/{total} - aiming sensors at coords {coords}"),
+                    {
+                        "current": index + 1,
+                        "total": targets.length,
+                        "coords": window.VNG.coordinate(target),
+                    }
+                ));
+
+                let sector = null;
+                let error = null;
+                try {
+                    const [scan] = await Promise.all([fetchSectorScan(target), sleep(1000)]);
+                    sector = scan;
+                } catch (caught) {
+                    error = caught instanceof Error ? caught : new Error(tr("sectorNeighborScanFailed", "Scan unavailable for this sector."));
+                    await sleep(1000);
+                }
+
+                appendNeighborTile(target, sector, error);
+            }
+
+            setNeighborScanStatus("");
+        } catch (error) {
+            setNeighborScanStatus(error.message || tr("requestDenied", "Request denied"));
+        } finally {
+            if (runId === neighborScanRunId) {
+                neighborScanInProgress = false;
+                if (button) {
+                    button.disabled = false;
+                    button.setAttribute("aria-disabled", "false");
+                }
+            }
+        }
+    }
+
     async function loadSector(path) {
         if (loadInProgress) {
             return;
@@ -765,12 +930,14 @@
             syncPrepareJumpButton(data.sector);
             applySectorScanButtonState();
             scheduleRefresh(data);
+            return data;
         } catch (error) {
             renderSectorObjects(null);
             syncPrepareJumpButton(null);
             setText("sector-context", error.message || tr("requestDenied", "Request denied"));
             applySectorScanButtonState();
             scheduleRefresh(null);
+            return null;
         } finally {
             loadInProgress = false;
         }
@@ -825,8 +992,9 @@
             window.location.assign("/movement/" + encodeURIComponent(String(target.x)) + "/" + encodeURIComponent(String(target.y)) + "/" + encodeURIComponent(String(target.z)));
         });
         document.querySelector("[data-refresh=\"sector\"]")?.addEventListener("click", () => {
-            loadDisplayedSector();
+            loadCurrentSector();
         });
+        document.getElementById("neighbor-scan-button")?.addEventListener("click", scanNeighborSectors);
     }
 
     document.addEventListener("DOMContentLoaded", () => {

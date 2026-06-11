@@ -929,6 +929,96 @@ button.account-menu-item:hover {
     margin-bottom: 14px;
 }
 
+.sector-scan-section {
+    display: grid;
+    gap: 12px;
+}
+
+.sector-scan-section h3 {
+    margin: 0;
+    color: #eef9fb;
+    font-size: 1rem;
+}
+
+.sector-scan-separator {
+    margin: 22px 0;
+    border: 0;
+    border-top: 1px solid rgba(143, 182, 189, .24);
+}
+
+.sector-neighbor-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.sector-neighbor-status {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(143, 182, 189, .42);
+    background: rgba(143, 182, 189, .1);
+    color: #dce9eb;
+    font-weight: 800;
+    animation: sensor-scan-pulse 1s ease-in-out infinite;
+}
+
+.sector-neighbor-status[hidden] {
+    display: none;
+}
+
+.neighbor-sector-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px;
+}
+
+.neighbor-sector-tile {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(0,0,0,.18);
+    animation: neighbor-tile-enter .22s ease-out both;
+}
+
+.neighbor-sector-tile h4 {
+    margin: 0;
+    color: #eef9fb;
+    font-size: .95rem;
+}
+
+.neighbor-sector-tile p {
+    margin: 0;
+    color: var(--text);
+    font-size: .9rem;
+    line-height: 1.45;
+}
+
+.neighbor-sector-context {
+    color: var(--muted) !important;
+}
+
+.button-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 8px 10px;
+    border: 1px solid rgba(184, 111, 75, .65);
+    border-radius: 2px;
+    background: linear-gradient(180deg, #8b5137, #3b241c);
+    color: var(--text);
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.button-link:hover,
+.button-link:focus-visible {
+    border-color: var(--cold);
+}
+
 .sector-context {
     margin: -6px 0 10px;
     color: var(--muted);
@@ -1186,6 +1276,31 @@ button.account-menu-item:hover {
         background: rgba(12, 255, 119, .05);
         color: #20ff84;
         box-shadow: 0 0 0 1px rgba(32, 255, 132, .22), 0 0 6px rgba(32, 255, 132, .18);
+    }
+}
+
+@keyframes sensor-scan-pulse {
+    0%,
+    100% {
+        border-color: rgba(143, 182, 189, .28);
+        box-shadow: 0 0 0 rgba(143, 182, 189, 0);
+    }
+
+    50% {
+        border-color: rgba(143, 182, 189, .72);
+        box-shadow: 0 0 16px rgba(143, 182, 189, .2);
+    }
+}
+
+@keyframes neighbor-tile-enter {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
 }
 
