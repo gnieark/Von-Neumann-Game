@@ -41,13 +41,13 @@
         </form>
         <div class="account-menu tutorial-menu">
             <button class="account-menu-button" type="button" aria-expanded="false">
-                <span>Tutorial</span>
+                <span>{{t.tutorialMenu}}</span>
                 <span aria-hidden="true">▾</span>
             </button>
             <div class="account-menu-panel" hidden="">
-                <button class="account-menu-item" data-tutorial-target="tutorial-context-dialog" type="button">Context</button>
-                <button class="account-menu-item" data-tutorial-target="tutorial-move-dialog" type="button">Move the probe</button>
-                <button class="account-menu-item" data-tutorial-target="tutorial-mannies-dialog" type="button">Use the Mannys</button>
+                <button class="account-menu-item" data-tutorial-target="tutorial-context-dialog" type="button">{{t.tutorialContext}}</button>
+                <button class="account-menu-item" data-tutorial-target="tutorial-move-dialog" type="button">{{t.tutorialMoveProbe}}</button>
+                <button class="account-menu-item" data-tutorial-target="tutorial-mannies-dialog" type="button">{{t.tutorialUseMannies}}</button>
             </div>
         </div>
         {{topheader}}
@@ -59,7 +59,7 @@
                 <p class="eyebrow">Active console</p>
                 <h1 id="navpanelPalyer"></h1>
                 <!-- BEGIN authenticatedUserContent.navpanellinks -->
-                 <a class="{{authenticatedUserContent.navpanellinks.class}}"  href="{{authenticatedUserContent.navpanellinks.href}}">{{authenticatedUserContent.navpanellinks.title}}</a>
+                 <a class="{{authenticatedUserContent.navpanellinks.class}}" href="{{authenticatedUserContent.navpanellinks.href}}" data-nav-link="{{authenticatedUserContent.navpanellinks.href}}">{{authenticatedUserContent.navpanellinks.title}}</a>
                 <!-- END authenticatedUserContent.navpanellinks -->  
             </aside>
             <section class="workspace">
@@ -73,6 +73,178 @@
         <!-- END anonymousUserContent -->
         {{mainContent}}
     </main>
+    <dialog id="tutorial-context-dialog" class="consent-banner tutorial-dialog" aria-labelledby="tutorial-context-title" hidden>
+        <button class="dialog-close icon-button" data-tutorial-close type="button" aria-label="{{t.close}}">×</button>
+        <p class="eyebrow">{{t.tutorialMenu}}</p>
+        <h2 id="tutorial-context-title">{{t.tutorialContext}}</h2>
+        <p class="tutorial-step-progress" data-tutorial-progress aria-live="polite">1 / 4</p>
+        <section class="tutorial-step" data-tutorial-step>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/contexte-1.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/contexte-1.png" alt="{{t.tutorialContextStepOneImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialStepOneTitle}} {{tutorialProbeName}}</h3>
+                <p>{{t.tutorialContextStepOne}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/contexte-2.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/contexte-2.png" alt="{{t.tutorialContextStepTwoImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialStepTwoTitle}}</h3>
+                <p>{{t.tutorialContextStepTwo}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/contexte-3.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/contexte-3.png" alt="{{t.tutorialContextStepThreeImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialStepThreeTitle}}</h3>
+                <p>{{t.tutorialContextStepThree}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/contexte-4.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/contexte-4.png" alt="{{t.tutorialContextStepFourImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialStepFourTitle}}</h3>
+                <p>{{t.tutorialContextStepFour}}</p>
+                <p class="tutorial-followup">
+                    <a href="/?tutorial=move" data-tutorial-target="tutorial-move-dialog">{{t.tutorialMoveProbe}}</a>
+                </p>
+            </div>
+        </section>
+        <div class="tutorial-actions">
+            <button class="primary" data-tutorial-next type="button">{{t.tutorialNext}}</button>
+            <button class="primary" data-tutorial-close data-tutorial-close-final type="button" hidden>{{t.close}}</button>
+        </div>
+    </dialog>
+    <dialog id="tutorial-move-dialog" class="consent-banner tutorial-dialog" aria-labelledby="tutorial-move-title" hidden>
+        <button class="dialog-close icon-button" data-tutorial-close type="button" aria-label="{{t.close}}">×</button>
+        <p class="eyebrow">{{t.tutorialMenu}}</p>
+        <h2 id="tutorial-move-title">{{t.tutorialMoveProbe}}</h2>
+        <p class="tutorial-step-progress" data-tutorial-progress aria-live="polite">1 / 3</p>
+        <section class="tutorial-step" data-tutorial-step>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/deplacement-1.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/deplacement-1.png" alt="{{t.tutorialMoveStepOneImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialMoveStepOneTitle}}</h3>
+                <p>{{t.tutorialMoveStepOneIntro}}<em>{{t.tabEnvironment}}</em>{{t.tutorialMoveStepOneAfterEnvironment}}<em>{{t.scan}}</em>{{t.tutorialMoveStepOneAfterScan}}{{t.prepareJump}}{{t.tutorialMoveStepOneAfterPrepareJump}}<em>{{t.tabActions}}</em>{{t.tutorialMoveStepOneEnd}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/deplacement-2.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/deplacement-2.png" alt="{{t.tutorialMoveStepTwoImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialMoveStepTwoTitle}}</h3>
+                <p>{{t.tutorialMoveStepTwo}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/deplacement-3.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/deplacement-3.png" alt="{{t.tutorialMoveStepThreeImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialMoveStepThreeTitle}}</h3>
+                <p>{{t.tutorialMoveStepThree}}</p>
+                <p class="tutorial-followup">
+                    <a href="/?tutorial=mannies" data-tutorial-target="tutorial-mannies-dialog">{{t.tutorialUseMannies}}</a>
+                </p>
+            </div>
+        </section>
+        <div class="tutorial-actions">
+            <button class="primary" data-tutorial-next type="button">{{t.tutorialNext}}</button>
+            <button class="primary" data-tutorial-close data-tutorial-close-final type="button" hidden>{{t.close}}</button>
+        </div>
+    </dialog>
+    <dialog id="tutorial-mannies-dialog" class="consent-banner tutorial-dialog" aria-labelledby="tutorial-mannies-title" hidden>
+        <button class="dialog-close icon-button" data-tutorial-close type="button" aria-label="{{t.close}}">×</button>
+        <p class="eyebrow">{{t.tutorialMenu}}</p>
+        <h2 id="tutorial-mannies-title">{{t.tutorialUseMannies}}</h2>
+        <p class="tutorial-step-progress" data-tutorial-progress aria-live="polite">1 / 5</p>
+        <section class="tutorial-step" data-tutorial-step>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/Manny-1.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/Manny-1.png" alt="{{t.tutorialManniesStepOneImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialManniesStepOneTitle}}</h3>
+                <p>{{t.tutorialManniesStepOne}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/Manny-2.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/Manny-2.png" alt="{{t.tutorialManniesStepTwoImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialManniesStepTwoTitle}}</h3>
+                <p>{{t.tutorialManniesStepTwo}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/Manny-3.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/Manny-3.png" alt="{{t.tutorialManniesStepThreeImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialManniesStepThreeTitle}}</h3>
+                <p>{{t.tutorialManniesStepThree}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/Manny-4.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/Manny-4.png" alt="{{t.tutorialManniesStepFourImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialManniesStepFourTitle}}</h3>
+                <p>{{t.tutorialManniesStepFour}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/Manny-5.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/Manny-5.png" alt="{{t.tutorialManniesStepFiveImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialManniesStepFiveTitle}}</h3>
+                <p>{{t.tutorialManniesStepFive}}</p>
+            </div>
+        </section>
+        <div class="tutorial-actions">
+            <button class="primary" data-tutorial-next type="button">{{t.tutorialNext}}</button>
+            <button class="primary" data-tutorial-close data-tutorial-close-final type="button" hidden>{{t.close}}</button>
+        </div>
+    </dialog>
+    <dialog id="tutorial-image-preview-dialog" class="tutorial-image-preview-dialog" hidden>
+        <button class="dialog-close icon-button" data-tutorial-image-preview-close type="button" aria-label="{{t.close}}">×</button>
+        <img id="tutorial-image-preview" class="tutorial-image-preview" alt="">
+    </dialog>
     <footer class="site-footer">
         <a href="/about">{{t.aboutFooterLink}}</a>
         <a href="/changelog">{{t.changelogFooterLink}}</a>

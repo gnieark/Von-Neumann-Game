@@ -79,6 +79,8 @@ function escapeHtml(value) {
 }
 
 let i18nPromise = null;
+let navigationWarningTimer = null;
+const sectorAlertAcknowledgementsStorageKey = "vng:sector-alert-acknowledgements:v1";
 
 function loadI18n() {
     if (window.VNG_I18N && typeof window.VNG_I18N === "object") {
@@ -264,8 +266,194 @@ function nextRefreshDelay(payload, defaultDelayMs, minimumDelayMs, cushionMs) {
     return Math.max(minimumDelay, Math.min(defaultDelay, futureTimes[0] - observedAt + cushion));
 }
 
+function navLinkNodes(path) {
+    return Array.from(document.querySelectorAll(".nav-panel a.panel-tab")).filter((node) => {
+        const href = node.getAttribute("href") || "";
+        const navLink = node.dataset.navLink || "";
+        return href === path || navLink === path;
+    });
+}
+
+function setNavigationWarning(path, active) {
+    navLinkNodes(path).forEach((node) => {
+        node.classList.toggle("alerts-pending", Boolean(active));
+    });
+}
+
+function sectorAlertStorageKey(type, sector, signature) {
+    const relative = sector && sector.relativeCoordinates ? sector.relativeCoordinates : null;
+    return [
+        type,
+        relative ? coordinate(relative) : "unknown",
+        signature || "",
+    ].join("|");
+}
+
+function readSectorAlertAcknowledgements() {
+    try {
+        const value = window.localStorage.getItem(sectorAlertAcknowledgementsStorageKey);
+        const parsed = value ? JSON.parse(value) : [];
+        return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch (error) {
+        return new Set();
+    }
+}
+
+function writeSectorAlertAcknowledgements(items) {
+    try {
+        window.localStorage.setItem(sectorAlertAcknowledgementsStorageKey, JSON.stringify(Array.from(items)));
+    } catch (error) {
+        // Local storage can be unavailable in private contexts; alerts still render.
+    }
+}
+
+function isSectorAlertAcknowledged(type, sector, signature) {
+    return readSectorAlertAcknowledgements().has(sectorAlertStorageKey(type, sector, signature));
+}
+
+function acknowledgeSectorAlert(type, sector, signature) {
+    const acknowledgements = readSectorAlertAcknowledgements();
+    acknowledgements.add(sectorAlertStorageKey(type, sector, signature));
+    writeSectorAlertAcknowledgements(acknowledgements);
+}
+
+function alertObjectTypeLabel(messages, type) {
+    return {
+        "asteroid": t(messages, "asteroidObject", "Asteroid"),
+        "planet": t(messages, "planetObject", "Planet"),
+        "star": t(messages, "starObject", "Star"),
+        "solar_system": t(messages, "solarSystemObject", "Solar system"),
+        "black_hole": t(messages, "blackHoleObject", "Black hole"),
+        "dust_cloud": t(messages, "dustCloudObject", "Dust cloud"),
+        "object": t(messages, "object", "Object"),
+    }[type] || type || t(messages, "object", "Object");
+}
+
+function bookmarkedSectorObjects(sector, messages) {
+    if (!sector || !Array.isArray(sector.objects)) {
+        return [];
+    }
+
+    const result = [];
+    const seen = new Set();
+    const collect = (object) => {
+        if (!object || typeof object !== "object") {
+            return;
+        }
+        if (Array.isArray(object.waypointBookmarks) && object.waypointBookmarks.length > 0) {
+            const label = [alertObjectTypeLabel(messages, object.type || "object"), object.name || object.id].filter(Boolean).join(" ");
+            const key = String(object.id || object.name || label);
+            if (!seen.has(key)) {
+                seen.add(key);
+                result.push({
+                    key,
+                    "label": label || key,
+                    "bookmarks": object.waypointBookmarks,
+                });
+            }
+        }
+        ["bookmarkTargets", "minableTargets"].forEach((childKey) => {
+            if (Array.isArray(object[childKey])) {
+                object[childKey].forEach(collect);
+            }
+        });
+    };
+    sector.objects.forEach(collect);
+
+    return result;
+}
+
+function sectorAlerts(sector, messages) {
+    const alerts = [];
+    const bookmarkedObjects = bookmarkedSectorObjects(sector, messages);
+    if (bookmarkedObjects.length > 0) {
+        const signature = bookmarkedObjects.map((object) => object.key).sort().join("|");
+        alerts.push({
+            "type": "bookmark",
+            "className": "sector-bookmark-alert",
+            "message": formatText(t(messages, "sectorWaypointBookmarkAlert", "Waypoint bookmark detected on object(s): {objects}"), {
+                "objects": bookmarkedObjects.map((object) => object.label).join(", "),
+            }),
+            signature,
+        });
+    }
+
+    const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
+    if (probes.length > 0) {
+        const probeLabels = probes.map((probe) => formatText(t(messages, "sectorProbeAlertEntry", "{name} ({movement})"), {
+            "name": probe && probe.name ? probe.name : t(messages, "unknownProbe", "Unknown probe"),
+            "movement": probe && probe.moving
+                ? t(messages, "probeMovementActive", "movement in progress")
+                : t(messages, "probeMovementInactive", "no movement in progress"),
+        }));
+        const signature = probes.map((probe) => [
+            probe && probe.id ? probe.id : "unknown",
+            probe && probe.name ? probe.name : t(messages, "unknownProbe", "Unknown probe"),
+            probe && probe.moving ? "moving" : "idle",
+        ].join(":")).sort().join("|");
+        alerts.push({
+            "type": "probe",
+            "className": "sector-probe-alert",
+            "message": formatText(t(messages, "sectorProbeAlert", "Probe detected in sector: {probes}"), {
+                "probes": probeLabels.join(", "),
+            }),
+            signature,
+        });
+    }
+
+    const containers = (Array.isArray(sector && sector.objects) ? sector.objects : [])
+        .filter((object) => object && object.type === "detached_container" && object.id);
+    if (containers.length > 0) {
+        const signature = containers.map((container) => [container.id, container.name || "", container.mode || ""].join(":")).sort().join("|");
+        alerts.push({
+            "type": "detached_container",
+            "className": "sector-detached-container-alert",
+            "message": formatText(t(messages, "sectorDetachedContainerAlert", "Detached container detected in sector: {containers}"), {
+                "containers": containers.map((container) => container.name || container.id).join(", "),
+            }),
+            signature,
+        });
+    }
+
+    return alerts.map((alert) => ({
+        ...alert,
+        "acknowledged": isSectorAlertAcknowledged(alert.type, sector, alert.signature),
+    }));
+}
+
+async function syncNavigationWarnings() {
+    if (document.body.dataset.authenticated !== "1") {
+        return;
+    }
+
+    const messages = await loadI18n();
+    const [messageData, sectorData] = await Promise.all([
+        apiJson("/api/probe/messages?limit=50&offset=0", {"method": "GET"}).catch(() => null),
+        apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
+    ]);
+
+    if (messageData) {
+        const receivedMessages = Array.isArray(messageData.messages) ? messageData.messages : [];
+        setNavigationWarning("/messaging", receivedMessages.some((message) => message && message.status === "unread"));
+    }
+    if (sectorData) {
+        const alerts = sectorAlerts(sectorData.sector || {}, messages);
+        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged));
+    }
+}
+
+function startNavigationWarningSync() {
+    if (document.body.dataset.authenticated !== "1" || navigationWarningTimer !== null) {
+        return;
+    }
+
+    syncNavigationWarnings();
+    navigationWarningTimer = window.setInterval(syncNavigationWarnings, 15000);
+}
+
 window.VNG = {
     ...(window.VNG || {}),
+    acknowledgeSectorAlert,
     apiJson,
     bindMetricDetails,
     coordinate,
@@ -279,6 +467,10 @@ window.VNG = {
     nextRefreshDelay,
     numberValue,
     renderMetrics,
+    sectorAlerts,
+    setNavigationWarning,
+    startNavigationWarningSync,
+    syncNavigationWarnings,
     t,
     validRelativeCoordinates,
 };
@@ -302,6 +494,164 @@ function closeDialog(dialog) {
         dialog.close();
     }
     dialog.hidden = true;
+}
+
+function bindTutorialDialog(closeAccountMenus) {
+    const previewDialog = document.getElementById("tutorial-image-preview-dialog");
+    const previewImage = document.getElementById("tutorial-image-preview");
+    const closePreview = () => {
+        if (!previewDialog) {
+            return;
+        }
+        closeDialog(previewDialog);
+        previewImage?.removeAttribute("src");
+    };
+
+    document.querySelectorAll("[data-tutorial-image-preview]").forEach((button) => {
+        if (button.dataset.tutorialImagePreviewBound === "1") {
+            return;
+        }
+        button.dataset.tutorialImagePreviewBound = "1";
+        button.addEventListener("click", () => {
+            if (!previewDialog || !previewImage) {
+                return;
+            }
+            const image = button.querySelector("img");
+            previewImage.src = button.dataset.tutorialImagePreview || image?.src || "";
+            previewImage.alt = image?.alt || "";
+            showDialog(previewDialog);
+        });
+    });
+
+    const previewClose = previewDialog?.querySelector("[data-tutorial-image-preview-close]");
+    if (previewClose && previewClose.dataset.tutorialPreviewCloseBound !== "1") {
+        previewClose.dataset.tutorialPreviewCloseBound = "1";
+        previewClose.addEventListener("click", closePreview);
+    }
+    if (previewDialog && previewDialog.dataset.tutorialPreviewDialogBound !== "1") {
+        previewDialog.dataset.tutorialPreviewDialogBound = "1";
+        previewDialog.addEventListener("click", (event) => {
+            if (event.target === previewDialog) {
+                closePreview();
+            }
+        });
+        previewDialog.addEventListener("close", () => {
+            previewDialog.hidden = true;
+        });
+    }
+
+    const tutorialControllers = new Map();
+
+    document.querySelectorAll(".tutorial-dialog").forEach((dialog) => {
+        const steps = dialog ? Array.from(dialog.querySelectorAll("[data-tutorial-step]")) : [];
+        const progress = dialog?.querySelector("[data-tutorial-progress]");
+        const nextButton = dialog?.querySelector("[data-tutorial-next]");
+        const closeButton = dialog?.querySelector("[data-tutorial-close-final]");
+        let currentStep = 0;
+
+        if (!dialog || steps.length === 0 || !nextButton || !closeButton) {
+            return;
+        }
+
+        const renderStep = () => {
+            steps.forEach((step, index) => {
+                step.hidden = index !== currentStep;
+            });
+            if (progress) {
+                progress.textContent = String(currentStep + 1) + " / " + String(steps.length);
+            }
+            nextButton.hidden = currentStep >= steps.length - 1;
+            closeButton.hidden = currentStep < steps.length - 1;
+        };
+
+        const closeTutorial = () => closeDialog(dialog);
+        const openTutorial = () => {
+            currentStep = 0;
+            renderStep();
+            showDialog(dialog);
+        };
+
+        if (nextButton.dataset.tutorialNextBound !== "1") {
+            nextButton.dataset.tutorialNextBound = "1";
+            nextButton.addEventListener("click", () => {
+                if (currentStep < steps.length - 1) {
+                    currentStep += 1;
+                    renderStep();
+                }
+            });
+        }
+
+        dialog.querySelectorAll("[data-tutorial-close]").forEach((button) => {
+            if (button.dataset.tutorialCloseBound === "1") {
+                return;
+            }
+            button.dataset.tutorialCloseBound = "1";
+            button.addEventListener("click", closeTutorial);
+        });
+
+        if (dialog.dataset.tutorialDialogBound !== "1") {
+            dialog.dataset.tutorialDialogBound = "1";
+            dialog.addEventListener("close", () => {
+                dialog.hidden = true;
+            });
+        }
+
+        tutorialControllers.set(dialog.id, {
+            "close": closeTutorial,
+            "open": openTutorial,
+        });
+    });
+
+    const openTutorialById = (targetId) => {
+        const controller = tutorialControllers.get(targetId);
+        if (!controller) {
+            return false;
+        }
+
+        closeAccountMenus?.();
+        tutorialControllers.forEach((candidate) => {
+            if (candidate !== controller) {
+                candidate.close();
+            }
+        });
+        controller.open();
+        return true;
+    };
+
+    document.querySelectorAll("[data-tutorial-target]").forEach((trigger) => {
+        if (trigger.dataset.tutorialTargetBound === "1") {
+            return;
+        }
+        trigger.dataset.tutorialTargetBound = "1";
+        trigger.addEventListener("click", (event) => {
+            if (openTutorialById(trigger.dataset.tutorialTarget || "")) {
+                event.preventDefault();
+            }
+        });
+    });
+
+    const tutorialAliases = {
+        "context": "tutorial-context-dialog",
+        "contexte": "tutorial-context-dialog",
+        "move": "tutorial-move-dialog",
+        "deplacement": "tutorial-move-dialog",
+        "mannies": "tutorial-mannies-dialog",
+    };
+    const params = new URLSearchParams(window.location.search);
+    const requestedTutorial = params.get("tutorial") || "";
+    if (requestedTutorial !== "" && document.body.dataset.tutorialQueryHandled !== "1") {
+        document.body.dataset.tutorialQueryHandled = "1";
+        const targetId = tutorialAliases[requestedTutorial] || requestedTutorial;
+        if (openTutorialById(targetId) && window.history?.replaceState) {
+            params.delete("tutorial");
+            const nextSearch = params.toString();
+            window.history.replaceState(
+                {},
+                "",
+                window.location.pathname + (nextSearch ? "?" + nextSearch : "") + window.location.hash
+            );
+        }
+    }
 }
 
 function bindAccountMenus() {
@@ -518,19 +868,23 @@ async function loadCurrentPlayer(spanOperator) {
 
 document.addEventListener("DOMContentLoaded", () => {
     if (document.body.dataset.authenticated !== "1") {
-        bindAccountMenus();
+        const closeAccountMenus = bindAccountMenus();
+        bindTutorialDialog(closeAccountMenus);
         return;
     }
 
     const header = document.querySelector("header.topbar");
     if (!header || header.querySelector(".sessionbar")) {
-        bindAccountMenus();
+        const closeAccountMenus = bindAccountMenus();
+        bindTutorialDialog(closeAccountMenus);
         return;
     }
 
     const {apiKeyButton, sessionbar, spanOperator} = createSessionBar();
     header.appendChild(sessionbar);
     const closeAccountMenus = bindAccountMenus();
+    bindTutorialDialog(closeAccountMenus);
     bindApiKeyButton(apiKeyButton, closeAccountMenus);
     loadCurrentPlayer(spanOperator);
+    startNavigationWarningSync();
 });

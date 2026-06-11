@@ -95,6 +95,7 @@ class FrontRoute{
             "customJs" => $this->getCustomJs(),
             "customCss" => $this->getCustomCss(),
             "mainContent" => "",
+            "tutorialProbeName" => self::e('N°8421'),
         ]);
         $tpl->addPrefixedVars('t', $translator->allEscaped());
         $this->addLanguageOptions($tpl, $translator);

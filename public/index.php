@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260611-inventories-page';
+const ASSET_VERSION = '20260611-tutorials';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -132,7 +132,7 @@ $availableroutes = [
     "changelog" =>[
         'name'  => 'changelog',
         'methods' => ['GET','HEAD'],
-        'needAuth' => true,
+        'needAuth' => false,
         'uriPattern' => '#^/changelog$#',
         'linkUri' => '/changelog',
         'routeClass' => 'FrontRouteChangelog',
@@ -140,9 +140,9 @@ $availableroutes = [
         'displayOnFooter' => false,   
     ],
     "stats" => [
-        'name'  =>   htmlspecialchars($translator->get('StatistiquesPageTitle'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+        'name'  =>   htmlspecialchars($translator->get('statsFooterLink'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
         'methods' => ['GET','HEAD'],
-        'needAuth' => true,
+        'needAuth' => false,
         'uriPattern' => '#^/stats$#',
         'linkUri' => '/stats',
         'routeClass' => 'FrontRouteStats',

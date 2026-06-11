@@ -1,0 +1,22 @@
+<article id="messages-panel" class="data-panel active">
+    <div class="panel-heading">
+        <div>
+            <h2>{{t.tabMessages}}</h2>
+        </div>
+        <button class="icon-button" data-refresh="messages" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+    </div>
+    <p class="message-intro">{{t.messageIntro}}</p>
+    <form id="message-form" class="message-form">
+        <label>{{t.messageRecipient}}<select id="message-recipient" name="recipientProbeId" required></select></label>
+        <label class="message-body-label">{{t.messageBody}}<textarea id="message-body" name="body" rows="4" maxlength="2000" required></textarea></label>
+        <button id="message-submit" class="primary" type="submit">{{t.sendMessage}}</button>
+    </form>
+    <p id="message-status" class="action-status" aria-live="polite"></p>
+    <div class="message-folder-tabs" role="tablist" aria-label="{{t.messageFolders}}">
+        <button id="messages-received-tab" class="message-folder-tab active" data-message-folder="received" role="tab" aria-selected="true" aria-controls="messages-list" type="button">{{t.receivedMessages}}</button>
+        <button id="messages-sent-tab" class="message-folder-tab" data-message-folder="sent" role="tab" aria-selected="false" aria-controls="messages-list" tabindex="-1" type="button">{{t.sentMessages}}</button>
+    </div>
+    <div id="messages-list" class="messages-list" role="tabpanel" aria-labelledby="messages-received-tab" aria-live="polite"></div>
+    <p id="messages-empty" class="sector-context">{{t.noReceivedMessages}}</p>
+    <button id="messages-load-more" type="button" hidden>{{t.loadOlderMessages}}</button>
+</article>
