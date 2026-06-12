@@ -7,6 +7,7 @@
     let refreshTimer = null;
     let loadInProgress = false;
     let currentSector = null;
+    let currentAlerts = [];
 
     function withVng(callback) {
         if (window.VNG) {
@@ -21,16 +22,50 @@
         return window.VNG.t(i18n, key, fallback);
     }
 
-    function renderAlerts(sector) {
+    function damageWarningMessage(warning) {
+        const sector = warning && warning.sector && warning.sector.relative
+            ? window.VNG.coordinate(warning.sector.relative)
+            : "-";
+        const container = warning && warning.container
+            ? (warning.container.label || warning.container.id || "-")
+            : "-";
+        const risk = warning && warning.risk ? window.VNG.numberValue(warning.risk.percent, "%") : "-";
+        const when = warning && warning.phase === "deceleration_start"
+            ? tr("damageWarningArrivalSector", "arrival sector")
+            : tr("damageWarningOriginSector", "origin sector");
+
+        return window.VNG.formatText(
+            tr("damageWarningContainerBreakMessage", "Fragile storage warning: {container} may break loose during this jump near the {when} ({sector}). Risk: {risk}. This can happen from 5 additional containers onward."),
+            {container, when, sector, risk}
+        );
+    }
+
+    function damageWarningAlerts(warnings) {
+        return (Array.isArray(warnings) ? warnings : []).map((warning) => ({
+            "kind": "damage-warning",
+            "id": warning.id,
+            "className": "sector-damage-alert",
+            "message": damageWarningMessage(warning),
+            "acknowledged": warning.status !== "unread",
+        }));
+    }
+
+    function renderAlerts(sector, damageWarnings) {
         currentSector = sector || {};
-        const alerts = window.VNG.sectorAlerts(currentSector, i18n);
+        const sectorAlerts = window.VNG.sectorAlerts(currentSector, i18n).map((alert) => ({
+            ...alert,
+            "kind": "sector-alert",
+        }));
+        const alerts = sectorAlerts.concat(damageWarningAlerts(damageWarnings));
+        currentAlerts = alerts;
         const list = document.getElementById("console-alerts-list");
         const empty = document.getElementById("console-alerts-empty");
         if (!list) {
             return;
         }
 
-        window.VNG.setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged));
+        const hasUnreadDamageWarning = alerts.some((alert) => alert.kind === "damage-warning" && !alert.acknowledged);
+        window.VNG.setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged), hasUnreadDamageWarning);
         if (empty) {
             empty.hidden = alerts.length > 0;
         }
@@ -72,9 +107,19 @@
         }
 
         try {
-            const data = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
-            renderAlerts(data.sector || {});
-            scheduleRefresh(data);
+            const [sectorData, damageWarningData] = await Promise.all([
+                window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch((error) => ({"sector": {}, "error": error})),
+                window.VNG.apiJson("/api/probe/damage-warnings", {"method": "GET"}).catch(() => ({"damageWarnings": []})),
+            ]);
+            renderAlerts(sectorData.sector || {}, damageWarningData.damageWarnings || []);
+            if (sectorData.error && (damageWarningData.damageWarnings || []).length === 0) {
+                const empty = document.getElementById("console-alerts-empty");
+                if (empty) {
+                    empty.hidden = false;
+                    empty.textContent = sectorData.error.message || tr("sectorContextUnavailable", "Displayed sector: observation unavailable.");
+                }
+            }
+            scheduleRefresh({"sector": sectorData, "damageWarnings": damageWarningData.damageWarnings || []});
         } catch (error) {
             const list = document.getElementById("console-alerts-list");
             const empty = document.getElementById("console-alerts-empty");
@@ -99,14 +144,26 @@
                 return;
             }
             const alertNode = button.closest(".sector-alert");
-            const alerts = window.VNG.sectorAlerts(currentSector || {}, i18n);
-            const alert = alerts[Number.parseInt(alertNode && alertNode.dataset.alertIndex || "-1", 10)];
+            const alert = currentAlerts[Number.parseInt(alertNode && alertNode.dataset.alertIndex || "-1", 10)];
             if (!alert) {
                 return;
             }
 
+            if (alert.kind === "damage-warning") {
+                button.disabled = true;
+                button.setAttribute("aria-disabled", "true");
+                window.VNG.apiJson("/api/probe/damage-warnings/" + encodeURIComponent(String(alert.id)), {
+                    "method": "PATCH",
+                    "body": JSON.stringify({}),
+                }).then(refreshAlertsPage).then(window.VNG.syncNavigationWarnings).catch(() => {
+                    button.disabled = false;
+                    button.setAttribute("aria-disabled", "false");
+                });
+                return;
+            }
+
             window.VNG.acknowledgeSectorAlert(alert.type, currentSector || {}, alert.signature);
-            renderAlerts(currentSector || {});
+            refreshAlertsPage();
             window.VNG.syncNavigationWarnings();
         });
     }

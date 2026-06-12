@@ -13,6 +13,7 @@ final class SchedulerService
 {
     public const PROBE_MOVEMENT_PHASE = 'probe.movement.phase';
     public const PROBE_BLACK_HOLE_TRAP = 'probe.black_hole.trap';
+    public const PROBE_STORAGE_CONTAINER_BREAK = 'probe.storage_container.break';
 
     public function __construct(
         private readonly ScheduledEventRepository $events,
@@ -57,6 +58,7 @@ final class SchedulerService
         match ($event->type) {
             self::PROBE_MOVEMENT_PHASE => $this->processProbeMovementPhase($event),
             self::PROBE_BLACK_HOLE_TRAP => $this->processProbeBlackHoleTrap($event),
+            self::PROBE_STORAGE_CONTAINER_BREAK => $this->processProbeStorageContainerBreak($event),
             default => throw new \RuntimeException('Unsupported scheduled event type: ' . $event->type),
         };
     }
@@ -92,5 +94,14 @@ final class SchedulerService
         }
 
         $this->movementService->trapProbeByBlackHole($probe);
+    }
+
+    private function processProbeStorageContainerBreak(ScheduledEvent $event): void
+    {
+        if ($event->entityType !== 'probe_damage_warning') {
+            throw new \RuntimeException('Invalid entity type for storage break event: ' . $event->entityType);
+        }
+
+        $this->movementService->breakStorageContainerFromScheduledWarning($event->payload);
     }
 }

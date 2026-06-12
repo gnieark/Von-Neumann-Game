@@ -18,6 +18,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
@@ -220,6 +221,12 @@ $messageSchemaColumns = array_map(
 $test->assert(in_array('sender_probe_id', $messageSchemaColumns, true), 'Probe message table stores sender probes');
 $test->assert(in_array('recipient_probe_id', $messageSchemaColumns, true), 'Probe message table stores recipient probes');
 $test->assert(in_array('read_at', $messageSchemaColumns, true), 'Probe message table stores read timestamps');
+$damageWarningSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_damage_warnings)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('container_id', $damageWarningSchemaColumns, true), 'Probe damage warning table stores container ids');
+$test->assert(in_array('status', $damageWarningSchemaColumns, true), 'Probe damage warning table stores read status');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -227,6 +234,7 @@ $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
+$damageWarnings = new ProbeDamageWarningRepository($pdo);
 $storageContainers = new StorageContainerRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
 $scheduledEvents = new ScheduledEventRepository($pdo);
@@ -236,16 +244,16 @@ $visitedSectors = new VisitedSectorRepository($pdo);
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, worldSeed: 'api-test-world');
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(24, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(25, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -865,6 +873,58 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
         $test->assertEquals(0.2, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
         $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
+    }
+}
+
+$damageWarningPlayer = $auth->registerPlayerWithPassword('fragile-storage', 'secret', 'Fragile Storage', 'Fragile probe');
+$damageWarningProbe = $probes->findByPlayerId($damageWarningPlayer->id);
+$damageWarningSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'fragile-storage', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$damageWarningHeaders = ['Authorization' => 'Bearer ' . (string) ($damageWarningSession->body['token'] ?? '')];
+if ($damageWarningProbe !== null) {
+    for ($index = 0; $index < 14; $index++) {
+        $storage->addItem($damageWarningProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    }
+    $damageMove = $kernel->handle('POST', '/api/probe/move', $damageWarningHeaders, json_encode([
+        'target' => [
+            'x' => 2,
+            'y' => 0,
+            'z' => 0,
+        ],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $damageMove->status, 'movement with fourteen additional containers starts');
+
+    $damageWarningsResponse = $kernel->handle('GET', '/api/probe/damage-warnings', $damageWarningHeaders);
+    $test->assertEquals(200, $damageWarningsResponse->status, 'GET /api/probe/damage-warnings lists movement damage warnings');
+    $damageWarning = $damageWarningsResponse->body['damageWarnings'][0] ?? null;
+    $test->assertEquals('unread', $damageWarning['status'] ?? null, 'damage warning starts unread');
+    $test->assertEquals(100.0, $damageWarning['risk']['percent'] ?? null, 'fourteen additional containers produce a 100 percent break risk');
+    $test->assertEquals(14, $damageWarning['risk']['additionalContainerCount'] ?? null, 'damage warning exposes the additional container count');
+    $warningContainerId = (string) ($damageWarning['container']['id'] ?? '');
+    $warningObjectId = (string) ($damageWarning['container']['detachedObjectId'] ?? '');
+    $warningId = (int) ($damageWarning['id'] ?? 0);
+
+    $warningContainer = $storageContainers->findByUidForProbe($damageWarningProbe->id, $warningContainerId);
+    if ($warningContainer !== null) {
+        $storageContainers->setResourceAmount($warningContainer->id, 'metals', 0.2);
+        $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.2 WHERE id = :id')->execute(['id' => $damageWarningProbe->id]);
+    }
+
+    $markDamageWarningRead = $kernel->handle('PATCH', '/api/probe/damage-warnings/' . $warningId, $damageWarningHeaders, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $markDamageWarningRead->status, 'PATCH /api/probe/damage-warnings/{id} marks the warning read');
+    $test->assertEquals('read', $markDamageWarningRead->body['damageWarning']['status'] ?? null, 'damage warning read response exposes read status');
+
+    $pdo->exec("UPDATE scheduled_events SET run_at = '2000-01-01T00:00:00+00:00' WHERE type = 'probe.storage_container.break'");
+    $schedulerStats = $scheduler->processDueEvents();
+    $test->assert($schedulerStats['processed'] >= 1, 'scheduler processes due storage container break events');
+
+    $storedWarning = $damageWarnings->findById($warningId);
+    $test->assert($storedWarning?->resolvedAt !== null, 'processed storage break resolves the damage warning');
+    $test->assert($storageContainers->findByUidForProbe($damageWarningProbe->id, $warningContainerId) === null, 'storage break removes the selected container from probe storage');
+    $test->assertEquals(0.0, $probes->findByPlayerId($damageWarningPlayer->id)?->metalsStock, 'storage break removes selected container resources from probe totals');
+    if ($storedWarning !== null) {
+        $warningSector = new SectorCoordinates($storedWarning->sectorX, $storedWarning->sectorY, $storedWarning->sectorZ);
+        $detachedByMovement = $sectorRepository->load($warningSector)->findObjectById($warningObjectId);
+        $test->assertEquals('detached_container', $detachedByMovement?->getType()->value, 'storage break persists the lost container as a drifting sector object');
     }
 }
 
@@ -1623,7 +1683,10 @@ if ($moveProbe !== null) {
     $afterStartProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(98.0, $afterStartProbe?->deuteriumStock, 'probe deuterium stock is persisted after movement start');
     $test->assertEquals('preparing', $afterStartProbe?->status->value, 'probe status becomes preparing');
-    $test->assertEquals(4, $scheduledEvents->countByStatus('pending'), 'starting a movement schedules its phase events');
+    $startedMovement = $movements->findActiveByProbeId($moveProbe->id);
+    $startedMovementPhaseEvents = $pdo->prepare("SELECT COUNT(*) FROM scheduled_events WHERE status = 'pending' AND type = 'probe.movement.phase' AND entity_type = 'probe_movement' AND entity_id = :movement_id");
+    $startedMovementPhaseEvents->execute(['movement_id' => $startedMovement?->id ?? 0]);
+    $test->assertEquals(4, (int) $startedMovementPhaseEvents->fetchColumn(), 'starting a movement schedules its phase events');
     $forgottenSector = $sectorRepository->load($originBeforeMove);
     $forgottenSectorManny = $forgottenSector->findObjectById(SectorManny::objectIdForUid($firstMannyId));
     $test->assertEquals(SectorManny::STATE_FORGOTTEN, $forgottenSectorManny?->toArray()['state'] ?? null, 'movement registers outside owned Mannys as forgotten sector objects');

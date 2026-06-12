@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- API v25 : ajout des warnings persistants de dégâts de mouvement avec `GET /api/probe/damage-warnings` et `PATCH /api/probe/damage-warnings/{damageWarningId}`.
+- Mouvement : à partir de 5 containers additionnels, un saut peut casser un lien de container et créer un container dérivant dans le secteur de départ ou d’arrivée.
 - API v24 : ajout des recettes `electric_motor`, `battery_pack`, `linear_actuator` et `manny`.
 - Craft : la fabrication d’une Manny crée désormais une vraie entité Manny stockée dans la sonde, avec l’encombrement et la capacité cargo standards.
 
@@ -13,7 +15,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Craft : le calcul des composants manquants est désormais récursif, afin qu’une recette puisse embarquer plusieurs niveaux de sous-recettes dans son coût et sa durée.
 - Interface : les écrans `Mannys & imprimante` et `Inventaires` affichent les nouveaux composants et calculent récursivement la disponibilité des ingrédients.
-- Les clients typés doivent accepter `apiVersion: 24`, les nouveaux types d’items `electric_motor`, `battery_pack` et `linear_actuator`, ainsi que la recette/sortie `manny`.
+- Interface : les warnings de dégâts non lus mettent l’onglet `Alertes` en style warning et s’acquittent via l’API au lieu du stockage local.
+- Les clients typés doivent accepter `apiVersion: 25`, les nouveaux types d’items `electric_motor`, `battery_pack` et `linear_actuator`, la recette/sortie `manny`, ainsi que les schémas `ProbeDamageWarning*`.
 
 ## 2026-06-11
 
