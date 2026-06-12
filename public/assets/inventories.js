@@ -71,6 +71,9 @@
             "crystal_substrate": tr("crystalSubstrate", "Crystal substrate"),
             "dopant_matrix": tr("dopantMatrix", "Dopant matrix"),
             "integrated_circuit": tr("integratedCircuit", "Integrated circuit"),
+            "electric_motor": tr("electricMotor", "Electric motor"),
+            "battery_pack": tr("batteryPack", "Battery pack"),
+            "linear_actuator": tr("linearActuator", "Linear actuator"),
             "manny": tr("mannyObject", "Manny"),
         }[type] || fallback || type || "-";
     }
@@ -201,6 +204,9 @@
             "crystal_substrate",
             "dopant_matrix",
             "integrated_circuit",
+            "electric_motor",
+            "battery_pack",
+            "linear_actuator",
         ].includes(item.type);
     }
 
@@ -335,6 +341,9 @@
         "crystal_substrate",
         "dopant_matrix",
         "integrated_circuit",
+        "electric_motor",
+        "battery_pack",
+        "linear_actuator",
     ];
 
     function storageRuleTypeLabel(type, fallback) {

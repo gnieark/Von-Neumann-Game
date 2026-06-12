@@ -2,6 +2,19 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-12
+
+### Added
+
+- API v24 : ajout des recettes `electric_motor`, `battery_pack`, `linear_actuator` et `manny`.
+- Craft : la fabrication d’une Manny crée désormais une vraie entité Manny stockée dans la sonde, avec l’encombrement et la capacité cargo standards.
+
+### Changed
+
+- Craft : le calcul des composants manquants est désormais récursif, afin qu’une recette puisse embarquer plusieurs niveaux de sous-recettes dans son coût et sa durée.
+- Interface : les écrans `Mannys & imprimante` et `Inventaires` affichent les nouveaux composants et calculent récursivement la disponibilité des ingrédients.
+- Les clients typés doivent accepter `apiVersion: 24`, les nouveaux types d’items `electric_motor`, `battery_pack` et `linear_actuator`, ainsi que la recette/sortie `manny`.
+
 ## 2026-06-11
 
 ### Changed

@@ -50,6 +50,32 @@ final class CraftingRecipeCatalog
     public const INTEGRATED_CIRCUIT_DEUTERIUM_COST = 0.05;
     public const INTEGRATED_CIRCUIT_CONTAINER_SPACE = 0.001;
     public const INTEGRATED_CIRCUIT_CRAFTING_SECONDS = 1200;
+    public const ELECTRIC_MOTOR_STEEL_BARS = 2;
+    public const ELECTRIC_MOTOR_STEEL_PLATES = 1;
+    public const ELECTRIC_MOTOR_METALS_COST = 0.02;
+    public const ELECTRIC_MOTOR_CONTAINER_SPACE = 0.006;
+    public const ELECTRIC_MOTOR_CRAFTING_SECONDS = 900;
+    public const BATTERY_PACK_METALS_COST = 0.03;
+    public const BATTERY_PACK_ICE_COST = 0.02;
+    public const BATTERY_PACK_ORGANIC_COST = 0.06;
+    public const BATTERY_PACK_DEUTERIUM_COST = 0.02;
+    public const BATTERY_PACK_CONTAINER_SPACE = 0.008;
+    public const BATTERY_PACK_CRAFTING_SECONDS = 1200;
+    public const LINEAR_ACTUATOR_STEEL_PLATES = 2;
+    public const LINEAR_ACTUATOR_STEEL_BARS = 1;
+    public const LINEAR_ACTUATOR_ELECTRIC_MOTORS = 1;
+    public const LINEAR_ACTUATOR_METALS_COST = 0.01;
+    public const LINEAR_ACTUATOR_CONTAINER_SPACE = 0.01;
+    public const LINEAR_ACTUATOR_CRAFTING_SECONDS = 1200;
+    public const MANNY_LINEAR_ACTUATORS = 6;
+    public const MANNY_ELECTRIC_MOTORS = 12;
+    public const MANNY_BATTERY_PACKS = 4;
+    public const MANNY_INTEGRATED_CIRCUITS = 6;
+    public const MANNY_STEEL_PLATES = 18;
+    public const MANNY_STEEL_BARS = 12;
+    public const MANNY_CONTAINER_SPACE = 0.05;
+    public const MANNY_CARGO_CAPACITY = 0.05;
+    public const MANNY_CRAFTING_SECONDS = 3600;
 
     /**
      * @return list<array<string, mixed>>
@@ -66,6 +92,10 @@ final class CraftingRecipeCatalog
             self::crystalSubstrate($config),
             self::dopantMatrix($config),
             self::integratedCircuit($config),
+            self::electricMotor($config),
+            self::batteryPack($config),
+            self::linearActuator($config),
+            self::manny($config),
         ];
     }
 
@@ -318,6 +348,106 @@ final class CraftingRecipeCatalog
                 ProbeItem::INTEGRATED_CIRCUIT_NAME,
                 Config::float($config, 'integrated_circuit.containerSpace', self::INTEGRATED_CIRCUIT_CONTAINER_SPACE),
             ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function electricMotor(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_ELECTRIC_MOTOR,
+            'name' => ProbeItem::ELECTRIC_MOTOR_NAME,
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_STEEL_BAR, Config::int($config, 'electric_motor.steelBarCount', self::ELECTRIC_MOTOR_STEEL_BARS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'electric_motor.steelPlateCount', self::ELECTRIC_MOTOR_STEEL_PLATES)),
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'electric_motor.metalsCost', self::ELECTRIC_MOTOR_METALS_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'electric_motor.durationSeconds', self::ELECTRIC_MOTOR_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_ELECTRIC_MOTOR,
+                ProbeItem::ELECTRIC_MOTOR_NAME,
+                Config::float($config, 'electric_motor.containerSpace', self::ELECTRIC_MOTOR_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function batteryPack(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_BATTERY_PACK,
+            'name' => ProbeItem::BATTERY_PACK_NAME,
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'battery_pack.metalsCost', self::BATTERY_PACK_METALS_COST)),
+                self::resourceIngredient(ResourceComposition::ICE, Config::float($config, 'battery_pack.iceCost', self::BATTERY_PACK_ICE_COST)),
+                self::resourceIngredient(ResourceComposition::CARBON_COMPOUNDS, Config::float($config, 'battery_pack.organicCost', self::BATTERY_PACK_ORGANIC_COST)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'battery_pack.deuteriumCost', self::BATTERY_PACK_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'battery_pack.durationSeconds', self::BATTERY_PACK_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_BATTERY_PACK,
+                ProbeItem::BATTERY_PACK_NAME,
+                Config::float($config, 'battery_pack.containerSpace', self::BATTERY_PACK_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function linearActuator(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_LINEAR_ACTUATOR,
+            'name' => ProbeItem::LINEAR_ACTUATOR_NAME,
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'linear_actuator.steelPlateCount', self::LINEAR_ACTUATOR_STEEL_PLATES)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_BAR, Config::int($config, 'linear_actuator.steelBarCount', self::LINEAR_ACTUATOR_STEEL_BARS)),
+                self::itemIngredient(ProbeItem::TYPE_ELECTRIC_MOTOR, Config::int($config, 'linear_actuator.electricMotorCount', self::LINEAR_ACTUATOR_ELECTRIC_MOTORS)),
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'linear_actuator.metalsCost', self::LINEAR_ACTUATOR_METALS_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'linear_actuator.durationSeconds', self::LINEAR_ACTUATOR_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_LINEAR_ACTUATOR,
+                ProbeItem::LINEAR_ACTUATOR_NAME,
+                Config::float($config, 'linear_actuator.containerSpace', self::LINEAR_ACTUATOR_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function manny(array $config): array
+    {
+        return [
+            'id' => 'manny',
+            'name' => 'Manny',
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_LINEAR_ACTUATOR, Config::int($config, 'manny.linearActuatorCount', self::MANNY_LINEAR_ACTUATORS)),
+                self::itemIngredient(ProbeItem::TYPE_ELECTRIC_MOTOR, Config::int($config, 'manny.electricMotorCount', self::MANNY_ELECTRIC_MOTORS)),
+                self::itemIngredient(ProbeItem::TYPE_BATTERY_PACK, Config::int($config, 'manny.batteryPackCount', self::MANNY_BATTERY_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_INTEGRATED_CIRCUIT, Config::int($config, 'manny.integratedCircuitCount', self::MANNY_INTEGRATED_CIRCUITS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'manny.steelPlateCount', self::MANNY_STEEL_PLATES)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_BAR, Config::int($config, 'manny.steelBarCount', self::MANNY_STEEL_BARS)),
+            ],
+            'durationSeconds' => Config::int($config, 'manny.durationSeconds', self::MANNY_CRAFTING_SECONDS),
+            'output' => [
+                'type' => 'manny',
+                'name' => 'Manny',
+                'containerSpace' => Config::float($config, 'manny.containerSpace', self::MANNY_CONTAINER_SPACE),
+                'containerSpaceUnit' => ProbeInventory::CAPACITY_UNIT,
+                'cargoCapacity' => Config::float($config, 'manny.cargoCapacity', self::MANNY_CARGO_CAPACITY),
+                'cargoCapacityUnit' => ProbeInventory::CAPACITY_UNIT,
+            ],
         ];
     }
 

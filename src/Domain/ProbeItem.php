@@ -15,6 +15,9 @@ final class ProbeItem
     public const TYPE_CRYSTAL_SUBSTRATE = 'crystal_substrate';
     public const TYPE_DOPANT_MATRIX = 'dopant_matrix';
     public const TYPE_INTEGRATED_CIRCUIT = 'integrated_circuit';
+    public const TYPE_ELECTRIC_MOTOR = 'electric_motor';
+    public const TYPE_BATTERY_PACK = 'battery_pack';
+    public const TYPE_LINEAR_ACTUATOR = 'linear_actuator';
     public const WAYPOINT_BOOKMARK_NAME = 'Waypoint bookmark';
     public const STEEL_BAR_NAME = 'Steel bar';
     public const STEEL_PLATE_NAME = 'Steel plate';
@@ -24,6 +27,9 @@ final class ProbeItem
     public const CRYSTAL_SUBSTRATE_NAME = 'Crystal substrate';
     public const DOPANT_MATRIX_NAME = 'Dopant matrix';
     public const INTEGRATED_CIRCUIT_NAME = 'Integrated circuit';
+    public const ELECTRIC_MOTOR_NAME = 'Electric motor';
+    public const BATTERY_PACK_NAME = 'Battery pack';
+    public const LINEAR_ACTUATOR_NAME = 'Linear actuator';
 
     public function __construct(
         public readonly int $id,

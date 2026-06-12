@@ -148,6 +148,40 @@
       "deuteriumCost": 0.05,
       "containerSpace": 0.001,
       "durationSeconds": 1200
+    },
+    "electric_motor": {
+      "steelBarCount": 2,
+      "steelPlateCount": 1,
+      "metalsCost": 0.02,
+      "containerSpace": 0.006,
+      "durationSeconds": 900
+    },
+    "battery_pack": {
+      "metalsCost": 0.03,
+      "iceCost": 0.02,
+      "organicCost": 0.06,
+      "deuteriumCost": 0.02,
+      "containerSpace": 0.008,
+      "durationSeconds": 1200
+    },
+    "linear_actuator": {
+      "steelPlateCount": 2,
+      "steelBarCount": 1,
+      "electricMotorCount": 1,
+      "metalsCost": 0.01,
+      "containerSpace": 0.01,
+      "durationSeconds": 1200
+    },
+    "manny": {
+      "linearActuatorCount": 6,
+      "electricMotorCount": 12,
+      "batteryPackCount": 4,
+      "integratedCircuitCount": 6,
+      "steelPlateCount": 18,
+      "steelBarCount": 12,
+      "containerSpace": 0.05,
+      "cargoCapacity": 0.05,
+      "durationSeconds": 3600
     }
   }
 }
