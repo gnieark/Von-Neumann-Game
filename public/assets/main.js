@@ -212,8 +212,42 @@ function renderMetrics(container, metrics) {
         return;
     }
 
+    const openMetricNames = new Set(Array.from(container.querySelectorAll(".interactive-metric[aria-expanded=\"true\"]"))
+        .map((metricNode) => metricNode.dataset.metric || "")
+        .filter(Boolean));
     container.innerHTML = metrics.map(metricHtml).join("");
     bindMetricDetails(container);
+    openMetricNames.forEach((name) => {
+        Array.from(container.querySelectorAll(".interactive-metric")).find((metricNode) => (
+            metricNode.dataset.metric === name
+        ))?.setAttribute("aria-expanded", "true");
+    });
+}
+
+function openDisclosureIds(root, selector) {
+    return new Set(Array.from((root || document).querySelectorAll(selector || "[aria-expanded=\"true\"][aria-controls]"))
+        .filter((node) => node.getAttribute("aria-expanded") === "true")
+        .map((node) => node.getAttribute("aria-controls") || "")
+        .filter(Boolean));
+}
+
+function restoreDisclosureIds(root, openIds, selector) {
+    if (!openIds || openIds.size === 0) {
+        return;
+    }
+
+    Array.from((root || document).querySelectorAll(selector || "[aria-controls]")).forEach((node) => {
+        const targetId = node.getAttribute("aria-controls") || "";
+        if (!openIds.has(targetId)) {
+            return;
+        }
+
+        node.setAttribute("aria-expanded", "true");
+        const panel = document.getElementById(targetId);
+        if (panel) {
+            panel.hidden = false;
+        }
+    });
 }
 
 function collectRefreshTimes(value, observedAt, times) {
@@ -472,7 +506,9 @@ window.VNG = {
     metricHtml,
     nextRefreshDelay,
     numberValue,
+    openDisclosureIds,
     renderMetrics,
+    restoreDisclosureIds,
     sectorAlerts,
     setNavigationWarning,
     startNavigationWarningSync,

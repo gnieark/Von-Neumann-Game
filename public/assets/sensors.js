@@ -607,6 +607,7 @@
             return;
         }
 
+        const openPanels = window.VNG.openDisclosureIds(node, ".sector-system-toggle[aria-expanded=\"true\"][aria-controls]");
         setText("sector-context", sectorContext(sector));
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         const displayObjects = objects.concat(sectorBookmarkObjects(sector), sectorProbeObjects(sector));
@@ -629,6 +630,10 @@
         }).join("");
 
         bindSolarSystemToggles(node);
+        window.VNG.restoreDisclosureIds(node, openPanels, ".sector-system-toggle[aria-controls]");
+        node.querySelectorAll(".sector-system-toggle[aria-expanded=\"true\"]").forEach((button) => {
+            button.textContent = button.dataset.closeLabel || tr("hideSolarSystemBodies", "Hide bodies");
+        });
         scheduleLiveCountdowns();
     }
 

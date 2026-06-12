@@ -1357,6 +1357,7 @@
             return;
         }
         clearProgressTimers();
+        const openActionPanels = window.VNG.openDisclosureIds(node, ".manny-action-accordion-trigger[aria-expanded=\"true\"][aria-controls]");
         const openMannyIds = new Set(Array.from(node.querySelectorAll(".manny-card[data-manny-id] .manny-accordion-trigger[aria-expanded=\"true\"]"))
             .map((button) => button.closest(".manny-card") && button.closest(".manny-card").dataset.mannyId)
             .filter(Boolean));
@@ -1411,6 +1412,7 @@
             : "";
 
         node.innerHTML = renderAtomicPrinterCard(observedAt, printerExpanded) + mannyHtml + emptyHtml;
+        window.VNG.restoreDisclosureIds(node, openActionPanels, ".manny-action-accordion-trigger[aria-controls]");
         scheduleProgressUpdates();
         updateMannyCraftForms();
         updatePrinterCraftForms();
