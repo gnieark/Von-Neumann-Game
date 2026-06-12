@@ -6,8 +6,9 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
-- API v25 : ajout des warnings persistants de dégâts de mouvement avec `GET /api/probe/damage-warnings` et `PATCH /api/probe/damage-warnings/{damageWarningId}`.
-- Mouvement : à partir de 5 containers additionnels, un saut peut casser un lien de container et créer un container dérivant dans le secteur de départ ou d’arrivée.
+- API v25 : ajout des warnings persistants de dégâts de mouvement avec `GET /api/probe/damage-warnings` et `PATCH /api/probe/damage-warnings/{damageWarningId}` pour marquer un warning comme lu.
+- Mouvement : à partir de 5 containers additionnels, un saut peut casser un lien de container avec 10% de risque, puis +10 points par container supplémentaire jusqu’à 100%.
+- Mouvement : le container perdu est tiré au sort dès l’initiation du saut, puis devient un container dérivant avec son contenu dans le secteur de départ en fin d’accélération ou dans le secteur d’arrivée en début de décélération.
 - API v24 : ajout des recettes `electric_motor`, `battery_pack`, `linear_actuator` et `manny`.
 - Craft : la fabrication d’une Manny crée désormais une vraie entité Manny stockée dans la sonde, avec l’encombrement et la capacité cargo standards.
 
@@ -16,7 +17,12 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Craft : le calcul des composants manquants est désormais récursif, afin qu’une recette puisse embarquer plusieurs niveaux de sous-recettes dans son coût et sa durée.
 - Interface : les écrans `Mannys & imprimante` et `Inventaires` affichent les nouveaux composants et calculent récursivement la disponibilité des ingrédients.
 - Interface : les warnings de dégâts non lus mettent l’onglet `Alertes` en style warning et s’acquittent via l’API au lieu du stockage local.
+- Déploiement : le schéma initialise automatiquement la table `probe_damage_warnings` et ses index.
 - Les clients typés doivent accepter `apiVersion: 25`, les nouveaux types d’items `electric_motor`, `battery_pack` et `linear_actuator`, la recette/sortie `manny`, ainsi que les schémas `ProbeDamageWarning*`.
+
+### Fixed
+
+- Interface : les panneaux interactifs ouverts dans les listes de métriques conservent maintenant leur état lors des rafraîchissements automatiques.
 
 ## 2026-06-11
 
