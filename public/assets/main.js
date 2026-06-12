@@ -685,6 +685,8 @@ function bindTutorialDialog(closeAccountMenus) {
         "move": "tutorial-move-dialog",
         "deplacement": "tutorial-move-dialog",
         "mannies": "tutorial-mannies-dialog",
+        "automate": "tutorial-automate-dialog",
+        "automatiser": "tutorial-automate-dialog",
     };
     const params = new URLSearchParams(window.location.search);
     const requestedTutorial = params.get("tutorial") || "";

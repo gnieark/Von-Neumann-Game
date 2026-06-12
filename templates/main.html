@@ -51,6 +51,7 @@
                 <button class="account-menu-item" data-tutorial-target="tutorial-context-dialog" type="button">{{t.tutorialContext}}</button>
                 <button class="account-menu-item" data-tutorial-target="tutorial-move-dialog" type="button">{{t.tutorialMoveProbe}}</button>
                 <button class="account-menu-item" data-tutorial-target="tutorial-mannies-dialog" type="button">{{t.tutorialUseMannies}}</button>
+                <button class="account-menu-item" data-tutorial-target="tutorial-automate-dialog" type="button">{{t.tutorialAutomate}}</button>
             </div>
         </div>
         {{topheader}}
@@ -237,6 +238,47 @@
             <div class="tutorial-step-copy">
                 <h3>{{t.tutorialManniesStepFiveTitle}}</h3>
                 <p>{{t.tutorialManniesStepFive}}</p>
+                <p class="tutorial-followup">
+                    <a href="/?tutorial=automate" data-tutorial-target="tutorial-automate-dialog">{{t.tutorialAutomate}}</a>
+                </p>
+            </div>
+        </section>
+        <div class="tutorial-actions">
+            <button class="primary" data-tutorial-next type="button">{{t.tutorialNext}}</button>
+            <button class="primary" data-tutorial-close data-tutorial-close-final type="button" hidden>{{t.close}}</button>
+        </div>
+    </dialog>
+    <dialog id="tutorial-automate-dialog" class="consent-banner tutorial-dialog" aria-labelledby="tutorial-automate-title" hidden>
+        <button class="dialog-close icon-button" data-tutorial-close type="button" aria-label="{{t.close}}">×</button>
+        <p class="eyebrow">{{t.tutorialMenu}}</p>
+        <h2 id="tutorial-automate-title">{{t.tutorialAutomate}}</h2>
+        <p class="tutorial-step-progress" data-tutorial-progress aria-live="polite">1 / 2</p>
+        <section class="tutorial-step" data-tutorial-step>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/Automatiser-1.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/Automatiser-1.png" alt="{{t.tutorialAutomateStepOneImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialAutomateStepOneTitle}}</h3>
+                <p>{{t.tutorialAutomateStepOne}}</p>
+            </div>
+        </section>
+        <section class="tutorial-step" data-tutorial-step hidden>
+            <div class="tutorial-illustration">
+                <button class="tutorial-image-button" data-tutorial-image-preview="/images/tutoriels/Automatiser-2.png" type="button" aria-label="{{t.tutorialImageOpen}}">
+                    <img class="tutorial-illustration-image" src="/images/tutoriels/Automatiser-2.png" alt="{{t.tutorialAutomateStepTwoImageAlt}}">
+                </button>
+            </div>
+            <div class="tutorial-step-copy">
+                <h3>{{t.tutorialAutomateStepTwoTitle}}</h3>
+                <p>{{t.tutorialAutomateStepTwoIntro}} <a href="/api-docs">/api-docs</a>{{t.tutorialAutomateStepTwoAfterDocs}}</p>
+                <p class="tutorial-followup">
+                    {{t.tutorialAutomateStepTwoHunterIntro}} <a href="https://github.com/gnieark/deuterium-hunter-neuman-probe" rel="noopener noreferrer" target="_blank">deuterium-hunter-neuman-probe</a>
+                </p>
+                <p class="tutorial-followup">
+                    {{t.tutorialAutomateStepTwoCockpitIntro}} <a href="https://github.com/MagiCrazy/neumann-cockpit/" rel="noopener noreferrer" target="_blank">neumann-cockpit</a>{{t.tutorialAutomateStepTwoAfterCockpit}}
+                </p>
             </div>
         </section>
         <div class="tutorial-actions">
