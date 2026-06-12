@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '23'
+  version: '24'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 23
+                apiVersion: 24
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -156,6 +156,30 @@ paths:
                       name: Integrated circuit
                       containerSpace: 0.001
                       containerSpaceUnit: earth_container_equivalent
+                  - id: manny
+                    name: Manny
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: linear_actuator
+                        quantity: 6
+                        unit: item
+                      - type: electric_motor
+                        quantity: 12
+                        unit: item
+                      - type: battery_pack
+                        quantity: 4
+                        unit: item
+                      - type: integrated_circuit
+                        quantity: 6
+                        unit: item
+                    durationSeconds: 3600
+                    output:
+                      type: manny
+                      name: Manny
+                      containerSpace: 0.05
+                      containerSpaceUnit: earth_container_equivalent
+                      cargoCapacity: 0.05
+                      cargoCapacityUnit: earth_container_equivalent
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe:
@@ -1552,7 +1576,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, manny]
         name:
           type: string
         craftableBy:
@@ -1577,7 +1601,7 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
         quantity:
           type: number
           minimum: 0
@@ -1594,7 +1618,7 @@ components:
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, manny]
         name:
           type: string
         containerSpace:
@@ -1603,6 +1627,14 @@ components:
         containerSpaceUnit:
           type: string
           enum: [earth_container_equivalent]
+        cargoCapacity:
+          type: number
+          minimum: 0
+          description: Present only when the recipe output is a Manny.
+        cargoCapacityUnit:
+          type: string
+          enum: [earth_container_equivalent]
+          description: Present only when the recipe output is a Manny.
         capacityBonus:
           type: number
           minimum: 0
@@ -2092,7 +2124,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
             amount:
               type: number
               description: Present for discarded resources and deuterium.
@@ -2131,7 +2163,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
         name:
           type: string
         containerSpace:
@@ -2163,7 +2195,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
         name:
           type: string
         currentTask:
@@ -2242,7 +2274,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, manny]
           description: >
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
@@ -2508,7 +2540,7 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         itemType:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
           description: Present only for drifting item stacks.
         quantity:
           type: integer

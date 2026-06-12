@@ -896,58 +896,14 @@ final class MannyService
         $resourceCosts = [];
         $itemsToConsume = [];
         $consumedItems = [];
-        $durationSeconds = max(0, (int) ($recipeDefinition['durationSeconds'] ?? 0));
         $itemsByType = $this->probeItemsByType($probe);
-        $ingredients = is_array($recipeDefinition['ingredients'] ?? null) ? $recipeDefinition['ingredients'] : [];
-
-        foreach ($ingredients as $ingredient) {
-            if (!is_array($ingredient)) {
-                continue;
-            }
-            $type = (string) ($ingredient['type'] ?? '');
-            if ($type === '') {
-                continue;
-            }
-
-            if ($this->craftingIngredientKind($ingredient) === 'item') {
-                $requiredCount = (int) ceil(max(0.0, (float) ($ingredient['quantity'] ?? 0)));
-                $availableItems = $itemsByType[$type] ?? [];
-                $consumedCount = min($requiredCount, count($availableItems));
-                for ($index = 0; $index < $consumedCount; $index++) {
-                    $item = array_shift($availableItems);
-                    if (!$item instanceof ProbeItem) {
-                        continue;
-                    }
-                    $itemsToConsume[] = $item;
-                    $consumedItems[] = $this->consumedItemPayload($item);
-                }
-                $itemsByType[$type] = $availableItems;
-
-                $missingCount = $requiredCount - $consumedCount;
-                if ($missingCount > 0) {
-                    $componentRecipe = CraftingRecipeCatalog::find($type, $this->craftingConfig());
-                    $componentResourceCosts = $componentRecipe !== null
-                        ? $this->directResourceCostsForRecipe($componentRecipe)
-                        : null;
-                    if ($componentRecipe === null || $componentResourceCosts === null) {
-                        throw new MannyActionException(422, 'insufficient_crafting_ingredients', 'Insufficient crafting ingredients for this recipe.');
-                    }
-
-                    foreach ($componentResourceCosts as $resourceType => $quantity) {
-                        $this->addResourceCost($resourceCosts, $resourceType, $quantity * $missingCount);
-                    }
-                    $durationSeconds += max(0, (int) ($componentRecipe['durationSeconds'] ?? 0)) * $missingCount;
-                }
-
-                continue;
-            }
-
-            $this->addResourceCost(
-                $resourceCosts,
-                $this->normalizeCraftResourceType($type),
-                max(0.0, (float) ($ingredient['quantity'] ?? 0)),
-            );
-        }
+        $durationSeconds = $this->resolveCraftingRecipe(
+            $recipeDefinition,
+            $itemsByType,
+            $itemsToConsume,
+            $consumedItems,
+            $resourceCosts,
+        );
 
         $this->ensureResourceCostsAvailable($probe, $resourceCosts);
 
@@ -961,6 +917,94 @@ final class MannyService
     }
 
     /**
+     * @param array<string, mixed> $recipeDefinition
+     * @param array<string, array<ProbeItem>> $itemsByType
+     * @param array<ProbeItem> $itemsToConsume
+     * @param array<array<string, mixed>> $consumedItems
+     * @param array<string, float> $resourceCosts
+     * @param array<string> $path
+     */
+    private function resolveCraftingRecipe(
+        array $recipeDefinition,
+        array &$itemsByType,
+        array &$itemsToConsume,
+        array &$consumedItems,
+        array &$resourceCosts,
+        array $path = [],
+    ): int {
+        $recipeId = (string) ($recipeDefinition['id'] ?? ($recipeDefinition['output']['type'] ?? ''));
+        if ($recipeId === '') {
+            throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
+        }
+        if (in_array($recipeId, $path, true)) {
+            throw new MannyActionException(422, 'invalid_recipe', 'Recursive crafting recipe cycle detected.');
+        }
+
+        $durationSeconds = max(0, (int) ($recipeDefinition['durationSeconds'] ?? 0));
+        $ingredients = is_array($recipeDefinition['ingredients'] ?? null) ? $recipeDefinition['ingredients'] : [];
+        foreach ($ingredients as $ingredient) {
+            if (!is_array($ingredient)) {
+                continue;
+            }
+            $type = (string) ($ingredient['type'] ?? '');
+            if ($type === '') {
+                continue;
+            }
+
+            if ($this->craftingIngredientKind($ingredient) !== 'item') {
+                $this->addResourceCost(
+                    $resourceCosts,
+                    $this->normalizeCraftResourceType($type),
+                    max(0.0, (float) ($ingredient['quantity'] ?? 0)),
+                );
+                continue;
+            }
+
+            $requiredCount = (int) ceil(max(0.0, (float) ($ingredient['quantity'] ?? 0)));
+            $availableItems = $itemsByType[$type] ?? [];
+            $consumedCount = min($requiredCount, count($availableItems));
+            for ($index = 0; $index < $consumedCount; $index++) {
+                $item = array_shift($availableItems);
+                if (!$item instanceof ProbeItem) {
+                    continue;
+                }
+                $itemsToConsume[] = $item;
+                $consumedItems[] = $this->consumedItemPayload($item);
+            }
+            $itemsByType[$type] = $availableItems;
+
+            $missingCount = $requiredCount - $consumedCount;
+            if ($missingCount <= 0) {
+                continue;
+            }
+
+            $componentRecipe = CraftingRecipeCatalog::find($type, $this->craftingConfig());
+            if (
+                $componentRecipe === null
+                || (
+                    !$this->recipeCraftableBy($componentRecipe, CraftingRecipeCatalog::FABRICATOR_MANNY)
+                    && !$this->recipeCraftableBy($componentRecipe, CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER)
+                )
+            ) {
+                throw new MannyActionException(422, 'insufficient_crafting_ingredients', 'Insufficient crafting ingredients for this recipe.');
+            }
+
+            for ($index = 0; $index < $missingCount; $index++) {
+                $durationSeconds += $this->resolveCraftingRecipe(
+                    $componentRecipe,
+                    $itemsByType,
+                    $itemsToConsume,
+                    $consumedItems,
+                    $resourceCosts,
+                    [...$path, $recipeId],
+                );
+            }
+        }
+
+        return $durationSeconds;
+    }
+
+    /**
      * @param array<string, mixed> $ingredient
      */
     private function craftingIngredientKind(array $ingredient): string
@@ -970,40 +1014,6 @@ final class MannyService
         }
 
         return ($ingredient['unit'] ?? null) === 'item' ? 'item' : 'resource';
-    }
-
-    /**
-     * @param array<string, mixed> $recipeDefinition
-     * @return array<string, float>|null
-     */
-    private function directResourceCostsForRecipe(array $recipeDefinition): ?array
-    {
-        if (
-            !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_MANNY)
-            && !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER)
-        ) {
-            return null;
-        }
-
-        $resourceCosts = [];
-        $ingredients = is_array($recipeDefinition['ingredients'] ?? null) ? $recipeDefinition['ingredients'] : [];
-        foreach ($ingredients as $ingredient) {
-            if (!is_array($ingredient) || $this->craftingIngredientKind($ingredient) !== 'resource') {
-                return null;
-            }
-            $type = (string) ($ingredient['type'] ?? '');
-            if ($type === '') {
-                return null;
-            }
-
-            $this->addResourceCost(
-                $resourceCosts,
-                $this->normalizeCraftResourceType($type),
-                max(0.0, (float) ($ingredient['quantity'] ?? 0)),
-            );
-        }
-
-        return $resourceCosts;
     }
 
     /**
@@ -1168,6 +1178,10 @@ final class MannyService
         if ($type === '') {
             return;
         }
+        if ($type === 'manny') {
+            $this->createCraftedManny($probe, $manny, $now);
+            return;
+        }
 
         $metadata = [
             'recipe' => (string) ($manny->taskPayload['recipe'] ?? $type),
@@ -1191,6 +1205,39 @@ final class MannyService
             round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
             $metadata,
         );
+    }
+
+    private function createCraftedManny(NeumannProbe $probe, Manny $craftingManny, \DateTimeImmutable $now): void
+    {
+        $name = $this->nextCraftedMannyName($probe);
+        $newManny = $this->mannies->createForProbe($probe->id, $name);
+        if (!$this->storage->placeMannyOnProbe($probe, $newManny)) {
+            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted Manny.');
+        }
+        $newManny->taskPayload = [
+            'craftedFromRecipe' => (string) ($craftingManny->taskPayload['recipe'] ?? 'manny'),
+            'craftedByMannyId' => $craftingManny->uid,
+            'craftedByMannyName' => $craftingManny->name,
+            'craftedAt' => $now->format('c'),
+        ];
+        $this->mannies->save($newManny);
+    }
+
+    private function nextCraftedMannyName(NeumannProbe $probe): string
+    {
+        $names = array_fill_keys(array_map(
+            static fn(Manny $manny): string => strtolower($manny->name),
+            $this->mannies->findByProbeId($probe->id),
+        ), true);
+
+        for ($index = 1; $index <= 9999; $index++) {
+            $name = 'manny-' . $index;
+            if (!isset($names[strtolower($name)])) {
+                return $name;
+            }
+        }
+
+        return 'manny-' . bin2hex(random_bytes(4));
     }
 
     private function refundCraftingCommitment(NeumannProbe $probe, Manny $manny): void
@@ -2494,6 +2541,9 @@ final class MannyService
             ProbeItem::TYPE_CRYSTAL_SUBSTRATE,
             ProbeItem::TYPE_DOPANT_MATRIX,
             ProbeItem::TYPE_INTEGRATED_CIRCUIT,
+            ProbeItem::TYPE_ELECTRIC_MOTOR,
+            ProbeItem::TYPE_BATTERY_PACK,
+            ProbeItem::TYPE_LINEAR_ACTUATOR,
         ], true);
     }
 
@@ -2509,6 +2559,9 @@ final class MannyService
             ProbeItem::TYPE_CRYSTAL_SUBSTRATE => ProbeItem::CRYSTAL_SUBSTRATE_NAME,
             ProbeItem::TYPE_DOPANT_MATRIX => ProbeItem::DOPANT_MATRIX_NAME,
             ProbeItem::TYPE_INTEGRATED_CIRCUIT => ProbeItem::INTEGRATED_CIRCUIT_NAME,
+            ProbeItem::TYPE_ELECTRIC_MOTOR => ProbeItem::ELECTRIC_MOTOR_NAME,
+            ProbeItem::TYPE_BATTERY_PACK => ProbeItem::BATTERY_PACK_NAME,
+            ProbeItem::TYPE_LINEAR_ACTUATOR => ProbeItem::LINEAR_ACTUATOR_NAME,
             default => $fallback !== null && trim($fallback) !== '' ? $fallback : $type,
         };
     }

@@ -72,6 +72,9 @@
             "crystal_substrate": tr("crystalSubstrate", "Crystal substrate"),
             "dopant_matrix": tr("dopantMatrix", "Dopant matrix"),
             "integrated_circuit": tr("integratedCircuit", "Integrated circuit"),
+            "electric_motor": tr("electricMotor", "Electric motor"),
+            "battery_pack": tr("batteryPack", "Battery pack"),
+            "linear_actuator": tr("linearActuator", "Linear actuator"),
             "manny": tr("mannyObject", "Manny"),
         }[type] || fallback || type || "-";
     }
@@ -542,12 +545,6 @@
         ), 0);
     }
 
-    function inventoryItemCount(type) {
-        return Array.isArray(state.currentInventory && state.currentInventory.items)
-            ? state.currentInventory.items.filter((item) => item.type === type).length
-            : 0;
-    }
-
     function craftIngredientKind(ingredient) {
         if (ingredient && ingredient.kind) {
             return String(ingredient.kind);
@@ -571,19 +568,76 @@
         resourceCosts[normalizedType] = Math.round(((resourceCosts[normalizedType] || 0) + amount) * 10000) / 10000;
     }
 
-    function directResourceCostsForRecipe(recipe) {
-        if (!recipe || !Array.isArray(recipe.ingredients)) {
-            return null;
+    function resourceCostsLabel(resourceCosts) {
+        const entries = Object.entries(resourceCosts && typeof resourceCosts === "object" ? resourceCosts : {})
+            .filter(([, quantity]) => Number(quantity) > 0);
+        if (entries.length === 0) {
+            return window.VNG.numberValue(0) + " " + tr("containerUnit", "containers");
         }
 
-        return recipe.ingredients.reduce((resourceCosts, ingredient) => {
-            if (resourceCosts === null || craftIngredientKind(ingredient) !== "resource") {
-                return null;
-            }
-            addCraftPlanResourceCost(resourceCosts, ingredient.type, craftIngredientAmount(ingredient));
+        return entries.map(([type, quantity]) => (
+            window.VNG.numberValue(quantity) + " " + tr("containerUnit", "containers") + " " + resourceTypeLabel(normalizeResourceType(type))
+        )).join(", ");
+    }
 
-            return resourceCosts;
+    function inventoryItemCounts() {
+        return (Array.isArray(state.currentInventory && state.currentInventory.items)
+            ? state.currentInventory.items
+            : []
+        ).reduce((counts, item) => {
+            const type = String(item && item.type || "");
+            if (type) {
+                counts[type] = (counts[type] || 0) + 1;
+            }
+
+            return counts;
         }, {});
+    }
+
+    function recipeCanBeAutoCrafted(recipe) {
+        return recipe
+            && Array.isArray(recipe.craftableBy)
+            && (recipe.craftableBy.includes("manny") || recipe.craftableBy.includes("atomic_3d_printer"));
+    }
+
+    function resolveCraftRecipe(recipe, itemCounts, resourceCosts, path) {
+        const recipeId = String(recipe && recipe.id || craftingRecipeOutputType(recipe));
+        if (!recipe || !recipeId || path.includes(recipeId)) {
+            return {"canResolve": false, "durationSeconds": 0};
+        }
+
+        let canResolve = true;
+        let durationSeconds = Math.max(0, Number(recipe.durationSeconds) || 0);
+        (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).forEach((ingredient) => {
+            if (craftIngredientKind(ingredient) !== "item") {
+                addCraftPlanResourceCost(resourceCosts, ingredient.type, craftIngredientAmount(ingredient));
+                return;
+            }
+
+            const type = String(ingredient.type || "");
+            const required = Math.ceil(Math.max(0, craftIngredientAmount(ingredient)));
+            const available = Math.max(0, itemCounts[type] || 0);
+            const consumed = Math.min(required, available);
+            itemCounts[type] = available - consumed;
+            const missing = required - consumed;
+            if (missing <= 0) {
+                return;
+            }
+
+            const componentRecipe = craftingRecipeByOutputType(type);
+            if (!recipeCanBeAutoCrafted(componentRecipe)) {
+                canResolve = false;
+                return;
+            }
+
+            for (let index = 0; index < missing; index += 1) {
+                const componentPlan = resolveCraftRecipe(componentRecipe, itemCounts, resourceCosts, path.concat([recipeId]));
+                canResolve = canResolve && componentPlan.canResolve;
+                durationSeconds += componentPlan.durationSeconds;
+            }
+        });
+
+        return {canResolve, durationSeconds};
     }
 
     function craftAvailability(recipe) {
@@ -599,9 +653,9 @@
 
         const ingredients = Array.isArray(recipe.ingredients) ? recipe.ingredients : [];
         const resourceCosts = {};
+        const itemCounts = inventoryItemCounts();
         let canCraft = true;
-        let durationSeconds = Number(recipe.durationSeconds);
-        durationSeconds = Number.isFinite(durationSeconds) ? Math.max(0, durationSeconds) : 0;
+        let durationSeconds = Math.max(0, Number(recipe.durationSeconds) || 0);
         ingredients.forEach((ingredient) => {
             if (craftIngredientKind(ingredient) !== "item") {
                 addCraftPlanResourceCost(resourceCosts, ingredient.type, craftIngredientAmount(ingredient));
@@ -610,20 +664,22 @@
 
             const type = String(ingredient.type || "");
             const required = Math.ceil(Math.max(0, craftIngredientAmount(ingredient)));
-            const available = inventoryItemCount(type);
-            const missing = Math.max(0, required - available);
+            const available = Math.max(0, itemCounts[type] || 0);
+            const consumed = Math.min(required, available);
+            itemCounts[type] = available - consumed;
+            const missing = required - consumed;
             let craftedFromResources = 0;
             if (missing > 0) {
                 const componentRecipe = craftingRecipeByOutputType(type);
-                const componentResourceCosts = directResourceCostsForRecipe(componentRecipe);
-                if (!componentRecipe || componentResourceCosts === null) {
+                if (!recipeCanBeAutoCrafted(componentRecipe)) {
                     canCraft = false;
                 } else {
-                    Object.entries(componentResourceCosts).forEach(([resourceType, quantity]) => {
-                        addCraftPlanResourceCost(resourceCosts, resourceType, Number(quantity) * missing);
-                    });
-                    durationSeconds += Math.max(0, Number(componentRecipe.durationSeconds) || 0) * missing;
-                    craftedFromResources = missing;
+                    for (let index = 0; index < missing; index += 1) {
+                        const componentPlan = resolveCraftRecipe(componentRecipe, itemCounts, resourceCosts, [String(recipe.id || "")]);
+                        canCraft = canCraft && componentPlan.canResolve;
+                        durationSeconds += componentPlan.durationSeconds;
+                        craftedFromResources += componentPlan.canResolve ? 1 : 0;
+                    }
                 }
             }
 
@@ -814,9 +870,9 @@
         if (manny.currentTask === "crafting") {
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("craftingInProgress", "Crafting in progress")) + "</h4>"
-                + "<p>" + escaped(window.VNG.formatText(tr("craftingTaskDetail", "{recipe}, {metals} metal containers committed."), {
+                + "<p>" + escaped(window.VNG.formatText(tr("craftingTaskDetail", "{recipe}, {resources} committed."), {
                     "recipe": payload.recipeName || tr("waypointBookmark", "Waypoint bookmark"),
-                    "metals": window.VNG.numberValue(payload.metalsCost),
+                    "resources": resourceCostsLabel(payload.resourceCosts || {"metals": payload.metalsCost || 0}),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(tr("cancelCrafting", "Cancel crafting")) + "</button>"

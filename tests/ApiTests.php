@@ -245,7 +245,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(23, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(24, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -459,6 +459,16 @@ $test->assertEquals('micro_conductor', $recipesById['integrated_circuit']['ingre
 $test->assertEquals(2, $recipesById['integrated_circuit']['ingredients'][0]['quantity'] ?? null, 'integrated circuit requires two micro conductors');
 $test->assertEquals('integrated_circuit', $recipesById['integrated_circuit']['output']['type'] ?? null, 'integrated circuit recipe exposes its output item');
 $test->assertEquals(0.001, $recipesById['integrated_circuit']['output']['containerSpace'] ?? null, 'integrated circuit occupies a tiny storage space');
+$test->assert(isset($recipesById['electric_motor']), 'crafting recipes expose electric motors');
+$test->assertEquals(['manny'], $recipesById['electric_motor']['craftableBy'] ?? null, 'electric motor is assembled by Manny');
+$test->assertEquals('steel_bar', $recipesById['electric_motor']['ingredients'][0]['type'] ?? null, 'electric motor requires steel bars');
+$test->assert(isset($recipesById['battery_pack']), 'crafting recipes expose battery packs');
+$test->assertEquals('carbon_compounds', $recipesById['battery_pack']['ingredients'][2]['type'] ?? null, 'battery pack uses organic compounds');
+$test->assert(isset($recipesById['linear_actuator']), 'crafting recipes expose linear actuators');
+$test->assertEquals('electric_motor', $recipesById['linear_actuator']['ingredients'][2]['type'] ?? null, 'linear actuator requires an electric motor');
+$test->assert(isset($recipesById['manny']), 'crafting recipes expose Mannys');
+$test->assertEquals('manny', $recipesById['manny']['output']['type'] ?? null, 'Manny recipe outputs a real Manny');
+$test->assertEquals(0.05, $recipesById['manny']['output']['containerSpace'] ?? null, 'crafted Manny occupies the standard Manny storage space');
 
 $craftPlayer = $auth->registerPlayerWithPassword('crafter', 'secret', 'Crafter');
 $craftProbeEntity = $probes->findByPlayerId($craftPlayer->id);
@@ -569,6 +579,26 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(1, count($integratedCircuits), 'completed integrated-circuit craft adds a circuit item');
     $test->assertEquals(0.001, $integratedCircuits[0]['containerSpace'] ?? null, 'integrated circuit item occupies a tiny storage space');
 
+    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.15 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $rawLinearActuatorCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'linear_actuator',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $rawLinearActuatorCraft->status, 'Manny can start a linear-actuator craft from raw metals');
+    $test->assertEquals(0.15, $rawLinearActuatorCraft->body['manny']['task']['metalsCost'] ?? null, 'recursive linear-actuator craft commits all nested metal costs');
+    $test->assertEquals(3900, $rawLinearActuatorCraft->body['manny']['task']['durationSeconds'] ?? null, 'recursive linear-actuator craft includes nested motor, bar and plate fabrication time');
+
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $linearProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $linearActuators = array_values(array_filter(
+        $linearProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === ProbeItem::TYPE_LINEAR_ACTUATOR,
+    ));
+    $test->assertEquals(1, count($linearActuators), 'completed linear-actuator craft adds a linear actuator item');
+
     $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.02 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
     $steelBarCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'steel_bar',
@@ -630,6 +660,45 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemA->uid)?->storageContainerId, 'completed batch move updates the first item container');
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemB->uid)?->storageContainerId, 'completed batch move updates the second item container');
+
+        for ($index = 0; $index < 5; $index++) {
+            $items->create($craftProbeEntity->id, ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, storageContainerId: $additionalStorageContainerEntity->id);
+        }
+        for ($index = 0; $index < 12; $index++) {
+            $items->create($craftProbeEntity->id, ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006, storageContainerId: $additionalStorageContainerEntity->id);
+        }
+        for ($index = 0; $index < 4; $index++) {
+            $items->create($craftProbeEntity->id, ProbeItem::TYPE_BATTERY_PACK, ProbeItem::BATTERY_PACK_NAME, 0.008, storageContainerId: $additionalStorageContainerEntity->id);
+        }
+        for ($index = 0; $index < 5; $index++) {
+            $items->create($craftProbeEntity->id, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001, storageContainerId: $additionalStorageContainerEntity->id);
+        }
+        for ($index = 0; $index < 18; $index++) {
+            $items->create($craftProbeEntity->id, ProbeItem::TYPE_STEEL_PLATE, ProbeItem::STEEL_PLATE_NAME, 0.01, storageContainerId: $additionalStorageContainerEntity->id);
+        }
+        for ($index = 0; $index < 12; $index++) {
+            $items->create($craftProbeEntity->id, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01, storageContainerId: $additionalStorageContainerEntity->id);
+        }
+        $mannyCountBeforeCraft = count($mannies->findByProbeId($craftProbeEntity->id));
+        $preparedMannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+            'recipe' => 'manny',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $preparedMannyCraft->status, 'Manny can start crafting another Manny from prepared components');
+        $test->assertEquals(3600, $preparedMannyCraft->body['manny']['task']['durationSeconds'] ?? null, 'prepared Manny assembly lasts one hour');
+        $test->assertEquals('manny', $preparedMannyCraft->body['manny']['task']['output']['type'] ?? null, 'Manny craft task stores a Manny output');
+
+        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $craftMannyDbId,
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $craftedMannyList = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+        $test->assertEquals($mannyCountBeforeCraft + 1, count($craftedMannyList->body['mannies'] ?? []), 'completed Manny craft creates a real Manny entity');
+        $craftedMannyProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+        $craftedMannyItems = array_values(array_filter(
+            $craftedMannyProbe->body['probe']['inventory']['items'] ?? [],
+            static fn(array $item): bool => ($item['type'] ?? null) === 'manny',
+        ));
+        $test->assertEquals($mannyCountBeforeCraft + 1, count($craftedMannyItems), 'crafted Manny appears in probe inventory');
 
         $storageContainers->setResourceAmount($coreStorageContainer->id, 'metals', 0.2);
         $storageContainers->setResourceAmount($additionalStorageContainerEntity->id, 'metals', 0.3);
