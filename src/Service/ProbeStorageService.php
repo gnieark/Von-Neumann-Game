@@ -218,6 +218,33 @@ final class ProbeStorageService
         );
     }
 
+    /**
+     * @return array<array{id:string,label:string,sortOrder:int,capacity:float}>
+     */
+    public function additionalContainerCandidates(NeumannProbe $probe): array
+    {
+        $this->ensureProbeStorage($probe);
+        $candidates = [];
+        foreach ($this->containers->findByProbeId($probe->id) as $container) {
+            if ($container->kind !== StorageContainer::KIND_CONTAINER || !str_starts_with($container->uid, 'container-')) {
+                continue;
+            }
+            $candidates[] = [
+                'id' => $container->uid,
+                'label' => $container->label,
+                'sortOrder' => $container->sortOrder,
+                'capacity' => $container->capacity,
+            ];
+        }
+
+        return $candidates;
+    }
+
+    public function additionalContainerCount(NeumannProbe $probe): int
+    {
+        return count($this->additionalContainerCandidates($probe));
+    }
+
     public function updateContainerRules(NeumannProbe $probe, string $containerUid, array $priority, array $exclusion, array $strictExclusion): array
     {
         $this->ensureProbeStorage($probe);

@@ -6,15 +6,18 @@ namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -36,6 +39,8 @@ final class ProbeMovementService
         private readonly ?ScheduledEventRepository $scheduledEvents = null,
         private readonly ?SectorService $sectors = null,
         private readonly ?MannyRepository $mannies = null,
+        private readonly ?ProbeStorageService $storage = null,
+        private readonly ?ProbeDamageWarningRepository $damageWarnings = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -90,6 +95,7 @@ final class ProbeMovementService
         $this->probes->save($probe);
         $this->cancelBlackHoleTrap($probe);
         $this->scheduleMovementEvents($movement);
+        $this->scheduleFragileContainerLossIfNeeded($probe, $movement);
 
         return $movement;
     }
@@ -393,6 +399,160 @@ final class ProbeMovementService
                 ],
             );
         }
+    }
+
+    private function scheduleFragileContainerLossIfNeeded(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->scheduledEvents === null || $this->storage === null || $this->damageWarnings === null) {
+            return;
+        }
+
+        $containers = $this->storage->additionalContainerCandidates($probe);
+        $count = count($containers);
+        $risk = $this->fragileContainerLossRisk($count);
+        if ($risk <= 0.0 || $containers === []) {
+            return;
+        }
+        if ($this->deterministicFloat('fragile-container-loss-risk', $movement) >= $risk) {
+            return;
+        }
+
+        $containerIndex = min(
+            count($containers) - 1,
+            (int) floor($this->deterministicFloat('fragile-container-loss-container', $movement) * count($containers)),
+        );
+        $container = $containers[$containerIndex];
+        $atOrigin = $this->deterministicFloat('fragile-container-loss-sector', $movement) < 0.5;
+        $sector = $atOrigin ? $movement->origin : $movement->target;
+        $phase = $atOrigin ? 'acceleration_end' : 'deceleration_start';
+        $runAt = $atOrigin ? $movement->accelerationEndsAt : $movement->cruiseEndsAt;
+        $objectId = SectorDetachedContainer::objectIdForContainer((string) $container['id']);
+        $riskPercent = round($risk * 100, 2);
+        $message = 'Fragile external storage warning: from 5 additional containers onward, movement can break a container link. '
+            . 'This jump is expected to lose ' . (string) $container['label']
+            . ' near sector ' . $sector->toKey()
+            . ' with a ' . $riskPercent . '% break risk.';
+
+        $warning = $this->damageWarnings->createStorageContainerBreakWarning(
+            $probe->id,
+            $movement->id,
+            $phase,
+            $runAt,
+            $sector,
+            (string) $container['id'],
+            (string) $container['label'],
+            $objectId,
+            $riskPercent,
+            $count,
+            $message,
+        );
+
+        $this->scheduledEvents->schedule(
+            SchedulerService::PROBE_STORAGE_CONTAINER_BREAK,
+            'probe_damage_warning',
+            $warning->id,
+            $runAt,
+            [
+                'warningId' => $warning->id,
+                'probeId' => $probe->id,
+                'playerId' => $probe->playerId,
+                'movementId' => $movement->id,
+                'containerId' => (string) $container['id'],
+                'objectId' => $objectId,
+                'phase' => $phase,
+                'sector' => $sector->toArray(),
+            ],
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function breakStorageContainerFromScheduledWarning(array $payload): void
+    {
+        if ($this->storage === null || $this->sectors === null) {
+            return;
+        }
+
+        $probeId = (int) ($payload['probeId'] ?? 0);
+        $containerId = (string) ($payload['containerId'] ?? '');
+        $sector = $this->sectorFromPayload($payload['sector'] ?? null);
+        if ($probeId <= 0 || $containerId === '' || $sector === null) {
+            return;
+        }
+
+        $probe = $this->probes->findById($probeId);
+        if ($probe === null) {
+            return;
+        }
+
+        try {
+            $snapshot = $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, (int) ($payload['playerId'] ?? $probe->playerId));
+        } catch (MannyActionException) {
+            return;
+        }
+
+        $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
+        $object = new SectorDetachedContainer(
+            (string) ($payload['objectId'] ?? SectorDetachedContainer::objectIdForContainer((string) ($snapshot['sourceContainerId'] ?? $containerId))),
+            (string) ($containerData['label'] ?? 'Detached storage container'),
+            SectorDetachedContainer::MODE_DRIFTING,
+            (int) ($snapshot['ownerProbeId'] ?? $probe->id),
+            (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
+            null,
+            (float) ($containerData['capacity'] ?? 0.0),
+            ProbeInventory::CAPACITY_UNIT,
+            gmdate('c'),
+            $snapshot + [
+                'mode' => SectorDetachedContainer::MODE_DRIFTING,
+                'sector' => $sector->toArray(),
+                'movementDamageWarningId' => (int) ($payload['warningId'] ?? 0),
+                'movementId' => (int) ($payload['movementId'] ?? 0),
+                'phase' => (string) ($payload['phase'] ?? ''),
+            ],
+            'Detached storage container drifting after a movement stress break.',
+        );
+
+        $sectorContent = $this->sectors->getOrCreateSector($sector);
+        if (!$sectorContent->replaceObject($object)) {
+            $sectorContent->addObject($object);
+        }
+        $this->sectors->saveSector($sectorContent);
+        if ($this->damageWarnings !== null && (int) ($payload['warningId'] ?? 0) > 0) {
+            $this->damageWarnings->markResolved((int) $payload['warningId']);
+        }
+    }
+
+    private function fragileContainerLossRisk(int $additionalContainerCount): float
+    {
+        return min(1.0, max(0.0, ($additionalContainerCount - 4) * 0.10));
+    }
+
+    private function deterministicFloat(string $purpose, ProbeMovement $movement): float
+    {
+        $payload = implode('|', [
+            $this->worldSeed,
+            $purpose,
+            $movement->probeId,
+            $movement->id,
+            $movement->origin->toKey(),
+            $movement->target->toKey(),
+            $movement->startedAt,
+        ]);
+
+        return hexdec(substr(hash('sha256', $payload), 0, 8)) / hexdec('ffffffff');
+    }
+
+    private function sectorFromPayload(mixed $value): ?SectorCoordinates
+    {
+        if (!is_array($value)) {
+            return null;
+        }
+        if (!isset($value['x'], $value['y'], $value['z'])) {
+            return null;
+        }
+
+        return new SectorCoordinates((int) $value['x'], (int) $value['y'], (int) $value['z']);
     }
 
     public function trapProbeByBlackHole(NeumannProbe $probe): void

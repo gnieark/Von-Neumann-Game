@@ -9,12 +9,14 @@ use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
+use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\VisitedSector;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
@@ -33,7 +35,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 24;
+    public const API_VERSION = 25;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -45,6 +47,7 @@ final class ApiKernel
         private readonly ProbeItemRepository $items,
         private readonly ProbeStorageService $storage,
         private readonly ProbeMessageRepository $messages,
+        private readonly ProbeDamageWarningRepository $damageWarnings,
         private readonly array $gameplayConfig = [],
     ) {}
 
@@ -79,6 +82,9 @@ final class ApiKernel
             if (preg_match('#^/api/probe/messages/(\d+)/read$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, (int) $matches[1]));
             }
+            if (preg_match('#^/api/probe/damage-warnings/(\d+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeDamageWarningReadResponse($player, (int) $matches[1]));
+            }
 
             return match ($routePath) {
                 '/api/version' => $this->routeApiVersion($method),
@@ -92,6 +98,7 @@ final class ApiKernel
                 '/api/probe/atomic-printer/craft' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeAtomicPrinterCraftResponse($player, $body)),
                 '/api/probe/messages/sent' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSentMessagesResponse($player, $query)),
                 '/api/probe/messages' => $this->protectedRoute($method, ['GET', 'POST'], $headers, fn(Player $player): ApiResponse => $method === 'POST' ? $this->probeMessageSendResponse($player, $body) : $this->probeMessagesResponse($player, $query)),
+                '/api/probe/damage-warnings' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeDamageWarningsResponse($player)),
                 '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
@@ -464,6 +471,39 @@ final class ApiKernel
         }
 
         return new ApiResponse(200, ['message' => $this->probeMessageArray($player, $this->messages->markRead($message))]);
+    }
+
+    private function probeDamageWarningsResponse(Player $player): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $warnings = $this->damageWarnings->findByProbeId($probe->id);
+
+        return new ApiResponse(200, [
+            'damageWarnings' => array_map(
+                fn(ProbeDamageWarning $warning): array => $this->probeDamageWarningArray($player, $warning),
+                $warnings,
+            ),
+            'rule' => [
+                'type' => ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
+                'startsAtAdditionalContainers' => 5,
+                'riskPerAdditionalContainerAfterFourPercent' => 10,
+                'maximumRiskPercent' => 100,
+                'message' => 'From 5 additional containers onward, movement stress can break one container link. Risk is 10% at 5 containers, 20% at 6, and continues up to 100%.',
+            ],
+        ]);
+    }
+
+    private function probeDamageWarningReadResponse(Player $player, int $warningId): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $warning = $this->damageWarnings->findByIdForProbe($warningId, $probe->id);
+        if ($warning === null) {
+            return ApiResponse::error(404, 'not_found', 'Damage warning not found.');
+        }
+
+        return new ApiResponse(200, [
+            'damageWarning' => $this->probeDamageWarningArray($player, $this->damageWarnings->markRead($warning)),
+        ]);
     }
 
     private function messageRecipientProbeId(mixed $value): ?int
@@ -936,6 +976,37 @@ final class ApiKernel
         }
 
         return $payload;
+    }
+
+    private function probeDamageWarningArray(Player $player, ProbeDamageWarning $warning): array
+    {
+        $frame = new PlayerReferenceFrame($player->homeSector);
+
+        return [
+            'id' => $warning->id,
+            'type' => $warning->type,
+            'status' => $warning->status,
+            'message' => $warning->message,
+            'phase' => $warning->phase,
+            'scheduledAt' => $warning->scheduledAt,
+            'sector' => [
+                'relative' => $frame->globalToRelative(new SectorCoordinates($warning->sectorX, $warning->sectorY, $warning->sectorZ)),
+            ],
+            'container' => [
+                'id' => $warning->containerId,
+                'label' => $warning->containerLabel,
+                'detachedObjectId' => $warning->objectId,
+            ],
+            'risk' => [
+                'percent' => $warning->riskPercent,
+                'additionalContainerCount' => $warning->additionalContainerCount,
+                'ruleStartsAtAdditionalContainers' => 5,
+            ],
+            'createdAt' => $warning->createdAt,
+            'updatedAt' => $warning->updatedAt,
+            'readAt' => $warning->readAt,
+            'resolvedAt' => $warning->resolvedAt,
+        ];
     }
 
     private function movementArray(Player $player, ProbeMovement $movement, bool $includeLive = true): array

@@ -194,6 +194,32 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient ON probe_messages(recipient_probe_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_sender ON probe_messages(sender_probe_id, created_at)",
+            "CREATE TABLE IF NOT EXISTS probe_damage_warnings (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                movement_id INTEGER NOT NULL,
+                type $text NOT NULL,
+                status $text NOT NULL,
+                phase $text NOT NULL,
+                scheduled_at $text NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                container_id $text NOT NULL,
+                container_label $text NOT NULL,
+                object_id $text NOT NULL,
+                risk_percent $decimal NOT NULL,
+                additional_container_count INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                read_at $nullableText,
+                resolved_at $nullableText,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id),
+                FOREIGN KEY(movement_id) REFERENCES probe_movements(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_probe_status ON probe_damage_warnings(probe_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_movement ON probe_damage_warnings(movement_id)",
             "CREATE TABLE IF NOT EXISTS scheduled_events (
                 id $id,
                 type $text NOT NULL,
@@ -277,6 +303,7 @@ final class SchemaInitializer
             }
             $this->ensureSqliteProbeResourceStockColumns($pdo);
             $this->ensureStorageSchema($pdo);
+            $this->ensureDamageWarningSchema($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlMannyProbeIdNullable($pdo);
             $this->ensureMysqlMannyCargoColumns($pdo);
@@ -295,7 +322,45 @@ final class SchemaInitializer
             }
             $this->ensureMysqlProbeResourceStockColumns($pdo);
             $this->ensureStorageSchema($pdo);
+            $this->ensureDamageWarningSchema($pdo);
         }
+    }
+
+    private function ensureDamageWarningSchema(PDO $pdo): void
+    {
+        $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+        $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
+
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS probe_damage_warnings (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                movement_id INTEGER NOT NULL,
+                type $text NOT NULL,
+                status $text NOT NULL,
+                phase $text NOT NULL,
+                scheduled_at $text NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                container_id $text NOT NULL,
+                container_label $text NOT NULL,
+                object_id $text NOT NULL,
+                risk_percent $decimal NOT NULL,
+                additional_container_count INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                read_at $nullableText,
+                resolved_at $nullableText,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id),
+                FOREIGN KEY(movement_id) REFERENCES probe_movements(id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_probe_status ON probe_damage_warnings(probe_id, status, created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_movement ON probe_damage_warnings(movement_id)');
     }
 
     private function ensureStorageSchema(PDO $pdo): void

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '24'
+  version: '25'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 24
+                apiVersion: 25
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -490,6 +490,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProbeMessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/probe/damage-warnings:
+    get:
+      summary: List probe movement damage warnings
+      description: >
+        Returns persistent warnings produced when a fragile chain of additional
+        storage containers may lose one container during a sector movement.
+        This rule starts at 5 additional containers with a 10% risk, then adds
+        10 percentage points per extra container up to 100%.
+      responses:
+        '200':
+          description: Current and past damage warnings for the authenticated probe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeDamageWarningsResponse'
+              example:
+                damageWarnings:
+                  - id: 7
+                    type: storage_container_break
+                    status: unread
+                    message: From 5 additional containers onward, movement stress can break one container link. Risk is 30% for this jump.
+                    phase: acceleration_end
+                    scheduledAt: '2026-06-12T12:03:00+00:00'
+                    sector:
+                      relative: { x: 0, y: 0, z: 0 }
+                    container:
+                      id: cnt_extra_3
+                      label: Additional container 3
+                      objectId: detached-container-7
+                    risk:
+                      percent: 30
+                      additionalContainerCount: 7
+                    createdAt: '2026-06-12T12:00:00+00:00'
+                    updatedAt: '2026-06-12T12:00:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                rule:
+                  type: storage_container_break
+                  startsAtAdditionalContainers: 5
+                  riskPerAdditionalContainerAfterFourPercent: 10
+                  maximumRiskPercent: 100
+                  message: From 5 additional containers onward, movement stress can break one container link. Risk is 10% at 5 containers, 20% at 6, and continues up to 100%.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/damage-warnings/{damageWarningId}:
+    patch:
+      summary: Mark a movement damage warning as read
+      parameters:
+        - $ref: '#/components/parameters/DamageWarningId'
+      responses:
+        '200':
+          description: Damage warning marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeDamageWarningResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1466,6 +1526,14 @@ components:
         type: integer
         minimum: 1
       example: 12
+    DamageWarningId:
+      name: damageWarningId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 7
   responses:
     BadRequest:
       description: Bad request
@@ -1997,6 +2065,101 @@ components:
         createdAt:
           type: string
           format: date-time
+    ProbeDamageWarningsResponse:
+      type: object
+      required: [damageWarnings, rule]
+      properties:
+        damageWarnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeDamageWarning'
+        rule:
+          $ref: '#/components/schemas/ProbeDamageWarningRule'
+    ProbeDamageWarningResponse:
+      type: object
+      required: [damageWarning]
+      properties:
+        damageWarning:
+          $ref: '#/components/schemas/ProbeDamageWarning'
+    ProbeDamageWarning:
+      type: object
+      required: [id, type, status, message, phase, scheduledAt, sector, container, risk, createdAt, updatedAt, readAt, resolvedAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [storage_container_break]
+        status:
+          type: string
+          enum: [unread, read]
+        message:
+          type: string
+        phase:
+          type: string
+          enum: [acceleration_end, deceleration_start]
+        scheduledAt:
+          type: string
+          format: date-time
+        sector:
+          type: object
+          required: [relative]
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+        container:
+          type: object
+          required: [id, label, objectId]
+          properties:
+            id:
+              type: string
+            label:
+              type: string
+            objectId:
+              type: string
+        risk:
+          type: object
+          required: [percent, additionalContainerCount]
+          properties:
+            percent:
+              type: integer
+              minimum: 0
+              maximum: 100
+            additionalContainerCount:
+              type: integer
+              minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+    ProbeDamageWarningRule:
+      type: object
+      required: [type, startsAtAdditionalContainers, riskPerAdditionalContainerAfterFourPercent, maximumRiskPercent, message]
+      properties:
+        type:
+          type: string
+          enum: [storage_container_break]
+        startsAtAdditionalContainers:
+          type: integer
+          example: 5
+        riskPerAdditionalContainerAfterFourPercent:
+          type: integer
+          example: 10
+        maximumRiskPercent:
+          type: integer
+          example: 100
+        message:
+          type: string
     ProbeMessageEndpoint:
       type: object
       required: [probeId, name]

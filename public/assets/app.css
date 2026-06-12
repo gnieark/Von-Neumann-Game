@@ -770,6 +770,12 @@ button.account-menu-item:hover {
     box-shadow: 0 0 0 1px rgba(32, 255, 132, .4), 0 0 20px rgba(32, 255, 132, .28);
 }
 
+.panel-tab.alerts-warning {
+    border-color: #ffb020;
+    color: #ffe4b3;
+    box-shadow: 0 0 0 1px rgba(255, 176, 32, .45), 0 0 22px rgba(255, 176, 32, .3);
+}
+
 .workspace {
     min-width: 0;
 }
@@ -1049,7 +1055,8 @@ button.account-menu-item:hover {
 
 .sector-bookmark-alert,
 .sector-probe-alert,
-.sector-detached-container-alert {
+.sector-detached-container-alert,
+.sector-damage-alert {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -1066,13 +1073,15 @@ button.account-menu-item:hover {
 
 .sector-bookmark-alert[hidden],
 .sector-probe-alert[hidden],
-.sector-detached-container-alert[hidden] {
+.sector-detached-container-alert[hidden],
+.sector-damage-alert[hidden] {
     display: none;
 }
 
 .sector-bookmark-alert.acknowledged,
 .sector-probe-alert.acknowledged,
-.sector-detached-container-alert.acknowledged {
+.sector-detached-container-alert.acknowledged,
+.sector-damage-alert.acknowledged {
     animation: none;
     border-color: rgba(143, 182, 189, .28);
     background: rgba(143, 182, 189, .08);
@@ -1080,6 +1089,13 @@ button.account-menu-item:hover {
     font-weight: 700;
     text-transform: none;
     box-shadow: none;
+}
+
+.sector-damage-alert:not(.acknowledged) {
+    border-color: #ffb020;
+    background: rgba(255, 176, 32, .18);
+    color: #ffe4b3;
+    box-shadow: 0 0 0 1px rgba(255, 176, 32, .32), 0 0 20px rgba(255, 176, 32, .28);
 }
 
 .sector-alert-message {

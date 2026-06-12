@@ -314,9 +314,10 @@ function navLinkNodes(path) {
     });
 }
 
-function setNavigationWarning(path, active) {
+function setNavigationWarning(path, active, warning) {
     navLinkNodes(path).forEach((node) => {
         node.classList.toggle("alerts-pending", Boolean(active));
+        node.classList.toggle("alerts-warning", Boolean(warning));
     });
 }
 
@@ -467,18 +468,24 @@ async function syncNavigationWarnings() {
     }
 
     const messages = await loadI18n();
-    const [messageData, sectorData] = await Promise.all([
+    const [messageData, sectorData, damageWarningData] = await Promise.all([
         apiJson("/api/probe/messages?limit=50&offset=0", {"method": "GET"}).catch(() => null),
         apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
+        apiJson("/api/probe/damage-warnings", {"method": "GET"}).catch(() => null),
     ]);
 
+    const unreadDamageWarnings = Array.isArray(damageWarningData && damageWarningData.damageWarnings)
+        ? damageWarningData.damageWarnings.some((warning) => warning && warning.status === "unread")
+        : false;
     if (messageData) {
         const receivedMessages = Array.isArray(messageData.messages) ? messageData.messages : [];
         setNavigationWarning("/messaging", receivedMessages.some((message) => message && message.status === "unread"));
     }
     if (sectorData) {
         const alerts = sectorAlerts(sectorData.sector || {}, messages);
-        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged));
+        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged) || unreadDamageWarnings, unreadDamageWarnings);
+    } else {
+        setNavigationWarning("/alerts", unreadDamageWarnings, unreadDamageWarnings);
     }
 }
 

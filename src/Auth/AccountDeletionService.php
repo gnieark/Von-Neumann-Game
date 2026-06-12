@@ -85,6 +85,7 @@ final class AccountDeletionService
             'probeMovements' => 0,
             'probeMessagesSent' => 0,
             'probeMessagesReceived' => 0,
+            'probeDamageWarnings' => 0,
             'scheduledEvents' => 0,
         ];
 
@@ -105,6 +106,7 @@ final class AccountDeletionService
         $stats['probeMovements'] = $this->count('SELECT COUNT(*) FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $stats['probeMessagesSent'] = $this->count('SELECT COUNT(*) FROM probe_messages WHERE sender_probe_id = :probe_id', ['probe_id' => $probeId]);
         $stats['probeMessagesReceived'] = $this->count('SELECT COUNT(*) FROM probe_messages WHERE recipient_probe_id = :probe_id', ['probe_id' => $probeId]);
+        $stats['probeDamageWarnings'] = $this->count('SELECT COUNT(*) FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $stats['scheduledEvents'] = $this->countScheduledEvents($probeId);
 
         return $stats;
@@ -166,7 +168,14 @@ final class AccountDeletionService
             'DELETE FROM scheduled_events WHERE entity_type = :entity_type AND entity_id = :probe_id',
             ['entity_type' => 'probe', 'probe_id' => $probeId],
         );
+        $this->execute(
+            'DELETE FROM scheduled_events
+             WHERE entity_type = :entity_type
+             AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :probe_id)',
+            ['entity_type' => 'probe_damage_warning', 'probe_id' => $probeId],
+        );
         $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM mannies WHERE probe_id = :probe_id',
             ['probe_id' => $probeId],
@@ -211,12 +220,15 @@ final class AccountDeletionService
         return $this->count(
             'SELECT COUNT(*) FROM scheduled_events
              WHERE (entity_type = :probe_entity_type AND entity_id = :probe_id)
-             OR (entity_type = :movement_entity_type AND entity_id IN (SELECT id FROM probe_movements WHERE probe_id = :movement_probe_id))',
+             OR (entity_type = :movement_entity_type AND entity_id IN (SELECT id FROM probe_movements WHERE probe_id = :movement_probe_id))
+             OR (entity_type = :damage_warning_entity_type AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :damage_warning_probe_id))',
             [
                 'probe_entity_type' => 'probe',
                 'movement_entity_type' => 'probe_movement',
+                'damage_warning_entity_type' => 'probe_damage_warning',
                 'probe_id' => $probeId,
                 'movement_probe_id' => $probeId,
+                'damage_warning_probe_id' => $probeId,
             ],
         );
     }
