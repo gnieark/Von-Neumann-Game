@@ -608,6 +608,48 @@ paths:
                       summary: Stellar system with 1 star(s) and 4 orbital body(ies).
                       radius: 5.4
                       radiusUnit: astronomical_unit
+                      minableTargets:
+                        - id: asteroid-abc123-0
+                          type: asteroid
+                          name: null
+                          mass: 0.000001
+                          massUnit: earth_mass
+                          resources: [iron, nickel]
+                          resourceTypes: [metals]
+                          resourceComposition:
+                            deuterium: 0
+                            metals: 1
+                            ice: 0
+                            carbon_compounds: 0
+                          resourceAmounts:
+                            deuterium: 0
+                            metals: 1
+                            ice: 0
+                            carbon_compounds: 0
+                    - id: mine-rock
+                      type: asteroid
+                      name: null
+                      estimated: false
+                      summary: Wandering asteroid body.
+                      mass: 0.000001
+                      massUnit: earth_mass
+                      radius: 0.001
+                      radiusUnit: earth_radius
+                      dangerLevel: low
+                      resources: [iron, nickel]
+                      resourceTypes: [metals]
+                      resourceComposition:
+                        deuterium: 0
+                        metals: 1
+                        ice: 0
+                        carbon_compounds: 0
+                      resourceAmounts:
+                        deuterium: 0
+                        metals: 1
+                        ice: 0
+                        carbon_compounds: 0
+                      mannyMineable: true
+                      composition: iron
                   probes:
                     - id: 2
                       name: Probe of nova
@@ -966,6 +1008,12 @@ paths:
   /api/probe/mannies/{mannyId}/mine:
     post:
       summary: Start mining a small body with a Manny
+      description: >
+        Pick objectId from a detailed SectorObject.id or from a solar system
+        minableTargets entry. Select resources from resourceTypes. For
+        asteroids, resourceAmounts is the authoritative remaining reserve in
+        equivalent earth containers; resourceComposition/resourceProfile define
+        how a multi-resource targetAmount is split.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -1424,6 +1472,30 @@ paths:
                           radius: 5.4
                           radiusUnit: astronomical_unit
                           dangerLevel: low
+                        - id: mine-rock
+                          type: asteroid
+                          name: null
+                          estimated: false
+                          summary: Wandering asteroid body.
+                          mass: 0.000001
+                          massUnit: earth_mass
+                          radius: 0.001
+                          radiusUnit: earth_radius
+                          dangerLevel: low
+                          resources: [iron, nickel]
+                          resourceTypes: [metals]
+                          resourceComposition:
+                            deuterium: 0
+                            metals: 1
+                            ice: 0
+                            carbon_compounds: 0
+                          resourceAmounts:
+                            deuterium: 0
+                            metals: 1
+                            ice: 0
+                            carbon_compounds: 0
+                          mannyMineable: true
+                          composition: iron
                       scan:
                         currentSectorResidenceSeconds: 42
                         requiredResidenceSeconds: 0
@@ -1717,6 +1789,108 @@ components:
         x: { type: number }
         y: { type: number }
         z: { type: number }
+    MineableResourceType:
+      type: string
+      enum: [deuterium, metals, ice, carbon_compounds]
+    ResourceHintList:
+      type: array
+      description: >
+        Raw sensor/material hints emitted by the sector generator. Asteroids
+        use strings such as iron, nickel, water_ice or carbon; clients should
+        use resourceTypes/resourceComposition for mining decisions.
+      items:
+        type: string
+    ResourceComposition:
+      type: object
+      required: [deuterium, metals, ice, carbon_compounds]
+      additionalProperties: false
+      description: >
+        Normalized mineable-resource shares. Values are rounded to four
+        decimals and normally sum to 1 when at least one resource is present.
+      properties:
+        deuterium:
+          type: number
+          minimum: 0
+          maximum: 1
+        metals:
+          type: number
+          minimum: 0
+          maximum: 1
+        ice:
+          type: number
+          minimum: 0
+          maximum: 1
+        carbon_compounds:
+          type: number
+          minimum: 0
+          maximum: 1
+    ResourceAmountMap:
+      type: object
+      required: [deuterium, metals, ice, carbon_compounds]
+      additionalProperties: false
+      description: >
+        Remaining material reserves in equivalent earth containers. Asteroids
+        expose this exact four-key object; mining subtracts from these values.
+      properties:
+        deuterium:
+          type: number
+          minimum: 0
+        metals:
+          type: number
+          minimum: 0
+        ice:
+          type: number
+          minimum: 0
+        carbon_compounds:
+          type: number
+          minimum: 0
+    MiningTarget:
+      type: object
+      required: [id, type, name, mass, resources, resourceTypes, resourceComposition]
+      properties:
+        id:
+          type: string
+          description: Object id to pass as objectId when starting a mining order.
+        type:
+          type: string
+          enum: [planet, asteroid]
+        name:
+          type: string
+          nullable: true
+        mass:
+          type: number
+        massUnit:
+          type: string
+          enum: [earth_mass]
+        radius:
+          type: number
+        radiusUnit:
+          type: string
+          enum: [earth_radius]
+        resources:
+          $ref: '#/components/schemas/ResourceHintList'
+        resourceTypes:
+          type: array
+          description: Mineable resource categories present on this target.
+          items:
+            $ref: '#/components/schemas/MineableResourceType'
+        resourceComposition:
+          $ref: '#/components/schemas/ResourceComposition'
+        resourceAmounts:
+          $ref: '#/components/schemas/ResourceAmountMap'
+        composition:
+          type: string
+          description: Asteroid composition class such as iron, silicate, carbonaceous, ice or rare_metals.
+        sizeCategory:
+          type: string
+          enum: [small, medium, large]
+        category:
+          type: string
+          description: Present for planet targets.
+        waypointBookmarks:
+          type: array
+          items:
+            $ref: '#/components/schemas/WaypointBookmarkHistory'
     ProbeMoveRequest:
       type: object
       required: [target]
@@ -2418,12 +2592,11 @@ components:
           minItems: 1
           uniqueItems: true
           items:
-            type: string
-            enum: [deuterium, metals, ice, carbon_compounds]
-          description: Resource categories to mine. The extracted amount is split according to the target object's composition, normalized over the selected categories.
+            $ref: '#/components/schemas/MineableResourceType'
+          description: Resource categories to mine, chosen from the target object's resourceTypes. The extracted amount is split according to resourceComposition, normalized over the selected categories.
         resource:
-          type: string
-          enum: [deuterium, metals, ice, carbon_compounds]
+          allOf:
+            - $ref: '#/components/schemas/MineableResourceType'
           deprecated: true
           description: Legacy single resource selector. Prefer resources.
         targetAmount:
@@ -2507,6 +2680,61 @@ components:
         objectId:
           type: string
           description: Recoverable detached container id when detection yields one.
+    MannyMiningTask:
+      type: object
+      required: [objectId, resourceType, resourceTypes, targetAmount, depositedAmount, depositedResources, extractedAmount, extractedResources, availableResources, resourceComposition, resourceProfile, target]
+      properties:
+        objectId:
+          type: string
+          description: Sector object being mined.
+        resourceType:
+          allOf:
+            - $ref: '#/components/schemas/MineableResourceType'
+          description: Legacy first selected resource; prefer resourceTypes.
+        resourceTypes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MineableResourceType'
+        targetAmount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Requested total amount in equivalent earth containers.
+        depositedAmount:
+          type: number
+          minimum: 0
+          description: Amount already delivered to the probe.
+        depositedResources:
+          anyOf:
+            - $ref: '#/components/schemas/ResourceAmountMap'
+            - type: array
+              maxItems: 0
+        extractedAmount:
+          type: number
+          minimum: 0
+          description: Amount already extracted from the target.
+        extractedResources:
+          anyOf:
+            - $ref: '#/components/schemas/ResourceAmountMap'
+            - type: array
+              maxItems: 0
+        availableResources:
+          type: array
+          description: Resource categories currently available on the target after existing Manny reservations.
+          items:
+            $ref: '#/components/schemas/MineableResourceType'
+        resourceComposition:
+          $ref: '#/components/schemas/ResourceComposition'
+        resourceProfile:
+          allOf:
+            - $ref: '#/components/schemas/ResourceComposition'
+          description: Normalized split applied to the selected resourceTypes for this order.
+        target:
+          $ref: '#/components/schemas/MiningTarget'
+        artificialObjectDetected:
+          $ref: '#/components/schemas/ArtificialObjectDetection'
     Manny:
       type: object
       required: [id, name, location, currentTask, taskProgressPercent, taskEstimatedEndTime, task, cargo, canReceiveOrders]
@@ -2534,8 +2762,17 @@ components:
           nullable: true
           description: Estimated ISO-8601 completion time for the current task, or null when idle.
         task:
-          type: object
-          additionalProperties: true
+          description: >
+            Current task payload. When currentTask is mining, this payload has
+            the MannyMiningTask shape, including target.resourceAmounts for
+            asteroids and resourceProfile for the selected split. Idle Mannys
+            may expose an empty payload.
+          anyOf:
+            - $ref: '#/components/schemas/MannyMiningTask'
+            - type: object
+              additionalProperties: true
+            - type: array
+              maxItems: 0
         cargo:
           $ref: '#/components/schemas/MannyCargo'
         canReceiveOrders:
@@ -2680,6 +2917,38 @@ components:
         dangerLevel:
           type: string
           enum: [low, moderate, extreme]
+        starCount:
+          type: integer
+          minimum: 0
+          description: Present on solar systems.
+        planetCount:
+          type: integer
+          minimum: 0
+          description: Present on solar systems.
+        orbitalBodyCount:
+          type: integer
+          minimum: 0
+          description: Present on solar systems.
+        resources:
+          $ref: '#/components/schemas/ResourceHintList'
+        resourceTypes:
+          type: array
+          description: Present on planets and asteroids; use these values in MannyMineRequest.resources.
+          items:
+            $ref: '#/components/schemas/MineableResourceType'
+        resourceComposition:
+          $ref: '#/components/schemas/ResourceComposition'
+        resourceAmounts:
+          $ref: '#/components/schemas/ResourceAmountMap'
+        mannyMineable:
+          type: boolean
+          description: Present on planets and asteroids; true when a Manny can mine this object.
+        composition:
+          type: string
+          description: Present on asteroids; generator composition class such as iron, silicate, carbonaceous, ice or rare_metals.
+        category:
+          type: string
+          description: Present on planets.
         salvageable:
           type: boolean
           description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage.
@@ -2692,6 +2961,11 @@ components:
           description: Present on solar systems; lists nested stars and orbital bodies that can receive a waypoint bookmark.
           items:
             $ref: '#/components/schemas/WaypointBookmarkTarget'
+        minableTargets:
+          type: array
+          description: Present on solar systems; lists nested planets/asteroids that can be mined by a Manny.
+          items:
+            $ref: '#/components/schemas/MiningTarget'
         mannyState:
           type: string
           enum: [abandoned, forgotten]
