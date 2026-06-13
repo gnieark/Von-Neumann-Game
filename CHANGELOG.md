@@ -15,9 +15,14 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Craft : clarification de la description du marque-page de navigation dans l’interface et les exemples API.
 - Forum : `GET /api/forum/posts/{postId}` sépare le message initial dans `firstMessage`; le tableau `messages` contient uniquement les réponses paginées.
 - Forum : l’auteur d’un message peut désormais modifier son propre message via `PATCH /api/forum/messages/{messageId}`; les modérateurs et admins conservent le droit de modifier tous les messages.
 - Les clients typés doivent accepter `apiVersion: 28` et les nouveaux schémas `ForumCategory*`, `ForumPost*`, `ForumMessage*`, les champs `ForumPost.firstMessageId`, `ForumMessage.editedAt`, `firstMessage` sur les réponses de détail/création de post, ainsi que les champs `forumAdmin` et `forumModerator` sur `Player`.
+
+### Fixed
+
+- Interface : la recette sélectionnée dans `Mannys & imprimante > Fabriquer` reste conservée après les rafraîchissements automatiques.
 
 ## 2026-06-12
 

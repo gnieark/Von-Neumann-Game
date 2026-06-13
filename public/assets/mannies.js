@@ -462,6 +462,7 @@
             "id": "waypoint_bookmark",
             "name": tr("waypointBookmark", "Waypoint bookmark"),
             "craftableBy": ["manny"],
+            "description": "A transmitting beacon placed on an object such as an asteroid or planet, or set in orbit around a star or gas giant. Its message can be read by every Neumann probe present in the sector.",
             "ingredients": [{
                 "type": "metals",
                 "quantity": 0.01,
@@ -489,6 +490,35 @@
         }
 
         return inventoryItemTypeLabel(recipe.id, recipe.name || recipe.id || "-");
+    }
+
+    function craftingRecipeDescriptionKey(recipe) {
+        return {
+            "waypoint_bookmark": "recipeDescriptionWaypointBookmark",
+            "steel_bar": "recipeDescriptionSteelBar",
+            "steel_plate": "recipeDescriptionSteelPlate",
+            "additional_container": "recipeDescriptionAdditionalContainer",
+            "micro_conductor": "recipeDescriptionMicroConductor",
+            "ceramic_insulator": "recipeDescriptionCeramicInsulator",
+            "crystal_substrate": "recipeDescriptionCrystalSubstrate",
+            "dopant_matrix": "recipeDescriptionDopantMatrix",
+            "integrated_circuit": "recipeDescriptionIntegratedCircuit",
+            "electric_motor": "recipeDescriptionElectricMotor",
+            "battery_pack": "recipeDescriptionBatteryPack",
+            "linear_actuator": "recipeDescriptionLinearActuator",
+            "manny": "recipeDescriptionManny",
+        }[recipe && recipe.id] || "";
+    }
+
+    function craftingRecipeDescription(recipe) {
+        if (!recipe) {
+            return "";
+        }
+
+        const fallback = typeof recipe.description === "string" ? recipe.description : "";
+        const key = craftingRecipeDescriptionKey(recipe);
+
+        return key ? tr(key, fallback) : fallback;
     }
 
     function craftingRecipeById(id, fabricator) {
@@ -763,6 +793,7 @@
         }
 
         const select = form.querySelector(".manny-craft-recipe");
+        const descriptionNode = form.querySelector(".manny-craft-description");
         const ingredientsNode = form.querySelector(".manny-craft-ingredients");
         const button = form.querySelector(".manny-craft-button, .printer-craft-button");
         if (!select) {
@@ -774,6 +805,11 @@
         select.innerHTML = craftRecipeOptions(selected, fabricator);
         const recipe = craftingRecipeById(select.value, fabricator);
         const canCraft = canCraftRecipe(recipe);
+        if (descriptionNode) {
+            const description = craftingRecipeDescription(recipe);
+            descriptionNode.textContent = description;
+            descriptionNode.hidden = description === "";
+        }
         if (ingredientsNode) {
             ingredientsNode.innerHTML = renderCraftIngredients(recipe);
         }
@@ -786,6 +822,39 @@
 
     function updateMannyCraftForms() {
         document.querySelectorAll(".manny-craft-form, .printer-craft-form").forEach(updateCraftForm);
+    }
+
+    function currentCraftRecipeSelections(node) {
+        const selections = {
+            "mannies": new Map(),
+            "printer": "",
+        };
+        const printerSelect = node.querySelector(".printer-card .printer-craft-form .manny-craft-recipe");
+        if (printerSelect) {
+            selections.printer = printerSelect.value;
+        }
+        node.querySelectorAll(".manny-card[data-manny-id]").forEach((card) => {
+            const select = card.querySelector(".manny-craft-form .manny-craft-recipe");
+            if (select && card.dataset.mannyId) {
+                selections.mannies.set(card.dataset.mannyId, select.value);
+            }
+        });
+
+        return selections;
+    }
+
+    function restoreCraftRecipeSelections(node, selections) {
+        const printerSelect = node.querySelector(".printer-card .printer-craft-form .manny-craft-recipe");
+        if (printerSelect && selections.printer && craftingRecipeById(selections.printer, "atomic_3d_printer")) {
+            printerSelect.value = selections.printer;
+        }
+        node.querySelectorAll(".manny-card[data-manny-id]").forEach((card) => {
+            const selected = selections.mannies.get(card.dataset.mannyId);
+            const select = card.querySelector(".manny-craft-form .manny-craft-recipe");
+            if (select && selected && craftingRecipeById(selected, "manny")) {
+                select.value = selected;
+            }
+        });
     }
 
     function selectedResourceLabels(types) {
@@ -1151,6 +1220,7 @@
         return "<form class=\"manny-craft-form manny-form\" data-fabricator=\"manny\">"
             + "<div class=\"manny-craft-picker\">"
             + "<label>" + escaped(tr("recipe", "Recipe")) + "<select class=\"manny-craft-recipe\" name=\"recipe\">" + craftRecipeOptions("", "manny") + "</select></label>"
+            + "<p class=\"manny-craft-description\" aria-live=\"polite\"></p>"
             + "<div class=\"manny-craft-ingredients\" aria-live=\"polite\"></div>"
             + "</div>"
             + "<button class=\"manny-craft-button\" type=\"submit\">" + escaped(tr("craft", "Craft")) + "</button>"
@@ -1216,6 +1286,7 @@
         return "<form class=\"printer-craft-form manny-form\" data-fabricator=\"atomic_3d_printer\">"
             + "<div class=\"manny-craft-picker\">"
             + "<label>" + escaped(tr("recipe", "Recipe")) + "<select class=\"manny-craft-recipe\" name=\"recipe\">" + craftRecipeOptions("", "atomic_3d_printer") + "</select></label>"
+            + "<p class=\"manny-craft-description\" aria-live=\"polite\"></p>"
             + "<div class=\"manny-craft-ingredients\" aria-live=\"polite\"></div>"
             + "</div>"
             + "<button class=\"printer-craft-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("craft", "Craft")) + "</button>"
@@ -1362,6 +1433,7 @@
             .map((button) => button.closest(".manny-card") && button.closest(".manny-card").dataset.mannyId)
             .filter(Boolean));
         const printerExpanded = node.querySelector(".printer-card .manny-accordion-trigger[aria-expanded=\"true\"]") !== null;
+        const craftRecipeSelections = currentCraftRecipeSelections(node);
         const mannyItems = Array.isArray(mannies) ? mannies : [];
         const observedAt = Date.now();
 
@@ -1413,6 +1485,7 @@
 
         node.innerHTML = renderAtomicPrinterCard(observedAt, printerExpanded) + mannyHtml + emptyHtml;
         window.VNG.restoreDisclosureIds(node, openActionPanels, ".manny-action-accordion-trigger[aria-controls]");
+        restoreCraftRecipeSelections(node, craftRecipeSelections);
         scheduleProgressUpdates();
         updateMannyCraftForms();
         updatePrinterCraftForms();

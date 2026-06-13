@@ -92,21 +92,25 @@
   },
   "crafting": {
     "waypoint_bookmark": {
+      "description": "A transmitting beacon placed on an object such as an asteroid or planet, or set in orbit around a star or gas giant. Its message can be read by every Neumann probe present in the sector.",
       "metalsCost": 0.01,
       "containerSpace": 0.01,
       "durationSeconds": 600
     },
     "steel_bar": {
+      "description": "A rigid structural bar used in frames, rails, braces, and heavy mechanical assemblies.",
       "metalsCost": 0.02,
       "containerSpace": 0.01,
       "durationSeconds": 300
     },
     "steel_plate": {
+      "description": "A flat reinforced plate suited to hull patches, container walls, and broad mounting surfaces.",
       "metalsCost": 0.02,
       "containerSpace": 0.01,
       "durationSeconds": 300
     },
     "additional_container": {
+      "description": "A fold-out storage module that expands the probe cargo volume once assembled.",
       "steelPlateCount": 12,
       "steelBarCount": 15,
       "durationSeconds": 180,
@@ -114,12 +118,14 @@
       "containerSpace": 0.0
     },
     "micro_conductor": {
+      "description": "A precision conductor etched at microscopic scale for high-density electronic paths.",
       "metalsCost": 0.04,
       "deuteriumCost": 0.01,
       "containerSpace": 0.005,
       "durationSeconds": 600
     },
     "ceramic_insulator": {
+      "description": "A heat-stable insulating part grown from volatile ice and carbon compounds.",
       "iceCost": 0.03,
       "organicCost": 0.04,
       "deuteriumCost": 0.01,
@@ -127,6 +133,7 @@
       "durationSeconds": 600
     },
     "crystal_substrate": {
+      "description": "A polished crystalline base that keeps printed circuits aligned and thermally stable.",
       "metalsCost": 0.08,
       "iceCost": 0.03,
       "deuteriumCost": 0.02,
@@ -134,6 +141,7 @@
       "durationSeconds": 900
     },
     "dopant_matrix": {
+      "description": "A controlled impurity matrix that tunes semiconductor behavior during atomic printing.",
       "metalsCost": 0.04,
       "organicCost": 0.03,
       "deuteriumCost": 0.02,
@@ -141,6 +149,7 @@
       "durationSeconds": 900
     },
     "integrated_circuit": {
+      "description": "A dense logic component combining conductors, insulators, substrate, and dopants.",
       "microConductorCount": 2,
       "ceramicInsulatorCount": 2,
       "crystalSubstrateCount": 1,
@@ -150,6 +159,7 @@
       "durationSeconds": 1200
     },
     "electric_motor": {
+      "description": "A compact rotary actuator that converts stored electrical energy into mechanical motion.",
       "steelBarCount": 2,
       "steelPlateCount": 1,
       "metalsCost": 0.02,
@@ -157,6 +167,7 @@
       "durationSeconds": 900
     },
     "battery_pack": {
+      "description": "A rechargeable power pack for mobile tools, actuators, and autonomous Manny systems.",
       "metalsCost": 0.03,
       "iceCost": 0.02,
       "organicCost": 0.06,
@@ -165,6 +176,7 @@
       "durationSeconds": 1200
     },
     "linear_actuator": {
+      "description": "A precise push-pull mechanism used wherever a Manny needs controlled force.",
       "steelPlateCount": 2,
       "steelBarCount": 1,
       "electricMotorCount": 1,
@@ -173,6 +185,7 @@
       "durationSeconds": 1200
     },
     "manny": {
+      "description": "A fully assembled maintenance unit able to repair, mine, carry cargo, and build new parts.",
       "linearActuatorCount": 6,
       "electricMotorCount": 12,
       "batteryPackCount": 4,

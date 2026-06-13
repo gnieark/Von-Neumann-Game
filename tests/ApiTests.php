@@ -140,6 +140,7 @@ file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'gameplay.json', json_
     ],
     'crafting' => [
         'steel_bar' => [
+            'description' => 'Test steel bar description',
             'durationSeconds' => 300,
             'metalsCost' => 0.02,
         ],
@@ -166,6 +167,7 @@ $test->assertEquals(100, $loadedGameplayConfig['probe']['maxDeuteriumPercent'] ?
 $test->assertEquals(['local'], $loadedGameplayConfig['listValues'] ?? null, 'local gameplay config replaces list values');
 $configuredSteelBar = CraftingRecipeCatalog::find('steel_bar', $loadedGameplayConfig['crafting'] ?? []);
 $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafting recipes consume gameplay config overrides');
+$test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
 
 $oauthConfigPath = $tmp . DIRECTORY_SEPARATOR . 'oauth.json';
 file_put_contents($oauthConfigPath, json_encode([
@@ -279,7 +281,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(28, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(29, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -526,6 +528,11 @@ $craftingRecipes = $kernel->handle('GET', '/api/crafting-recipes', $headers);
 $test->assertEquals(200, $craftingRecipes->status, 'valid token allows GET /api/crafting-recipes');
 $test->assertEquals('waypoint_bookmark', $craftingRecipes->body['recipes'][0]['id'] ?? null, 'crafting recipes expose waypoint bookmark');
 $test->assertEquals(['manny'], $craftingRecipes->body['recipes'][0]['craftableBy'] ?? null, 'waypoint bookmark is craftable by Manny');
+$test->assertEquals(
+    'A transmitting beacon placed on an object such as an asteroid or planet, or set in orbit around a star or gas giant. Its message can be read by every Neumann probe present in the sector.',
+    $craftingRecipes->body['recipes'][0]['description'] ?? null,
+    'waypoint bookmark recipe exposes its description',
+);
 $test->assertEquals('metals', $craftingRecipes->body['recipes'][0]['ingredients'][0]['type'] ?? null, 'waypoint bookmark recipe uses metals');
 $test->assertEquals(0.01, $craftingRecipes->body['recipes'][0]['ingredients'][0]['quantity'] ?? null, 'waypoint bookmark recipe consumes 0.01 metal containers');
 $test->assertEquals('earth_container_equivalent', $craftingRecipes->body['recipes'][0]['ingredients'][0]['unit'] ?? null, 'waypoint bookmark ingredient quantity uses cargo units');

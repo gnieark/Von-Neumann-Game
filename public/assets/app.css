@@ -1886,6 +1886,7 @@ button.account-menu-item {
 .manny-detach-storage-hint,
 .manny-recover-storage-container-hint,
 .manny-bookmark-hint,
+.manny-craft-description,
 .printer-craft-hint {
     grid-column: 1 / -1;
     margin: 0;
