@@ -29,6 +29,7 @@ final class SchemaInitializer
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
         $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
+        $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
 
         return [
             "CREATE TABLE IF NOT EXISTS players (
@@ -39,6 +40,8 @@ final class SchemaInitializer
                 home_sector_x INTEGER NOT NULL DEFAULT 0,
                 home_sector_y INTEGER NOT NULL DEFAULT 0,
                 home_sector_z INTEGER NOT NULL DEFAULT 0,
+                forum_admin $boolean,
+                forum_moderator $boolean,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL
             )",
@@ -276,12 +279,51 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_api_keys_player_id ON api_keys(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_api_keys_token_hash ON api_keys(token_hash)",
+            "CREATE TABLE IF NOT EXISTS forum_categories (
+                id $id,
+                name $text NOT NULL,
+                description TEXT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_forum_categories_sort_order ON forum_categories(sort_order, id)",
+            "CREATE TABLE IF NOT EXISTS forum_posts (
+                id $id,
+                category_id INTEGER NOT NULL,
+                author_player_id INTEGER NOT NULL,
+                title $text NOT NULL,
+                pinned $boolean,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                last_message_at $text NOT NULL,
+                FOREIGN KEY(category_id) REFERENCES forum_categories(id),
+                FOREIGN KEY(author_player_id) REFERENCES players(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_forum_posts_recent ON forum_posts(pinned, last_message_at, id)",
+            "CREATE INDEX IF NOT EXISTS idx_forum_posts_category_recent ON forum_posts(category_id, pinned, last_message_at, id)",
+            "CREATE TABLE IF NOT EXISTS forum_messages (
+                id $id,
+                post_id INTEGER NOT NULL,
+                author_player_id INTEGER NOT NULL,
+                body TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                edited_at $nullableText,
+                FOREIGN KEY(post_id) REFERENCES forum_posts(id),
+                FOREIGN KEY(author_player_id) REFERENCES players(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_forum_messages_post_recent ON forum_messages(post_id, created_at, id)",
         ];
     }
 
     private function applyLightweightMigrations(PDO $pdo): void
     {
         if ($this->driver === 'sqlite') {
+            $this->ensureSqliteColumn($pdo, 'players', 'forum_admin', 'INTEGER NOT NULL DEFAULT 0');
+            $this->ensureSqliteColumn($pdo, 'players', 'forum_moderator', 'INTEGER NOT NULL DEFAULT 0');
+            $this->ensureSqliteColumn($pdo, 'forum_messages', 'edited_at', 'TEXT NULL');
             $this->ensureSqliteMannyCargoColumns($pdo);
             $this->ensureSqliteMannyProbeIdNullable($pdo);
             $this->migrateRepairTaskPayloads($pdo);
@@ -305,6 +347,9 @@ final class SchemaInitializer
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
         } elseif ($this->driver === 'mysql') {
+            $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
+            $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
+            $this->ensureMysqlColumn($pdo, 'forum_messages', 'edited_at', 'VARCHAR(255) NULL AFTER updated_at');
             $this->ensureMysqlMannyProbeIdNullable($pdo);
             $this->ensureMysqlMannyCargoColumns($pdo);
             $this->migrateRepairTaskPayloads($pdo);

@@ -64,7 +64,7 @@ final class PlayerRepository
     {
         $player->updatedAt = gmdate('c');
         $stmt = $this->pdo->prepare(
-            'UPDATE players SET username = :username, display_name = :display_name, home_sector_x = :x, home_sector_y = :y, home_sector_z = :z, updated_at = :updated_at WHERE id = :id'
+            'UPDATE players SET username = :username, display_name = :display_name, home_sector_x = :x, home_sector_y = :y, home_sector_z = :z, forum_admin = :forum_admin, forum_moderator = :forum_moderator, updated_at = :updated_at WHERE id = :id'
         );
         $stmt->execute([
             'id' => $player->id,
@@ -73,6 +73,8 @@ final class PlayerRepository
             'x' => $player->homeSector->getX(),
             'y' => $player->homeSector->getY(),
             'z' => $player->homeSector->getZ(),
+            'forum_admin' => $player->forumAdmin ? 1 : 0,
+            'forum_moderator' => $player->forumModerator ? 1 : 0,
             'updated_at' => $player->updatedAt,
         ]);
     }
@@ -86,6 +88,8 @@ final class PlayerRepository
             new SectorCoordinates((int) $row['home_sector_x'], (int) $row['home_sector_y'], (int) $row['home_sector_z']),
             (string) $row['created_at'],
             (string) $row['updated_at'],
+            (bool) ($row['forum_admin'] ?? false),
+            (bool) ($row['forum_moderator'] ?? false),
         );
     }
 }

@@ -39,6 +39,14 @@ class FrontRouteFactory{
                         ));
 
                     }
+                    if(isset($route2['displayOnFooter']) && $route2['displayOnFooter'] === true){
+                        $frontRoute->addFooterMenuItem(
+                            new MenuLinkItem(
+                            $route2['name'],
+                            $route2['linkUri']
+                        ));
+
+                    }
                 }
 
 

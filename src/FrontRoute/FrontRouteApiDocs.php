@@ -32,14 +32,14 @@ class FrontRouteApiDocs extends FrontRoute{
 
     public function getCustomCss(): string
     {
-        return '<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">';
+        return '<link rel="stylesheet" href="/swagger/swagger-ui.css">';
     }
 
     public function getCustomJs(): string
     {
         $version = defined('ASSET_VERSION') ? ASSET_VERSION : '';
 
-        return '<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" defer></script>'
+        return '<script src="/swagger/swagger-ui-bundle.js" defer></script>'
             . '<script src="/assets/api-docs.js?v=' . $version . '" defer></script>';
     }
 

@@ -15,6 +15,10 @@ use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\VisitedSector;
+use VonNeumannGame\Forum\ForumCategory;
+use VonNeumannGame\Forum\ForumMessage;
+use VonNeumannGame\Forum\ForumPost;
+use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
@@ -35,7 +39,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 25;
+    public const API_VERSION = 27;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -48,6 +52,7 @@ final class ApiKernel
         private readonly ProbeStorageService $storage,
         private readonly ProbeMessageRepository $messages,
         private readonly ProbeDamageWarningRepository $damageWarnings,
+        private readonly ForumRepository $forum,
         private readonly array $gameplayConfig = [],
     ) {}
 
@@ -85,6 +90,30 @@ final class ApiKernel
             if (preg_match('#^/api/probe/damage-warnings/(\d+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeDamageWarningReadResponse($player, (int) $matches[1]));
             }
+            if (preg_match('#^/api/forum/categories/(\d+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['GET', 'PATCH', 'DELETE'], $headers, fn(Player $player): ApiResponse => match ($method) {
+                    'GET' => $this->forumCategoryResponse((int) $matches[1]),
+                    'PATCH' => $this->forumCategoryUpdateResponse($player, (int) $matches[1], $body),
+                    'DELETE' => $this->forumCategoryDeleteResponse($player, (int) $matches[1]),
+                });
+            }
+            if (preg_match('#^/api/forum/posts/(\d+)/messages$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['GET', 'POST'], $headers, fn(Player $player): ApiResponse => $method === 'POST'
+                    ? $this->forumMessageCreateResponse($player, (int) $matches[1], $body)
+                    : $this->forumPostMessagesResponse((int) $matches[1], $query));
+            }
+            if (preg_match('#^/api/forum/posts/(\d+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['GET', 'PATCH', 'DELETE'], $headers, fn(Player $player): ApiResponse => match ($method) {
+                    'GET' => $this->forumPostResponse((int) $matches[1], $query),
+                    'PATCH' => $this->forumPostUpdateResponse($player, (int) $matches[1], $body),
+                    'DELETE' => $this->forumPostDeleteResponse($player, (int) $matches[1]),
+                });
+            }
+            if (preg_match('#^/api/forum/messages/(\d+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['PATCH', 'DELETE'], $headers, fn(Player $player): ApiResponse => $method === 'PATCH'
+                    ? $this->forumMessageUpdateResponse($player, (int) $matches[1], $body)
+                    : $this->forumMessageDeleteResponse($player, (int) $matches[1]));
+            }
 
             return match ($routePath) {
                 '/api/version' => $this->routeApiVersion($method),
@@ -104,6 +133,8 @@ final class ApiKernel
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
                 '/api/probe/mannies' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeManniesResponse($player)),
                 '/api/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $query)),
+                '/api/forum/categories' => $this->protectedRoute($method, ['GET', 'POST'], $headers, fn(Player $player): ApiResponse => $method === 'POST' ? $this->forumCategoryCreateResponse($player, $body) : $this->forumCategoriesResponse()),
+                '/api/forum/posts' => $this->protectedRoute($method, ['GET', 'POST'], $headers, fn(Player $player): ApiResponse => $method === 'POST' ? $this->forumPostCreateResponse($player, $body) : $this->forumPostsResponse($query)),
                 default => ApiResponse::error(404, 'not_found', 'Endpoint not found'),
             };
         } catch (ProbeMovementException $e) {
@@ -175,6 +206,311 @@ final class ApiKernel
     private function craftingRecipesResponse(): ApiResponse
     {
         return new ApiResponse(200, ['recipes' => CraftingRecipeCatalog::all($this->gameplayConfig['crafting'] ?? [])]);
+    }
+
+    private function forumCategoriesResponse(): ApiResponse
+    {
+        return new ApiResponse(200, [
+            'categories' => array_map(
+                fn(ForumCategory $category): array => $this->forumCategoryArray($category),
+                $this->forum->categories(),
+            ),
+        ]);
+    }
+
+    private function forumCategoryResponse(int $categoryId): ApiResponse
+    {
+        $category = $this->forum->findCategoryById($categoryId);
+        if ($category === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum category not found.');
+        }
+
+        return new ApiResponse(200, ['category' => $this->forumCategoryArray($category)]);
+    }
+
+    private function forumCategoryCreateResponse(Player $player, ?string $body): ApiResponse
+    {
+        if (!$player->forumAdmin) {
+            return ApiResponse::error(403, 'forbidden', 'Forum administrator permission is required.');
+        }
+
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a forum category.');
+        }
+
+        $name = $this->forumTextField($data['name'] ?? null, 'name', 1, 120);
+        if ($name instanceof ApiResponse) {
+            return $name;
+        }
+        $description = $this->forumOptionalTextField($data['description'] ?? null, 'description', 1000);
+        if ($description instanceof ApiResponse) {
+            return $description;
+        }
+        $sortOrder = $this->forumOptionalIntegerField($data['sortOrder'] ?? null, 'sortOrder');
+        if ($sortOrder instanceof ApiResponse) {
+            return $sortOrder;
+        }
+
+        return new ApiResponse(201, [
+            'category' => $this->forumCategoryArray($this->forum->createCategory($name, $description, $sortOrder)),
+        ]);
+    }
+
+    private function forumCategoryUpdateResponse(Player $player, int $categoryId, ?string $body): ApiResponse
+    {
+        if (!$player->forumAdmin) {
+            return ApiResponse::error(403, 'forbidden', 'Forum administrator permission is required.');
+        }
+
+        $category = $this->forum->findCategoryById($categoryId);
+        if ($category === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum category not found.');
+        }
+
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain forum category fields.');
+        }
+        if (array_key_exists('name', $data)) {
+            $name = $this->forumTextField($data['name'], 'name', 1, 120);
+            if ($name instanceof ApiResponse) {
+                return $name;
+            }
+            $category->name = $name;
+        }
+        if (array_key_exists('description', $data)) {
+            $description = $this->forumOptionalTextField($data['description'], 'description', 1000);
+            if ($description instanceof ApiResponse) {
+                return $description;
+            }
+            $category->description = $description;
+        }
+        if (array_key_exists('sortOrder', $data)) {
+            $sortOrder = $this->forumOptionalIntegerField($data['sortOrder'], 'sortOrder');
+            if ($sortOrder instanceof ApiResponse) {
+                return $sortOrder;
+            }
+            $category->sortOrder = $sortOrder ?? $category->sortOrder;
+        }
+
+        return new ApiResponse(200, ['category' => $this->forumCategoryArray($this->forum->updateCategory($category))]);
+    }
+
+    private function forumCategoryDeleteResponse(Player $player, int $categoryId): ApiResponse
+    {
+        if (!$player->forumAdmin) {
+            return ApiResponse::error(403, 'forbidden', 'Forum administrator permission is required.');
+        }
+        if ($this->forum->findCategoryById($categoryId) === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum category not found.');
+        }
+
+        $this->forum->deleteCategory($categoryId);
+
+        return new ApiResponse(200, ['deleted' => true]);
+    }
+
+    private function forumPostsResponse(array $query): ApiResponse
+    {
+        $categoryId = $this->forumOptionalPositiveIntegerQuery($query, 'categoryId');
+        if ($categoryId instanceof ApiResponse) {
+            return $categoryId;
+        }
+        if ($categoryId !== null && $this->forum->findCategoryById($categoryId) === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum category not found.');
+        }
+
+        $limit = $this->messagePaginationParameter($query, 'limit', 50, 1, 200);
+        if ($limit instanceof ApiResponse) {
+            return $limit;
+        }
+        $offset = $this->messagePaginationParameter($query, 'offset', 0, 0);
+        if ($offset instanceof ApiResponse) {
+            return $offset;
+        }
+
+        $posts = $this->forum->recentPosts($categoryId, $limit, $offset);
+        $total = $this->forum->countPosts($categoryId);
+
+        return new ApiResponse(200, [
+            'posts' => array_map(fn(ForumPost $post): array => $this->forumPostArray($post), $posts),
+            'pagination' => $this->paginationArray($limit, $offset, count($posts), $total),
+        ]);
+    }
+
+    private function forumPostResponse(int $postId, array $query): ApiResponse
+    {
+        $post = $this->forum->findPostById($postId);
+        if ($post === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum post not found.');
+        }
+
+        $messages = $this->forumMessagesPage($postId, $query);
+        if ($messages instanceof ApiResponse) {
+            return $messages;
+        }
+
+        return new ApiResponse(200, [
+            'post' => $this->forumPostArray($post),
+            'messages' => array_map(fn(ForumMessage $message): array => $this->forumMessageArray($message), $messages['items']),
+            'pagination' => $messages['pagination'],
+        ]);
+    }
+
+    private function forumPostCreateResponse(Player $player, ?string $body): ApiResponse
+    {
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a forum post.');
+        }
+
+        $categoryId = $this->forumPositiveIntegerField($data['categoryId'] ?? null, 'categoryId');
+        if ($categoryId instanceof ApiResponse) {
+            return $categoryId;
+        }
+        if ($this->forum->findCategoryById($categoryId) === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum category not found.');
+        }
+
+        $title = $this->forumTextField($data['title'] ?? null, 'title', 1, 160);
+        if ($title instanceof ApiResponse) {
+            return $title;
+        }
+        $messageBody = $this->forumTextField($data['body'] ?? null, 'body', 1, 5000);
+        if ($messageBody instanceof ApiResponse) {
+            return $messageBody;
+        }
+
+        return new ApiResponse(201, ['post' => $this->forumPostArray($this->forum->createPost($player, $categoryId, $title, $messageBody))]);
+    }
+
+    private function forumPostUpdateResponse(Player $player, int $postId, ?string $body): ApiResponse
+    {
+        if (!$this->canModerateForum($player)) {
+            return ApiResponse::error(403, 'forbidden', 'Forum moderator permission is required.');
+        }
+
+        $post = $this->forum->findPostById($postId);
+        if ($post === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum post not found.');
+        }
+
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain forum post fields.');
+        }
+        if (array_key_exists('title', $data)) {
+            $title = $this->forumTextField($data['title'], 'title', 1, 160);
+            if ($title instanceof ApiResponse) {
+                return $title;
+            }
+            $post->title = $title;
+        }
+        if (array_key_exists('categoryId', $data)) {
+            $categoryId = $this->forumPositiveIntegerField($data['categoryId'], 'categoryId');
+            if ($categoryId instanceof ApiResponse) {
+                return $categoryId;
+            }
+            if ($this->forum->findCategoryById($categoryId) === null) {
+                return ApiResponse::error(404, 'not_found', 'Forum category not found.');
+            }
+            $post->categoryId = $categoryId;
+        }
+        if (array_key_exists('pinned', $data)) {
+            if (!is_bool($data['pinned'])) {
+                return ApiResponse::error(400, 'bad_request', 'Forum post pinned must be a boolean.');
+            }
+            $post->pinned = $data['pinned'];
+        }
+
+        return new ApiResponse(200, ['post' => $this->forumPostArray($this->forum->updatePost($post))]);
+    }
+
+    private function forumPostDeleteResponse(Player $player, int $postId): ApiResponse
+    {
+        if (!$this->canModerateForum($player)) {
+            return ApiResponse::error(403, 'forbidden', 'Forum moderator permission is required.');
+        }
+        if ($this->forum->findPostById($postId) === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum post not found.');
+        }
+
+        $this->forum->deletePost($postId);
+
+        return new ApiResponse(200, ['deleted' => true]);
+    }
+
+    private function forumPostMessagesResponse(int $postId, array $query): ApiResponse
+    {
+        if ($this->forum->findPostById($postId) === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum post not found.');
+        }
+
+        $messages = $this->forumMessagesPage($postId, $query);
+        if ($messages instanceof ApiResponse) {
+            return $messages;
+        }
+
+        return new ApiResponse(200, [
+            'messages' => array_map(fn(ForumMessage $message): array => $this->forumMessageArray($message), $messages['items']),
+            'pagination' => $messages['pagination'],
+        ]);
+    }
+
+    private function forumMessageCreateResponse(Player $player, int $postId, ?string $body): ApiResponse
+    {
+        if ($this->forum->findPostById($postId) === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum post not found.');
+        }
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a forum message.');
+        }
+
+        $messageBody = $this->forumTextField($data['body'] ?? null, 'body', 1, 5000);
+        if ($messageBody instanceof ApiResponse) {
+            return $messageBody;
+        }
+
+        return new ApiResponse(201, ['message' => $this->forumMessageArray($this->forum->createMessage($player, $postId, $messageBody))]);
+    }
+
+    private function forumMessageUpdateResponse(Player $player, int $messageId, ?string $body): ApiResponse
+    {
+        $message = $this->forum->findMessageById($messageId);
+        if ($message === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum message not found.');
+        }
+        if (!$this->canModerateForum($player) && $message->authorPlayerId !== $player->id) {
+            return ApiResponse::error(403, 'forbidden', 'Forum moderator permission or message authorship is required.');
+        }
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain forum message fields.');
+        }
+        $messageBody = $this->forumTextField($data['body'] ?? null, 'body', 1, 5000);
+        if ($messageBody instanceof ApiResponse) {
+            return $messageBody;
+        }
+        $message->body = $messageBody;
+
+        return new ApiResponse(200, ['message' => $this->forumMessageArray($this->forum->updateMessage($message))]);
+    }
+
+    private function forumMessageDeleteResponse(Player $player, int $messageId): ApiResponse
+    {
+        if (!$this->canModerateForum($player)) {
+            return ApiResponse::error(403, 'forbidden', 'Forum moderator permission is required.');
+        }
+        $message = $this->forum->findMessageById($messageId);
+        if ($message === null) {
+            return ApiResponse::error(404, 'not_found', 'Forum message not found.');
+        }
+
+        $this->forum->deleteMessage($message);
+
+        return new ApiResponse(200, ['deleted' => true]);
     }
 
     private function probeResponse(Player $player): ApiResponse
@@ -976,6 +1312,166 @@ final class ApiKernel
         }
 
         return $payload;
+    }
+
+    private function canModerateForum(Player $player): bool
+    {
+        return $player->forumAdmin || $player->forumModerator;
+    }
+
+    private function forumCategoryArray(ForumCategory $category): array
+    {
+        return [
+            'id' => $category->id,
+            'name' => $category->name,
+            'description' => $category->description,
+            'sortOrder' => $category->sortOrder,
+            'createdAt' => $category->createdAt,
+            'updatedAt' => $category->updatedAt,
+        ];
+    }
+
+    private function forumPostArray(ForumPost $post): array
+    {
+        return [
+            'id' => $post->id,
+            'categoryId' => $post->categoryId,
+            'author' => $this->forumAuthorArray($post->authorPlayerId, $post->authorUsername, $post->authorDisplayName),
+            'title' => $post->title,
+            'pinned' => $post->pinned,
+            'messageCount' => $post->messageCount,
+            'createdAt' => $post->createdAt,
+            'updatedAt' => $post->updatedAt,
+            'lastMessageAt' => $post->lastMessageAt,
+        ];
+    }
+
+    private function forumMessageArray(ForumMessage $message): array
+    {
+        return [
+            'id' => $message->id,
+            'postId' => $message->postId,
+            'author' => $this->forumAuthorArray($message->authorPlayerId, $message->authorUsername, $message->authorDisplayName),
+            'body' => $message->body,
+            'createdAt' => $message->createdAt,
+            'updatedAt' => $message->updatedAt,
+            'editedAt' => $message->editedAt,
+        ];
+    }
+
+    private function forumAuthorArray(int $id, string $username, ?string $displayName): array
+    {
+        return [
+            'playerId' => $id,
+            'username' => $username,
+            'displayName' => $displayName,
+        ];
+    }
+
+    private function paginationArray(int $limit, int $offset, int $count, int $total): array
+    {
+        return [
+            'limit' => $limit,
+            'offset' => $offset,
+            'count' => $count,
+            'total' => $total,
+            'hasMore' => $offset + $count < $total,
+        ];
+    }
+
+    /**
+     * @return array{items: array<ForumMessage>, pagination: array<string, int|bool>}|ApiResponse
+     */
+    private function forumMessagesPage(int $postId, array $query): array|ApiResponse
+    {
+        $limit = $this->messagePaginationParameter($query, 'limit', 50, 1, 200);
+        if ($limit instanceof ApiResponse) {
+            return $limit;
+        }
+        $offset = $this->messagePaginationParameter($query, 'offset', 0, 0);
+        if ($offset instanceof ApiResponse) {
+            return $offset;
+        }
+
+        $messages = $this->forum->recentMessagesForPost($postId, $limit, $offset);
+        $total = $this->forum->countMessagesForPost($postId);
+
+        return [
+            'items' => $messages,
+            'pagination' => $this->paginationArray($limit, $offset, count($messages), $total),
+        ];
+    }
+
+    private function forumTextField(mixed $value, string $name, int $minLength, int $maxLength): string|ApiResponse
+    {
+        if (!is_string($value)) {
+            return ApiResponse::error(400, 'bad_request', sprintf('Forum %s must be a string.', $name));
+        }
+
+        $trimmed = trim($value);
+        $length = strlen($trimmed);
+        if ($length < $minLength || $length > $maxLength) {
+            return ApiResponse::error(400, 'bad_request', sprintf('Forum %s must contain %d to %d characters.', $name, $minLength, $maxLength));
+        }
+
+        return $trimmed;
+    }
+
+    private function forumOptionalTextField(mixed $value, string $name, int $maxLength): string|ApiResponse|null
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value)) {
+            return ApiResponse::error(400, 'bad_request', sprintf('Forum %s must be a string or null.', $name));
+        }
+
+        $trimmed = trim($value);
+        if (strlen($trimmed) > $maxLength) {
+            return ApiResponse::error(400, 'bad_request', sprintf('Forum %s must contain at most %d characters.', $name, $maxLength));
+        }
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function forumPositiveIntegerField(mixed $value, string $name): int|ApiResponse
+    {
+        if (is_int($value) && $value > 0) {
+            return $value;
+        }
+        if (is_string($value) && ctype_digit($value) && (int) $value > 0) {
+            return (int) $value;
+        }
+
+        return ApiResponse::error(400, 'bad_request', sprintf('Forum %s must be a positive integer.', $name));
+    }
+
+    private function forumOptionalIntegerField(mixed $value, string $name): int|ApiResponse|null
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_string($value) && preg_match('/^-?\d+$/', $value) === 1) {
+            return (int) $value;
+        }
+
+        return ApiResponse::error(400, 'bad_request', sprintf('Forum %s must be an integer.', $name));
+    }
+
+    private function forumOptionalPositiveIntegerQuery(array $query, string $name): int|ApiResponse|null
+    {
+        if (!array_key_exists($name, $query)) {
+            return null;
+        }
+        $value = $query[$name];
+        if (is_array($value) || !is_string($value) || !ctype_digit($value) || (int) $value <= 0) {
+            return ApiResponse::error(400, 'bad_request', sprintf('Query parameter %s must be a positive integer.', $name));
+        }
+
+        return (int) $value;
     }
 
     private function probeDamageWarningArray(Player $player, ProbeDamageWarning $warning): array
