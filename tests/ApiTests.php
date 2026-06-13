@@ -12,6 +12,7 @@ use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\ProbeItem;
+use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
@@ -221,12 +222,36 @@ $messageSchemaColumns = array_map(
 $test->assert(in_array('sender_probe_id', $messageSchemaColumns, true), 'Probe message table stores sender probes');
 $test->assert(in_array('recipient_probe_id', $messageSchemaColumns, true), 'Probe message table stores recipient probes');
 $test->assert(in_array('read_at', $messageSchemaColumns, true), 'Probe message table stores read timestamps');
+$playerSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(players)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('forum_admin', $playerSchemaColumns, true), 'Player table stores forum admin flag');
+$test->assert(in_array('forum_moderator', $playerSchemaColumns, true), 'Player table stores forum moderator flag');
 $damageWarningSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_damage_warnings)')->fetchAll(PDO::FETCH_ASSOC),
 );
 $test->assert(in_array('container_id', $damageWarningSchemaColumns, true), 'Probe damage warning table stores container ids');
 $test->assert(in_array('status', $damageWarningSchemaColumns, true), 'Probe damage warning table stores read status');
+$forumCategorySchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(forum_categories)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('sort_order', $forumCategorySchemaColumns, true), 'Forum categories store a sort order');
+$forumPostSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(forum_posts)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('pinned', $forumPostSchemaColumns, true), 'Forum posts store pinned state');
+$test->assert(in_array('first_message_id', $forumPostSchemaColumns, true), 'Forum posts link their first message');
+$test->assert(in_array('message_count', $forumPostSchemaColumns, true), 'Forum posts store message counts');
+$forumMessageSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(forum_messages)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('body', $forumMessageSchemaColumns, true), 'Forum messages store a body');
+$test->assert(in_array('edited_at', $forumMessageSchemaColumns, true), 'Forum messages store an explicit edit timestamp');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -235,6 +260,7 @@ $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
 $damageWarnings = new ProbeDamageWarningRepository($pdo);
+$forum = new ForumRepository($pdo);
 $storageContainers = new StorageContainerRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
 $scheduledEvents = new ScheduledEventRepository($pdo);
@@ -249,11 +275,11 @@ $movementService = new ProbeMovementService($probes, $movements, $visitedSectors
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(25, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(28, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -265,6 +291,14 @@ $test->assertEquals('2026-01-01T01:15:00+00:00', $movementTimeline['arrivalAt']-
 
 $player = $auth->registerPlayerWithPassword('remi', 'secret', 'Remi');
 $test->assert($player->id > 0, 'user creation returns a persisted player');
+$test->assert($player->forumAdmin === false, 'new players are not forum admins by default');
+$test->assert($player->forumModerator === false, 'new players are not forum moderators by default');
+$player->forumModerator = true;
+$players->save($player);
+$player = $players->findById($player->id) ?? throw new RuntimeException('Expected player to be persisted.');
+$test->assert($player->forumModerator === true, 'player repository persists forum moderator flag');
+$test->assert(($player->publicArray()['forumAdmin'] ?? null) === false, 'player public array exposes forum admin flag');
+$test->assert(($player->publicArray()['forumModerator'] ?? null) === true, 'player public array exposes forum moderator flag');
 $createdProbe = $probes->findByPlayerId($player->id);
 $test->assert($createdProbe !== null, 'a probe is automatically created for a new player');
 $test->assert(!$player->homeSector->equals(SectorCoordinates::origin()), 'new player receives a pseudo-random absolute home sector');
@@ -420,6 +454,73 @@ $headers = ['Authorization' => 'Bearer ' . $token];
 $me = $kernel->handle('GET', '/api/me', $headers);
 $test->assertEquals(200, $me->status, 'valid token allows GET /api/me');
 $test->assertEquals('remi', $me->body['player']['username'] ?? null, 'GET /api/me returns the player');
+
+$forumUser = $auth->registerPlayerWithPassword('forum-user', 'secret', 'Forum User');
+$forumUserSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'forum-user', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$forumUserHeaders = ['Authorization' => 'Bearer ' . (string) ($forumUserSession->body['token'] ?? '')];
+$forumOtherUser = $auth->registerPlayerWithPassword('forum-other-user', 'secret', 'Forum Other User');
+$forumOtherUserSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'forum-other-user', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$forumOtherUserHeaders = ['Authorization' => 'Bearer ' . (string) ($forumOtherUserSession->body['token'] ?? '')];
+$forumAdmin = $auth->registerPlayerWithPassword('forum-admin', 'secret', 'Forum Admin');
+$forumAdmin->forumAdmin = true;
+$players->save($forumAdmin);
+$forumAdminSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'forum-admin', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$forumAdminHeaders = ['Authorization' => 'Bearer ' . (string) ($forumAdminSession->body['token'] ?? '')];
+
+$forumCategoryDenied = $kernel->handle('POST', '/api/forum/categories', $forumUserHeaders, json_encode(['name' => 'Operations'], JSON_THROW_ON_ERROR));
+$test->assertEquals(403, $forumCategoryDenied->status, 'forum category creation requires forum admin permission');
+$forumCategoryCreated = $kernel->handle('POST', '/api/forum/categories', $forumAdminHeaders, json_encode(['name' => 'Operations', 'description' => 'Shipboard discussions', 'sortOrder' => 20], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $forumCategoryCreated->status, 'forum admins can create categories');
+$forumCategoryId = (int) ($forumCategoryCreated->body['category']['id'] ?? 0);
+$forumCategoryUpdated = $kernel->handle('PATCH', '/api/forum/categories/' . $forumCategoryId, $forumAdminHeaders, json_encode(['sortOrder' => 10], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $forumCategoryUpdated->status, 'forum admins can update categories');
+$test->assertEquals(10, $forumCategoryUpdated->body['category']['sortOrder'] ?? null, 'forum category sort order is mutable');
+$forumCategories = $kernel->handle('GET', '/api/forum/categories', $forumUserHeaders);
+$test->assertEquals(200, $forumCategories->status, 'forum users can list categories');
+$test->assertEquals('Operations', $forumCategories->body['categories'][0]['name'] ?? null, 'forum category list exposes created category');
+
+$forumPostCreated = $kernel->handle('POST', '/api/forum/posts', $forumUserHeaders, json_encode(['categoryId' => $forumCategoryId, 'title' => 'First contact', 'body' => 'Hello forum.'], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $forumPostCreated->status, 'forum users can create posts');
+$forumPostId = (int) ($forumPostCreated->body['post']['id'] ?? 0);
+$test->assertEquals(1, $forumPostCreated->body['post']['messageCount'] ?? null, 'forum post creation also creates the first message');
+$forumFirstMessageId = (int) ($forumPostCreated->body['post']['firstMessageId'] ?? 0);
+$test->assert($forumFirstMessageId > 0, 'forum post stores its first message id');
+$test->assertEquals($forumFirstMessageId, $forumPostCreated->body['firstMessage']['id'] ?? null, 'forum post creation exposes the first message');
+$test->assertEquals('Hello forum.', $forumPostCreated->body['firstMessage']['body'] ?? null, 'forum first message exposes the post body');
+$forumMessageCreated = $kernel->handle('POST', '/api/forum/posts/' . $forumPostId . '/messages', $forumUserHeaders, json_encode(['body' => 'A first reply.'], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $forumMessageCreated->status, 'forum users can reply to posts');
+$forumMessageId = (int) ($forumMessageCreated->body['message']['id'] ?? 0);
+$forumSecondPostCreated = $kernel->handle('POST', '/api/forum/posts', $forumUserHeaders, json_encode(['categoryId' => $forumCategoryId, 'title' => 'Second contact', 'body' => 'Another thread.'], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $forumSecondPostCreated->status, 'forum users can create multiple posts');
+$forumPosts = $kernel->handle('GET', '/api/forum/posts?limit=1&offset=0', $forumUserHeaders);
+$test->assertEquals(200, $forumPosts->status, 'forum users can list posts');
+$test->assertEquals(1, $forumPosts->body['pagination']['limit'] ?? null, 'forum post list accepts a limit');
+$test->assertEquals(true, $forumPosts->body['pagination']['hasMore'] ?? null, 'forum post list exposes pagination hasMore');
+$forumPostWithMessages = $kernel->handle('GET', '/api/forum/posts/' . $forumPostId . '?limit=1&offset=1', $forumUserHeaders);
+$test->assertEquals(200, $forumPostWithMessages->status, 'forum users can read one post with messages');
+$test->assertEquals($forumFirstMessageId, $forumPostWithMessages->body['firstMessage']['id'] ?? null, 'forum post detail exposes the first message separately');
+$test->assertEquals([], $forumPostWithMessages->body['messages'] ?? null, 'forum post messages pagination excludes the first message from replies');
+$test->assertEquals(1, $forumPostWithMessages->body['pagination']['offset'] ?? null, 'forum post message list accepts an offset for older messages');
+$forumPostPatchDenied = $kernel->handle('PATCH', '/api/forum/posts/' . $forumPostId, $forumUserHeaders, json_encode(['pinned' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(403, $forumPostPatchDenied->status, 'regular forum users cannot pin posts');
+$forumPostPinned = $kernel->handle('PATCH', '/api/forum/posts/' . $forumPostId, $headers, json_encode(['pinned' => true, 'title' => 'Pinned contact'], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $forumPostPinned->status, 'forum moderators can pin and edit posts');
+$test->assertEquals(true, $forumPostPinned->body['post']['pinned'] ?? null, 'forum post pinned state is persisted');
+$forumMessageOtherUserEditDenied = $kernel->handle('PATCH', '/api/forum/messages/' . $forumMessageId, $forumOtherUserHeaders, json_encode(['body' => 'Hijacked reply.'], JSON_THROW_ON_ERROR));
+$test->assertEquals(403, $forumMessageOtherUserEditDenied->status, 'regular forum users cannot edit other users messages');
+$forumMessageAuthorEdited = $kernel->handle('PATCH', '/api/forum/messages/' . $forumMessageId, $forumUserHeaders, json_encode(['body' => 'An author-edited reply.'], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $forumMessageAuthorEdited->status, 'forum message authors can edit their own messages');
+$test->assertEquals('An author-edited reply.', $forumMessageAuthorEdited->body['message']['body'] ?? null, 'forum author edit updates message body');
+$test->assert(is_string($forumMessageAuthorEdited->body['message']['editedAt'] ?? null), 'forum author edit exposes editedAt');
+$forumMessageEdited = $kernel->handle('PATCH', '/api/forum/messages/' . $forumMessageId, $headers, json_encode(['body' => 'A moderated reply.'], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $forumMessageEdited->status, 'forum moderators can edit messages');
+$test->assertEquals('A moderated reply.', $forumMessageEdited->body['message']['body'] ?? null, 'forum message body is updated');
+$forumMessageDeleted = $kernel->handle('DELETE', '/api/forum/messages/' . $forumMessageId, $headers);
+$test->assertEquals(200, $forumMessageDeleted->status, 'forum moderators can delete messages');
+$forumPostDeleted = $kernel->handle('DELETE', '/api/forum/posts/' . $forumPostId, $headers);
+$test->assertEquals(200, $forumPostDeleted->status, 'forum moderators can delete posts');
+$forumCategoryDeleted = $kernel->handle('DELETE', '/api/forum/categories/' . $forumCategoryId, $forumAdminHeaders);
+$test->assertEquals(200, $forumCategoryDeleted->status, 'forum admins can delete categories');
 
 $craftingRecipes = $kernel->handle('GET', '/api/crafting-recipes', $headers);
 $test->assertEquals(200, $craftingRecipes->status, 'valid token allows GET /api/crafting-recipes');
@@ -1945,6 +2046,8 @@ foreach ([
     'GET /api/probe/visited-sectors',
     'GET /api/probe/sector',
     'GET /api/sector?x=0&y=0&z=0',
+    'GET /api/forum/categories',
+    'GET /api/forum/posts',
 ] as $route) {
     [$routeMethod, $path] = explode(' ', $route, 2);
     $response = $kernel->handle($routeMethod, $path);

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '25'
+  version: '28'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 25
+                apiVersion: 28
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -50,6 +50,8 @@ paths:
                   id: 1
                   username: remi
                   displayName: Remi
+                  forumAdmin: false
+                  forumModerator: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -75,6 +77,8 @@ paths:
                   id: 1
                   username: remi
                   displayName: Remi
+                  forumAdmin: false
+                  forumModerator: false
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/me/api-key:
@@ -182,6 +186,341 @@ paths:
                       cargoCapacityUnit: earth_container_equivalent
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/forum/categories:
+    get:
+      summary: List forum categories
+      responses:
+        '200':
+          description: Forum categories ordered by sortOrder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumCategoriesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      summary: Create a forum category
+      description: Requires forum administrator permission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForumCategoryWriteRequest'
+      responses:
+        '201':
+          description: Forum category created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumCategoryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/forum/categories/{categoryId}:
+    get:
+      summary: Get a forum category
+      parameters:
+        - $ref: '#/components/parameters/ForumCategoryId'
+      responses:
+        '200':
+          description: Forum category
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumCategoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update a forum category
+      description: Requires forum administrator permission. Use sortOrder to reorder categories.
+      parameters:
+        - $ref: '#/components/parameters/ForumCategoryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForumCategoryPatchRequest'
+      responses:
+        '200':
+          description: Forum category updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumCategoryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a forum category
+      description: Requires forum administrator permission. Deletes posts and messages inside the category.
+      parameters:
+        - $ref: '#/components/parameters/ForumCategoryId'
+      responses:
+        '200':
+          description: Forum category deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/forum/posts:
+    get:
+      summary: List forum posts
+      description: Returns pinned posts first, then the most recently active posts. Defaults to 50 posts.
+      parameters:
+        - name: categoryId
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Forum posts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumPostsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Create a forum post
+      description: Creates a post and its first forum message.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForumPostCreateRequest'
+      responses:
+        '201':
+          description: Forum post created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumPostResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/forum/posts/{postId}:
+    get:
+      summary: Get a forum post with its first message and recent replies
+      description: Returns the post, its first message, and the 50 most recent replies by default. Use limit and offset to load older replies.
+      parameters:
+        - $ref: '#/components/parameters/ForumPostId'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Forum post with messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumPostWithMessagesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Moderate a forum post
+      description: Forum moderators and forum admins can edit title/category and pin or unpin the post.
+      parameters:
+        - $ref: '#/components/parameters/ForumPostId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForumPostPatchRequest'
+      responses:
+        '200':
+          description: Forum post updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumPostResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a forum post
+      description: Requires forum moderator or forum admin permission.
+      parameters:
+        - $ref: '#/components/parameters/ForumPostId'
+      responses:
+        '200':
+          description: Forum post deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/forum/posts/{postId}/messages:
+    get:
+      summary: List replies for a forum post
+      description: Returns the 50 most recent replies by default. Use limit and offset to load older replies. The initial post message is exposed as firstMessage on the post detail response.
+      parameters:
+        - $ref: '#/components/parameters/ForumPostId'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Forum messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumMessagesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Reply to a forum post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForumMessageWriteRequest'
+      parameters:
+        - $ref: '#/components/parameters/ForumPostId'
+      responses:
+        '201':
+          description: Forum message created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/forum/messages/{messageId}:
+    patch:
+      summary: Edit a forum message
+      description: The original author can edit their own message. Forum moderators and forum admins can edit any message.
+      parameters:
+        - $ref: '#/components/parameters/ForumMessageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForumMessageWriteRequest'
+      responses:
+        '200':
+          description: Forum message updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForumMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a forum message
+      description: Requires forum moderator or forum admin permission.
+      parameters:
+        - $ref: '#/components/parameters/ForumMessageId'
+      responses:
+        '200':
+          description: Forum message deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe:
     get:
       summary: Get current Neumann probe
@@ -1606,6 +1945,30 @@ components:
         type: integer
         minimum: 1
       example: 7
+    ForumCategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+    ForumPostId:
+      name: postId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 42
+    ForumMessageId:
+      name: messageId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 100
   responses:
     BadRequest:
       description: Bad request
@@ -1623,6 +1986,16 @@ components:
             error:
               code: unauthorized
               message: Missing or invalid bearer token
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: forbidden
+              message: Forum moderator permission is required.
     MethodNotAllowed:
       description: Method not allowed
       content:
@@ -1646,7 +2019,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -1679,7 +2052,7 @@ components:
           $ref: '#/components/schemas/Player'
     Player:
       type: object
-      required: [id, username]
+      required: [id, username, forumAdmin, forumModerator]
       properties:
         id:
           type: integer
@@ -1688,6 +2061,10 @@ components:
         displayName:
           type: string
           nullable: true
+        forumAdmin:
+          type: boolean
+        forumModerator:
+          type: boolean
     ApiKeyResponse:
       type: object
       required: [apiKey]
@@ -2187,6 +2564,221 @@ components:
           minimum: 0
         hasMore:
           type: boolean
+    DeleteResponse:
+      type: object
+      required: [deleted]
+      properties:
+        deleted:
+          type: boolean
+    ForumAuthor:
+      type: object
+      required: [playerId, username, displayName]
+      properties:
+        playerId:
+          type: integer
+        username:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+    ForumCategory:
+      type: object
+      required: [id, name, description, sortOrder, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ForumCategoryWriteRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        sortOrder:
+          type: integer
+    ForumCategoryPatchRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        sortOrder:
+          type: integer
+    ForumCategoryResponse:
+      type: object
+      required: [category]
+      properties:
+        category:
+          $ref: '#/components/schemas/ForumCategory'
+    ForumCategoriesResponse:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForumCategory'
+    ForumPost:
+      type: object
+      required: [id, categoryId, author, title, pinned, firstMessageId, messageCount, createdAt, updatedAt, lastMessageAt]
+      properties:
+        id:
+          type: integer
+        categoryId:
+          type: integer
+        author:
+          $ref: '#/components/schemas/ForumAuthor'
+        title:
+          type: string
+        pinned:
+          type: boolean
+        firstMessageId:
+          type: integer
+          nullable: true
+        messageCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastMessageAt:
+          type: string
+          format: date-time
+    ForumPostCreateRequest:
+      type: object
+      required: [categoryId, title, body]
+      properties:
+        categoryId:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        body:
+          type: string
+          minLength: 1
+          maxLength: 5000
+    ForumPostPatchRequest:
+      type: object
+      properties:
+        categoryId:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        pinned:
+          type: boolean
+    ForumPostResponse:
+      type: object
+      required: [post, firstMessage]
+      properties:
+        post:
+          $ref: '#/components/schemas/ForumPost'
+        firstMessage:
+          allOf:
+            - $ref: '#/components/schemas/ForumMessage'
+          nullable: true
+    ForumPostsResponse:
+      type: object
+      required: [posts, pagination]
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForumPost'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    ForumMessage:
+      type: object
+      required: [id, postId, author, body, createdAt, updatedAt, editedAt]
+      properties:
+        id:
+          type: integer
+        postId:
+          type: integer
+        author:
+          $ref: '#/components/schemas/ForumAuthor'
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        editedAt:
+          type: string
+          format: date-time
+          nullable: true
+    ForumMessageWriteRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 5000
+    ForumMessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          $ref: '#/components/schemas/ForumMessage'
+    ForumMessagesResponse:
+      type: object
+      required: [messages, pagination]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForumMessage'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    ForumPostWithMessagesResponse:
+      type: object
+      required: [post, firstMessage, messages, pagination]
+      properties:
+        post:
+          $ref: '#/components/schemas/ForumPost'
+        firstMessage:
+          allOf:
+            - $ref: '#/components/schemas/ForumMessage'
+          nullable: true
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForumMessage'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
     ProbeMessage:
       type: object
       required: [id, sender, recipient, sector, body, status, readAt, createdAt, updatedAt]

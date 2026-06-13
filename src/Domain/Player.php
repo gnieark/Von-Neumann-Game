@@ -15,6 +15,8 @@ final class Player
         public SectorCoordinates $homeSector,
         public readonly string $createdAt,
         public string $updatedAt,
+        public bool $forumAdmin = false,
+        public bool $forumModerator = false,
     ) {}
 
     public function publicArray(): array
@@ -23,6 +25,8 @@ final class Player
             'id' => $this->id,
             'username' => $this->username,
             'displayName' => $this->displayName,
+            'forumAdmin' => $this->forumAdmin,
+            'forumModerator' => $this->forumModerator,
         ];
     }
 }

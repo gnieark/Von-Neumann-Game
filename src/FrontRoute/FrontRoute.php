@@ -12,6 +12,7 @@ class FrontRoute{
     */
 
     protected array $leftMenuItems = []; 
+    protected array $footerMenuItems = [];
 
     public function __construct()
     {
@@ -20,6 +21,10 @@ class FrontRoute{
     public function addLeftMenuItem(MenuLinkItem $item): void
     {
         $this->leftMenuItems[] = $item;
+    }
+    public function addFooterMenuItem(MenuLinkItem $item): void
+    {
+        $this->footerMenuItems[] = $item;
     }
     public function getCustomJs(): string
     {
@@ -101,6 +106,12 @@ class FrontRoute{
         ]);
         $tpl->addPrefixedVars('t', $translator->allEscaped());
         $this->addLanguageOptions($tpl, $translator);
+        foreach($this->footerMenuItems as $menuLinkItem){
+            $tpl->addSubBlock((new TplBlock('footerlinks'))->addVars([
+                'title' => $menuLinkItem->getTitle(),
+                'href' => $menuLinkItem->getHref(),
+            ]));
+        }
 
         if(is_null($bearer)){
             //user deconnecté

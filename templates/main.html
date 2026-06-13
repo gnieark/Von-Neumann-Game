@@ -14,12 +14,6 @@
     <meta name="apple-mobile-web-app-title" content="Neumann-probe.net" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="preload" href="{{i18nUrl}}" as="fetch" type="application/json" crossorigin="anonymous">
-
-    <!-- BEGIN swaggerassets -->
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" defer></script>
-    <!-- END swaggerassets -->
-
     <script type="module" src="/assets/main.js?v={{assetVersion}}"></script>
     {{customJs}}
     {{customCss}}
@@ -52,6 +46,7 @@
                 <button class="account-menu-item" data-tutorial-target="tutorial-move-dialog" type="button">{{t.tutorialMoveProbe}}</button>
                 <button class="account-menu-item" data-tutorial-target="tutorial-mannies-dialog" type="button">{{t.tutorialUseMannies}}</button>
                 <button class="account-menu-item" data-tutorial-target="tutorial-automate-dialog" type="button">{{t.tutorialAutomate}}</button>
+                <a class="account-menu-item" href="/forum">{{t.tabForum}}</a>
             </div>
         </div>
         {{topheader}}
@@ -291,10 +286,9 @@
         <img id="tutorial-image-preview" class="tutorial-image-preview" alt="">
     </dialog>
     <footer class="site-footer">
-        <a href="/about">{{t.aboutFooterLink}}</a>
-        <a href="/changelog">{{t.changelogFooterLink}}</a>
-        <a href="/stats">{{t.statsFooterLink}}</a>
-        <a href="/api-docs">{{t.apiDocsFooterLink}}</a>
+        <!-- BEGIN footerlinks -->
+        <a href="{{footerlinks.href}}">{{footerlinks.title}}</a>
+        <!-- END footerlinks -->
     </footer>
 </body>
 </html>

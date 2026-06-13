@@ -2,6 +2,23 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-13
+
+### Added
+
+- API v28 : les posts du forum exposent désormais `firstMessageId` et les réponses de détail de post incluent `firstMessage`.
+- API v27 : les messages du forum exposent `editedAt`, renseigné lorsqu’un message a été modifié.
+- API v26 : ajout d’un forum léger sous `/api/forum/*`, avec catégories ordonnées, posts et messages/réponses.
+- Forum : ajout des endpoints `GET|POST /api/forum/categories`, `GET|PATCH|DELETE /api/forum/categories/{categoryId}`, `GET|POST /api/forum/posts`, `GET|PATCH|DELETE /api/forum/posts/{postId}`, `GET|POST /api/forum/posts/{postId}/messages` et `PATCH|DELETE /api/forum/messages/{messageId}`.
+- Forum : les catégories sont réservées aux joueurs `forumAdmin`; les joueurs `forumModerator` ou `forumAdmin` peuvent épingler, modifier et supprimer tous les posts et messages.
+- Joueurs : ajout des flags persistants `forumAdmin` et `forumModerator`, exposés dans `/api/me`.
+
+### Changed
+
+- Forum : `GET /api/forum/posts/{postId}` sépare le message initial dans `firstMessage`; le tableau `messages` contient uniquement les réponses paginées.
+- Forum : l’auteur d’un message peut désormais modifier son propre message via `PATCH /api/forum/messages/{messageId}`; les modérateurs et admins conservent le droit de modifier tous les messages.
+- Les clients typés doivent accepter `apiVersion: 28` et les nouveaux schémas `ForumCategory*`, `ForumPost*`, `ForumMessage*`, les champs `ForumPost.firstMessageId`, `ForumMessage.editedAt`, `firstMessage` sur les réponses de détail/création de post, ainsi que les champs `forumAdmin` et `forumModerator` sur `Player`.
+
 ## 2026-06-12
 
 ### Added

@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260612-damage-warnings';
+const ASSET_VERSION = '20260613-forum-first-message';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -114,7 +114,7 @@ $availableroutes = [
 
     ],
     'about' => [
-        'name' => translatedRouteName($translator, 'aboutPageTitle'),
+        'name' => translatedRouteName($translator, 'aboutFooterLink'),
         'methods' => ['GET', 'HEAD'],
         'needAuth' => false,
         'uriPattern' => '#^/about$#',
@@ -154,14 +154,14 @@ $availableroutes = [
         'displayOnFooter' => false,
     ],
     "changelog" =>[
-        'name'  => 'changelog',
+        'name'  => translatedRouteName($translator, 'changelogFooterLink'),
         'methods' => ['GET','HEAD'],
         'needAuth' => false,
         'uriPattern' => '#^/changelog$#',
         'linkUri' => '/changelog',
         'routeClass' => 'FrontRouteChangelog',
         'displayOnMainMenu' => false,
-        'displayOnFooter' => false,   
+        'displayOnFooter' => true,
     ],
     "stats" => [
         'name'  => translatedRouteName($translator, 'statsFooterLink'),
@@ -171,17 +171,17 @@ $availableroutes = [
         'linkUri' => '/stats',
         'routeClass' => 'FrontRouteStats',
         'displayOnMainMenu' => false,
-        'displayOnFooter' => true,   
+        'displayOnFooter' => true,
     ],
     "api-docs" => [
-        'name'  => 'API Docs',
+        'name'  => translatedRouteName($translator, 'apiDocsFooterLink'),
         'methods' => ['GET','HEAD'],
         'needAuth' => false,
         'uriPattern' => '#^/(api-docs|openapi\.yaml)$#',
         'linkUri' => '/api-docs',
         'routeClass' => 'FrontRouteApiDocs',
         'displayOnMainMenu' => false,
-        'displayOnFooter' => true,   
+        'displayOnFooter' => true,
     ],
     "Sensors" => [
         'name'  => translatedRouteName($translator, 'tabEnvironment'),
@@ -242,6 +242,16 @@ $availableroutes = [
         'routeClass' => 'FrontRouteAlerts',
         'displayOnMainMenu' => true,
         'displayOnFooter' => false,   
+    ],
+    "Forum" => [
+        'name'  => translatedRouteName($translator, 'tabForum'),
+        'methods' => ['GET','POST'],
+        'needAuth' => true,
+        'uriPattern' => '#^/forum$#',
+        'linkUri' => '/forum',
+        'routeClass' => 'FrontRouteForum',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => true,
     ]
 
 ];
