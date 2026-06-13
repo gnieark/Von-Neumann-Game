@@ -76,6 +76,21 @@ final class CraftingRecipeCatalog
     public const MANNY_CONTAINER_SPACE = 0.05;
     public const MANNY_CARGO_CAPACITY = 0.05;
     public const MANNY_CRAFTING_SECONDS = 3600;
+    private const DEFAULT_DESCRIPTIONS = [
+        'waypoint_bookmark' => 'A transmitting beacon placed on an object such as an asteroid or planet, or set in orbit around a star or gas giant. Its message can be read by every Neumann probe present in the sector.',
+        'steel_bar' => 'A rigid structural bar used in frames, rails, braces, and heavy mechanical assemblies.',
+        'steel_plate' => 'A flat reinforced plate suited to hull patches, container walls, and broad mounting surfaces.',
+        'additional_container' => 'A fold-out storage module that expands the probe cargo volume once assembled.',
+        'micro_conductor' => 'A precision conductor etched at microscopic scale for high-density electronic paths.',
+        'ceramic_insulator' => 'A heat-stable insulating part grown from volatile ice and carbon compounds.',
+        'crystal_substrate' => 'A polished crystalline base that keeps printed circuits aligned and thermally stable.',
+        'dopant_matrix' => 'A controlled impurity matrix that tunes semiconductor behavior during atomic printing.',
+        'integrated_circuit' => 'A dense logic component combining conductors, insulators, substrate, and dopants.',
+        'electric_motor' => 'A compact rotary actuator that converts stored electrical energy into mechanical motion.',
+        'battery_pack' => 'A rechargeable power pack for mobile tools, actuators, and autonomous Manny systems.',
+        'linear_actuator' => 'A precise push-pull mechanism used wherever a Manny needs controlled force.',
+        'manny' => 'A fully assembled maintenance unit able to repair, mine, carry cargo, and build new parts.',
+    ];
 
     /**
      * @return list<array<string, mixed>>
@@ -127,6 +142,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_WAYPOINT_BOOKMARK,
             'name' => ProbeItem::WAYPOINT_BOOKMARK_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_WAYPOINT_BOOKMARK),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 [
@@ -154,6 +170,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_STEEL_BAR,
             'name' => ProbeItem::STEEL_BAR_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_STEEL_BAR),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 [
@@ -181,6 +198,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_STEEL_PLATE,
             'name' => ProbeItem::STEEL_PLATE_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_STEEL_PLATE),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 [
@@ -208,6 +226,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_ADDITIONAL_CONTAINER,
             'name' => ProbeItem::ADDITIONAL_CONTAINER_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_ADDITIONAL_CONTAINER),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 [
@@ -243,6 +262,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_MICRO_CONDUCTOR,
             'name' => ProbeItem::MICRO_CONDUCTOR_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_MICRO_CONDUCTOR),
             'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
             'ingredients' => [
                 self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'micro_conductor.metalsCost', self::MICRO_CONDUCTOR_METALS_COST)),
@@ -265,6 +285,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_CERAMIC_INSULATOR,
             'name' => ProbeItem::CERAMIC_INSULATOR_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_CERAMIC_INSULATOR),
             'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
             'ingredients' => [
                 self::resourceIngredient(ResourceComposition::ICE, Config::float($config, 'ceramic_insulator.iceCost', self::CERAMIC_INSULATOR_ICE_COST)),
@@ -288,6 +309,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_CRYSTAL_SUBSTRATE,
             'name' => ProbeItem::CRYSTAL_SUBSTRATE_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_CRYSTAL_SUBSTRATE),
             'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
             'ingredients' => [
                 self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'crystal_substrate.metalsCost', self::CRYSTAL_SUBSTRATE_METALS_COST)),
@@ -311,6 +333,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_DOPANT_MATRIX,
             'name' => ProbeItem::DOPANT_MATRIX_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_DOPANT_MATRIX),
             'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
             'ingredients' => [
                 self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'dopant_matrix.metalsCost', self::DOPANT_MATRIX_METALS_COST)),
@@ -334,6 +357,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_INTEGRATED_CIRCUIT,
             'name' => ProbeItem::INTEGRATED_CIRCUIT_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_INTEGRATED_CIRCUIT),
             'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
             'ingredients' => [
                 self::itemIngredient(ProbeItem::TYPE_MICRO_CONDUCTOR, Config::int($config, 'integrated_circuit.microConductorCount', self::INTEGRATED_CIRCUIT_MICRO_CONDUCTORS)),
@@ -359,6 +383,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_ELECTRIC_MOTOR,
             'name' => ProbeItem::ELECTRIC_MOTOR_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_ELECTRIC_MOTOR),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 self::itemIngredient(ProbeItem::TYPE_STEEL_BAR, Config::int($config, 'electric_motor.steelBarCount', self::ELECTRIC_MOTOR_STEEL_BARS)),
@@ -382,6 +407,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_BATTERY_PACK,
             'name' => ProbeItem::BATTERY_PACK_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_BATTERY_PACK),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'battery_pack.metalsCost', self::BATTERY_PACK_METALS_COST)),
@@ -406,6 +432,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => ProbeItem::TYPE_LINEAR_ACTUATOR,
             'name' => ProbeItem::LINEAR_ACTUATOR_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_LINEAR_ACTUATOR),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'linear_actuator.steelPlateCount', self::LINEAR_ACTUATOR_STEEL_PLATES)),
@@ -430,6 +457,7 @@ final class CraftingRecipeCatalog
         return [
             'id' => 'manny',
             'name' => 'Manny',
+            'description' => self::description($config, 'manny'),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
                 self::itemIngredient(ProbeItem::TYPE_LINEAR_ACTUATOR, Config::int($config, 'manny.linearActuatorCount', self::MANNY_LINEAR_ACTUATORS)),
@@ -462,6 +490,14 @@ final class CraftingRecipeCatalog
             'unit' => ProbeInventory::CAPACITY_UNIT,
             'kind' => 'resource',
         ];
+    }
+
+    private static function description(array $config, string $id): string
+    {
+        $default = self::DEFAULT_DESCRIPTIONS[$id] ?? '';
+        $value = Config::value($config, $id . '.description', $default);
+
+        return is_string($value) ? $value : $default;
     }
 
     /**

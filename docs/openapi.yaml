@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '28'
+  version: '29'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 28
+                apiVersion: 29
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -124,6 +124,7 @@ paths:
                 recipes:
                   - id: waypoint_bookmark
                     name: Waypoint bookmark
+                    description: A transmitting beacon placed on an object such as an asteroid or planet, or set in orbit around a star or gas giant. Its message can be read by every Neumann probe present in the sector.
                     craftableBy: [manny]
                     ingredients:
                       - type: metals
@@ -137,6 +138,7 @@ paths:
                       containerSpaceUnit: earth_container_equivalent
                   - id: integrated_circuit
                     name: Integrated circuit
+                    description: A dense logic component combining conductors, insulators, substrate, and dopants.
                     craftableBy: [atomic_3d_printer]
                     ingredients:
                       - type: micro_conductor
@@ -2089,13 +2091,16 @@ components:
           format: date-time
     CraftingRecipe:
       type: object
-      required: [id, name, craftableBy, ingredients, durationSeconds, output]
+      required: [id, name, description, craftableBy, ingredients, durationSeconds, output]
       properties:
         id:
           type: string
           enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, manny]
         name:
           type: string
+        description:
+          type: string
+          description: Human-readable description of the crafted object.
         craftableBy:
           type: array
           description: Inventory item types that can start this recipe.
