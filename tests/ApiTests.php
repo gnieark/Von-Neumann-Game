@@ -244,6 +244,7 @@ $forumPostSchemaColumns = array_map(
     $pdo->query('PRAGMA table_info(forum_posts)')->fetchAll(PDO::FETCH_ASSOC),
 );
 $test->assert(in_array('pinned', $forumPostSchemaColumns, true), 'Forum posts store pinned state');
+$test->assert(in_array('first_message_id', $forumPostSchemaColumns, true), 'Forum posts link their first message');
 $test->assert(in_array('message_count', $forumPostSchemaColumns, true), 'Forum posts store message counts');
 $forumMessageSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
@@ -278,7 +279,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(27, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(28, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -482,6 +483,10 @@ $forumPostCreated = $kernel->handle('POST', '/api/forum/posts', $forumUserHeader
 $test->assertEquals(201, $forumPostCreated->status, 'forum users can create posts');
 $forumPostId = (int) ($forumPostCreated->body['post']['id'] ?? 0);
 $test->assertEquals(1, $forumPostCreated->body['post']['messageCount'] ?? null, 'forum post creation also creates the first message');
+$forumFirstMessageId = (int) ($forumPostCreated->body['post']['firstMessageId'] ?? 0);
+$test->assert($forumFirstMessageId > 0, 'forum post stores its first message id');
+$test->assertEquals($forumFirstMessageId, $forumPostCreated->body['firstMessage']['id'] ?? null, 'forum post creation exposes the first message');
+$test->assertEquals('Hello forum.', $forumPostCreated->body['firstMessage']['body'] ?? null, 'forum first message exposes the post body');
 $forumMessageCreated = $kernel->handle('POST', '/api/forum/posts/' . $forumPostId . '/messages', $forumUserHeaders, json_encode(['body' => 'A first reply.'], JSON_THROW_ON_ERROR));
 $test->assertEquals(201, $forumMessageCreated->status, 'forum users can reply to posts');
 $forumMessageId = (int) ($forumMessageCreated->body['message']['id'] ?? 0);
@@ -493,6 +498,8 @@ $test->assertEquals(1, $forumPosts->body['pagination']['limit'] ?? null, 'forum 
 $test->assertEquals(true, $forumPosts->body['pagination']['hasMore'] ?? null, 'forum post list exposes pagination hasMore');
 $forumPostWithMessages = $kernel->handle('GET', '/api/forum/posts/' . $forumPostId . '?limit=1&offset=1', $forumUserHeaders);
 $test->assertEquals(200, $forumPostWithMessages->status, 'forum users can read one post with messages');
+$test->assertEquals($forumFirstMessageId, $forumPostWithMessages->body['firstMessage']['id'] ?? null, 'forum post detail exposes the first message separately');
+$test->assertEquals([], $forumPostWithMessages->body['messages'] ?? null, 'forum post messages pagination excludes the first message from replies');
 $test->assertEquals(1, $forumPostWithMessages->body['pagination']['offset'] ?? null, 'forum post message list accepts an offset for older messages');
 $forumPostPatchDenied = $kernel->handle('PATCH', '/api/forum/posts/' . $forumPostId, $forumUserHeaders, json_encode(['pinned' => true], JSON_THROW_ON_ERROR));
 $test->assertEquals(403, $forumPostPatchDenied->status, 'regular forum users cannot pin posts');

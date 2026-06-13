@@ -90,8 +90,8 @@ final class ForumRepository
         $this->pdo->beginTransaction();
         try {
             $stmt = $this->pdo->prepare(
-                'INSERT INTO forum_posts (category_id, author_player_id, title, pinned, message_count, created_at, updated_at, last_message_at)
-                 VALUES (:category_id, :author_player_id, :title, 0, 1, :created_at, :updated_at, :last_message_at)'
+                'INSERT INTO forum_posts (category_id, author_player_id, title, pinned, first_message_id, message_count, created_at, updated_at, last_message_at)
+                 VALUES (:category_id, :author_player_id, :title, 0, NULL, 1, :created_at, :updated_at, :last_message_at)'
             );
             $stmt->execute([
                 'category_id' => $categoryId,
@@ -102,7 +102,12 @@ final class ForumRepository
                 'last_message_at' => $now,
             ]);
             $postId = (int) $this->pdo->lastInsertId();
-            $this->insertMessage($postId, $author->id, $body, $now);
+            $messageId = $this->insertMessage($postId, $author->id, $body, $now);
+            $stmt = $this->pdo->prepare('UPDATE forum_posts SET first_message_id = :first_message_id WHERE id = :id');
+            $stmt->execute([
+                'id' => $postId,
+                'first_message_id' => $messageId,
+            ]);
             $this->pdo->commit();
         } catch (\Throwable $e) {
             $this->pdo->rollBack();
@@ -211,10 +216,12 @@ final class ForumRepository
         $stmt = $this->pdo->prepare(
             $this->messageSelectSql() .
             ' WHERE fm.post_id = :post_id
+              AND fm.id <> COALESCE((SELECT first_message_id FROM forum_posts WHERE id = :post_id_first), -1)
               ORDER BY fm.created_at DESC, fm.id DESC
               LIMIT :limit OFFSET :offset'
         );
         $stmt->bindValue(':post_id', $postId, PDO::PARAM_INT);
+        $stmt->bindValue(':post_id_first', $postId, PDO::PARAM_INT);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
@@ -224,10 +231,36 @@ final class ForumRepository
 
     public function countMessagesForPost(int $postId): int
     {
-        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM forum_messages WHERE post_id = :post_id');
-        $stmt->execute(['post_id' => $postId]);
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*)
+             FROM forum_messages
+             WHERE post_id = :post_id
+             AND id <> COALESCE((SELECT first_message_id FROM forum_posts WHERE id = :post_id_first), -1)'
+        );
+        $stmt->execute([
+            'post_id' => $postId,
+            'post_id_first' => $postId,
+        ]);
 
         return (int) $stmt->fetchColumn();
+    }
+
+    public function firstMessageForPost(ForumPost $post): ?ForumMessage
+    {
+        if ($post->firstMessageId !== null) {
+            return $this->findMessageById($post->firstMessageId);
+        }
+
+        $stmt = $this->pdo->prepare(
+            $this->messageSelectSql() .
+            ' WHERE fm.post_id = :post_id
+              ORDER BY fm.created_at ASC, fm.id ASC
+              LIMIT 1'
+        );
+        $stmt->execute(['post_id' => $post->id]);
+        $row = $stmt->fetch();
+
+        return $row ? $this->hydrateMessage($row) : null;
     }
 
     public function findMessageById(int $id): ?ForumMessage
@@ -306,12 +339,14 @@ final class ForumRepository
             'UPDATE forum_posts
              SET message_count = (SELECT COUNT(*) FROM forum_messages WHERE post_id = :post_id),
                  last_message_at = COALESCE((SELECT MAX(created_at) FROM forum_messages WHERE post_id = :post_id_last), created_at),
+                 first_message_id = (SELECT id FROM forum_messages WHERE post_id = :post_id_first ORDER BY created_at ASC, id ASC LIMIT 1),
                  updated_at = :updated_at
              WHERE id = :id'
         );
         $stmt->execute([
             'post_id' => $postId,
             'post_id_last' => $postId,
+            'post_id_first' => $postId,
             'id' => $postId,
             'updated_at' => gmdate('c'),
         ]);
@@ -353,6 +388,7 @@ final class ForumRepository
             $row['author_display_name'] !== null ? (string) $row['author_display_name'] : null,
             (string) $row['title'],
             (bool) $row['pinned'],
+            $row['first_message_id'] !== null ? (int) $row['first_message_id'] : null,
             (int) $row['message_count'],
             (string) $row['created_at'],
             (string) $row['updated_at'],

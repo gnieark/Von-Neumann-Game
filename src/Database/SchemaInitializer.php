@@ -294,6 +294,7 @@ final class SchemaInitializer
                 author_player_id INTEGER NOT NULL,
                 title $text NOT NULL,
                 pinned $boolean,
+                first_message_id INTEGER NULL,
                 message_count INTEGER NOT NULL DEFAULT 0,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
@@ -323,7 +324,9 @@ final class SchemaInitializer
         if ($this->driver === 'sqlite') {
             $this->ensureSqliteColumn($pdo, 'players', 'forum_admin', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureSqliteColumn($pdo, 'players', 'forum_moderator', 'INTEGER NOT NULL DEFAULT 0');
+            $this->ensureSqliteColumn($pdo, 'forum_posts', 'first_message_id', 'INTEGER NULL');
             $this->ensureSqliteColumn($pdo, 'forum_messages', 'edited_at', 'TEXT NULL');
+            $this->syncForumFirstMessages($pdo);
             $this->ensureSqliteMannyCargoColumns($pdo);
             $this->ensureSqliteMannyProbeIdNullable($pdo);
             $this->migrateRepairTaskPayloads($pdo);
@@ -349,7 +352,9 @@ final class SchemaInitializer
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
+            $this->ensureMysqlColumn($pdo, 'forum_posts', 'first_message_id', 'INTEGER NULL AFTER pinned');
             $this->ensureMysqlColumn($pdo, 'forum_messages', 'edited_at', 'VARCHAR(255) NULL AFTER updated_at');
+            $this->syncForumFirstMessages($pdo);
             $this->ensureMysqlMannyProbeIdNullable($pdo);
             $this->ensureMysqlMannyCargoColumns($pdo);
             $this->migrateRepairTaskPayloads($pdo);
@@ -469,6 +474,21 @@ final class SchemaInitializer
         }
 
         $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+    }
+
+    private function syncForumFirstMessages(PDO $pdo): void
+    {
+        $pdo->exec(
+            'UPDATE forum_posts
+             SET first_message_id = (
+                 SELECT id
+                 FROM forum_messages
+                 WHERE post_id = forum_posts.id
+                 ORDER BY created_at ASC, id ASC
+                 LIMIT 1
+             )
+             WHERE first_message_id IS NULL'
+        );
     }
 
     private function ensureMysqlColumn(PDO $pdo, string $table, string $column, string $definition): void

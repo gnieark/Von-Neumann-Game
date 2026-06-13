@@ -6,6 +6,7 @@
         "categories": [],
         "postsByCategory": {},
         "currentPost": null,
+        "currentFirstMessage": null,
         "currentMessages": [],
         "currentMessagePagination": null,
         "currentPlayer": null,
@@ -111,43 +112,51 @@
         + "</button>";
     }
 
-    function renderMessageList() {
-        if (state.currentMessages.length === 0) {
-            return "<p class=\"sector-context\">" + escaped(tr("forumNoMessages", "No message in this thread.")) + "</p>";
-        }
+    function renderForumMessage(message, isFirstMessage) {
+        const author = window.VNG.formatText(tr("forumAuthorPrefix", "by {author}"), {"author": authorName(message.author || {})});
+        const editedLabel = message.editedAt
+            ? "<span>" + escaped(window.VNG.formatText(tr("forumEditedAt", "edited on {date}"), {"date": formatDate(message.editedAt)})) + "</span>"
+            : "";
+        const firstLabel = isFirstMessage
+            ? "<span class=\"forum-initial-message-badge\">" + escaped(tr("forumInitialMessage", "Initial post")) + "</span>"
+            : "";
+        const actions = canEditMessage(message)
+            ? "<div class=\"forum-message-actions\">"
+                + "<button data-forum-edit-message=\"" + escaped(message.id) + "\" type=\"button\">" + escaped(tr("forumEditMessage", "Edit")) + "</button>"
+            + "</div>"
+            : "";
+        const isEditing = String(state.editingMessageId || "") === String(message.id);
+        const body = isEditing
+            ? "<form class=\"forum-message-edit-form\" data-forum-edit-form=\"" + escaped(message.id) + "\">"
+                + "<label>" + escaped(tr("forumPostBody", "Message"))
+                    + "<textarea name=\"body\" rows=\"4\" maxlength=\"5000\" required>" + escaped(message.body || "") + "</textarea>"
+                + "</label>"
+                + "<div class=\"forum-message-edit-actions\">"
+                    + "<button class=\"primary\" type=\"submit\">" + escaped(tr("forumSaveEdit", "Save")) + "</button>"
+                    + "<button data-forum-cancel-edit type=\"button\">" + escaped(tr("forumCancelEdit", "Cancel")) + "</button>"
+                + "</div>"
+            + "</form>"
+            : "<p>" + escaped(message.body || "") + "</p>";
 
-        return state.currentMessages.map((message) => {
-            const author = window.VNG.formatText(tr("forumAuthorPrefix", "by {author}"), {"author": authorName(message.author || {})});
-            const editedLabel = message.editedAt
-                ? "<span>" + escaped(window.VNG.formatText(tr("forumEditedAt", "edited on {date}"), {"date": formatDate(message.editedAt)})) + "</span>"
-                : "";
-            const actions = canEditMessage(message)
-                ? "<div class=\"forum-message-actions\">"
-                    + "<button data-forum-edit-message=\"" + escaped(message.id) + "\" type=\"button\">" + escaped(tr("forumEditMessage", "Edit")) + "</button>"
-                + "</div>"
-                : "";
-            const isEditing = String(state.editingMessageId || "") === String(message.id);
-            const body = isEditing
-                ? "<form class=\"forum-message-edit-form\" data-forum-edit-form=\"" + escaped(message.id) + "\">"
-                    + "<label>" + escaped(tr("forumPostBody", "Message"))
-                        + "<textarea name=\"body\" rows=\"4\" maxlength=\"5000\" required>" + escaped(message.body || "") + "</textarea>"
-                    + "</label>"
-                    + "<div class=\"forum-message-edit-actions\">"
-                        + "<button class=\"primary\" type=\"submit\">" + escaped(tr("forumSaveEdit", "Save")) + "</button>"
-                        + "<button data-forum-cancel-edit type=\"button\">" + escaped(tr("forumCancelEdit", "Cancel")) + "</button>"
-                    + "</div>"
-                + "</form>"
-                : "<p>" + escaped(message.body || "") + "</p>";
-            return "<article class=\"forum-message\">"
-                + "<div class=\"forum-message-meta\">"
-                    + "<span>" + escaped(author) + "</span>"
-                    + "<span>" + escaped(formatDate(message.createdAt)) + "</span>"
-                    + editedLabel
-                + "</div>"
-                + body
-                + (isEditing ? "" : actions)
-            + "</article>";
-        }).join("");
+        return "<article class=\"forum-message" + (isFirstMessage ? " forum-message-initial" : "") + "\">"
+            + "<div class=\"forum-message-meta\">"
+                + firstLabel
+                + "<span>" + escaped(author) + "</span>"
+                + "<span>" + escaped(formatDate(message.createdAt)) + "</span>"
+                + editedLabel
+            + "</div>"
+            + body
+            + (isEditing ? "" : actions)
+        + "</article>";
+    }
+
+    function renderMessageList() {
+        const firstMessage = state.currentFirstMessage ? renderForumMessage(state.currentFirstMessage, true) : "";
+        const replies = state.currentMessages.length > 0
+            ? state.currentMessages.map((message) => renderForumMessage(message, false)).join("")
+            : "<p class=\"sector-context\">" + escaped(tr("forumNoReplies", "No reply in this thread yet.")) + "</p>";
+
+        return firstMessage + replies;
     }
 
     function renderInlineThread(category) {
@@ -302,6 +311,7 @@
         });
         const data = await window.VNG.apiJson("/api/forum/posts/" + encodeURIComponent(postId) + "?" + query.toString(), {"method": "GET"});
         state.currentPost = data.post || null;
+        state.currentFirstMessage = data.firstMessage || null;
         const nextMessages = Array.isArray(data.messages) ? data.messages : [];
         state.currentMessages = settings.append ? state.currentMessages.concat(nextMessages) : nextMessages;
         state.currentMessagePagination = data.pagination || null;
@@ -380,6 +390,9 @@
         });
         const updated = data.message || null;
         if (updated) {
+            if (state.currentFirstMessage && String(state.currentFirstMessage.id) === String(updated.id)) {
+                state.currentFirstMessage = updated;
+            }
             state.currentMessages = state.currentMessages.map((message) => (
                 String(message.id) === String(updated.id) ? updated : message
             ));
@@ -398,6 +411,7 @@
             if (backButton) {
                 const categoryId = state.currentPost ? state.currentPost.categoryId : null;
                 state.currentPost = null;
+                state.currentFirstMessage = null;
                 state.currentMessages = [];
                 state.currentMessagePagination = null;
                 state.editingMessageId = null;
@@ -486,6 +500,7 @@
         });
         document.getElementById("forum-thread-close")?.addEventListener("click", () => {
             state.currentPost = null;
+            state.currentFirstMessage = null;
             state.currentMessages = [];
             state.currentMessagePagination = null;
             renderThread();

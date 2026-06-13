@@ -14,6 +14,7 @@ final class ForumPost
         public ?string $authorDisplayName,
         public string $title,
         public bool $pinned,
+        public ?int $firstMessageId,
         public int $messageCount,
         public readonly string $createdAt,
         public string $updatedAt,

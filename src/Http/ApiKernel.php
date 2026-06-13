@@ -39,7 +39,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 27;
+    public const API_VERSION = 28;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -353,6 +353,7 @@ final class ApiKernel
 
         return new ApiResponse(200, [
             'post' => $this->forumPostArray($post),
+            'firstMessage' => $this->forumOptionalMessageArray($this->forum->firstMessageForPost($post)),
             'messages' => array_map(fn(ForumMessage $message): array => $this->forumMessageArray($message), $messages['items']),
             'pagination' => $messages['pagination'],
         ]);
@@ -382,7 +383,9 @@ final class ApiKernel
             return $messageBody;
         }
 
-        return new ApiResponse(201, ['post' => $this->forumPostArray($this->forum->createPost($player, $categoryId, $title, $messageBody))]);
+        $post = $this->forum->createPost($player, $categoryId, $title, $messageBody);
+
+        return new ApiResponse(201, $this->forumPostPayload($post));
     }
 
     private function forumPostUpdateResponse(Player $player, int $postId, ?string $body): ApiResponse
@@ -424,7 +427,7 @@ final class ApiKernel
             $post->pinned = $data['pinned'];
         }
 
-        return new ApiResponse(200, ['post' => $this->forumPostArray($this->forum->updatePost($post))]);
+        return new ApiResponse(200, $this->forumPostPayload($this->forum->updatePost($post)));
     }
 
     private function forumPostDeleteResponse(Player $player, int $postId): ApiResponse
@@ -1339,11 +1342,25 @@ final class ApiKernel
             'author' => $this->forumAuthorArray($post->authorPlayerId, $post->authorUsername, $post->authorDisplayName),
             'title' => $post->title,
             'pinned' => $post->pinned,
+            'firstMessageId' => $post->firstMessageId,
             'messageCount' => $post->messageCount,
             'createdAt' => $post->createdAt,
             'updatedAt' => $post->updatedAt,
             'lastMessageAt' => $post->lastMessageAt,
         ];
+    }
+
+    private function forumPostPayload(ForumPost $post): array
+    {
+        return [
+            'post' => $this->forumPostArray($post),
+            'firstMessage' => $this->forumOptionalMessageArray($this->forum->firstMessageForPost($post)),
+        ];
+    }
+
+    private function forumOptionalMessageArray(?ForumMessage $message): ?array
+    {
+        return $message !== null ? $this->forumMessageArray($message) : null;
     }
 
     private function forumMessageArray(ForumMessage $message): array

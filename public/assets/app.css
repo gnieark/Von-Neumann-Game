@@ -1415,6 +1415,20 @@ button.account-menu-item {
     background: rgba(8, 12, 13, .45);
 }
 
+.forum-message-initial {
+    border-color: rgba(255, 218, 118, .34);
+    background: rgba(255, 218, 118, .07);
+}
+
+.forum-initial-message-badge {
+    padding: 1px 6px;
+    border: 1px solid rgba(255, 218, 118, .38);
+    color: #ffe19a;
+    font-size: .72rem;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
 .forum-message p {
     margin: 8px 0 0;
     white-space: pre-wrap;
