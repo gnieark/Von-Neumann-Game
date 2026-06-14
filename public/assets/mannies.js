@@ -1365,6 +1365,19 @@
             && !sameRelativeSector(mannyRelativeSector(manny), state.currentProbeSectorRelative);
     }
 
+    function mannyRackStatusClass(manny, tooFar) {
+        if (tooFar) {
+            return "manny-status-away";
+        }
+        if (manny && manny.currentTask === "waiting_for_space") {
+            return "manny-status-waiting";
+        }
+        if (manny && manny.currentTask !== null) {
+            return "manny-status-active";
+        }
+        return "manny-status-inactive";
+    }
+
     function mannyCargo(manny) {
         const cargo = manny.cargo || {};
         return [
@@ -1448,6 +1461,7 @@
             const expanded = openMannyIds.has(mannyId);
             const buttonTitle = (manny.name || mannyId) + " - " + taskName;
             const progressAttributes = busy && !tooFar ? progressDataAttributes(manny, observedAt) : "";
+            const rackStatusClass = mannyRackStatusClass(manny, tooFar);
             const panelContent = tooFar
                 ? "<div class=\"manny-metrics\">"
                     + metric(tr("location", "Location"), mannyLocation(manny))
@@ -1466,7 +1480,7 @@
                     + "</form>"
                     + (busy ? renderMannyTaskPanel(manny, observedAt) : renderMannyActionForms(panelId));
 
-            return "<article class=\"manny-card\" data-manny-id=\"" + escaped(manny.id) + "\">"
+            return "<article class=\"manny-card " + rackStatusClass + "\" data-manny-id=\"" + escaped(manny.id) + "\">"
                 + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
                 + "<span class=\"manny-accordion-title\">"
                 + "<b>" + escaped(manny.name || mannyId) + "</b>"

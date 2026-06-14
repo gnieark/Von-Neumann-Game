@@ -301,7 +301,7 @@
             + placements.map((placement) => (
                 "<li class=\"inventory-container-line\" " + lineActionAttributes(action, placement) + ">"
                     + "<span class=\"inventory-line-container\">" + window.VNG.escapeHtml(containerLabel(placement.container)) + "</span>"
-                    + "<b>" + window.VNG.escapeHtml(window.VNG.numberValue(placement[valueKey] || 0)) + "</b>"
+                    + inventoryLineReadouts(placement, valueKey)
                     + renderLineActions(action, placement)
                 + "</li>"
             )).join("")
@@ -484,11 +484,29 @@
         });
     }
 
-    function resourceStockDetail(amount, space) {
-        return [
-            tr("storedAmount", "Amount") + " " + window.VNG.numberValue(amount),
-            tr("containerSpace", "Space") + " " + window.VNG.numberValue(space),
-        ].join(" - ");
+    function inventoryReadouts(readouts) {
+        return "<dl class=\"inventory-card-readouts\">"
+            + readouts.map((readout) => (
+                "<div><dt>" + window.VNG.escapeHtml(readout.label) + "</dt><dd>"
+                + window.VNG.escapeHtml(readout.value)
+                + "</dd></div>"
+            )).join("")
+            + "</dl>";
+    }
+
+    function inventoryLineReadouts(placement, valueKey) {
+        const isAmount = valueKey === "amount";
+        const value = Number(placement[valueKey] || 0);
+        const space = Number(placement.containerSpace || (isAmount ? placement.amount : 0) || 0);
+
+        return "<span class=\"inventory-line-readouts\">"
+            + "<span class=\"inventory-line-readout\"><span>" + window.VNG.escapeHtml(isAmount ? tr("storedAmount", "Amount") : tr("quantity", "Quantity")) + "</span><b>"
+            + window.VNG.escapeHtml(window.VNG.numberValue(value))
+            + "</b></span>"
+            + "<span class=\"inventory-line-readout\"><span>" + window.VNG.escapeHtml(tr("containerSpace", "Space")) + "</span><b>"
+            + window.VNG.escapeHtml(window.VNG.numberValue(space))
+            + "</b></span>"
+            + "</span>";
     }
 
     function groupInventoryItems(items) {
@@ -553,8 +571,11 @@
                 }
 
                 return "<article class=\"inventory-card\">"
-                    + "<div><span>" + window.VNG.escapeHtml(tr("inventoryStock", "Stock")) + "</span><b>" + window.VNG.escapeHtml(resourceTypeLabel(stock.type)) + "</b></div>"
-                    + "<p>" + window.VNG.escapeHtml(resourceStockDetail(amount, space)) + "</p>"
+                    + "<div class=\"inventory-card-heading\"><span>" + window.VNG.escapeHtml(tr("inventoryStock", "Stock")) + "</span><b>" + window.VNG.escapeHtml(resourceTypeLabel(stock.type)) + "</b></div>"
+                    + inventoryReadouts([
+                        {"label": tr("storedAmount", "Amount"), "value": window.VNG.numberValue(amount)},
+                        {"label": tr("containerSpace", "Space"), "value": window.VNG.numberValue(space)},
+                    ])
                     + placementLines(placements, "amount", {"kind": "resource", "resourceType": stock.type, "itemId": stock.id || stock.type})
                     + "</article>";
             })
@@ -565,8 +586,10 @@
             .filter((tank) => Number(tank.fillPercent) > 0)
             .map((tank) => (
                 "<article class=\"inventory-card\">"
-                + "<div><span>" + window.VNG.escapeHtml(tr("externalTank", "External tank")) + "</span><b>" + window.VNG.escapeHtml(resourceTypeLabel(tank.type)) + "</b></div>"
-                + "<p>" + window.VNG.escapeHtml(tr("storedAmount", "Amount") + " " + window.VNG.numberValue(tank.fillPercent, "%")) + "</p>"
+                + "<div class=\"inventory-card-heading\"><span>" + window.VNG.escapeHtml(tr("externalTank", "External tank")) + "</span><b>" + window.VNG.escapeHtml(resourceTypeLabel(tank.type)) + "</b></div>"
+                + inventoryReadouts([
+                    {"label": tr("storedAmount", "Amount"), "value": window.VNG.numberValue(tank.fillPercent, "%")},
+                ])
                 + "</article>"
             ));
 
@@ -582,10 +605,13 @@
             const kind = group.type === "manny" ? "manny" : "item";
 
             return "<article class=\"inventory-card\">"
-                + "<div><span>" + window.VNG.escapeHtml(tr("inventoryItem", "Equipment")) + "</span><b>" + window.VNG.escapeHtml(inventoryItemName(group.sample)) + "</b></div>"
-                + "<p>" + window.VNG.escapeHtml(tr("quantity", "Quantity") + " " + window.VNG.numberValue(group.items.length) + " - " + tr("containerSpace", "Space") + " " + window.VNG.numberValue(group.totalSpace)) + "</p>"
+                + "<div class=\"inventory-card-heading\"><span>" + window.VNG.escapeHtml(tr("inventoryItem", "Equipment")) + "</span><b>" + window.VNG.escapeHtml(inventoryItemName(group.sample)) + "</b></div>"
+                + inventoryReadouts([
+                    {"label": tr("quantity", "Quantity"), "value": window.VNG.numberValue(group.items.length)},
+                    {"label": tr("containerSpace", "Space"), "value": window.VNG.numberValue(group.totalSpace)},
+                ])
                 + placementLines(placements, "quantity", {"kind": kind, "itemType": group.type})
-                + (group.items.length === 1 ? "<p>" + window.VNG.escapeHtml(inventoryEntryDetail(group.sample)) + "</p>" : "")
+                + (group.items.length === 1 ? "<p class=\"inventory-entry-detail\">" + window.VNG.escapeHtml(inventoryEntryDetail(group.sample)) + "</p>" : "")
                 + "</article>";
         });
 

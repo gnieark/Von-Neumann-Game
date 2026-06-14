@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Interface : le panneau de navigation utilise désormais le même fond que l'espace de travail.
+- Interface : dans `Inventaires`, les compteurs de total sont alignés avec les compteurs des lignes par container.
 - Interface : la case `Se souvenir de moi` est de nouveau transmise lors d'une connexion OAuth, afin de poser un cookie de session persistant.
 
 ## 2026-06-13
