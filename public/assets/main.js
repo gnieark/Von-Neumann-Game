@@ -47,6 +47,35 @@ function sessionToken() {
     return safeDecode(cookieValue("vn_session"));
 }
 
+function bindOAuthRememberChoice() {
+    const checkbox = document.getElementById("oauth-remember");
+    const links = document.querySelectorAll("[data-oauth-url]");
+    if (!checkbox || links.length === 0) {
+        return;
+    }
+
+    const syncLinks = () => {
+        links.forEach((link) => {
+            const baseUrl = link.getAttribute("data-oauth-url") || link.getAttribute("href") || "";
+            if (!baseUrl) {
+                return;
+            }
+
+            const url = new URL(baseUrl, window.location.origin);
+            if (checkbox.checked) {
+                url.searchParams.set("remember", "1");
+            } else {
+                url.searchParams.delete("remember");
+            }
+
+            link.setAttribute("href", url.pathname + url.search + url.hash);
+        });
+    };
+
+    checkbox.addEventListener("change", syncLinks);
+    syncLinks();
+}
+
 async function apiJson(path, options) {
     const token = sessionToken();
     const response = await fetch(path, {
@@ -918,6 +947,8 @@ async function loadCurrentPlayer(spanOperator) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    bindOAuthRememberChoice();
+
     if (document.body.dataset.authenticated !== "1") {
         const closeAccountMenus = bindAccountMenus();
         bindTutorialDialog(closeAccountMenus);

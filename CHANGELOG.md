@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-14
+
+### Fixed
+
+- Interface : la case `Se souvenir de moi` est de nouveau transmise lors d'une connexion OAuth, afin de poser un cookie de session persistant.
+
 ## 2026-06-13
 
 ### Added
