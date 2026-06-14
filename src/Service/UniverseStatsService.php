@@ -35,7 +35,14 @@ final class UniverseStatsService
                 'probesInUniverse' => count($probeRows),
                 'generatedSectors' => $sectorStats['generatedSectors'],
                 'visitedSectors' => $this->scalarInt(
-                    'SELECT COUNT(*) FROM (SELECT sector_x, sector_y, sector_z FROM visited_sectors GROUP BY sector_x, sector_y, sector_z) visited'
+                    'SELECT COUNT(*)
+                     FROM (
+                         SELECT visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z
+                         FROM visited_sectors
+                         INNER JOIN neumann_probes ON neumann_probes.player_id = visited_sectors.player_id
+                         WHERE neumann_probes.exclude_from_stats = 0
+                         GROUP BY visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z
+                     ) visited'
                 ),
                 'blackHoles' => $sectorStats['blackHoles'],
                 'asteroidsByResource' => $sectorStats['asteroidsByResource'],
@@ -48,6 +55,7 @@ final class UniverseStatsService
                 'intelligentLifeWorlds' => 0,
                 'successfulMissions' => 0,
                 'failedMissions' => 0,
+                'topVisitedProbes' => $this->topVisitedProbes(),
             ],
         ];
     }
@@ -57,7 +65,7 @@ final class UniverseStatsService
      */
     private function probeRows(): array
     {
-        $stmt = $this->pdo->query('SELECT sector_x, sector_y, sector_z FROM neumann_probes ORDER BY id ASC');
+        $stmt = $this->pdo->query('SELECT sector_x, sector_y, sector_z FROM neumann_probes WHERE exclude_from_stats = 0 ORDER BY id ASC');
         $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map(static fn(array $row): array => [
@@ -75,6 +83,29 @@ final class UniverseStatsService
         }
 
         return max(0, (int) $stmt->fetchColumn());
+    }
+
+    /**
+     * @return array<int, array{rank: int, probeName: string, visitedSectors: int}>
+     */
+    private function topVisitedProbes(): array
+    {
+        $stmt = $this->pdo->query(
+            'SELECT neumann_probes.name AS probe_name, COUNT(visited_sectors.id) AS visited_count
+             FROM neumann_probes
+             LEFT JOIN visited_sectors ON visited_sectors.player_id = neumann_probes.player_id
+             WHERE neumann_probes.exclude_from_stats = 0
+             GROUP BY neumann_probes.id, neumann_probes.name
+             ORDER BY visited_count DESC, neumann_probes.name ASC, neumann_probes.id ASC
+             LIMIT 3'
+        );
+        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(static fn(array $row, int $index): array => [
+            'rank' => $index + 1,
+            'probeName' => (string) $row['probe_name'],
+            'visitedSectors' => max(0, (int) $row['visited_count']),
+        ], $rows, array_keys($rows));
     }
 
     /**

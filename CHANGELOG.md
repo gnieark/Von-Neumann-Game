@@ -4,6 +4,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-06-14
 
+### Added
+
+- Stats : ajout d'un podium des sondes ayant visité le plus de secteurs sur la page publique des statistiques.
+- Stats : ajout du champ `neumann_probes.exclude_from_stats` pour retirer des sondes des statistiques publiques.
+
 ### Fixed
 
 - Interface : le panneau de navigation utilise désormais le même fond que l'espace de travail.

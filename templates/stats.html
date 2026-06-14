@@ -6,6 +6,24 @@
         </div>
         <p>{{t.statsUpdatedAt}} {{generatedAt}}</p>
     </div>
+    <section class="stats-podium" aria-labelledby="stats-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-podium-title">{{t.statsTopVisitedProbes}}</h2>
+            <p>{{t.statsTopVisitedProbesHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN podiumProbe -->
+            <li class="stats-podium-rank">
+                <span>{{podiumProbe.rank}}</span>
+                <strong>{{podiumProbe.name}}</strong>
+                <b>{{podiumProbe.visitedSectors}} {{podiumProbe.visitedSectorsLabel}}</b>
+            </li>
+            <!-- END podiumProbe -->
+            <!-- BEGIN emptyPodium -->
+            <li class="stats-podium-empty">{{t.statsTopVisitedProbesEmpty}}</li>
+            <!-- END emptyPodium -->
+        </ol>
+    </section>
     <div class="stats-grid">
         <!-- BEGIN metric -->
         <article class="stats-card">

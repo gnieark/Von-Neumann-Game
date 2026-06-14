@@ -109,7 +109,8 @@ final class NeumannProbeRepository
                 internal_clock_rate = :internal_clock_rate,
                 current_task = :current_task,
                 entered_current_sector_at = :entered_current_sector_at,
-                updated_at = :updated_at
+                updated_at = :updated_at,
+                exclude_from_stats = :exclude_from_stats
              WHERE id = :id'
         );
         $stmt->execute([
@@ -134,6 +135,7 @@ final class NeumannProbeRepository
             'current_task' => $probe->currentTask,
             'entered_current_sector_at' => $probe->enteredCurrentSectorAt,
             'updated_at' => $probe->updatedAt,
+            'exclude_from_stats' => $probe->excludeFromStats ? 1 : 0,
         ]);
     }
 
@@ -159,6 +161,7 @@ final class NeumannProbeRepository
             (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
             (string) $row['created_at'],
             (string) $row['updated_at'],
+            (int) ($row['exclude_from_stats'] ?? 0) === 1,
         );
     }
 

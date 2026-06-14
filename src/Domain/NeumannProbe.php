@@ -28,5 +28,6 @@ final class NeumannProbe
         public string $enteredCurrentSectorAt,
         public readonly string $createdAt,
         public string $updatedAt,
+        public bool $excludeFromStats,
     ) {}
 }

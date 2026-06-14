@@ -82,6 +82,7 @@ final class SchemaInitializer
                 entered_current_sector_at $text NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
+                exclude_from_stats $boolean,
                 FOREIGN KEY(player_id) REFERENCES players(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)",
@@ -347,6 +348,7 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
             $this->ensureSqliteProbeResourceStockColumns($pdo);
+            $this->ensureSqliteColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
         } elseif ($this->driver === 'mysql') {
@@ -371,6 +373,7 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
             $this->ensureMysqlProbeResourceStockColumns($pdo);
+            $this->ensureMysqlColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER updated_at');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
         }
@@ -543,14 +546,15 @@ final class SchemaInitializer
                     entered_current_sector_at TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    exclude_from_stats INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(player_id) REFERENCES players(id)
                 )"
             );
 
             $insert = $pdo->prepare(
                 'INSERT INTO neumann_probes
-                 (id, player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
-                 VALUES (:id, :player_id, :name, :sector_x, :sector_y, :sector_z, :velocity_c, :acceleration_c_per_day, :direction_x, :direction_y, :direction_z, :status, :integrity_percent, :energy_stored, :deuterium_stock, :metals_stock, :ice_stock, :organic_compounds_stock, :internal_clock_rate, :current_task, :entered_current_sector_at, :created_at, :updated_at)'
+                 (id, player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at, exclude_from_stats)
+                 VALUES (:id, :player_id, :name, :sector_x, :sector_y, :sector_z, :velocity_c, :acceleration_c_per_day, :direction_x, :direction_y, :direction_z, :status, :integrity_percent, :energy_stored, :deuterium_stock, :metals_stock, :ice_stock, :organic_compounds_stock, :internal_clock_rate, :current_task, :entered_current_sector_at, :created_at, :updated_at, :exclude_from_stats)'
             );
             foreach ($rows as $row) {
                 $insert->execute([
@@ -581,6 +585,7 @@ final class SchemaInitializer
                     'entered_current_sector_at' => (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
                     'created_at' => (string) $row['created_at'],
                     'updated_at' => (string) $row['updated_at'],
+                    'exclude_from_stats' => (int) ($row['exclude_from_stats'] ?? 0) === 1 ? 1 : 0,
                 ]);
             }
 

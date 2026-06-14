@@ -18,6 +18,19 @@ class FrontRouteStats extends FrontRoute{
         $tpl->addVars([
             'generatedAt' => self::e($this->formatGeneratedAt($stats['generatedAt'], $translator)),
         ]);
+        $podium = $this->topVisitedProbeRows($stats['metrics'], $translator);
+        if ($podium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyPodium'));
+        } else {
+            foreach ($podium as $probe) {
+                $tpl->addSubBlock((new TplBlock('podiumProbe'))->addVars([
+                    'rank' => self::e($probe['rank']),
+                    'name' => self::e($probe['name']),
+                    'visitedSectors' => self::e($probe['visitedSectors']),
+                    'visitedSectorsLabel' => self::e($probe['visitedSectorsLabel']),
+                ]));
+            }
+        }
         foreach ($this->metricRows($stats['metrics'], $translator) as $metric) {
             $tpl->addSubBlock((new TplBlock('metric'))->addVars([
                 'label' => self::e($metric['label']),
@@ -67,6 +80,7 @@ class FrontRouteStats extends FrontRoute{
             'intelligentLifeWorlds' => 0,
             'successfulMissions' => 0,
             'failedMissions' => 0,
+            'topVisitedProbes' => [],
         ];
 
         $json = is_file($path) ? file_get_contents($path) : false;
@@ -88,6 +102,30 @@ class FrontRouteStats extends FrontRoute{
             'generatedAt' => is_string($data['generatedAt'] ?? null) ? $data['generatedAt'] : null,
             'metrics' => array_replace_recursive($fallbackMetrics, $data['metrics']),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
+     * @return array<int, array{rank: string, name: string, visitedSectors: string, visitedSectorsLabel: string}>
+     */
+    private function topVisitedProbeRows(array $metrics, Translator $translator): array
+    {
+        $rows = is_array($metrics['topVisitedProbes'] ?? null) ? $metrics['topVisitedProbes'] : [];
+        $podium = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $visitedSectors = max(0, (int) ($row['visitedSectors'] ?? 0));
+            $podium[] = [
+                'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
+                'name' => trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownProbe'),
+                'visitedSectors' => $this->formatNumber($visitedSectors),
+                'visitedSectorsLabel' => $translator->get($visitedSectors > 1 ? 'statsVisitedSectorsPodiumPlural' : 'statsVisitedSectorsPodiumSingular'),
+            ];
+        }
+
+        return $podium;
     }
 
     /**

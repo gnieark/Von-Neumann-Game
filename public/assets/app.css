@@ -383,6 +383,84 @@ button:disabled {
     text-align: right;
 }
 
+.stats-podium {
+    margin-bottom: 18px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,.1);
+    background: rgba(0,0,0,.18);
+}
+
+.stats-podium-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: start;
+    margin-bottom: 12px;
+}
+
+.stats-podium-heading h2 {
+    margin: 0;
+    color: #f0f3f3;
+    font-size: 1.08rem;
+}
+
+.stats-podium-heading p {
+    margin: 0;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.45;
+    text-align: right;
+}
+
+.stats-podium-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.stats-podium-rank,
+.stats-podium-empty {
+    display: grid;
+    gap: 8px;
+    min-height: 112px;
+    padding: 14px;
+    border: 1px solid rgba(255, 214, 90, .22);
+    background:
+        linear-gradient(180deg, rgba(255, 214, 90, .08), rgba(0,0,0,.08)),
+        rgba(0,0,0,.16);
+}
+
+.stats-podium-rank span {
+    color: #ffe66d;
+    font-family: "Lucida Console", "Courier New", monospace;
+    font-size: .82rem;
+    font-weight: 700;
+}
+
+.stats-podium-rank strong {
+    color: #f0f3f3;
+    font-size: 1.12rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.stats-podium-rank b {
+    align-self: end;
+    color: var(--muted);
+    font-size: .85rem;
+    font-weight: 600;
+}
+
+.stats-podium-empty {
+    grid-column: 1 / -1;
+    min-height: 0;
+    color: var(--muted);
+    line-height: 1.45;
+}
+
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -2886,6 +2964,19 @@ button.account-menu-item {
 
     .stats-heading p:last-child {
         text-align: left;
+    }
+
+    .stats-podium-heading {
+        align-items: start;
+        flex-direction: column;
+    }
+
+    .stats-podium-heading p {
+        text-align: left;
+    }
+
+    .stats-podium-list {
+        grid-template-columns: 1fr;
     }
 
     .game-brief,

@@ -33,6 +33,7 @@ use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
+use VonNeumannGame\Service\UniverseStatsService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
@@ -209,6 +210,7 @@ $probeSchemaColumns = array_map(
 );
 $test->assert(in_array('ice_stock', $probeSchemaColumns, true), 'Probe table stores ice stock explicitly');
 $test->assert(in_array('organic_compounds_stock', $probeSchemaColumns, true), 'Probe table stores organic-compound stock explicitly');
+$test->assert(in_array('exclude_from_stats', $probeSchemaColumns, true), 'Probe table can exclude probes from public stats');
 $test->assert(!in_array('other_stock', $probeSchemaColumns, true), 'Probe table no longer stores generic other_stock');
 $mannySchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
@@ -309,6 +311,7 @@ $test->assert(($player->publicArray()['forumAdmin'] ?? null) === false, 'player 
 $test->assert(($player->publicArray()['forumModerator'] ?? null) === true, 'player public array exposes forum moderator flag');
 $createdProbe = $probes->findByPlayerId($player->id);
 $test->assert($createdProbe !== null, 'a probe is automatically created for a new player');
+$test->assert($createdProbe?->excludeFromStats === false, 'new probes are included in public stats by default');
 $test->assert(!$player->homeSector->equals(SectorCoordinates::origin()), 'new player receives a pseudo-random absolute home sector');
 $homeSum = $player->homeSector->getX() + $player->homeSector->getY() + $player->homeSector->getZ();
 $test->assert($homeSum % 2 === 0, 'random initial sector respects the FCC parity constraint');
@@ -331,6 +334,16 @@ $oauthProbe = $probes->findByPlayerId($oauthPlayer->id);
 $test->assert($oauthProbe !== null, 'OAuth registration creates an initial probe');
 $test->assert($oauthProbe?->currentSector->equals($oauthPlayer->homeSector), 'OAuth probe starts in the player home sector');
 $test->assert($visitedSectors->hasVisited($oauthPlayer, $oauthPlayer->homeSector), 'OAuth registration marks the initial sector as visited');
+if ($oauthProbe !== null) {
+    $oauthProbe->excludeFromStats = true;
+    $probes->save($oauthProbe);
+    $stats = (new UniverseStatsService($pdo, $universePath))->collect();
+    $test->assertEquals(1, $stats['metrics']['probesInUniverse'] ?? null, 'public stats exclude probes marked as test probes');
+    $topVisitedProbes = $stats['metrics']['topVisitedProbes'] ?? [];
+    $test->assertEquals('Probe of remi', $topVisitedProbes[0]['probeName'] ?? null, 'public stats podium ranks included probes by visited sectors');
+    $test->assertEquals(1, $topVisitedProbes[0]['visitedSectors'] ?? null, 'public stats podium exposes visited-sector counts');
+    $test->assert(!in_array('Sonde de Nova Pilot', array_column($topVisitedProbes, 'probeName'), true), 'public stats podium excludes hidden test probes');
+}
 $test->assertThrows(
     fn() => $auth->registerPlayerWithExternalAuth('Nova Pilot', 'discord', 'discord-openid-subject'),
     'OAuth registration rejects an already used pseudonym'
