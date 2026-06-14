@@ -28,6 +28,7 @@ final class UniverseStatsService
         $probeRows = $this->probeRows();
         $sectorStats = $this->sectorStats();
         $probeDistances = $this->probeDistances($probeRows);
+        $waypointStats = $this->waypointStats();
 
         return [
             'generatedAt' => gmdate('c'),
@@ -52,10 +53,12 @@ final class UniverseStatsService
                 'hiddenContainers' => $sectorStats['hiddenContainers'],
                 'furthestProbeDistance' => $probeDistances['furthest'],
                 'closestProbeDistance' => $probeDistances['closest'],
+                'waypointBookmarksInstalled' => $waypointStats['installed'],
                 'intelligentLifeWorlds' => 0,
                 'successfulMissions' => 0,
                 'failedMissions' => 0,
                 'topVisitedProbes' => $this->topVisitedProbes(),
+                'topWaypointPlayers' => $waypointStats['topPlayers'],
             ],
         ];
     }
@@ -106,6 +109,70 @@ final class UniverseStatsService
             'probeName' => (string) $row['probe_name'],
             'visitedSectors' => max(0, (int) $row['visited_count']),
         ], $rows, array_keys($rows));
+    }
+
+    /**
+     * @return array{installed: int, topPlayers: array<int, array{rank: int, playerName: string, waypointBookmarks: int}>}
+     */
+    private function waypointStats(): array
+    {
+        $stats = [
+            'installed' => 0,
+            'players' => [],
+        ];
+        $excludedPlayerIds = $this->excludedStatsPlayerIds();
+        $sectorDirectory = rtrim($this->universePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'sectors';
+        if (!is_dir($sectorDirectory)) {
+            return ['installed' => 0, 'topPlayers' => []];
+        }
+
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sectorDirectory));
+        foreach ($iterator as $file) {
+            if (!$file->isFile() || $file->getExtension() !== 'json') {
+                continue;
+            }
+
+            $data = $this->jsonFile((string) $file->getPathname());
+            if ($data === null) {
+                continue;
+            }
+
+            $this->addWaypointObjectStats($data['objects'] ?? [], $stats, $excludedPlayerIds);
+            $this->addWaypointObjectStats($data['detachedContainers'] ?? [], $stats, $excludedPlayerIds);
+            $this->addWaypointObjectStats($data['hiddenDetachedContainers'] ?? [], $stats, $excludedPlayerIds);
+        }
+
+        uasort($stats['players'], static fn(array $a, array $b): int => (
+            ($b['waypointBookmarks'] <=> $a['waypointBookmarks'])
+            ?: strcasecmp($a['playerName'], $b['playerName'])
+        ));
+
+        $rank = 1;
+        $topPlayers = [];
+        foreach (array_slice($stats['players'], 0, 3) as $player) {
+            $topPlayers[] = [
+                'rank' => $rank++,
+                'playerName' => $player['playerName'],
+                'waypointBookmarks' => $player['waypointBookmarks'],
+            ];
+        }
+
+        return ['installed' => $stats['installed'], 'topPlayers' => $topPlayers];
+    }
+
+    /**
+     * @return array<int, true>
+     */
+    private function excludedStatsPlayerIds(): array
+    {
+        $stmt = $this->pdo->query('SELECT player_id FROM neumann_probes WHERE exclude_from_stats = 1');
+        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $excluded = [];
+        foreach ($rows as $playerId) {
+            $excluded[(int) $playerId] = true;
+        }
+
+        return $excluded;
     }
 
     /**
@@ -250,6 +317,76 @@ final class UniverseStatsService
                 continue;
             }
             $this->addObjectStats([$body['object']], $stats);
+        }
+    }
+
+    /**
+     * @param mixed $objects
+     * @param array{installed: int, players: array<string, array{playerName: string, waypointBookmarks: int}>} $stats
+     * @param array<int, true> $excludedPlayerIds
+     */
+    private function addWaypointObjectStats(mixed $objects, array &$stats, array $excludedPlayerIds): void
+    {
+        if (!is_array($objects)) {
+            return;
+        }
+
+        foreach ($objects as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+
+            $this->addWaypointBookmarks($object['waypointBookmarks'] ?? [], $stats, $excludedPlayerIds);
+            if ((string) ($object['type'] ?? '') !== 'solar_system') {
+                continue;
+            }
+
+            $this->addWaypointObjectStats([$object['primaryStar'] ?? null], $stats, $excludedPlayerIds);
+            if (is_array($object['secondaryStar'] ?? null)) {
+                $this->addWaypointObjectStats([$object['secondaryStar']], $stats, $excludedPlayerIds);
+            }
+            foreach ($object['orbitalBodies'] ?? [] as $body) {
+                if (is_array($body) && is_array($body['object'] ?? null)) {
+                    $this->addWaypointObjectStats([$body['object']], $stats, $excludedPlayerIds);
+                }
+            }
+        }
+    }
+
+    /**
+     * @param mixed $bookmarks
+     * @param array{installed: int, players: array<string, array{playerName: string, waypointBookmarks: int}>} $stats
+     * @param array<int, true> $excludedPlayerIds
+     */
+    private function addWaypointBookmarks(mixed $bookmarks, array &$stats, array $excludedPlayerIds): void
+    {
+        if (!is_array($bookmarks)) {
+            return;
+        }
+
+        foreach ($bookmarks as $bookmark) {
+            if (!is_array($bookmark)) {
+                continue;
+            }
+            $playerId = isset($bookmark['playerId']) ? (int) $bookmark['playerId'] : null;
+            if ($playerId !== null && isset($excludedPlayerIds[$playerId])) {
+                continue;
+            }
+
+            $playerName = trim((string) ($bookmark['playerName'] ?? ''));
+            if ($playerName === '') {
+                $playerName = 'Unknown player';
+            }
+            $key = $playerId !== null ? 'id:' . $playerId : 'name:' . strtolower($playerName);
+            if (!isset($stats['players'][$key])) {
+                $stats['players'][$key] = [
+                    'playerName' => $playerName,
+                    'waypointBookmarks' => 0,
+                ];
+            }
+
+            $stats['installed']++;
+            $stats['players'][$key]['waypointBookmarks']++;
         }
     }
 

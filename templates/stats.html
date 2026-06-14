@@ -24,6 +24,24 @@
             <!-- END emptyPodium -->
         </ol>
     </section>
+    <section class="stats-podium" aria-labelledby="stats-waypoint-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-waypoint-podium-title">{{t.statsTopWaypointPlayers}}</h2>
+            <p>{{t.statsTopWaypointPlayersHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN waypointPlayer -->
+            <li class="stats-podium-rank">
+                <span>{{waypointPlayer.rank}}</span>
+                <strong>{{waypointPlayer.name}}</strong>
+                <b>{{waypointPlayer.waypointBookmarks}} {{waypointPlayer.waypointBookmarksLabel}}</b>
+            </li>
+            <!-- END waypointPlayer -->
+            <!-- BEGIN emptyWaypointPodium -->
+            <li class="stats-podium-empty">{{t.statsTopWaypointPlayersEmpty}}</li>
+            <!-- END emptyWaypointPodium -->
+        </ol>
+    </section>
     <div class="stats-grid">
         <!-- BEGIN metric -->
         <article class="stats-card">

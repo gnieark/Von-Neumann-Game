@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- Stats : ajout du nombre de waypoints installés dans l'univers et d'un podium des joueurs en ayant installé le plus.
 - Stats : ajout d'un podium des sondes ayant visité le plus de secteurs sur la page publique des statistiques.
 - Stats : ajout du champ `neumann_probes.exclude_from_stats` pour retirer des sondes des statistiques publiques.
 

@@ -31,6 +31,19 @@ class FrontRouteStats extends FrontRoute{
                 ]));
             }
         }
+        $waypointPodium = $this->topWaypointPlayerRows($stats['metrics'], $translator);
+        if ($waypointPodium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyWaypointPodium'));
+        } else {
+            foreach ($waypointPodium as $player) {
+                $tpl->addSubBlock((new TplBlock('waypointPlayer'))->addVars([
+                    'rank' => self::e($player['rank']),
+                    'name' => self::e($player['name']),
+                    'waypointBookmarks' => self::e($player['waypointBookmarks']),
+                    'waypointBookmarksLabel' => self::e($player['waypointBookmarksLabel']),
+                ]));
+            }
+        }
         foreach ($this->metricRows($stats['metrics'], $translator) as $metric) {
             $tpl->addSubBlock((new TplBlock('metric'))->addVars([
                 'label' => self::e($metric['label']),
@@ -77,10 +90,12 @@ class FrontRouteStats extends FrontRoute{
             'hiddenContainers' => 0,
             'furthestProbeDistance' => 0,
             'closestProbeDistance' => 0,
+            'waypointBookmarksInstalled' => 0,
             'intelligentLifeWorlds' => 0,
             'successfulMissions' => 0,
             'failedMissions' => 0,
             'topVisitedProbes' => [],
+            'topWaypointPlayers' => [],
         ];
 
         $json = is_file($path) ? file_get_contents($path) : false;
@@ -130,6 +145,30 @@ class FrontRouteStats extends FrontRoute{
 
     /**
      * @param array<string, mixed> $metrics
+     * @return array<int, array{rank: string, name: string, waypointBookmarks: string, waypointBookmarksLabel: string}>
+     */
+    private function topWaypointPlayerRows(array $metrics, Translator $translator): array
+    {
+        $rows = is_array($metrics['topWaypointPlayers'] ?? null) ? $metrics['topWaypointPlayers'] : [];
+        $podium = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $waypointBookmarks = max(0, (int) ($row['waypointBookmarks'] ?? 0));
+            $podium[] = [
+                'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
+                'name' => trim((string) ($row['playerName'] ?? '')) !== '' ? (string) $row['playerName'] : $translator->get('unknownPlayer'),
+                'waypointBookmarks' => $this->formatNumber($waypointBookmarks),
+                'waypointBookmarksLabel' => $translator->get($waypointBookmarks > 1 ? 'statsWaypointBookmarksPlural' : 'statsWaypointBookmarksSingular'),
+            ];
+        }
+
+        return $podium;
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
      * @return array<int, array{label: string, value: string}>
      */
     private function metricRows(array $metrics, Translator $translator): array
@@ -151,6 +190,7 @@ class FrontRouteStats extends FrontRoute{
             ['label' => $translator->get('statsHiddenContainers'), 'value' => $this->formatNumber($metrics['hiddenContainers'] ?? 0)],
             ['label' => $translator->get('statsFurthestProbeDistance'), 'value' => $this->formatNumber($metrics['furthestProbeDistance'] ?? 0)],
             ['label' => $translator->get('statsClosestProbeDistance'), 'value' => $this->formatNumber($metrics['closestProbeDistance'] ?? 0)],
+            ['label' => $translator->get('statsWaypointBookmarksInstalled'), 'value' => $this->formatNumber($metrics['waypointBookmarksInstalled'] ?? 0)],
             ['label' => $translator->get('statsIntelligentLifeWorlds'), 'value' => $this->formatNumber($metrics['intelligentLifeWorlds'] ?? 0)],
             ['label' => $translator->get('statsSuccessfulMissions'), 'value' => $this->formatNumber($metrics['successfulMissions'] ?? 0)],
             ['label' => $translator->get('statsFailedMissions'), 'value' => $this->formatNumber($metrics['failedMissions'] ?? 0)],

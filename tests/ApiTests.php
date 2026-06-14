@@ -1528,6 +1528,11 @@ if ($createdProbe !== null) {
     $test->assertEquals('Remi', $bookmarkedData['waypointBookmarks'][0]['playerName'] ?? null, 'bookmark history stores the player display name');
     $bookmarkObservation = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('Balise test', $bookmarkObservation->body['sector']['objects'][0]['waypointBookmarks'][0]['name'] ?? null, 'sector observation exposes bookmark history');
+    $bookmarkStats = (new UniverseStatsService($pdo, $universePath))->collect();
+    $test->assertEquals(1, $bookmarkStats['metrics']['waypointBookmarksInstalled'] ?? null, 'public stats count installed waypoint bookmarks');
+    $topWaypointPlayers = $bookmarkStats['metrics']['topWaypointPlayers'] ?? [];
+    $test->assertEquals('Remi', $topWaypointPlayers[0]['playerName'] ?? null, 'public stats waypoint podium ranks players by installed bookmarks');
+    $test->assertEquals(1, $topWaypointPlayers[0]['waypointBookmarks'] ?? null, 'public stats waypoint podium exposes bookmark counts');
 
     $fourthRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $fourthRow->execute(['uid' => $fourthMannyId]);
