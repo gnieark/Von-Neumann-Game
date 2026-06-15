@@ -77,6 +77,8 @@ class FrontRouteStats extends FrontRoute{
             'probesInUniverse' => 0,
             'generatedSectors' => 0,
             'visitedSectors' => 0,
+            'habitablePlanetsInGeneratedSectors' => 0,
+            'habitablePlanetsInVisitedSectors' => 0,
             'blackHoles' => 0,
             'asteroidsByResource' => [
                 'deuterium' => 0,
@@ -179,6 +181,8 @@ class FrontRouteStats extends FrontRoute{
             ['label' => $translator->get('statsProbesInUniverse'), 'value' => $this->formatNumber($metrics['probesInUniverse'] ?? 0)],
             ['label' => $translator->get('statsGeneratedSectors'), 'value' => $this->formatNumber($metrics['generatedSectors'] ?? 0)],
             ['label' => $translator->get('statsVisitedSectors'), 'value' => $this->formatNumber($metrics['visitedSectors'] ?? 0)],
+            ['label' => $translator->get('statsHabitablePlanetsInGeneratedSectors'), 'value' => $this->formatNumber($metrics['habitablePlanetsInGeneratedSectors'] ?? 0)],
+            ['label' => $translator->get('statsHabitablePlanetsInVisitedSectors'), 'value' => $this->formatNumber($metrics['habitablePlanetsInVisitedSectors'] ?? 0)],
             ['label' => $translator->get('statsBlackHoles'), 'value' => $this->formatNumber($metrics['blackHoles'] ?? 0)],
             ['label' => $translator->get('statsAsteroidsDeuterium'), 'value' => $this->formatNumber($asteroidsByResource['deuterium'] ?? 0)],
             ['label' => $translator->get('statsAsteroidsMetals'), 'value' => $this->formatNumber($asteroidsByResource['metals'] ?? 0)],

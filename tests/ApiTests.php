@@ -37,6 +37,8 @@ use VonNeumannGame\Service\UniverseStatsService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\OrbitDescriptor;
+use VonNeumannGame\Sector\OrbitingBody;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -46,6 +48,7 @@ use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
+use VonNeumannGame\Sector\SolarSystem;
 use VonNeumannGame\Sector\Star;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -344,6 +347,55 @@ if ($oauthProbe !== null) {
     $test->assertEquals('Probe of remi', $topVisitedProbes[0]['probeName'] ?? null, 'public stats podium ranks included probes by visited sectors');
     $test->assertEquals(1, $topVisitedProbes[0]['visitedSectors'] ?? null, 'public stats podium exposes visited-sector counts');
     $test->assert(!in_array('Sonde de Nova Pilot', array_column($topVisitedProbes, 'probeName'), true), 'public stats podium excludes hidden test probes');
+
+    $statsUniversePath = $tmp . DIRECTORY_SEPARATOR . 'stats-universe';
+    $statsSectorRepository = new SectorFileRepository($statsUniversePath);
+    $statsVisitedSector = $player->homeSector;
+    $statsGeneratedOnlySector = new SectorCoordinates(
+        $statsVisitedSector->getX() + 2,
+        $statsVisitedSector->getY(),
+        $statsVisitedSector->getZ(),
+    );
+    $statsSectorRepository->save(new SectorContent($statsVisitedSector, [
+        new SolarSystem(
+            'stats-visited-system',
+            'Stats visited system',
+            new Star('stats-visited-star', null, 'G', 1.0, 5800, 1.0, 1.0),
+            null,
+            [
+                new OrbitingBody(
+                    new Planet('stats-visited-habitable', null, 'rocky', 1.0, 1.0, true, 0.7),
+                    new OrbitDescriptor(1.0, 0.01, 0.0),
+                ),
+                new OrbitingBody(
+                    new Planet('stats-visited-background', null, 'rocky', 1.0, 1.0, true, 0.18),
+                    new OrbitDescriptor(1.6, 0.01, 0.0),
+                ),
+            ],
+            3.0,
+            1.6,
+        ),
+    ]));
+    $statsSectorRepository->save(new SectorContent($statsGeneratedOnlySector, [
+        new Planet('stats-generated-habitable-top-level', null, 'ocean', 1.0, 1.1, true, 0.8),
+        new SolarSystem(
+            'stats-generated-system',
+            'Stats generated system',
+            new Star('stats-generated-star', null, 'K', 0.8, 4900, 0.8, 0.9),
+            null,
+            [
+                new OrbitingBody(
+                    new Planet('stats-generated-habitable-nested', null, 'rocky', 1.0, 1.0, true, 0.4),
+                    new OrbitDescriptor(0.8, 0.01, 0.0),
+                ),
+            ],
+            2.0,
+            0.8,
+        ),
+    ]));
+    $habitabilityStats = (new UniverseStatsService($pdo, $statsUniversePath))->collect();
+    $test->assertEquals(3, $habitabilityStats['metrics']['habitablePlanetsInGeneratedSectors'] ?? null, 'public stats count habitable planets in generated sectors');
+    $test->assertEquals(1, $habitabilityStats['metrics']['habitablePlanetsInVisitedSectors'] ?? null, 'public stats count habitable planets in visited sectors');
 }
 $test->assertThrows(
     fn() => $auth->registerPlayerWithExternalAuth('Nova Pilot', 'discord', 'discord-openid-subject'),

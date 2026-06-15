@@ -10,6 +10,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API : ajout de `POST /api/probe/mannies/{mannyId}/drop-storage-container` pour larguer un container additionnel sur une planète avec consommation d’un kit de largage atmosphérique.
 - Secteurs : les containers largués sur planète sont persistés dans le JSON du secteur avec `originProbeId`, sans être exposés dans les observations API pour le moment.
 - Interface : ajout du formulaire Manny “Larguer un container sur une planète”.
+- Stats : ajout du nombre de planètes habitables dans les secteurs générés et dans les secteurs visités.
 
 ### Fixed
 

@@ -14,6 +14,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class UniverseStatsService
 {
     public const RESOURCE_TYPES = ResourceComposition::TYPES;
+    private const HABITABLE_PLANET_THRESHOLD = 0.35;
 
     public function __construct(
         private readonly PDO $pdo,
@@ -26,7 +27,8 @@ final class UniverseStatsService
     public function collect(): array
     {
         $probeRows = $this->probeRows();
-        $sectorStats = $this->sectorStats();
+        $visitedSectorKeys = $this->visitedSectorKeys();
+        $sectorStats = $this->sectorStats($visitedSectorKeys);
         $probeDistances = $this->probeDistances($probeRows);
         $waypointStats = $this->waypointStats();
 
@@ -35,16 +37,9 @@ final class UniverseStatsService
             'metrics' => [
                 'probesInUniverse' => count($probeRows),
                 'generatedSectors' => $sectorStats['generatedSectors'],
-                'visitedSectors' => $this->scalarInt(
-                    'SELECT COUNT(*)
-                     FROM (
-                         SELECT visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z
-                         FROM visited_sectors
-                         INNER JOIN neumann_probes ON neumann_probes.player_id = visited_sectors.player_id
-                         WHERE neumann_probes.exclude_from_stats = 0
-                         GROUP BY visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z
-                     ) visited'
-                ),
+                'visitedSectors' => count($visitedSectorKeys),
+                'habitablePlanetsInGeneratedSectors' => $sectorStats['habitablePlanetsInGeneratedSectors'],
+                'habitablePlanetsInVisitedSectors' => $sectorStats['habitablePlanetsInVisitedSectors'],
                 'blackHoles' => $sectorStats['blackHoles'],
                 'asteroidsByResource' => $sectorStats['asteroidsByResource'],
                 'lostMannies' => $sectorStats['lostMannies'],
@@ -78,14 +73,26 @@ final class UniverseStatsService
         ], $rows);
     }
 
-    private function scalarInt(string $sql): int
+    /**
+     * @return array<string, true>
+     */
+    private function visitedSectorKeys(): array
     {
-        $stmt = $this->pdo->query($sql);
-        if ($stmt === false) {
-            return 0;
+        $stmt = $this->pdo->query(
+            'SELECT visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z
+             FROM visited_sectors
+             INNER JOIN neumann_probes ON neumann_probes.player_id = visited_sectors.player_id
+             WHERE neumann_probes.exclude_from_stats = 0
+             GROUP BY visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z'
+        );
+        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $keys = [];
+        foreach ($rows as $row) {
+            $keys[$this->sectorKey((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z'])] = true;
         }
 
-        return max(0, (int) $stmt->fetchColumn());
+        return $keys;
     }
 
     /**
@@ -203,8 +210,11 @@ final class UniverseStatsService
     }
 
     /**
+     * @param array<string, true> $visitedSectorKeys
      * @return array{
      *     generatedSectors: int,
+     *     habitablePlanetsInGeneratedSectors: int,
+     *     habitablePlanetsInVisitedSectors: int,
      *     blackHoles: int,
      *     asteroidsByResource: array<string, int>,
      *     lostMannies: int,
@@ -213,10 +223,12 @@ final class UniverseStatsService
      *     hiddenContainers: int
      * }
      */
-    private function sectorStats(): array
+    private function sectorStats(array $visitedSectorKeys): array
     {
         $stats = [
             'generatedSectors' => 0,
+            'habitablePlanetsInGeneratedSectors' => 0,
+            'habitablePlanetsInVisitedSectors' => 0,
             'blackHoles' => 0,
             'asteroidsByResource' => array_fill_keys(self::RESOURCE_TYPES, 0),
             'lostMannies' => 0,
@@ -242,6 +254,12 @@ final class UniverseStatsService
             }
 
             $stats['generatedSectors']++;
+            $habitablePlanets = $this->habitablePlanetCount($data['objects'] ?? []);
+            $stats['habitablePlanetsInGeneratedSectors'] += $habitablePlanets;
+            $sectorKey = $this->sectorKeyFromData($data);
+            if ($sectorKey !== null && isset($visitedSectorKeys[$sectorKey])) {
+                $stats['habitablePlanetsInVisitedSectors'] += $habitablePlanets;
+            }
             $this->addObjectStats($data['objects'] ?? [], $stats);
             $this->addDetachedContainerStats($data['detachedContainers'] ?? [], $stats);
             $this->addHiddenDetachedContainerStats($data['hiddenDetachedContainers'] ?? [], $stats);
@@ -441,5 +459,65 @@ final class UniverseStatsService
         if (is_array($containers)) {
             $stats['hiddenContainers'] += count(array_filter($containers, 'is_array'));
         }
+    }
+
+    /**
+     * @param mixed $objects
+     */
+    private function habitablePlanetCount(mixed $objects): int
+    {
+        if (!is_array($objects)) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach ($objects as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+
+            $type = (string) ($object['type'] ?? '');
+            if ($type === 'planet' && $this->isHabitablePlanet($object)) {
+                $count++;
+            } elseif ($type === 'solar_system') {
+                foreach ($object['orbitalBodies'] ?? [] as $body) {
+                    if (is_array($body) && is_array($body['object'] ?? null)) {
+                        $count += $this->habitablePlanetCount([$body['object']]);
+                    }
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * @param array<string, mixed> $planet
+     */
+    private function isHabitablePlanet(array $planet): bool
+    {
+        return (float) ($planet['habitabilityScore'] ?? 0.0) >= self::HABITABLE_PLANET_THRESHOLD;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function sectorKeyFromData(array $data): ?string
+    {
+        $coordinates = $data['coordinates'] ?? null;
+        if (!is_array($coordinates)) {
+            return null;
+        }
+
+        return $this->sectorKey(
+            (int) ($coordinates['x'] ?? 0),
+            (int) ($coordinates['y'] ?? 0),
+            (int) ($coordinates['z'] ?? 0),
+        );
+    }
+
+    private function sectorKey(int $x, int $y, int $z): string
+    {
+        return $x . ':' . $y . ':' . $z;
     }
 }
