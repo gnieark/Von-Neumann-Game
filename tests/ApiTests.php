@@ -653,13 +653,20 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $staleContainerCraftA = $mannies->findById($craftMannyDbId);
+    $staleContainerCraftB = $mannies->findById($craftMannyDbId);
+    $craftProbeForStaleRefresh = $probes->findByPlayerId($craftPlayer->id);
+    if ($staleContainerCraftA !== null && $staleContainerCraftB !== null && $craftProbeForStaleRefresh !== null) {
+        $mannyService->refreshMannyState($staleContainerCraftA, $craftProbeForStaleRefresh);
+        $mannyService->refreshMannyState($staleContainerCraftB, $craftProbeForStaleRefresh);
+    }
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
     $containerProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $additionalContainers = array_values(array_filter(
         $containerProbe->body['probe']['inventory']['items'] ?? [],
         static fn(array $item): bool => ($item['type'] ?? null) === 'additional_container',
     ));
-    $test->assertEquals(1, count($additionalContainers), 'completed additional-container craft adds a container item');
+    $test->assertEquals(1, count($additionalContainers), 'completed additional-container craft adds exactly one container item after duplicate stale refreshes');
     $test->assertEquals(0.0, $additionalContainers[0]['containerSpace'] ?? null, 'additional container item occupies no storage');
     $test->assertEquals(1.0, (float) ($additionalContainers[0]['metadata']['capacityBonus'] ?? 0), 'additional container item carries its capacity bonus');
     $test->assertEquals(2.0, $containerProbe->body['probe']['inventory']['capacity'] ?? null, 'additional container increases probe storage capacity');
@@ -679,6 +686,37 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $storageRules->status, 'PATCH /api/probe/storage-containers/{id}/rules updates routing rules');
     $test->assertEquals(['metals'], $storageRules->body['container']['rules']['priority'] ?? null, 'storage priority rule is persisted');
+
+    $mannyComponentSeeds = [
+        [ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, 6],
+        [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006, 12],
+        [ProbeItem::TYPE_BATTERY_PACK, ProbeItem::BATTERY_PACK_NAME, 0.008, 4],
+        [ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001, 6],
+        [ProbeItem::TYPE_STEEL_PLATE, ProbeItem::STEEL_PLATE_NAME, 0.01, 18],
+        [ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01, 12],
+    ];
+    foreach ($mannyComponentSeeds as [$type, $name, $space, $count]) {
+        for ($index = 0; $index < $count; $index++) {
+            $storage->addItem($craftProbeEntity, $type, $name, $space, ['seededFor' => 'manny-duplicate-refresh-test']);
+        }
+    }
+    $mannyCountBeforeCraft = count($mannies->findByProbeId($craftProbeEntity->id));
+    $mannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'manny',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $mannyCraft->status, 'Manny can start a Manny craft from stored components');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $staleMannyCraftA = $mannies->findById($craftMannyDbId);
+    $staleMannyCraftB = $mannies->findById($craftMannyDbId);
+    $craftProbeForStaleMannyRefresh = $probes->findByPlayerId($craftPlayer->id);
+    if ($staleMannyCraftA !== null && $staleMannyCraftB !== null && $craftProbeForStaleMannyRefresh !== null) {
+        $mannyService->refreshMannyState($staleMannyCraftA, $craftProbeForStaleMannyRefresh);
+        $mannyService->refreshMannyState($staleMannyCraftB, $craftProbeForStaleMannyRefresh);
+    }
+    $test->assertEquals($mannyCountBeforeCraft + 1, count($mannies->findByProbeId($craftProbeEntity->id)), 'completed Manny craft creates exactly one Manny after duplicate stale refreshes');
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100, metals_stock = 0.2, ice_stock = 0.09, organic_compounds_stock = 0.11 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
     $directAtomicMannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([

@@ -442,12 +442,12 @@ final class ProbeStorageService
         return true;
     }
 
-    public function addItem(NeumannProbe $probe, string $type, string $name, float $containerSpace, array $metadata = []): ProbeItem
+    public function addItem(NeumannProbe $probe, string $type, string $name, float $containerSpace, array $metadata = [], ?string $uid = null): ProbeItem
     {
         $this->ensureProbeStorage($probe);
         $container = $this->placeUnit($probe, $type, $containerSpace)
             ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this inventory item.');
-        $item = $this->items->create($probe->id, $type, $name, $containerSpace, $metadata, $container->id);
+        $item = $this->items->create($probe->id, $type, $name, $containerSpace, $metadata, $container->id, $uid);
         if ($type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
             $this->containers->ensureContainerForItem($probe->id, $item->uid);
         }

@@ -11,6 +11,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Secteurs : les containers largués sur planète sont persistés dans le JSON du secteur avec `originProbeId`, sans être exposés dans les observations API pour le moment.
 - Interface : ajout du formulaire Manny “Larguer un container sur une planète”.
 
+### Fixed
+
+- Craft : la complétion d’une fabrication est idempotente, évitant qu’un double rafraîchissement concurrent crée deux containers, items ou Mannys pour une seule tâche.
+
 ## 2026-06-14
 
 ### Added

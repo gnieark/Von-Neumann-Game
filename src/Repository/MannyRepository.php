@@ -37,10 +37,13 @@ final class MannyRepository
         }
     }
 
-    public function createForProbe(int $probeId, string $name, ?int $storageContainerId = null): Manny
+    public function createForProbe(int $probeId, string $name, ?int $storageContainerId = null, ?string $uid = null): Manny
     {
         $now = gmdate('c');
-        $uid = $this->uniqueUid();
+        $uid ??= $this->uniqueUid();
+        if ($this->findByUid($uid) !== null) {
+            throw new \RuntimeException('Manny uid already exists.');
+        }
         $stmt = $this->pdo->prepare(
             'INSERT INTO mannies
              (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)

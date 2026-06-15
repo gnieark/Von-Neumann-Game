@@ -244,6 +244,7 @@ final class MannyService
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
         $manny->taskPayload = [
+            'craftingRunId' => $this->newCraftingRunId(),
             'recipe' => $recipe,
             'recipeName' => (string) ($recipeDefinition['name'] ?? $recipe),
             'durationSeconds' => (int) $craftingPlan['durationSeconds'],
@@ -294,6 +295,7 @@ final class MannyService
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
         $manny->taskPayload = [
+            'craftingRunId' => $this->newCraftingRunId(),
             'recipe' => $recipe,
             'recipeName' => (string) ($recipeDefinition['name'] ?? $recipe),
             'durationSeconds' => (int) $craftingPlan['durationSeconds'],
@@ -1267,8 +1269,14 @@ final class MannyService
             return;
         }
 
+        $outputUid = $this->craftingOutputUid($manny, $type, 'itm_craft_');
+        if ($this->items->findByUidForProbe($probe->id, $outputUid) !== null) {
+            return;
+        }
+
         $metadata = [
             'recipe' => (string) ($manny->taskPayload['recipe'] ?? $type),
+            'craftingRunId' => $this->craftingRunId($manny, $type),
             'craftedByMannyId' => $manny->uid,
             'craftedByMannyName' => $manny->name,
             'craftedAt' => $now->format('c'),
@@ -1282,29 +1290,95 @@ final class MannyService
             $metadata['capacityBonusUnit'] = ProbeInventory::CAPACITY_UNIT;
         }
 
-        $this->storage->addItem(
-            $probe,
-            $type,
-            (string) ($output['name'] ?? $type),
-            round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
-            $metadata,
-        );
+        try {
+            $this->storage->addItem(
+                $probe,
+                $type,
+                (string) ($output['name'] ?? $type),
+                round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
+                $metadata,
+                $outputUid,
+            );
+        } catch (\RuntimeException $e) {
+            if ($this->items->findByUidForProbe($probe->id, $outputUid) !== null) {
+                return;
+            }
+
+            throw $e;
+        }
     }
 
     private function createCraftedManny(NeumannProbe $probe, Manny $craftingManny, \DateTimeImmutable $now): void
     {
+        $uid = $this->craftingOutputUid($craftingManny, 'manny', 'mny_craft_');
+        $existing = $this->mannies->findByUid($uid);
+        if ($existing !== null) {
+            $this->ensureCraftedMannyStored($probe, $existing);
+            return;
+        }
+
         $name = $this->nextCraftedMannyName($probe);
-        $newManny = $this->mannies->createForProbe($probe->id, $name);
+        try {
+            $newManny = $this->mannies->createForProbe($probe->id, $name, uid: $uid);
+        } catch (\RuntimeException $e) {
+            if ($this->mannies->findByUid($uid) !== null) {
+                return;
+            }
+
+            throw $e;
+        }
         if (!$this->storage->placeMannyOnProbe($probe, $newManny)) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted Manny.');
         }
         $newManny->taskPayload = [
             'craftedFromRecipe' => (string) ($craftingManny->taskPayload['recipe'] ?? 'manny'),
+            'craftingRunId' => $this->craftingRunId($craftingManny, 'manny'),
             'craftedByMannyId' => $craftingManny->uid,
             'craftedByMannyName' => $craftingManny->name,
             'craftedAt' => $now->format('c'),
         ];
         $this->mannies->save($newManny);
+    }
+
+    private function ensureCraftedMannyStored(NeumannProbe $probe, Manny $manny): void
+    {
+        if ($manny->probeId !== $probe->id || !$manny->isOnProbe()) {
+            throw new \RuntimeException('Crafted Manny uid already exists for another location.');
+        }
+        if ($manny->storageContainerId !== null) {
+            return;
+        }
+        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted Manny.');
+        }
+
+        $this->mannies->save($manny);
+    }
+
+    private function newCraftingRunId(): string
+    {
+        return 'craft_' . bin2hex(random_bytes(12));
+    }
+
+    private function craftingRunId(Manny $manny, string $outputType): string
+    {
+        $runId = $manny->taskPayload['craftingRunId'] ?? null;
+        if (is_string($runId) && $runId !== '') {
+            return $runId;
+        }
+
+        return hash('sha256', implode('|', [
+            $manny->uid,
+            (string) $manny->taskStartedAt,
+            (string) ($manny->taskPayload['recipe'] ?? $outputType),
+            $outputType,
+            (string) ($manny->taskPayload['fabricator'] ?? CraftingRecipeCatalog::FABRICATOR_MANNY),
+        ]));
+    }
+
+    private function craftingOutputUid(Manny $manny, string $outputType, string $prefix): string
+    {
+        return $prefix . substr(hash('sha256', $this->craftingRunId($manny, $outputType) . '|' . $outputType), 0, 24);
     }
 
     private function nextCraftedMannyName(NeumannProbe $probe): string
