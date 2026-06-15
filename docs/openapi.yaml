@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '29'
+  version: '30'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 29
+                apiVersion: 30
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1582,6 +1582,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/drop-storage-container:
+    post:
+      summary: Drop an additional storage container on a planet
+      description: >
+        Starts a dropping_storage_container task on an idle onboard Manny. The
+        target must be a planet in the current sector and the probe inventory
+        must contain one atmospheric_drop_kit. The container, its stored
+        resources/items, and routing rules are removed from the probe inventory
+        when the order is accepted, and the drop kit is consumed. On completion
+        the detached container is stored in sector JSON as attached to the
+        planet with the origin probe id, but planet-dropped containers are not
+        exposed by sector observation endpoints yet.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyDropStorageContainerRequest'
+            example:
+              containerId: container-itm_extra
+              planetId: planet-abc123
+      responses:
+        '202':
+          description: Drop task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable, probe moving, or probe no longer operational
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Container, planet target, or required drop kit is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/inspect-asteroid:
     post:
       summary: Inspect an asteroid with a Manny
@@ -2021,7 +2073,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -2095,7 +2147,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         description:
@@ -2123,7 +2175,7 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module]
         quantity:
           type: number
           minimum: 0
@@ -2140,7 +2192,7 @@ components:
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         containerSpace:
@@ -3246,6 +3298,18 @@ components:
         objectId:
           type: string
           description: Required when mode is hidden_on_asteroid; must be an asteroid id in the current sector.
+    MannyDropStorageContainerRequest:
+      type: object
+      required: [containerId, planetId]
+      properties:
+        containerId:
+          type: string
+          description: Additional storage container id. probe-core is not droppable.
+          example: container-itm_extra
+        planetId:
+          type: string
+          description: Current-sector planet id receiving the dropped container.
+          example: planet-abc123
     MannyInspectAsteroidRequest:
       type: object
       required: [objectId]
@@ -3348,7 +3412,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, inspecting_asteroid, returning, waiting_for_space, moving_stockage]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, returning, waiting_for_space, moving_stockage]
         taskProgressPercent:
           type: number
           minimum: 0

@@ -67,6 +67,32 @@ final class CraftingRecipeCatalog
     public const LINEAR_ACTUATOR_METALS_COST = 0.01;
     public const LINEAR_ACTUATOR_CONTAINER_SPACE = 0.01;
     public const LINEAR_ACTUATOR_CRAFTING_SECONDS = 1200;
+    public const THERMAL_PROTECTION_SHELL_CERAMIC_INSULATORS = 8;
+    public const THERMAL_PROTECTION_SHELL_STEEL_PLATES = 4;
+    public const THERMAL_PROTECTION_SHELL_ORGANIC_COST = 0.06;
+    public const THERMAL_PROTECTION_SHELL_DEUTERIUM_COST = 0.02;
+    public const THERMAL_PROTECTION_SHELL_CONTAINER_SPACE = 0.035;
+    public const THERMAL_PROTECTION_SHELL_CRAFTING_SECONDS = 2400;
+    public const PARACHUTE_PACK_STEEL_BARS = 2;
+    public const PARACHUTE_PACK_STEEL_PLATES = 2;
+    public const PARACHUTE_PACK_ORGANIC_COST = 0.18;
+    public const PARACHUTE_PACK_ICE_COST = 0.05;
+    public const PARACHUTE_PACK_CONTAINER_SPACE = 0.045;
+    public const PARACHUTE_PACK_CRAFTING_SECONDS = 1800;
+    public const DESCENT_GUIDANCE_MODULE_INTEGRATED_CIRCUITS = 2;
+    public const DESCENT_GUIDANCE_MODULE_BATTERY_PACKS = 1;
+    public const DESCENT_GUIDANCE_MODULE_LINEAR_ACTUATORS = 2;
+    public const DESCENT_GUIDANCE_MODULE_STEEL_PLATES = 2;
+    public const DESCENT_GUIDANCE_MODULE_DEUTERIUM_COST = 0.03;
+    public const DESCENT_GUIDANCE_MODULE_CONTAINER_SPACE = 0.035;
+    public const DESCENT_GUIDANCE_MODULE_CRAFTING_SECONDS = 2400;
+    public const ATMOSPHERIC_DROP_KIT_THERMAL_PROTECTION_SHELLS = 1;
+    public const ATMOSPHERIC_DROP_KIT_PARACHUTE_PACKS = 1;
+    public const ATMOSPHERIC_DROP_KIT_DESCENT_GUIDANCE_MODULES = 1;
+    public const ATMOSPHERIC_DROP_KIT_STEEL_PLATES = 4;
+    public const ATMOSPHERIC_DROP_KIT_STEEL_BARS = 2;
+    public const ATMOSPHERIC_DROP_KIT_CONTAINER_SPACE = 0.08;
+    public const ATMOSPHERIC_DROP_KIT_CRAFTING_SECONDS = 3600;
     public const MANNY_LINEAR_ACTUATORS = 6;
     public const MANNY_ELECTRIC_MOTORS = 12;
     public const MANNY_BATTERY_PACKS = 4;
@@ -89,6 +115,10 @@ final class CraftingRecipeCatalog
         'electric_motor' => 'A compact rotary actuator that converts stored electrical energy into mechanical motion.',
         'battery_pack' => 'A rechargeable power pack for mobile tools, actuators, and autonomous Manny systems.',
         'linear_actuator' => 'A precise push-pull mechanism used wherever a Manny needs controlled force.',
+        'thermal_protection_shell' => 'A disposable ablative shell that protects a storage container during atmospheric entry.',
+        'parachute_pack' => 'A folded braking canopy pack with compact deployment hardware for cargo descents.',
+        'descent_guidance_module' => 'A small avionics and actuator package for limited steering during a cargo drop.',
+        'atmospheric_drop_kit' => 'A disposable descent kit for dropping one storage container through an atmosphere with ablative shielding, parachute braking, and limited steering authority.',
         'manny' => 'A fully assembled maintenance unit able to repair, mine, carry cargo, and build new parts.',
     ];
 
@@ -110,6 +140,10 @@ final class CraftingRecipeCatalog
             self::electricMotor($config),
             self::batteryPack($config),
             self::linearActuator($config),
+            self::thermalProtectionShell($config),
+            self::parachutePack($config),
+            self::descentGuidanceModule($config),
+            self::atmosphericDropKit($config),
             self::manny($config),
         ];
     }
@@ -445,6 +479,108 @@ final class CraftingRecipeCatalog
                 ProbeItem::TYPE_LINEAR_ACTUATOR,
                 ProbeItem::LINEAR_ACTUATOR_NAME,
                 Config::float($config, 'linear_actuator.containerSpace', self::LINEAR_ACTUATOR_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function thermalProtectionShell(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_THERMAL_PROTECTION_SHELL,
+            'name' => ProbeItem::THERMAL_PROTECTION_SHELL_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_THERMAL_PROTECTION_SHELL),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_CERAMIC_INSULATOR, Config::int($config, 'thermal_protection_shell.ceramicInsulatorCount', self::THERMAL_PROTECTION_SHELL_CERAMIC_INSULATORS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'thermal_protection_shell.steelPlateCount', self::THERMAL_PROTECTION_SHELL_STEEL_PLATES)),
+                self::resourceIngredient(ResourceComposition::CARBON_COMPOUNDS, Config::float($config, 'thermal_protection_shell.organicCost', self::THERMAL_PROTECTION_SHELL_ORGANIC_COST)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'thermal_protection_shell.deuteriumCost', self::THERMAL_PROTECTION_SHELL_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'thermal_protection_shell.durationSeconds', self::THERMAL_PROTECTION_SHELL_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_THERMAL_PROTECTION_SHELL,
+                ProbeItem::THERMAL_PROTECTION_SHELL_NAME,
+                Config::float($config, 'thermal_protection_shell.containerSpace', self::THERMAL_PROTECTION_SHELL_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function parachutePack(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_PARACHUTE_PACK,
+            'name' => ProbeItem::PARACHUTE_PACK_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_PARACHUTE_PACK),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_STEEL_BAR, Config::int($config, 'parachute_pack.steelBarCount', self::PARACHUTE_PACK_STEEL_BARS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'parachute_pack.steelPlateCount', self::PARACHUTE_PACK_STEEL_PLATES)),
+                self::resourceIngredient(ResourceComposition::CARBON_COMPOUNDS, Config::float($config, 'parachute_pack.organicCost', self::PARACHUTE_PACK_ORGANIC_COST)),
+                self::resourceIngredient(ResourceComposition::ICE, Config::float($config, 'parachute_pack.iceCost', self::PARACHUTE_PACK_ICE_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'parachute_pack.durationSeconds', self::PARACHUTE_PACK_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_PARACHUTE_PACK,
+                ProbeItem::PARACHUTE_PACK_NAME,
+                Config::float($config, 'parachute_pack.containerSpace', self::PARACHUTE_PACK_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function descentGuidanceModule(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_DESCENT_GUIDANCE_MODULE,
+            'name' => ProbeItem::DESCENT_GUIDANCE_MODULE_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_DESCENT_GUIDANCE_MODULE),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_INTEGRATED_CIRCUIT, Config::int($config, 'descent_guidance_module.integratedCircuitCount', self::DESCENT_GUIDANCE_MODULE_INTEGRATED_CIRCUITS)),
+                self::itemIngredient(ProbeItem::TYPE_BATTERY_PACK, Config::int($config, 'descent_guidance_module.batteryPackCount', self::DESCENT_GUIDANCE_MODULE_BATTERY_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_LINEAR_ACTUATOR, Config::int($config, 'descent_guidance_module.linearActuatorCount', self::DESCENT_GUIDANCE_MODULE_LINEAR_ACTUATORS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'descent_guidance_module.steelPlateCount', self::DESCENT_GUIDANCE_MODULE_STEEL_PLATES)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'descent_guidance_module.deuteriumCost', self::DESCENT_GUIDANCE_MODULE_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'descent_guidance_module.durationSeconds', self::DESCENT_GUIDANCE_MODULE_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_DESCENT_GUIDANCE_MODULE,
+                ProbeItem::DESCENT_GUIDANCE_MODULE_NAME,
+                Config::float($config, 'descent_guidance_module.containerSpace', self::DESCENT_GUIDANCE_MODULE_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function atmosphericDropKit(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT,
+            'name' => ProbeItem::ATMOSPHERIC_DROP_KIT_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_THERMAL_PROTECTION_SHELL, Config::int($config, 'atmospheric_drop_kit.thermalProtectionShellCount', self::ATMOSPHERIC_DROP_KIT_THERMAL_PROTECTION_SHELLS)),
+                self::itemIngredient(ProbeItem::TYPE_PARACHUTE_PACK, Config::int($config, 'atmospheric_drop_kit.parachutePackCount', self::ATMOSPHERIC_DROP_KIT_PARACHUTE_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_DESCENT_GUIDANCE_MODULE, Config::int($config, 'atmospheric_drop_kit.descentGuidanceModuleCount', self::ATMOSPHERIC_DROP_KIT_DESCENT_GUIDANCE_MODULES)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'atmospheric_drop_kit.steelPlateCount', self::ATMOSPHERIC_DROP_KIT_STEEL_PLATES)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_BAR, Config::int($config, 'atmospheric_drop_kit.steelBarCount', self::ATMOSPHERIC_DROP_KIT_STEEL_BARS)),
+            ],
+            'durationSeconds' => Config::int($config, 'atmospheric_drop_kit.durationSeconds', self::ATMOSPHERIC_DROP_KIT_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT,
+                ProbeItem::ATMOSPHERIC_DROP_KIT_NAME,
+                Config::float($config, 'atmospheric_drop_kit.containerSpace', self::ATMOSPHERIC_DROP_KIT_CONTAINER_SPACE),
             ),
         ];
     }

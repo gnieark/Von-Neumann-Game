@@ -37,6 +37,7 @@ use VonNeumannGame\Service\UniverseStatsService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
@@ -289,7 +290,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(29, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(30, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -601,6 +602,15 @@ $test->assert(isset($recipesById['battery_pack']), 'crafting recipes expose batt
 $test->assertEquals('carbon_compounds', $recipesById['battery_pack']['ingredients'][2]['type'] ?? null, 'battery pack uses organic compounds');
 $test->assert(isset($recipesById['linear_actuator']), 'crafting recipes expose linear actuators');
 $test->assertEquals('electric_motor', $recipesById['linear_actuator']['ingredients'][2]['type'] ?? null, 'linear actuator requires an electric motor');
+$test->assert(isset($recipesById['thermal_protection_shell']), 'crafting recipes expose thermal protection shells');
+$test->assertEquals('ceramic_insulator', $recipesById['thermal_protection_shell']['ingredients'][0]['type'] ?? null, 'thermal protection shells require ceramic insulators');
+$test->assert(isset($recipesById['parachute_pack']), 'crafting recipes expose parachute packs');
+$test->assertEquals('carbon_compounds', $recipesById['parachute_pack']['ingredients'][2]['type'] ?? null, 'parachute packs use organic compounds');
+$test->assert(isset($recipesById['descent_guidance_module']), 'crafting recipes expose descent guidance modules');
+$test->assertEquals('integrated_circuit', $recipesById['descent_guidance_module']['ingredients'][0]['type'] ?? null, 'descent guidance modules require integrated circuits');
+$test->assert(isset($recipesById['atmospheric_drop_kit']), 'crafting recipes expose atmospheric drop kits');
+$test->assertEquals('thermal_protection_shell', $recipesById['atmospheric_drop_kit']['ingredients'][0]['type'] ?? null, 'atmospheric drop kits require thermal protection shells');
+$test->assertEquals(0.08, $recipesById['atmospheric_drop_kit']['output']['containerSpace'] ?? null, 'atmospheric drop kits occupy their configured storage space');
 $test->assert(isset($recipesById['manny']), 'crafting recipes expose Mannys');
 $test->assertEquals('manny', $recipesById['manny']['output']['type'] ?? null, 'Manny recipe outputs a real Manny');
 $test->assertEquals(0.05, $recipesById['manny']['output']['containerSpace'] ?? null, 'crafted Manny occupies the standard Manny storage space');
@@ -1000,6 +1010,47 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
         $test->assertEquals(0.2, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
         $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
+
+        $dropSector = new SectorContent($detachProbe->currentSector, [
+            new Planet('drop-target-planet', 'Drop target', 'rocky', 1.0, 1.0, true, 0.42, ['metals']),
+        ]);
+        $sectorRepository->save($dropSector);
+        $dropWithoutKit = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/drop-storage-container', $detachHeaders, json_encode([
+            'containerId' => $detachContainerId,
+            'planetId' => 'drop-target-planet',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(422, $dropWithoutKit->status, 'dropping a container on a planet requires an atmospheric drop kit');
+        $test->assertEquals('missing_atmospheric_drop_kit', $dropWithoutKit->body['error']['code'] ?? null, 'missing drop kit returns a specific error');
+
+        $dropKit = $storage->addItem($detachProbe, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT, ProbeItem::ATMOSPHERIC_DROP_KIT_NAME, 0.08);
+        $dropAccepted = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/drop-storage-container', $detachHeaders, json_encode([
+            'containerId' => $detachContainerId,
+            'planetId' => 'drop-target-planet',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $dropAccepted->status, 'Manny can start dropping an additional container on a planet');
+        $test->assertEquals('dropping_storage_container', $dropAccepted->body['manny']['currentTask'] ?? null, 'planet container drop uses its own Manny task type');
+        $test->assertEquals(420, $dropAccepted->body['manny']['task']['durationSeconds'] ?? null, 'dropping a container takes salvage duration plus two minutes');
+        $test->assert(!array_key_exists('snapshot', $dropAccepted->body['manny']['task'] ?? []), 'planet drop task does not expose the detached container snapshot');
+        $droppedObjectId = (string) ($dropAccepted->body['manny']['task']['objectId'] ?? '');
+        $test->assert($storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId) === null, 'accepted planet drop removes the storage container from probe inventory immediately');
+        $test->assert($items->findByUidForProbe($detachProbe->id, $dropKit->uid) === null, 'accepted planet drop consumes the atmospheric drop kit immediately');
+
+        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $detachMannyDbId,
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $planetDropSector = $sectorRepository->load($detachProbe->currentSector);
+        $planetDroppedContainers = $planetDropSector->planetDroppedContainersForObject('drop-target-planet');
+        $test->assertEquals(1, count($planetDroppedContainers), 'completed planet drop persists the container on the planet');
+        $test->assertEquals($droppedObjectId, $planetDroppedContainers[0]->getId(), 'planet-dropped container keeps the task object id');
+        $test->assertEquals($detachProbe->id, $planetDroppedContainers[0]->getOriginProbeId(), 'planet-dropped container records the origin probe id');
+        $planetDropObservation = $kernel->handle('GET', '/api/probe/sector', $detachHeaders);
+        $observedPlanetDropped = array_values(array_filter(
+            $planetDropObservation->body['sector']['objects'] ?? [],
+            static fn(array $object): bool => ($object['id'] ?? null) === $droppedObjectId,
+        ));
+        $test->assertEquals(0, count($observedPlanetDropped), 'planet-dropped containers are not exposed in sector observation yet');
     }
 }
 

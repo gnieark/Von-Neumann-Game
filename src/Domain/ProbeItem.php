@@ -18,6 +18,10 @@ final class ProbeItem
     public const TYPE_ELECTRIC_MOTOR = 'electric_motor';
     public const TYPE_BATTERY_PACK = 'battery_pack';
     public const TYPE_LINEAR_ACTUATOR = 'linear_actuator';
+    public const TYPE_THERMAL_PROTECTION_SHELL = 'thermal_protection_shell';
+    public const TYPE_PARACHUTE_PACK = 'parachute_pack';
+    public const TYPE_DESCENT_GUIDANCE_MODULE = 'descent_guidance_module';
+    public const TYPE_ATMOSPHERIC_DROP_KIT = 'atmospheric_drop_kit';
     public const WAYPOINT_BOOKMARK_NAME = 'Waypoint bookmark';
     public const STEEL_BAR_NAME = 'Steel bar';
     public const STEEL_PLATE_NAME = 'Steel plate';
@@ -30,6 +34,10 @@ final class ProbeItem
     public const ELECTRIC_MOTOR_NAME = 'Electric motor';
     public const BATTERY_PACK_NAME = 'Battery pack';
     public const LINEAR_ACTUATOR_NAME = 'Linear actuator';
+    public const THERMAL_PROTECTION_SHELL_NAME = 'Thermal protection shell';
+    public const PARACHUTE_PACK_NAME = 'Parachute pack';
+    public const DESCENT_GUIDANCE_MODULE_NAME = 'Descent guidance module';
+    public const ATMOSPHERIC_DROP_KIT_NAME = 'Atmospheric drop kit';
 
     public function __construct(
         public readonly int $id,

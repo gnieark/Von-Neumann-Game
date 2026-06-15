@@ -18,6 +18,7 @@ final class SectorContent
         private readonly string $source = 'generated',
         private array $detachedContainers = [],
         private array $hiddenDetachedContainers = [],
+        private array $planetDroppedContainers = [],
     ) {}
 
     public function getCoordinates(): SectorCoordinates
@@ -66,10 +67,29 @@ final class SectorContent
     /**
      * @return array<SectorDetachedContainer>
      */
+    public function getPlanetDroppedContainers(): array
+    {
+        return $this->planetDroppedContainers;
+    }
+
+    /**
+     * @return array<SectorDetachedContainer>
+     */
     public function hiddenDetachedContainersForObject(string $objectId): array
     {
         return array_values(array_filter(
             $this->hiddenDetachedContainers,
+            static fn(SectorDetachedContainer $container): bool => $container->getTargetObjectId() === $objectId,
+        ));
+    }
+
+    /**
+     * @return array<SectorDetachedContainer>
+     */
+    public function planetDroppedContainersForObject(string $objectId): array
+    {
+        return array_values(array_filter(
+            $this->planetDroppedContainers,
             static fn(SectorDetachedContainer $container): bool => $container->getTargetObjectId() === $objectId,
         ));
     }
@@ -119,6 +139,12 @@ final class SectorContent
     public function addHiddenDetachedContainer(SectorDetachedContainer $container): void
     {
         $this->hiddenDetachedContainers[] = $container;
+        $this->touch();
+    }
+
+    public function addPlanetDroppedContainer(SectorDetachedContainer $container): void
+    {
+        $this->planetDroppedContainers[] = $container;
         $this->touch();
     }
 
@@ -219,6 +245,7 @@ final class SectorContent
             'objects' => array_map(static fn(UniverseObject $object): array => $object->toArray(), $this->objects),
             'detachedContainers' => array_map(static fn(SectorDetachedContainer $container): array => $container->toArray(), $this->detachedContainers),
             'hiddenDetachedContainers' => array_map(static fn(SectorDetachedContainer $container): array => $container->toArray(), $this->hiddenDetachedContainers),
+            'planetDroppedContainers' => array_map(static fn(SectorDetachedContainer $container): array => $container->toArray(), $this->planetDroppedContainers),
             'createdAt' => $this->createdAt,
             'updatedAt' => $this->updatedAt,
             'generationVersion' => $this->generationVersion,
@@ -239,6 +266,7 @@ final class SectorContent
             $source,
             array_map(static fn(array $object): SectorDetachedContainer => SectorDetachedContainer::fromArray($object), $data['detachedContainers'] ?? []),
             array_map(static fn(array $object): SectorDetachedContainer => SectorDetachedContainer::fromArray($object), $data['hiddenDetachedContainers'] ?? []),
+            array_map(static fn(array $object): SectorDetachedContainer => SectorDetachedContainer::fromArray($object), $data['planetDroppedContainers'] ?? []),
         );
     }
 

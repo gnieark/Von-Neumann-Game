@@ -75,6 +75,10 @@
             "electric_motor": tr("electricMotor", "Electric motor"),
             "battery_pack": tr("batteryPack", "Battery pack"),
             "linear_actuator": tr("linearActuator", "Linear actuator"),
+            "thermal_protection_shell": tr("thermalProtectionShell", "Thermal protection shell"),
+            "parachute_pack": tr("parachutePack", "Parachute pack"),
+            "descent_guidance_module": tr("descentGuidanceModule", "Descent guidance module"),
+            "atmospheric_drop_kit": tr("atmosphericDropKit", "Atmospheric drop kit"),
             "manny": tr("mannyObject", "Manny"),
         }[type] || fallback || type || "-";
     }
@@ -91,6 +95,7 @@
             "moving_storage": tr("movingStorage", "Moving storage"),
             "installing_waypoint_bookmark": tr("installingWaypointBookmark", "Installing waypoint bookmark"),
             "detaching_storage_container": tr("detachingStorageContainer", "Detaching storage container"),
+            "dropping_storage_container": tr("droppingStorageContainer", "Dropping storage container"),
             "inspecting_asteroid": tr("inspectingAsteroid", "Inspecting asteroid"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
@@ -343,12 +348,38 @@
         return targets;
     }
 
+    function planetTargets() {
+        const targets = [];
+        const seen = new Set();
+        const collect = (object) => {
+            if (!object || typeof object !== "object") {
+                return;
+            }
+            if (object.type === "planet" && object.id && !seen.has(object.id)) {
+                seen.add(object.id);
+                targets.push(object);
+            }
+            ["bookmarkTargets", "minableTargets"].forEach((key) => {
+                if (Array.isArray(object[key])) {
+                    object[key].forEach(collect);
+                }
+            });
+        };
+
+        state.currentSectorObjects.forEach(collect);
+        return targets;
+    }
+
     function bookmarkTargetLabel(target) {
         return [objectTypeLabel(target.type || "object"), target.name || target.id].filter(Boolean).join(" ");
     }
 
     function asteroidTargetLabel(target) {
         return [objectTypeLabel("asteroid"), target && (target.name || target.id)].filter(Boolean).join(" ");
+    }
+
+    function planetTargetLabel(target) {
+        return [objectTypeLabel("planet"), target && (target.name || target.id)].filter(Boolean).join(" ");
     }
 
     function artificialObjectDetection(payload) {
@@ -421,6 +452,12 @@
     function bookmarkItems() {
         return Array.isArray(state.currentInventory && state.currentInventory.items)
             ? state.currentInventory.items.filter((item) => item.type === "waypoint_bookmark")
+            : [];
+    }
+
+    function atmosphericDropKitItems() {
+        return Array.isArray(state.currentInventory && state.currentInventory.items)
+            ? state.currentInventory.items.filter((item) => item.type === "atmospheric_drop_kit")
             : [];
     }
 
@@ -506,6 +543,10 @@
             "electric_motor": "recipeDescriptionElectricMotor",
             "battery_pack": "recipeDescriptionBatteryPack",
             "linear_actuator": "recipeDescriptionLinearActuator",
+            "thermal_protection_shell": "recipeDescriptionThermalProtectionShell",
+            "parachute_pack": "recipeDescriptionParachutePack",
+            "descent_guidance_module": "recipeDescriptionDescentGuidanceModule",
+            "atmospheric_drop_kit": "recipeDescriptionAtmosphericDropKit",
             "manny": "recipeDescriptionManny",
         }[recipe && recipe.id] || "";
     }
@@ -989,6 +1030,16 @@
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
         }
+        if (manny.currentTask === "dropping_storage_container") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("dropStorageInProgress", "Container drop in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("dropStorageTaskDetail", "{container} is descending toward {target}."), {
+                    "container": payload.containerId || tr("storageContainer", "Container"),
+                    "target": planetTargetLabel(payload.target || {"id": payload.planetId || payload.targetObjectId}),
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "</section>";
+        }
         if (manny.currentTask === "inspecting_asteroid") {
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("asteroidInspectionInProgress", "Asteroid inspection in progress")) + "</h4>"
@@ -1192,6 +1243,47 @@
             + "</form>";
     }
 
+    function dropPlanetTargetOptions(selected) {
+        const targets = planetTargets();
+        if (targets.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return targets.map((target) => (
+            "<option value=\"" + escaped(target.id) + "\"" + (target.id === selected ? " selected" : "") + ">"
+            + escaped(planetTargetLabel(target))
+            + "</option>"
+        )).join("");
+    }
+
+    function dropStorageContainerHint(containerCount, planetCount, hasKit) {
+        if (containerCount === 0) {
+            return tr("noDetachableContainer", "No additional container can be detached.");
+        }
+        if (planetCount === 0) {
+            return tr("noPlanetTarget", "No planet available in the current sector.");
+        }
+        if (!hasKit) {
+            return tr("missingAtmosphericDropKit", "An atmospheric drop kit is required in stock.");
+        }
+
+        return tr("dropStorageHint", "The container and its content leave the probe; one atmospheric drop kit is consumed.");
+    }
+
+    function renderDropStorageContainerForm() {
+        const containers = detachableStorageContainers();
+        const planets = planetTargets();
+        const hasKit = atmosphericDropKitItems().length > 0;
+        const disabled = containers.length === 0 || planets.length === 0 || !hasKit;
+
+        return "<form class=\"manny-drop-storage-container-form manny-form\">"
+            + "<label>" + escaped(tr("planetObject", "Planet")) + "<select class=\"manny-drop-planet-target\" name=\"planetId\" required>" + dropPlanetTargetOptions("") + "</select></label>"
+            + "<label>" + escaped(tr("storageContainer", "Container")) + "<select class=\"manny-drop-container\" name=\"containerId\" required>" + detachStorageContainerOptions("") + "</select></label>"
+            + "<button class=\"manny-drop-storage-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("dropStorageContainerShort", "Drop")) + "</button>"
+            + "<p class=\"manny-drop-storage-hint\">" + escaped(dropStorageContainerHint(containers.length, planets.length, hasKit)) + "</p>"
+            + "</form>";
+    }
+
     function recoverStorageContainerTargetOptions(selected) {
         const targets = detectedDetachedContainerTargets();
         if (targets.length === 0) {
@@ -1264,6 +1356,7 @@
             {"id": "salvage", "title": tr("salvageActionTitle", "Recover a drifting object"), "render": renderSalvageForm},
             {"id": "inspect-asteroid", "title": tr("inspectAsteroidActionTitle", "Inspect an asteroid"), "render": renderInspectAsteroidForm},
             {"id": "detach-storage", "title": tr("detachStorageActionTitle", "Detach a container"), "render": renderDetachStorageContainerForm},
+            {"id": "drop-storage", "title": tr("dropStorageActionTitle", "Drop a container on a planet"), "render": renderDropStorageContainerForm},
             {"id": "recover-storage", "title": tr("recoverStorageContainerActionTitle", "Recover a detached container"), "render": renderRecoverStorageContainerForm},
             {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint-bookmark"), "render": renderBookmarkForm},
             {"id": "craft", "title": tr("craftingActionTitle", "Craft"), "render": renderCraftForm},
@@ -1506,6 +1599,7 @@
         updateMannyBookmarkForms();
         updateMannyInspectAsteroidForms();
         updateMannyDetachStorageContainerForms();
+        updateMannyDropStorageContainerForms();
         updateMannyRecoverStorageContainerForms();
     }
 
@@ -1632,6 +1726,41 @@
                     : (hiddenMode && asteroids.length === 0
                         ? tr("noAsteroidTarget", "No asteroid available in the current sector.")
                         : tr("detachStorageHint", "The container and its content leave the probe when the order is accepted."));
+            }
+        });
+    }
+
+    function updateMannyDropStorageContainerForms() {
+        document.querySelectorAll(".manny-drop-storage-container-form").forEach((form) => {
+            const containerSelect = form.querySelector(".manny-drop-container");
+            const planetSelect = form.querySelector(".manny-drop-planet-target");
+            const button = form.querySelector(".manny-drop-storage-button");
+            const hint = form.querySelector(".manny-drop-storage-hint");
+            const selectedContainer = containerSelect ? containerSelect.value : "";
+            const selectedPlanet = planetSelect ? planetSelect.value : "";
+            const containers = detachableStorageContainers();
+            const planets = planetTargets();
+            const hasKit = atmosphericDropKitItems().length > 0;
+            const disabled = containers.length === 0 || planets.length === 0 || !hasKit;
+
+            if (containerSelect) {
+                containerSelect.innerHTML = detachStorageContainerOptions(selectedContainer);
+                if (!containers.some((container) => container.id === containerSelect.value)) {
+                    containerSelect.value = containers[0] ? containers[0].id : "";
+                }
+            }
+            if (planetSelect) {
+                planetSelect.innerHTML = dropPlanetTargetOptions(selectedPlanet);
+                if (!planets.some((target) => target.id === planetSelect.value)) {
+                    planetSelect.value = planets[0] ? planets[0].id : "";
+                }
+            }
+            if (button) {
+                button.disabled = disabled;
+                button.setAttribute("aria-disabled", disabled ? "true" : "false");
+            }
+            if (hint) {
+                hint.textContent = dropStorageContainerHint(containers.length, planets.length, hasKit);
             }
         });
     }
@@ -1844,6 +1973,20 @@
                 }),
             });
         }
+        if (form.classList.contains("manny-drop-storage-container-form")) {
+            updateMannyDropStorageContainerForms();
+            const containerId = String(formData.get("containerId") || "");
+            const planetId = String(formData.get("planetId") || "");
+            if (!containerId || !planetId || atmosphericDropKitItems().length === 0) {
+                setStatus(tr("invalidDropStorageOrder", "Invalid container drop order."));
+                return null;
+            }
+
+            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/drop-storage-container", {
+                "method": "POST",
+                "body": JSON.stringify({containerId, planetId}),
+            });
+        }
         if (form.classList.contains("manny-recover-storage-container-form")) {
             const targetSelect = form.querySelector(".manny-recover-storage-container-target");
             if (!targetSelect || !targetSelect.value) {
@@ -1976,6 +2119,9 @@
             }
             if (event.target.classList.contains("manny-detach-container") || event.target.classList.contains("manny-detach-storage-mode") || event.target.classList.contains("manny-detach-asteroid-target")) {
                 updateMannyDetachStorageContainerForms();
+            }
+            if (event.target.classList.contains("manny-drop-container") || event.target.classList.contains("manny-drop-planet-target")) {
+                updateMannyDropStorageContainerForms();
             }
             if (event.target.classList.contains("manny-recover-storage-container-target")) {
                 updateMannyRecoverStorageContainerForms();

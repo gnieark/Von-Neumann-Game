@@ -21,6 +21,7 @@ final class Manny
     public const TASK_MOVING_STORAGE = 'moving_stockage';
     public const TASK_INSTALLING_WAYPOINT_BOOKMARK = 'installing_waypoint_bookmark';
     public const TASK_DETACHING_STORAGE_CONTAINER = 'detaching_storage_container';
+    public const TASK_DROPPING_STORAGE_CONTAINER = 'dropping_storage_container';
     public const TASK_INSPECTING_ASTEROID = 'inspecting_asteroid';
     public const CARGO_CAPACITY = 0.05;
     public const CONTAINER_SPACE = 0.05;

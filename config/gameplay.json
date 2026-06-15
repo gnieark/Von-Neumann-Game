@@ -184,6 +184,44 @@
       "containerSpace": 0.01,
       "durationSeconds": 1200
     },
+    "thermal_protection_shell": {
+      "description": "A disposable ablative shell that protects a storage container during atmospheric entry.",
+      "ceramicInsulatorCount": 8,
+      "steelPlateCount": 4,
+      "organicCost": 0.06,
+      "deuteriumCost": 0.02,
+      "containerSpace": 0.035,
+      "durationSeconds": 2400
+    },
+    "parachute_pack": {
+      "description": "A folded braking canopy pack with compact deployment hardware for cargo descents.",
+      "steelBarCount": 2,
+      "steelPlateCount": 2,
+      "organicCost": 0.18,
+      "iceCost": 0.05,
+      "containerSpace": 0.045,
+      "durationSeconds": 1800
+    },
+    "descent_guidance_module": {
+      "description": "A small avionics and actuator package for limited steering during a cargo drop.",
+      "integratedCircuitCount": 2,
+      "batteryPackCount": 1,
+      "linearActuatorCount": 2,
+      "steelPlateCount": 2,
+      "deuteriumCost": 0.03,
+      "containerSpace": 0.035,
+      "durationSeconds": 2400
+    },
+    "atmospheric_drop_kit": {
+      "description": "A disposable descent kit for dropping one storage container through an atmosphere with ablative shielding, parachute braking, and limited steering authority.",
+      "thermalProtectionShellCount": 1,
+      "parachutePackCount": 1,
+      "descentGuidanceModuleCount": 1,
+      "steelPlateCount": 4,
+      "steelBarCount": 2,
+      "containerSpace": 0.08,
+      "durationSeconds": 3600
+    },
     "manny": {
       "description": "A fully assembled maintenance unit able to repair, mine, carry cargo, and build new parts.",
       "linearActuatorCount": 6,

@@ -500,6 +500,7 @@ final class ProbeMovementService
             (int) ($snapshot['ownerProbeId'] ?? $probe->id),
             (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
             null,
+            null,
             (float) ($containerData['capacity'] ?? 0.0),
             ProbeInventory::CAPACITY_UNIT,
             gmdate('c'),
