@@ -293,7 +293,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(30, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(31, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1473,6 +1473,7 @@ if ($createdProbe !== null) {
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
         new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
         new Star('unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+        new Planet('current-habitable-planet', null, 'rocky', 1.0, 1.0, true, 0.72, ['silicates']),
     ]));
     $mineableSector = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('mine-rock', $mineableSector->body['sector']['objects'][0]['id'] ?? null, 'sector observation exposes object ids for Manny mining orders');
@@ -1488,6 +1489,16 @@ if ($createdProbe !== null) {
     }
     $test->assertEquals('solar_mass', $unitObjectsById['unit-star']['massUnit'] ?? null, 'star sector object exposes solar mass unit');
     $test->assertEquals('solar_radius', $unitObjectsById['unit-star']['radiusUnit'] ?? null, 'star sector object exposes solar radius unit');
+    $test->assertEquals(0.72, $unitObjectsById['current-habitable-planet']['habitabilityScore'] ?? null, 'current-sector planet observations expose habitability score');
+
+    $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
+    $visitedSectors->markVisited($player, $visitedPlanetSector);
+    $sectorRepository->save(new SectorContent($visitedPlanetSector, [
+        new Planet('visited-habitable-planet', null, 'ocean', 1.1, 1.2, true, 0.81, ['water_ice']),
+    ]));
+    $visitedPlanetObservation = $kernel->handle('GET', '/api/sector?x=8&y=0&z=0', $headers);
+    $test->assertEquals(200, $visitedPlanetObservation->status, 'visited planet sector can be scanned through GET /api/sector');
+    $test->assertEquals(0.81, $visitedPlanetObservation->body['sector']['objects'][0]['habitabilityScore'] ?? null, 'visited-sector planet observations expose habitability score');
 
     $mineManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
         'objectId' => 'mine-rock',

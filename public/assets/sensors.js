@@ -381,6 +381,15 @@
         return label ? window.VNG.numberValue(value) + " " + label : window.VNG.numberValue(value);
     }
 
+    function habitabilityValue(value) {
+        const score = Number(value);
+        if (!Number.isFinite(score)) {
+            return null;
+        }
+
+        return window.VNG.numberValue(score) + " / 1";
+    }
+
     function systemBodyKey(body) {
         return String(body && (body.id || body.name || body.type) ? (body.id || body.name || body.type) : "");
     }
@@ -424,6 +433,10 @@
         }
         if (body.category) {
             details.push({"label": tr("category", "Category"), "value": planetCategoryLabel(body.category)});
+        }
+        const habitability = habitabilityValue(body.habitabilityScore);
+        if (habitability !== null) {
+            details.push({"label": tr("habitabilityScore", "Habitability score"), "value": habitability});
         }
         if (body.sizeCategory) {
             details.push({"label": tr("size", "Size"), "value": sizeCategoryLabel(body.sizeCategory)});
@@ -574,6 +587,23 @@
     }
 
     function objectDetailHtml(object) {
+        if (object.type === "planet") {
+            const details = [];
+            if (object.category) {
+                details.push({"label": tr("category", "Category"), "value": planetCategoryLabel(object.category)});
+            }
+            const habitability = habitabilityValue(object.habitabilityScore);
+            if (habitability !== null) {
+                details.push({"label": tr("habitabilityScore", "Habitability score"), "value": habitability});
+            }
+            if (details.length > 0) {
+                return "<dl class=\"sector-system-body-details\">"
+                    + details.map((detail) => (
+                        "<div><dt>" + window.VNG.escapeHtml(detail.label) + "</dt><dd>" + window.VNG.escapeHtml(detail.value) + "</dd></div>"
+                    )).join("")
+                    + "</dl>";
+            }
+        }
         if (object.type === "manny") {
             return "<p>" + window.VNG.escapeHtml(tr("mannyState", "State") + " " + mannyStateLabel(object.mannyState)) + "</p>";
         }

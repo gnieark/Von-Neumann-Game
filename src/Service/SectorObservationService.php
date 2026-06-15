@@ -228,6 +228,7 @@ final class SectorObservationService
             }
             if ($object instanceof Planet) {
                 $data['category'] = $object->getCategory();
+                $data['habitabilityScore'] = $object->getHabitabilityScore();
             }
         }
 
@@ -333,6 +334,10 @@ final class SectorObservationService
             if ($object instanceof Asteroid) {
                 $target['resourceAmounts'] = $object->getResourceAmounts();
             }
+            if ($object instanceof Planet) {
+                $target['category'] = $object->getCategory();
+                $target['habitabilityScore'] = $object->getHabitabilityScore();
+            }
             $targets[] = $target;
         }
 
@@ -362,6 +367,10 @@ final class SectorObservationService
             'radius' => $object->getRadius(),
         ];
         $target += $this->objectUnitFields($object);
+        if ($object instanceof Planet) {
+            $target['category'] = $object->getCategory();
+            $target['habitabilityScore'] = $object->getHabitabilityScore();
+        }
         if ($object->getWaypointBookmarks() !== []) {
             $target['waypointBookmarks'] = $object->getWaypointBookmarks();
         }

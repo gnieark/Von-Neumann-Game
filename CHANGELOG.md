@@ -6,11 +6,13 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- API v31 : les observations détaillées de secteur exposent `habitabilityScore` sur les planètes des secteurs courants ou déjà visités.
 - API v30 : ajout des recettes `thermal_protection_shell`, `parachute_pack`, `descent_guidance_module` et `atmospheric_drop_kit`.
 - API : ajout de `POST /api/probe/mannies/{mannyId}/drop-storage-container` pour larguer un container additionnel sur une planète avec consommation d’un kit de largage atmosphérique.
 - Secteurs : les containers largués sur planète sont persistés dans le JSON du secteur avec `originProbeId`, sans être exposés dans les observations API pour le moment.
 - Interface : ajout du formulaire Manny “Larguer un container sur une planète”.
 - Stats : ajout du nombre de planètes habitables dans les secteurs générés et dans les secteurs visités.
+- Interface : la page `/sensors` affiche le score d’habitabilité des planètes et documente ce score avec les unités.
 
 ### Fixed
 

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '30'
+  version: '31'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 30
+                apiVersion: 31
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -991,6 +991,26 @@ paths:
                         carbon_compounds: 0
                       mannyMineable: true
                       composition: iron
+                    - id: planet-abc123-0
+                      type: planet
+                      name: null
+                      estimated: false
+                      summary: Planetary body detected.
+                      mass: 1
+                      massUnit: earth_mass
+                      radius: 1
+                      radiusUnit: earth_radius
+                      dangerLevel: low
+                      resources: [silicates]
+                      resourceTypes: [metals]
+                      resourceComposition:
+                        deuterium: 0
+                        metals: 1
+                        ice: 0
+                        carbon_compounds: 0
+                      mannyMineable: false
+                      category: rocky
+                      habitabilityScore: 0.72
                   probes:
                     - id: 2
                       name: Probe of nova
@@ -1889,6 +1909,26 @@ paths:
                             carbon_compounds: 0
                           mannyMineable: true
                           composition: iron
+                        - id: planet-abc123-0
+                          type: planet
+                          name: null
+                          estimated: false
+                          summary: Planetary body detected.
+                          mass: 1
+                          massUnit: earth_mass
+                          radius: 1
+                          radiusUnit: earth_radius
+                          dangerLevel: low
+                          resources: [silicates]
+                          resourceTypes: [metals]
+                          resourceComposition:
+                            deuterium: 0
+                            metals: 1
+                            ice: 0
+                            carbon_compounds: 0
+                          mannyMineable: false
+                          category: rocky
+                          habitabilityScore: 0.72
                       scan:
                         currentSectorResidenceSeconds: 42
                         requiredResidenceSeconds: 0
@@ -2321,6 +2361,11 @@ components:
         category:
           type: string
           description: Present for planet targets.
+        habitabilityScore:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Present for planet targets; 0 means hostile or unknown, 1 is highly habitable.
         waypointBookmarks:
           type: array
           items:
@@ -3610,6 +3655,11 @@ components:
         category:
           type: string
           description: Present on planets.
+        habitabilityScore:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Present on planets in detailed current-sector or already-visited-sector observations.
         salvageable:
           type: boolean
           description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage.
@@ -3681,6 +3731,14 @@ components:
         radiusUnit:
           type: string
           enum: [solar_radius, earth_radius, kilometer, astronomical_unit]
+        category:
+          type: string
+          description: Present for planet targets.
+        habitabilityScore:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Present for planet targets; 0 means hostile or unknown, 1 is highly habitable.
         waypointBookmarks:
           type: array
           items:
