@@ -214,8 +214,19 @@ function metricHtml(metric) {
 
     return "<button class=\"metric interactive-metric\" type=\"button\" aria-expanded=\"false\"" + metricName + ">"
         + content
-        + "<span class=\"metric-detail\" role=\"status\">" + metric.detail + "</span>"
+        + "<span class=\"metric-detail-hidden\" role=\"status\">" + metric.detail + "</span>"
         + "</button>";
+}
+
+function setMetricDetailExpanded(metricNode, expanded) {
+    const detailNode = metricNode.querySelector(".metric-detail, .metric-detail-hidden");
+    if (!detailNode) {
+        return;
+    }
+
+    detailNode.classList.toggle("metric-detail", expanded);
+    detailNode.classList.toggle("metric-detail-hidden", !expanded);
+    metricNode.setAttribute("aria-expanded", expanded ? "true" : "false");
 }
 
 function bindMetricDetails(root) {
@@ -228,10 +239,10 @@ function bindMetricDetails(root) {
             const expanded = metricNode.getAttribute("aria-expanded") === "true";
             document.querySelectorAll(".interactive-metric[aria-expanded=\"true\"]").forEach((openNode) => {
                 if (openNode !== metricNode) {
-                    openNode.setAttribute("aria-expanded", "false");
+                    setMetricDetailExpanded(openNode, false);
                 }
             });
-            metricNode.setAttribute("aria-expanded", expanded ? "false" : "true");
+            setMetricDetailExpanded(metricNode, !expanded);
         });
     });
 }
@@ -241,16 +252,8 @@ function renderMetrics(container, metrics) {
         return;
     }
 
-    const openMetricNames = new Set(Array.from(container.querySelectorAll(".interactive-metric[aria-expanded=\"true\"]"))
-        .map((metricNode) => metricNode.dataset.metric || "")
-        .filter(Boolean));
     container.innerHTML = metrics.map(metricHtml).join("");
     bindMetricDetails(container);
-    openMetricNames.forEach((name) => {
-        Array.from(container.querySelectorAll(".interactive-metric")).find((metricNode) => (
-            metricNode.dataset.metric === name
-        ))?.setAttribute("aria-expanded", "true");
-    });
 }
 
 function openDisclosureIds(root, selector) {
