@@ -54,6 +54,53 @@ final class ProbeDamageWarningRepository
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Damage warning creation failed.');
     }
 
+    public function createIntelligentLifeAlert(
+        int $probeId,
+        int $movementId,
+        SectorCoordinates $sector,
+        string $planetId,
+        string $planetName,
+        string $message,
+    ): ProbeDamageWarning {
+        $existing = $this->findByProbeMovementTypeAndObject(
+            $probeId,
+            $movementId,
+            ProbeDamageWarning::TYPE_INTELLIGENT_LIFE,
+            $planetId,
+        );
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO probe_damage_warnings
+             (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, read_at, resolved_at, created_at, updated_at)
+             VALUES (:probe_id, :movement_id, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, :risk_percent, :additional_container_count, :message, NULL, NULL, :created_at, :updated_at)'
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'movement_id' => $movementId,
+            'type' => ProbeDamageWarning::TYPE_INTELLIGENT_LIFE,
+            'status' => ProbeDamageWarning::STATUS_UNREAD,
+            'phase' => 'arrival',
+            'scheduled_at' => $now,
+            'sector_x' => $sector->getX(),
+            'sector_y' => $sector->getY(),
+            'sector_z' => $sector->getZ(),
+            'container_id' => '',
+            'container_label' => $planetName,
+            'object_id' => $planetId,
+            'risk_percent' => 0.0,
+            'additional_container_count' => 0,
+            'message' => $message,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe alert creation failed.');
+    }
+
     /**
      * @return array<ProbeDamageWarning>
      */
@@ -82,6 +129,24 @@ final class ProbeDamageWarningRepository
     {
         $stmt = $this->pdo->prepare('SELECT * FROM probe_damage_warnings WHERE id = :id');
         $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+
+        return $row ? $this->hydrate($row) : null;
+    }
+
+    private function findByProbeMovementTypeAndObject(int $probeId, int $movementId, string $type, string $objectId): ?ProbeDamageWarning
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM probe_damage_warnings
+             WHERE probe_id = :probe_id AND movement_id = :movement_id AND type = :type AND object_id = :object_id
+             ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'movement_id' => $movementId,
+            'type' => $type,
+            'object_id' => $objectId,
+        ]);
         $row = $stmt->fetch();
 
         return $row ? $this->hydrate($row) : null;

@@ -500,14 +500,14 @@ async function syncNavigationWarnings() {
     }
 
     const messages = await loadI18n();
-    const [messageData, sectorData, damageWarningData] = await Promise.all([
+    const [messageData, sectorData, alertData] = await Promise.all([
         apiJson("/api/probe/messages?limit=50&offset=0", {"method": "GET"}).catch(() => null),
         apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
-        apiJson("/api/probe/damage-warnings", {"method": "GET"}).catch(() => null),
+        apiJson("/api/probe/alerts", {"method": "GET"}).catch(() => null),
     ]);
 
-    const unreadDamageWarnings = Array.isArray(damageWarningData && damageWarningData.damageWarnings)
-        ? damageWarningData.damageWarnings.some((warning) => warning && warning.status === "unread")
+    const unreadPersistentAlerts = Array.isArray(alertData && alertData.alerts)
+        ? alertData.alerts.some((alert) => alert && alert.status === "unread")
         : false;
     if (messageData) {
         const receivedMessages = Array.isArray(messageData.messages) ? messageData.messages : [];
@@ -515,9 +515,9 @@ async function syncNavigationWarnings() {
     }
     if (sectorData) {
         const alerts = sectorAlerts(sectorData.sector || {}, messages);
-        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged) || unreadDamageWarnings, unreadDamageWarnings);
+        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged) || unreadPersistentAlerts, unreadPersistentAlerts);
     } else {
-        setNavigationWarning("/alerts", unreadDamageWarnings, unreadDamageWarnings);
+        setNavigationWarning("/alerts", unreadPersistentAlerts, unreadPersistentAlerts);
     }
 }
 
