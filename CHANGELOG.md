@@ -2,17 +2,11 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
-## 2026-06-16
+## 2026-06-17
 
-### Added
+### Fixed
 
-- API v33 : ajout des alertes persistantes généralistes avec `GET /api/probe/alerts` et `PATCH /api/probe/alerts/{alertId}`.
-- Mouvement : lorsqu’une sonde arrive dans un secteur contenant une planète avec vie intelligente, une alerte persistante `intelligent_life` est créée avec le secteur et la planète concernés.
-
-### Changed
-
-- API : `GET /api/probe/damage-warnings` et `PATCH /api/probe/damage-warnings/{damageWarningId}` restent disponibles comme alias de compatibilité, mais sont remplacés par les endpoints d’alertes généralistes.
-- Interface : la page `/alerts` et l’onglet de navigation consomment les alertes persistantes généralistes, dont les détections de vie intelligente.
+- Interface : le container interne de la sonde est traduit en anglais dans les vues d'inventaire.
 
 ## 2026-06-15
 
