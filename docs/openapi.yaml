@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '34'
+  version: '35'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 34
+                apiVersion: 35
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -539,6 +539,56 @@ paths:
                     $ref: '#/components/schemas/Probe'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/probe/mission:
+    get:
+      summary: List active probe missions
+      description: Alias of /api/probe/missions kept for clients that use a singular mission route.
+      responses:
+        '200':
+          description: Active missions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/missions:
+    get:
+      summary: List active probe missions
+      description: Returns missions currently assigned to the authenticated probe. New probes return an empty list.
+      responses:
+        '200':
+          description: Active missions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionListResponse'
+              example:
+                missions: []
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/missions/{missionId}/abandon:
+    post:
+      summary: Abandon an active probe mission
+      parameters:
+        - $ref: '#/components/parameters/MissionId'
+      responses:
+        '200':
+          description: Mission abandoned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Mission is already terminal and cannot be abandoned again
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/storage-containers:
     get:
       summary: List probe storage containers
@@ -2134,6 +2184,13 @@ components:
       schema:
         type: string
       example: probe-core
+    MissionId:
+      name: missionId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: mis_8d4a2c1f5a91b334
     ProbeMessageId:
       name: messageId
       in: path
@@ -2232,7 +2289,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -2521,6 +2578,109 @@ components:
         visitCount:
           type: integer
           minimum: 1
+    MissionListResponse:
+      type: object
+      required: [missions]
+      properties:
+        missions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mission'
+    MissionResponse:
+      type: object
+      required: [mission]
+      properties:
+        mission:
+          $ref: '#/components/schemas/Mission'
+    Mission:
+      type: object
+      required: [id, type, title, status, stepOrder, metadata, startedAt, createdAt, updatedAt, steps]
+      properties:
+        id:
+          type: string
+          description: Stable public mission id.
+        type:
+          type: string
+          description: Mission family identifier, chosen by the future event that creates the mission.
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, completed, failed, abandoned]
+        stepOrder:
+          type: string
+          enum: [free, sequential]
+          description: Whether pending steps may be completed in any order or must follow sortOrder.
+        metadata:
+          type: object
+          additionalProperties: true
+        createdByEvent:
+          type: object
+          nullable: true
+          additionalProperties: true
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          nullable: true
+          format: date-time
+        failedAt:
+          type: string
+          nullable: true
+          format: date-time
+        abandonedAt:
+          type: string
+          nullable: true
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissionStep'
+    MissionStep:
+      type: object
+      required: [id, sortOrder, title, status, metadata, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Stable public mission-step id.
+        sortOrder:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, completed, failed, skipped]
+        metadata:
+          type: object
+          additionalProperties: true
+        completedAt:
+          type: string
+          nullable: true
+          format: date-time
+        failedAt:
+          type: string
+          nullable: true
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     ProbeMovement:
       type: object
       required: [status, origin, target, distance, fuelCostDeuterium, startedAt, arrivalAt]

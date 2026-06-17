@@ -16,6 +16,7 @@ use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
+use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
@@ -30,6 +31,7 @@ use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
@@ -269,6 +271,19 @@ $forumMessageSchemaColumns = array_map(
 );
 $test->assert(in_array('body', $forumMessageSchemaColumns, true), 'Forum messages store a body');
 $test->assert(in_array('edited_at', $forumMessageSchemaColumns, true), 'Forum messages store an explicit edit timestamp');
+$missionSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_missions)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('probe_id', $missionSchemaColumns, true), 'Mission table assigns missions to probes');
+$test->assert(in_array('status', $missionSchemaColumns, true), 'Mission table stores mission status');
+$test->assert(in_array('step_order', $missionSchemaColumns, true), 'Mission table stores step ordering mode');
+$missionStepSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_mission_steps)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('mission_id', $missionStepSchemaColumns, true), 'Mission step table links steps to missions');
+$test->assert(in_array('sort_order', $missionStepSchemaColumns, true), 'Mission step table stores step order');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -276,6 +291,7 @@ $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
+$missions = new MissionRepository($pdo);
 $damageWarnings = new ProbeDamageWarningRepository($pdo);
 $forum = new ForumRepository($pdo);
 $storageContainers = new StorageContainerRepository($pdo);
@@ -291,12 +307,13 @@ $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
+$missionService = new MissionService($missions);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(34, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(35, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -325,6 +342,58 @@ $test->assert($homeSum % 2 === 0, 'random initial sector respects the FCC parity
 $test->assert($visitedSectors->hasVisited($player, $player->homeSector), 'initial sector is automatically marked as visited');
 if ($createdProbe !== null) {
     $test->assert($createdProbe->currentSector->equals($player->homeSector), 'initial probe starts in the player home sector');
+    $missionHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($player)['token']];
+    $emptyMissions = $kernel->handle('GET', '/api/probe/missions', $missionHeaders);
+    $test->assertEquals(200, $emptyMissions->status, 'GET /api/probe/missions returns mission list');
+    $test->assertEquals([], $emptyMissions->body['missions'] ?? null, 'new probes start without active missions');
+    $legacyMissionRoute = $kernel->handle('GET', '/api/probe/mission', $missionHeaders);
+    $test->assertEquals(200, $legacyMissionRoute->status, 'GET /api/probe/mission remains a mission-list alias');
+    $createdMission = $missionService->startMission(
+        $createdProbe,
+        'test_signal',
+        'Signal de test',
+        'Mission générée par le test API.',
+        \VonNeumannGame\Domain\Mission::STEP_ORDER_SEQUENTIAL,
+        ['test' => true],
+        ['type' => 'api_test'],
+        [
+            ['title' => 'Identifier le signal', 'metadata' => ['event' => 'scan']],
+            ['title' => 'Répondre', 'description' => 'Attendre une future action joueur.'],
+        ],
+    );
+    $activeMissions = $kernel->handle('GET', '/api/probe/missions', $missionHeaders);
+    $test->assertEquals(200, $activeMissions->status, 'GET /api/probe/missions lists active missions');
+    $test->assertEquals($createdMission->uid, $activeMissions->body['missions'][0]['id'] ?? null, 'mission response exposes a stable public mission id');
+    $test->assertEquals('sequential', $activeMissions->body['missions'][0]['stepOrder'] ?? null, 'mission response exposes step ordering');
+    $test->assertEquals(2, count($activeMissions->body['missions'][0]['steps'] ?? []), 'mission response exposes mission steps');
+    $abandonedMission = $kernel->handle('POST', '/api/probe/missions/' . rawurlencode($createdMission->uid) . '/abandon', $missionHeaders);
+    $test->assertEquals(200, $abandonedMission->status, 'POST /api/probe/missions/{missionId}/abandon abandons an active mission');
+    $test->assertEquals('abandoned', $abandonedMission->body['mission']['status'] ?? null, 'abandoned mission response exposes terminal status');
+    $missionsAfterAbandon = $kernel->handle('GET', '/api/probe/missions', $missionHeaders);
+    $test->assertEquals([], $missionsAfterAbandon->body['missions'] ?? null, 'abandoned missions are no longer listed as active');
+    $secondAbandon = $kernel->handle('POST', '/api/probe/missions/' . rawurlencode($createdMission->uid) . '/abandon', $missionHeaders);
+    $test->assertEquals(409, $secondAbandon->status, 'abandoning a terminal mission is rejected');
+    $missingMission = $kernel->handle('POST', '/api/probe/missions/missing/abandon', $missionHeaders);
+    $test->assertEquals(404, $missingMission->status, 'abandoning an unknown mission is rejected');
+    $sequentialMission = $missionService->startMission(
+        $createdProbe,
+        'sequential_test',
+        'Sequential mission test',
+        stepOrder: \VonNeumannGame\Domain\Mission::STEP_ORDER_SEQUENTIAL,
+        steps: [
+            ['title' => 'First sequential step'],
+            ['title' => 'Second sequential step'],
+        ],
+    );
+    $sequentialStepIds = array_map(static fn($step): string => $step->uid, $sequentialMission->steps);
+    $test->assertThrows(
+        fn() => $missionService->completeStep($createdProbe, $sequentialMission->uid, $sequentialStepIds[1] ?? ''),
+        'sequential missions block later steps until earlier steps complete'
+    );
+    $afterFirstStep = $missionService->completeStep($createdProbe, $sequentialMission->uid, $sequentialStepIds[0] ?? '');
+    $test->assertEquals('active', $afterFirstStep->status, 'sequential mission remains active after an intermediate step');
+    $afterSecondStep = $missionService->completeStep($createdProbe, $sequentialMission->uid, $sequentialStepIds[1] ?? '');
+    $test->assertEquals('completed', $afterSecondStep->status, 'sequential mission completes after its final step');
     $userinfosDbConfig = $tmp . DIRECTORY_SEPARATOR . 'userinfos-database.json';
     file_put_contents($userinfosDbConfig, json_encode([
         'driver' => 'sqlite',
@@ -435,6 +504,15 @@ $auth->createApiKeyForPlayer($deletePlayer);
 if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 2) {
     $deleteSentMessage = $messages->create($deleteProbe->id, $createdProbe->id, $deleteProbe->currentSector, 'Deleting sender ping');
     $deleteReceivedMessage = $messages->create($createdProbe->id, $deleteProbe->id, $deleteProbe->currentSector, 'Deleting recipient ping');
+    $deleteMission = $missionService->startMission(
+        $deleteProbe,
+        'delete_test',
+        'Delete test mission',
+        steps: [
+            ['title' => 'First deleted step'],
+            ['title' => 'Second deleted step'],
+        ],
+    );
     $outsideManny = $deleteMannies[0];
     $onboardManny = $deleteMannies[1];
     $outsideManny->locationType = 'sector';
@@ -464,11 +542,14 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assertEquals(1, $deleteStats['probes'] ?? null, 'account deletion reports the deleted probe');
     $test->assertEquals(1, $deleteStats['probeMessagesSent'] ?? null, 'account deletion reports sent probe messages');
     $test->assertEquals(1, $deleteStats['probeMessagesReceived'] ?? null, 'account deletion reports received probe messages');
+    $test->assertEquals(1, $deleteStats['probeMissions'] ?? null, 'account deletion reports probe missions');
+    $test->assertEquals(2, $deleteStats['probeMissionSteps'] ?? null, 'account deletion reports probe mission steps');
     $test->assertEquals(1, $deleteStats['manniesDetachedAsAbandoned'] ?? null, 'account deletion detaches outside Mannys as abandoned');
     $test->assert($players->findById($deletePlayer->id) === null, 'account deletion removes the player row');
     $test->assert($probes->findByPlayerId($deletePlayer->id) === null, 'account deletion removes the player probe');
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
+    $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
     $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
     $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
     $detachedManny = $mannies->findByUid($outsideManny->uid);

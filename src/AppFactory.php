@@ -16,6 +16,7 @@ use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\MannyRepository;
+use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
@@ -28,6 +29,7 @@ use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeStorageService;
@@ -74,6 +76,7 @@ final class AppFactory
         $items = new ProbeItemRepository($pdo);
         $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
         $messages = new ProbeMessageRepository($pdo);
+        $missions = new MissionRepository($pdo);
         $damageWarnings = new ProbeDamageWarningRepository($pdo);
         $forum = new ForumRepository($pdo);
         $movements = new ProbeMovementRepository($pdo);
@@ -90,8 +93,9 @@ final class AppFactory
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks);
+        $missionService = new MissionService($missions);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $gameplayConfig);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $gameplayConfig);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService

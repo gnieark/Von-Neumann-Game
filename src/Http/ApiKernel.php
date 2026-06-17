@@ -26,6 +26,7 @@ use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyActionException;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ObservationAccessException;
 use VonNeumannGame\Service\ProbeMovementException;
 use VonNeumannGame\Service\ProbeMovementService;
@@ -39,7 +40,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 34;
+    public const API_VERSION = 35;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -53,6 +54,7 @@ final class ApiKernel
         private readonly ProbeMessageRepository $messages,
         private readonly ProbeDamageWarningRepository $damageWarnings,
         private readonly ForumRepository $forum,
+        private readonly MissionService $missions,
         private readonly array $gameplayConfig = [],
     ) {}
 
@@ -83,6 +85,9 @@ final class ApiKernel
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMannyRenameResponse($player, rawurldecode($matches[1]), $body));
+            }
+            if (preg_match('#^/api/probe/missions/([^/]+)/abandon$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMissionAbandonResponse($player, rawurldecode($matches[1])));
             }
             if (preg_match('#^/api/probe/messages/(\d+)/read$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, (int) $matches[1]));
@@ -134,6 +139,8 @@ final class ApiKernel
                 '/api/probe/damage-warnings' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeDamageWarningsResponse($player)),
                 '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
+                '/api/probe/mission' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player)),
+                '/api/probe/missions' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
                 '/api/probe/mannies' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeManniesResponse($player)),
                 '/api/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $query)),
@@ -1241,6 +1248,26 @@ final class ApiKernel
         return new ApiResponse(200, [
             'mannies' => array_map(fn($manny): array => $this->mannyArray($player, $probe, $manny), $mannies),
         ]);
+    }
+
+    private function probeMissionsResponse(Player $player): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+
+        return new ApiResponse(200, [
+            'missions' => array_map(
+                static fn($mission): array => $mission->toArray(),
+                $this->missions->activeMissionsForProbe($probe),
+            ),
+        ]);
+    }
+
+    private function probeMissionAbandonResponse(Player $player, string $missionId): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $mission = $this->missions->abandonMission($probe, $missionId);
+
+        return new ApiResponse(200, ['mission' => $mission->toArray()]);
     }
 
     private function probeMannyRenameResponse(Player $player, string $uid, ?string $body): ApiResponse
