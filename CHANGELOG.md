@@ -4,6 +4,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-06-17
 
+### Added
+
+- Debug : ajout de `scripts/userinfos.php` pour auditer en CLI l'état complet d'une sonde, dont position absolue/relative, inventaire brut, secteurs visités, mouvements et événements planifiés.
+
 ### Fixed
 
 - Interface : le container interne de la sonde est traduit en anglais dans les vues d'inventaire.
