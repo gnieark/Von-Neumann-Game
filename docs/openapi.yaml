@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '31'
+  version: '32'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 31
+                apiVersion: 32
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -539,6 +539,31 @@ paths:
                     $ref: '#/components/schemas/Probe'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/probe/mind-snapshot/reassign:
+    post:
+      summary: Reassign a terminal probe mind snapshot
+      description: >
+        Available only when the current probe is dead or trapped by a black hole.
+        Deletes the terminal probe state, assigns the player's last stable mind
+        snapshot to a fresh probe chassis, resets the player's local reference
+        frame, and marks the new origin as 0,0,0.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Mind snapshot reassigned to a fresh probe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeMindSnapshotReassignResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/probe/storage-containers:
     get:
       summary: List probe storage containers
@@ -2090,6 +2115,12 @@ components:
             error:
               code: forbidden
               message: Forum moderator permission is required.
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     MethodNotAllowed:
       description: Method not allowed
       content:
@@ -2113,7 +2144,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -2432,7 +2463,7 @@ components:
           type: number
     Probe:
       type: object
-      required: [id, name, status, fuel, sensorMode, movement, inventory]
+      required: [id, name, status, fuel, sensorMode]
       properties:
         id:
           type: integer
@@ -2440,7 +2471,13 @@ components:
           type: string
         status:
           type: string
-          enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, dead]
+          enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, dead, trapped_by_black_hole]
+        message:
+          type: string
+          nullable: true
+        alert:
+          nullable: true
+          $ref: '#/components/schemas/ProbeTerminalAlert'
         fuel:
           type: object
           properties:
@@ -2481,6 +2518,45 @@ components:
               nullable: true
         inventory:
           $ref: '#/components/schemas/ProbeInventory'
+    ProbeTerminalAlert:
+      type: object
+      required: [type, severity, title, message, action]
+      properties:
+        type:
+          type: string
+          enum: [mind_snapshot_reassignment_available]
+        severity:
+          type: string
+          enum: [critical]
+        title:
+          type: string
+        message:
+          type: string
+        action:
+          type: object
+          required: [label, method, endpoint]
+          properties:
+            label:
+              type: string
+            method:
+              type: string
+              enum: [POST]
+            endpoint:
+              type: string
+              enum: ['/api/probe/mind-snapshot/reassign']
+    ProbeMindSnapshotReassignResponse:
+      type: object
+      required: [reassigned, previousProbeId, probe, message]
+      properties:
+        reassigned:
+          type: boolean
+          enum: [true]
+        previousProbeId:
+          type: integer
+        probe:
+          $ref: '#/components/schemas/Probe'
+        message:
+          type: string
     StorageContainer:
       type: object
       required: [id, kind, label, sortOrder, capacity, usedCapacity, freeCapacity, capacityUnit, rules]

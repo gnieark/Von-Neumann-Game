@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- API v32 : ajout de `POST /api/probe/mind-snapshot/reassign` pour réassigner le snapshot d'esprit d'une sonde morte ou piégée par un trou noir vers une nouvelle sonde, avec reset du référentiel local à `0,0,0`.
+- Interface : les sondes mortes ou piégées par un trou noir affichent maintenant une alerte explicite avec une action de réattribution du snapshot d'esprit.
 - Debug : ajout de `scripts/userinfos.php` pour auditer en CLI l'état complet d'une sonde, dont position absolue/relative, inventaire brut, secteurs visités, mouvements et événements planifiés.
 
 ### Fixed

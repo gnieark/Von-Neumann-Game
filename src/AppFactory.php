@@ -30,6 +30,7 @@ use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
@@ -90,8 +91,9 @@ final class AppFactory
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks);
+        $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $gameplayConfig);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $reinstantiation, $gameplayConfig);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService
