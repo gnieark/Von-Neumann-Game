@@ -41,8 +41,9 @@ final class ProbeStorageService
             }
         }
 
-        $this->assignUnplacedItems($probe, $core);
-        $this->assignUnplacedMannies($probe, $core);
+        $knownContainerIds = $this->knownContainerIds($probe);
+        $this->assignUnplacedItems($probe, $core, $knownContainerIds);
+        $this->assignUnplacedMannies($probe, $core, $knownContainerIds);
         if ($this->resourceRowsDifferFromProbeTotals($probe)) {
             $this->migrateLegacyProbe($probe);
         }
@@ -802,10 +803,13 @@ final class ProbeStorageService
         return max(1, (int) ceil(max(1.0, $amount))) * $this->storageMoveSecondsPerUnit();
     }
 
-    private function assignUnplacedItems(NeumannProbe $probe, StorageContainer $fallback): void
+    /**
+     * @param array<int, true> $knownContainerIds
+     */
+    private function assignUnplacedItems(NeumannProbe $probe, StorageContainer $fallback, array $knownContainerIds): void
     {
         foreach ($this->items->findByProbeId($probe->id) as $item) {
-            if ($item->storageContainerId !== null) {
+            if ($item->storageContainerId !== null && isset($knownContainerIds[$item->storageContainerId])) {
                 continue;
             }
             $container = $this->placeUnit($probe, $item->type, $item->containerSpace) ?? $fallback;
@@ -828,16 +832,35 @@ final class ProbeStorageService
         ];
     }
 
-    private function assignUnplacedMannies(NeumannProbe $probe, StorageContainer $fallback): void
+    /**
+     * @param array<int, true> $knownContainerIds
+     */
+    private function assignUnplacedMannies(NeumannProbe $probe, StorageContainer $fallback, array $knownContainerIds): void
     {
         foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
-            if (!$manny->isOnProbe() || $manny->storageContainerId !== null) {
+            if (!$manny->isOnProbe()) {
+                continue;
+            }
+            if ($manny->storageContainerId !== null && isset($knownContainerIds[$manny->storageContainerId])) {
                 continue;
             }
             $container = $this->placeUnit($probe, 'manny', $this->mannyContainerSpace()) ?? $fallback;
             $manny->storageContainerId = $container->id;
             $this->mannies->save($manny);
         }
+    }
+
+    /**
+     * @return array<int, true>
+     */
+    private function knownContainerIds(NeumannProbe $probe): array
+    {
+        $known = [];
+        foreach ($this->containers->findByProbeId($probe->id) as $container) {
+            $known[$container->id] = true;
+        }
+
+        return $known;
     }
 
     private function resourceRowsDifferFromProbeTotals(NeumannProbe $probe): bool

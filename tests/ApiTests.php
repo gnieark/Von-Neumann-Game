@@ -413,6 +413,41 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($userinfosText, 'relative: 0:0:0 from player home'), 'userinfos CLI reports relative position');
     $test->assert(str_contains($userinfosText, 'Inventory'), 'userinfos CLI reports inventory state');
     $test->assert(str_contains($userinfosText, 'Visited sectors'), 'userinfos CLI reports visited sector history');
+
+    $storageRepairSession = $auth->createSessionForPlayer($player);
+    $storageRepairHeaders = ['Authorization' => 'Bearer ' . $storageRepairSession['token']];
+    $initialMannyStorageRepair = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
+    $test->assertEquals(200, $initialMannyStorageRepair->status, 'GET /api/probe/mannies initializes storage for a newly created probe');
+    $coreContainer = $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core');
+    $test->assert($coreContainer !== null, 'Manny list repair creates the probe core storage container');
+    if ($coreContainer !== null) {
+        foreach ($mannies->findByProbeId($createdProbe->id) as $manny) {
+            $test->assertEquals($coreContainer->id, $manny->storageContainerId, 'Manny list repair assigns onboard Mannys to the core container');
+        }
+    }
+
+    $orphanedItem = $items->create($createdProbe->id, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01, storageContainerId: 999999);
+    $pdo->prepare('UPDATE mannies SET storage_container_id = 999999 WHERE probe_id = :probe_id AND location_type = :location_type')->execute([
+        'probe_id' => $createdProbe->id,
+        'location_type' => 'probe',
+    ]);
+    $pdo->prepare('DELETE FROM storage_container_resources WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)')->execute(['probe_id' => $createdProbe->id]);
+    $pdo->prepare('DELETE FROM storage_containers WHERE probe_id = :probe_id')->execute(['probe_id' => $createdProbe->id]);
+
+    $orphanedStorageRepair = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
+    $test->assertEquals(200, $orphanedStorageRepair->status, 'GET /api/probe/mannies repairs missing storage containers');
+    $recreatedCore = $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core');
+    $test->assert($recreatedCore !== null, 'orphaned storage repair recreates the probe core container');
+    if ($recreatedCore !== null) {
+        foreach ($mannies->findByProbeId($createdProbe->id) as $manny) {
+            $test->assertEquals($recreatedCore->id, $manny->storageContainerId, 'orphaned storage repair moves onboard Mannys back to a known container');
+        }
+        $test->assertEquals($recreatedCore->id, $items->findByUidForProbe($createdProbe->id, $orphanedItem->uid)?->storageContainerId, 'orphaned storage repair moves items back to a known container');
+    }
+    $storedOrphanedItem = $items->findByUidForProbe($createdProbe->id, $orphanedItem->uid);
+    if ($storedOrphanedItem !== null) {
+        $items->delete($storedOrphanedItem);
+    }
 }
 $test->assertThrows(
     fn() => $auth->registerPlayerWithPassword('remi', 'other-secret', 'Duplicate'),
@@ -999,6 +1034,27 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemA->uid)?->storageContainerId, 'completed batch move updates the first item container');
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemB->uid)?->storageContainerId, 'completed batch move updates the second item container');
+
+        $pdo->prepare('UPDATE mannies SET current_task = :task, task_started_at = :started, task_ends_at = :ended, task_payload_json = :payload WHERE uid = :uid')->execute([
+            'uid' => $craftMannyId,
+            'task' => 'moving_stockage',
+            'started' => gmdate('c', time() - 120),
+            'ended' => gmdate('c', time() - 60),
+            'payload' => json_encode([
+                'kind' => 'resource',
+                'fromContainerId' => 'probe-core',
+                'toContainerId' => $additionalStorageContainer['id'] ?? '',
+                'resourceType' => 'ice',
+                'amount' => 0.3,
+                'durationSeconds' => 60,
+            ], JSON_THROW_ON_ERROR),
+        ]);
+        $failedStorageMoveRefresh = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+        $test->assertEquals(200, $failedStorageMoveRefresh->status, 'expired impossible storage moves do not break Manny refresh');
+        $failedStorageMoveManny = $mannies->findByUidForProbe($craftProbeEntity->id, $craftMannyId);
+        $test->assertEquals(null, $failedStorageMoveManny?->currentTask, 'expired impossible storage move releases the Manny');
+        $test->assertEquals('failed', $failedStorageMoveManny?->taskPayload['result'] ?? null, 'expired impossible storage move records a failed result');
+        $test->assertEquals('insufficient_inventory_amount', $failedStorageMoveManny?->taskPayload['failureReason'] ?? null, 'expired impossible storage move records its failure reason');
 
         for ($index = 0; $index < 5; $index++) {
             $items->create($craftProbeEntity->id, ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, storageContainerId: $additionalStorageContainerEntity->id);
