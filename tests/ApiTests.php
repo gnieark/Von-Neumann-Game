@@ -12,6 +12,7 @@ use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\ProbeItem;
+use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
@@ -235,6 +236,8 @@ $messageSchemaColumns = array_map(
 );
 $test->assert(in_array('sender_probe_id', $messageSchemaColumns, true), 'Probe message table stores sender probes');
 $test->assert(in_array('recipient_probe_id', $messageSchemaColumns, true), 'Probe message table stores recipient probes');
+$test->assert(in_array('sender_type', $messageSchemaColumns, true), 'Probe message table stores typed senders');
+$test->assert(in_array('recipient_type', $messageSchemaColumns, true), 'Probe message table stores typed recipients');
 $test->assert(in_array('read_at', $messageSchemaColumns, true), 'Probe message table stores read timestamps');
 $playerSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
@@ -293,7 +296,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(33, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(34, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1315,6 +1318,10 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $probes->save($stationaryNeighborProbe);
     $movingNeighborProbe->currentSector = $createdProbe->currentSector;
     $probes->save($movingNeighborProbe);
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Planet('message-life-planet', 'Warm Chorus', 'ocean', 1.0, 1.0, true, 0.79, ['water_ice'], intelligentLife: true),
+        new Planet('message-empty-planet', 'Quiet Rock', 'rocky', 0.8, 0.9, true, 0.33, ['silicates']),
+    ]));
 
     $neighborTarget = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
     $movements->create(
@@ -1368,7 +1375,9 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assertEquals(201, $sentMessage->status, 'POST /api/probe/messages sends a message to a probe in the same sector');
     $test->assertEquals('Signal de bienvenue', $sentMessage->body['message']['body'] ?? null, 'sent probe message body is trimmed');
     $test->assertEquals($createdProbe->id, $sentMessage->body['message']['sender']['probeId'] ?? null, 'sent probe message exposes sender probe id');
+    $test->assertEquals('probe', $sentMessage->body['message']['sender']['type'] ?? null, 'sent probe message exposes sender type');
     $test->assertEquals($stationaryNeighborProbe->id, $sentMessage->body['message']['recipient']['probeId'] ?? null, 'sent probe message exposes recipient probe id');
+    $test->assertEquals('probe', $sentMessage->body['message']['recipient']['type'] ?? null, 'sent probe message exposes recipient type');
     $test->assertEquals('unread', $sentMessage->body['message']['status'] ?? null, 'new probe message starts unread');
     $sentMessageId = (int) ($sentMessage->body['message']['id'] ?? 0);
 
@@ -1385,6 +1394,29 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assert(!array_key_exists('readAt', $senderSentMessages->body['messages'][0] ?? []), 'sent probe message list does not expose read timestamp');
     $test->assert(!array_key_exists('updatedAt', $senderSentMessages->body['messages'][0] ?? []), 'sent probe message list does not expose read-driven update timestamp');
     $test->assertEquals(1, $senderSentMessages->body['pagination']['total'] ?? null, 'sent probe message list exposes the total sent message count');
+
+    $planetMessage = $kernel->handle('POST', '/api/probe/messages', $headers, json_encode([
+        'recipient' => [
+            'type' => 'planet',
+            'id' => 'message-life-planet',
+        ],
+        'body' => 'Salutations orbitales',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(201, $planetMessage->status, 'POST /api/probe/messages sends a message to an inhabited planet in the current sector');
+    $test->assertEquals('planet', $planetMessage->body['message']['recipient']['type'] ?? null, 'planet message exposes a planet recipient type');
+    $test->assertEquals('message-life-planet', $planetMessage->body['message']['recipient']['planetId'] ?? null, 'planet message exposes recipient planet id');
+    $test->assertEquals('Warm Chorus', $planetMessage->body['message']['recipient']['name'] ?? null, 'planet message exposes recipient planet name');
+
+    $uninhabitedPlanetMessage = $kernel->handle('POST', '/api/probe/messages', $headers, json_encode([
+        'recipient' => [
+            'type' => 'planet',
+            'id' => 'message-empty-planet',
+        ],
+        'body' => 'Y a-t-il quelqu’un ?',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $uninhabitedPlanetMessage->status, 'POST /api/probe/messages rejects uninhabited planet recipients');
+    $test->assertEquals('invalid_message_recipient', $uninhabitedPlanetMessage->body['error']['code'] ?? null, 'uninhabited planet recipient returns an explicit error');
+
     $recipientSentMessages = $kernel->handle('GET', '/api/probe/messages/sent', $stationaryHeaders);
     $test->assertEquals(0, $recipientSentMessages->body['pagination']['total'] ?? null, 'recipient does not see inbound messages in sent messages');
     $receivedMessages = $kernel->handle('GET', '/api/probe/messages', $stationaryHeaders);
@@ -1394,6 +1426,26 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assert(isset($receivedMessages->body['messages'][0]['sector']['relative']), 'received probe message exposes a relative sector');
     $test->assertEquals(1, $receivedMessages->body['pagination']['count'] ?? null, 'probe message list exposes the page item count');
     $test->assertEquals(false, $receivedMessages->body['pagination']['hasMore'] ?? null, 'probe message list reports when no older page remains');
+
+    $planetInbound = $messages->createForEndpoints(
+        ProbeMessage::ENDPOINT_PLANET,
+        'message-life-planet',
+        'Warm Chorus',
+        null,
+        ProbeMessage::ENDPOINT_PROBE,
+        (string) $createdProbe->id,
+        null,
+        $createdProbe->id,
+        $createdProbe->currentSector,
+        'Nous vous recevons.',
+    );
+    $probeReceivedPlanetMessages = $kernel->handle('GET', '/api/probe/messages', $headers);
+    $test->assertEquals(200, $probeReceivedPlanetMessages->status, 'probe can list messages received from inhabited planets');
+    $test->assertEquals('Nous vous recevons.', $probeReceivedPlanetMessages->body['messages'][0]['body'] ?? null, 'planet inbound message body is exposed');
+    $test->assertEquals('planet', $probeReceivedPlanetMessages->body['messages'][0]['sender']['type'] ?? null, 'planet inbound message exposes sender type');
+    $test->assertEquals('message-life-planet', $probeReceivedPlanetMessages->body['messages'][0]['sender']['planetId'] ?? null, 'planet inbound message exposes sender planet id');
+    $planetInboundRead = $kernel->handle('PATCH', '/api/probe/messages/' . $planetInbound->id . '/read', $headers);
+    $test->assertEquals(200, $planetInboundRead->status, 'probe can mark a planet-origin message as read');
 
     $senderRead = $kernel->handle('PATCH', '/api/probe/messages/' . $sentMessageId . '/read', $headers);
     $test->assertEquals(404, $senderRead->status, 'only the recipient can mark a probe message read');
@@ -1438,14 +1490,14 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $defaultSentMessagePage = $kernel->handle('GET', '/api/probe/messages/sent', $headers);
     $test->assertEquals(200, $defaultSentMessagePage->status, 'GET /api/probe/messages/sent returns the default sent message page');
     $test->assertEquals(50, count($defaultSentMessagePage->body['messages'] ?? []), 'GET /api/probe/messages/sent returns at most the 50 latest sent messages by default');
-    $test->assertEquals(56, $defaultSentMessagePage->body['pagination']['total'] ?? null, 'default sent message page exposes the total available sent messages');
+    $test->assertEquals(57, $defaultSentMessagePage->body['pagination']['total'] ?? null, 'default sent message page exposes the total available sent messages');
     $test->assertEquals('Archive message 55', $defaultSentMessagePage->body['messages'][0]['body'] ?? null, 'default sent message page is sorted newest first');
     $test->assert(!array_key_exists('status', $defaultSentMessagePage->body['messages'][0] ?? []), 'default sent message page does not expose read status');
     $test->assert(!array_key_exists('updatedAt', $defaultSentMessagePage->body['messages'][0] ?? []), 'default sent message page does not expose update timestamp');
     $olderSentMessagePage = $kernel->handle('GET', '/api/probe/messages/sent?limit=10&offset=50', $headers);
     $olderSentBodies = array_map(static fn(array $message): string => (string) ($message['body'] ?? ''), $olderSentMessagePage->body['messages'] ?? []);
     $test->assertEquals(200, $olderSentMessagePage->status, 'GET /api/probe/messages/sent accepts limit and offset query parameters');
-    $test->assertEquals(6, count($olderSentBodies), 'older sent message page returns remaining messages after the offset');
+    $test->assertEquals(7, count($olderSentBodies), 'older sent message page returns remaining messages after the offset');
     $test->assert(in_array('Signal de bienvenue', $olderSentBodies, true), 'older sent message page can reach messages beyond the first 50');
     $invalidSentLimitMessagePage = $kernel->handle('GET', '/api/probe/messages/sent?limit=0', $headers);
     $test->assertEquals(400, $invalidSentLimitMessagePage->status, 'GET /api/probe/messages/sent rejects a zero limit');

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '33'
+  version: '34'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 33
+                apiVersion: 34
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -705,9 +705,31 @@ paths:
                 messages:
                   - id: 12
                     sender:
+                      type: planet
+                      id: planet-abc123
+                      planetId: planet-abc123
+                      name: Pale Signal
+                    recipient:
+                      type: probe
+                      id: 1
+                      probeId: 1
+                      name: Probe of remi
+                    sector:
+                      relative: { x: 0, y: 0, z: 0 }
+                    body: Signal local reçu.
+                    status: unread
+                    readAt: null
+                    createdAt: '2026-06-06T12:00:00+00:00'
+                    updatedAt: '2026-06-06T12:00:00+00:00'
+                  - id: 13
+                    sender:
+                      type: probe
+                      id: 2
                       probeId: 2
                       name: Probe of nova
                     recipient:
+                      type: probe
+                      id: 1
                       probeId: 1
                       name: Probe of remi
                     sector:
@@ -720,7 +742,7 @@ paths:
                 pagination:
                   limit: 50
                   offset: 0
-                  count: 1
+                  count: 2
                   total: 67
                   hasMore: true
         '401':
@@ -728,10 +750,12 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
     post:
-      summary: Send a message to another probe in the same sector
+      summary: Send a message to a local probe or inhabited planet
       description: >
-        Creates an unread message for another probe. The recipient probe must
-        currently be in the exact same sector as the sender probe.
+        Creates an unread message from the current probe to a local recipient.
+        Probe recipients must currently be in the exact same sector as the
+        sender probe. Planet recipients must be inhabited planets in the
+        current sector. If the recipient type is omitted, `probe` is used.
       requestBody:
         required: true
         content:
@@ -739,7 +763,9 @@ paths:
             schema:
               $ref: '#/components/schemas/ProbeMessageSendRequest'
             example:
-              recipientProbeId: 2
+              recipient:
+                type: planet
+                id: planet-abc123
               body: Signal local reçu ?
       responses:
         '201':
@@ -755,7 +781,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Recipient probe is invalid or not in the same sector
+          description: Recipient is invalid or not in the current sector
           content:
             application/json:
               schema:
@@ -797,11 +823,15 @@ paths:
                 messages:
                   - id: 12
                     sender:
+                      type: probe
+                      id: 1
                       probeId: 1
                       name: Probe of remi
                     recipient:
-                      probeId: 2
-                      name: Probe of nova
+                      type: planet
+                      id: planet-abc123
+                      planetId: planet-abc123
+                      name: Pale Signal
                     sector:
                       relative: { x: 0, y: 0, z: 0 }
                     body: Signal local reçu ?
@@ -2704,16 +2734,49 @@ components:
           description: Optional cap applied to itemIds or targetMannyIds.
     ProbeMessageSendRequest:
       type: object
-      required: [recipientProbeId, body]
+      required: [body]
+      description: Provide `recipient`, or alternatively `recipientId` with optional `recipientType`. If no type is provided, `probe` is used.
       properties:
+        recipient:
+          $ref: '#/components/schemas/ProbeMessageRecipientRequest'
+        recipientId:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: string
+          description: Alternative recipient id. Used with `recipientType` or default `probe`.
+        recipientType:
+          type: string
+          enum: [probe, planet]
+          default: probe
+          description: Alternative recipient type for clients that do not send `recipient`.
         recipientProbeId:
           type: integer
           minimum: 1
-          description: Probe id of another probe currently in the same sector.
+          deprecated: true
+          description: Legacy shortcut for `recipient: { type: probe, id: ... }`.
+        recipientPlanetId:
+          type: string
+          deprecated: true
+          description: Legacy shortcut for `recipient: { type: planet, id: ... }`.
         body:
           type: string
           minLength: 1
           maxLength: 2000
+    ProbeMessageRecipientRequest:
+      type: object
+      required: [id]
+      properties:
+        type:
+          type: string
+          enum: [probe, planet]
+          default: probe
+        id:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: string
+          description: Probe id for `probe`, planet object id for `planet`.
     ProbeMessageResponse:
       type: object
       required: [message]
@@ -3167,10 +3230,22 @@ components:
         - $ref: '#/components/schemas/ProbeAlertRule'
     ProbeMessageEndpoint:
       type: object
-      required: [probeId, name]
+      required: [type, id, name]
       properties:
+        type:
+          type: string
+          enum: [probe, planet]
+        id:
+          oneOf:
+            - type: integer
+            - type: string
+          description: Numeric probe id for probe endpoints, planet object id for planet endpoints.
         probeId:
           type: integer
+          description: Present when `type` is `probe`.
+        planetId:
+          type: string
+          description: Present when `type` is `planet`.
         name:
           type: string
     ProbeInventory:

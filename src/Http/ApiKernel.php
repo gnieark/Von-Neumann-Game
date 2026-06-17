@@ -39,7 +39,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 33;
+    public const API_VERSION = 34;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -732,29 +732,67 @@ final class ApiKernel
             return ApiResponse::error(400, 'bad_request', 'JSON body must contain a probe message.');
         }
 
-        $recipientProbeId = $this->messageRecipientProbeId($data['recipientProbeId'] ?? null);
-        if ($recipientProbeId === null) {
-            return ApiResponse::error(400, 'bad_request', 'Message requires recipientProbeId.');
-        }
-        if ($recipientProbeId === $probe->id) {
-            return ApiResponse::error(422, 'invalid_message_recipient', 'A probe cannot send a message to itself.');
-        }
-
         $messageBody = isset($data['body']) && is_string($data['body']) ? trim($data['body']) : '';
         if ($messageBody === '' || strlen($messageBody) > 2000) {
             return ApiResponse::error(400, 'bad_request', 'Message body must contain 1 to 2000 characters.');
         }
 
-        $recipient = $this->probes->findById($recipientProbeId);
-        if ($recipient === null) {
-            return ApiResponse::error(404, 'not_found', 'Recipient probe not found.');
-        }
-        $recipient = $this->movements->refreshProbeMovementState($recipient);
-        if (!$recipient->currentSector->equals($probe->currentSector)) {
-            return ApiResponse::error(422, 'probe_not_in_same_sector', 'Recipient probe must be in the same sector.');
+        $recipient = $this->messageRecipientEndpoint($data);
+        if ($recipient instanceof ApiResponse) {
+            return $recipient;
         }
 
-        $message = $this->messages->create($probe->id, $recipient->id, $probe->currentSector, $messageBody);
+        if ($recipient['type'] === ProbeMessage::ENDPOINT_PROBE) {
+            $recipientProbeId = $this->messageRecipientProbeId($recipient['id']);
+            if ($recipientProbeId === null) {
+                return ApiResponse::error(400, 'bad_request', 'Message requires a recipient probe id.');
+            }
+            if ($recipientProbeId === $probe->id) {
+                return ApiResponse::error(422, 'invalid_message_recipient', 'A probe cannot send a message to itself.');
+            }
+
+            $recipientProbe = $this->probes->findById($recipientProbeId);
+            if ($recipientProbe === null) {
+                return ApiResponse::error(404, 'not_found', 'Recipient probe not found.');
+            }
+            $recipientProbe = $this->movements->refreshProbeMovementState($recipientProbe);
+            if (!$recipientProbe->currentSector->equals($probe->currentSector)) {
+                return ApiResponse::error(422, 'probe_not_in_same_sector', 'Recipient probe must be in the same sector.');
+            }
+
+            $message = $this->messages->createForEndpoints(
+                ProbeMessage::ENDPOINT_PROBE,
+                (string) $probe->id,
+                null,
+                $probe->id,
+                ProbeMessage::ENDPOINT_PROBE,
+                (string) $recipientProbe->id,
+                null,
+                $recipientProbe->id,
+                $probe->currentSector,
+                $messageBody,
+            );
+
+            return new ApiResponse(201, ['message' => $this->probeMessageArray($player, $message)]);
+        }
+
+        $recipientPlanet = $this->currentSectorIntelligentLifePlanet($player, $probe, $recipient['id']);
+        if ($recipientPlanet === null) {
+            return ApiResponse::error(422, 'invalid_message_recipient', 'Recipient planet must be an inhabited planet in the current sector.');
+        }
+
+        $message = $this->messages->createForEndpoints(
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $probe->id,
+            null,
+            $probe->id,
+            ProbeMessage::ENDPOINT_PLANET,
+            $recipientPlanet['id'],
+            $recipientPlanet['name'],
+            null,
+            $probe->currentSector,
+            $messageBody,
+        );
 
         return new ApiResponse(201, ['message' => $this->probeMessageArray($player, $message)]);
     }
@@ -809,7 +847,7 @@ final class ApiKernel
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $message = $this->messages->findById($messageId);
-        if ($message === null || $message->recipientProbeId !== $probe->id) {
+        if ($message === null || $message->recipientType !== ProbeMessage::ENDPOINT_PROBE || $message->recipientProbeId !== $probe->id) {
             return ApiResponse::error(404, 'not_found', 'Message not found.');
         }
 
@@ -901,6 +939,87 @@ final class ApiKernel
         }
         if (is_string($value) && ctype_digit($value) && (int) $value > 0) {
             return (int) $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{type: string, id: mixed}|ApiResponse
+     */
+    private function messageRecipientEndpoint(array $data): array|ApiResponse
+    {
+        $recipient = is_array($data['recipient'] ?? null) ? $data['recipient'] : [];
+        $typeValue = $recipient['type'] ?? $data['recipientType'] ?? $data['type'] ?? ProbeMessage::ENDPOINT_PROBE;
+        $type = is_string($typeValue) ? strtolower(trim($typeValue)) : ProbeMessage::ENDPOINT_PROBE;
+        if ($type === '') {
+            $type = ProbeMessage::ENDPOINT_PROBE;
+        }
+        if (!in_array($type, [ProbeMessage::ENDPOINT_PROBE, ProbeMessage::ENDPOINT_PLANET], true)) {
+            return ApiResponse::error(400, 'bad_request', 'Recipient type must be probe or planet.');
+        }
+
+        $id = $recipient['id'] ?? $data['recipientId'] ?? null;
+        if ($type === ProbeMessage::ENDPOINT_PROBE && array_key_exists('recipientProbeId', $data)) {
+            $id = $data['recipientProbeId'];
+        }
+        if ($type === ProbeMessage::ENDPOINT_PLANET && array_key_exists('recipientPlanetId', $data)) {
+            $id = $data['recipientPlanetId'];
+        }
+
+        if (($type === ProbeMessage::ENDPOINT_PROBE && $this->messageRecipientProbeId($id) === null) || ($type === ProbeMessage::ENDPOINT_PLANET && (!is_string($id) || trim($id) === ''))) {
+            return ApiResponse::error(400, 'bad_request', 'Message requires a recipient id.');
+        }
+
+        return [
+            'type' => $type,
+            'id' => $type === ProbeMessage::ENDPOINT_PLANET ? trim((string) $id) : $id,
+        ];
+    }
+
+    /**
+     * @return array{id: string, name: ?string}|null
+     */
+    private function currentSectorIntelligentLifePlanet(Player $player, NeumannProbe $probe, string $planetId): ?array
+    {
+        $observation = $this->observations->observe($player, $probe, $probe->currentSector)->toArray();
+        foreach (($observation['objects'] ?? []) as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+            $planet = $this->findIntelligentLifePlanetInObservationObject($object, $planetId);
+            if ($planet !== null) {
+                return $planet;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $object
+     * @return array{id: string, name: ?string}|null
+     */
+    private function findIntelligentLifePlanetInObservationObject(array $object, string $planetId): ?array
+    {
+        if (($object['type'] ?? null) === ProbeMessage::ENDPOINT_PLANET && (string) ($object['id'] ?? '') === $planetId && (bool) ($object['intelligentLife'] ?? false)) {
+            return [
+                'id' => (string) $object['id'],
+                'name' => isset($object['name']) && $object['name'] !== null ? (string) $object['name'] : null,
+            ];
+        }
+
+        foreach (['minableTargets', 'bookmarkTargets'] as $childKey) {
+            foreach (($object[$childKey] ?? []) as $child) {
+                if (!is_array($child)) {
+                    continue;
+                }
+                $planet = $this->findIntelligentLifePlanetInObservationObject($child, $planetId);
+                if ($planet !== null) {
+                    return $planet;
+                }
+            }
         }
 
         return null;
@@ -1351,19 +1470,10 @@ final class ApiKernel
 
     private function probeMessageArray(Player $player, ProbeMessage $message, bool $includeReadState = true): array
     {
-        $sender = $this->probes->findById($message->senderProbeId);
-        $recipient = $this->probes->findById($message->recipientProbeId);
-
         $payload = [
             'id' => $message->id,
-            'sender' => [
-                'probeId' => $message->senderProbeId,
-                'name' => $sender?->name ?? 'Probe #' . $message->senderProbeId,
-            ],
-            'recipient' => [
-                'probeId' => $message->recipientProbeId,
-                'name' => $recipient?->name ?? 'Probe #' . $message->recipientProbeId,
-            ],
+            'sender' => $this->probeMessageEndpointArray($message->senderType, $message->senderId, $message->senderName, $message->senderProbeId),
+            'recipient' => $this->probeMessageEndpointArray($message->recipientType, $message->recipientId, $message->recipientName, $message->recipientProbeId),
             'sector' => [
                 'relative' => (new PlayerReferenceFrame($player->homeSector))->globalToRelative($message->sector),
             ],
@@ -1378,6 +1488,28 @@ final class ApiKernel
         }
 
         return $payload;
+    }
+
+    private function probeMessageEndpointArray(string $type, string $id, ?string $name, ?int $probeId): array
+    {
+        if ($type === ProbeMessage::ENDPOINT_PROBE) {
+            $probe = $probeId !== null ? $this->probes->findById($probeId) : null;
+            $publicId = $probeId ?? (int) $id;
+
+            return [
+                'type' => ProbeMessage::ENDPOINT_PROBE,
+                'id' => $publicId,
+                'probeId' => $publicId,
+                'name' => $probe?->name ?? $name ?? 'Probe #' . $publicId,
+            ];
+        }
+
+        return [
+            'type' => ProbeMessage::ENDPOINT_PLANET,
+            'id' => $id,
+            'planetId' => $id,
+            'name' => $name ?? 'Planet #' . $id,
+        ];
     }
 
     private function canModerateForum(Player $player): bool

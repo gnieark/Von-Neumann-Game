@@ -4,6 +4,12 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-06-17
 
+### Added
+
+- API v34 : la messagerie `/api/probe/messages` accepte des destinataires typés via `recipient.type` (`probe` par défaut, ou `planet`) et `recipient.id`.
+- Messagerie : les messages exposent désormais `sender.type` et `recipient.type`; les endpoints peuvent être une sonde (`probeId`) ou une planète habitée (`planetId`).
+- Interface : la page `/messaging` permet d’envoyer un message aux sondes du secteur courant et aux planètes habitées détectées dans ce secteur.
+
 ### Fixed
 
 - Interface : le container interne de la sonde est traduit en anglais dans les vues d'inventaire.

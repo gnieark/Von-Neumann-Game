@@ -5,6 +5,7 @@
     const state = {
         "currentMessageFolder": "received",
         "currentSectorProbes": [],
+        "currentSectorObjects": [],
         "receivedMessages": [],
         "receivedMessagePagination": null,
         "sentMessages": [],
@@ -76,8 +77,59 @@
 
     function sectorProbeRecipients() {
         return Array.isArray(state.currentSectorProbes)
-            ? state.currentSectorProbes.filter((probe) => probe && probe.id)
+            ? state.currentSectorProbes
+                .filter((probe) => probe && probe.id)
+                .map((probe) => ({
+                    "type": "probe",
+                    "id": String(probe.id),
+                    "name": probe.name || tr("unknownProbe", "Unknown probe"),
+                }))
             : [];
+    }
+
+    function sectorPlanetRecipients() {
+        const recipients = [];
+        const seen = new Set();
+        const visit = (object) => {
+            if (!object || typeof object !== "object") {
+                return;
+            }
+            if (object.type === "planet" && object.id && object.intelligentLife === true && !seen.has(String(object.id))) {
+                seen.add(String(object.id));
+                recipients.push({
+                    "type": "planet",
+                    "id": String(object.id),
+                    "name": object.name || object.id,
+                });
+            }
+            ["minableTargets", "bookmarkTargets"].forEach((key) => {
+                if (Array.isArray(object[key])) {
+                    object[key].forEach(visit);
+                }
+            });
+        };
+
+        if (Array.isArray(state.currentSectorObjects)) {
+            state.currentSectorObjects.forEach(visit);
+        }
+
+        return recipients;
+    }
+
+    function messageRecipients() {
+        return sectorProbeRecipients().concat(sectorPlanetRecipients());
+    }
+
+    function recipientOptionValue(recipient) {
+        return String(recipient.type || "probe") + ":" + String(recipient.id || "");
+    }
+
+    function endpointTypeLabel(type) {
+        if (type === "planet") {
+            return tr("messageEndpointPlanet", "Planet");
+        }
+
+        return tr("messageEndpointProbe", "Probe");
     }
 
     function renderMessageRecipients() {
@@ -88,9 +140,9 @@
         }
 
         const previousValue = select.value;
-        const probes = sectorProbeRecipients();
-        if (probes.length === 0) {
-            select.innerHTML = "<option value=\"\">" + window.VNG.escapeHtml(tr("noMessageRecipients", "No other probe detected in the sector.")) + "</option>";
+        const recipients = messageRecipients();
+        if (recipients.length === 0) {
+            select.innerHTML = "<option value=\"\">" + window.VNG.escapeHtml(tr("noMessageRecipients", "No other probe or inhabited planet detected in the sector.")) + "</option>";
             select.disabled = true;
             if (submit) {
                 submit.disabled = true;
@@ -99,10 +151,12 @@
             return;
         }
 
-        select.innerHTML = probes.map((probe) => (
-            "<option value=\"" + window.VNG.escapeHtml(probe.id) + "\">" + window.VNG.escapeHtml(probe.name || tr("unknownProbe", "Unknown probe")) + "</option>"
+        select.innerHTML = recipients.map((recipient) => (
+            "<option value=\"" + window.VNG.escapeHtml(recipientOptionValue(recipient)) + "\">"
+                + window.VNG.escapeHtml(endpointTypeLabel(recipient.type) + " - " + (recipient.name || recipient.id))
+            + "</option>"
         )).join("");
-        if (previousValue && probes.some((probe) => String(probe.id) === previousValue)) {
+        if (previousValue && recipients.some((recipient) => recipientOptionValue(recipient) === previousValue)) {
             select.value = previousValue;
         }
         select.disabled = false;
@@ -183,7 +237,7 @@
             return "<article class=\"probe-message " + (isUnread ? "unread" : "read") + "\">"
                 + "<div class=\"probe-message-header\">"
                     + "<div>"
-                        + "<div class=\"probe-message-sender\">" + window.VNG.escapeHtml(counterpartLabel) + " : " + window.VNG.escapeHtml(counterpart.name || tr("unknownProbe", "Unknown probe")) + "</div>"
+                        + "<div class=\"probe-message-sender\">" + window.VNG.escapeHtml(counterpartLabel) + " : " + window.VNG.escapeHtml((counterpart.name || tr("unknownMessageSender", "Unknown sender")) + " (" + endpointTypeLabel(counterpart.type || "probe") + ")") + "</div>"
                         + "<div class=\"probe-message-meta\">"
                             + "<span>" + window.VNG.escapeHtml(formatMessageDate(message.createdAt)) + "</span>"
                             + "<span>" + window.VNG.escapeHtml(tr("messageSector", "Sector")) + " " + window.VNG.escapeHtml(window.VNG.coordinate(sector)) + "</span>"
@@ -281,8 +335,10 @@
         try {
             const data = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
             state.currentSectorProbes = Array.isArray(data && data.sector && data.sector.probes) ? data.sector.probes : [];
+            state.currentSectorObjects = Array.isArray(data && data.sector && data.sector.objects) ? data.sector.objects : [];
         } catch (error) {
             state.currentSectorProbes = [];
+            state.currentSectorObjects = [];
         }
         renderMessageRecipients();
     }
@@ -341,9 +397,12 @@
             event.preventDefault();
             const formNode = event.currentTarget;
             const form = new FormData(formNode);
-            const recipientProbeId = Number.parseInt(String(form.get("recipientProbeId") || ""), 10);
+            const recipientValue = String(form.get("recipient") || "");
+            const separatorIndex = recipientValue.indexOf(":");
+            const recipientType = separatorIndex >= 0 ? recipientValue.slice(0, separatorIndex) : "probe";
+            const recipientId = separatorIndex >= 0 ? recipientValue.slice(separatorIndex + 1) : recipientValue;
             const bodyValue = String(form.get("body") || "").trim();
-            if (!Number.isFinite(recipientProbeId) || recipientProbeId <= 0 || bodyValue === "") {
+            if (!["probe", "planet"].includes(recipientType) || recipientId === "" || bodyValue === "") {
                 setText("message-status", tr("requestDenied", "Request denied"));
                 return;
             }
@@ -353,7 +412,10 @@
                 await window.VNG.apiJson("/api/probe/messages", {
                     "method": "POST",
                     "body": JSON.stringify({
-                        recipientProbeId,
+                        "recipient": {
+                            "type": recipientType,
+                            "id": recipientType === "probe" ? Number.parseInt(recipientId, 10) : recipientId,
+                        },
                         "body": bodyValue,
                     }),
                 });

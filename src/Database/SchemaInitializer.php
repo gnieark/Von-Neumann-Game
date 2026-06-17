@@ -183,8 +183,14 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_probe_movements_probe_status ON probe_movements(probe_id, status)",
             "CREATE TABLE IF NOT EXISTS probe_messages (
                 id $id,
-                sender_probe_id INTEGER NOT NULL,
-                recipient_probe_id INTEGER NOT NULL,
+                sender_type $text NOT NULL DEFAULT 'probe',
+                sender_id $text NOT NULL,
+                sender_name $nullableText,
+                sender_probe_id INTEGER NULL,
+                recipient_type $text NOT NULL DEFAULT 'probe',
+                recipient_id $text NOT NULL,
+                recipient_name $nullableText,
+                recipient_probe_id INTEGER NULL,
                 sector_x INTEGER NOT NULL,
                 sector_y INTEGER NOT NULL,
                 sector_z INTEGER NOT NULL,
@@ -198,6 +204,8 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient ON probe_messages(recipient_probe_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_sender ON probe_messages(sender_probe_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type, recipient_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type, sender_id, created_at)",
             "CREATE TABLE IF NOT EXISTS probe_damage_warnings (
                 id $id,
                 probe_id INTEGER NOT NULL,
@@ -351,6 +359,7 @@ final class SchemaInitializer
             $this->ensureSqliteColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
+            $this->ensureProbeMessageSchema($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
@@ -376,7 +385,126 @@ final class SchemaInitializer
             $this->ensureMysqlColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER updated_at');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
+            $this->ensureProbeMessageSchema($pdo);
         }
+    }
+
+    private function ensureProbeMessageSchema(PDO $pdo): void
+    {
+        if ($this->driver === 'sqlite') {
+            $this->ensureSqliteColumn($pdo, 'probe_messages', 'sender_type', "TEXT NOT NULL DEFAULT 'probe'");
+            $this->ensureSqliteColumn($pdo, 'probe_messages', 'sender_id', 'TEXT NULL');
+            $this->ensureSqliteColumn($pdo, 'probe_messages', 'sender_name', 'TEXT NULL');
+            $this->ensureSqliteColumn($pdo, 'probe_messages', 'recipient_type', "TEXT NOT NULL DEFAULT 'probe'");
+            $this->ensureSqliteColumn($pdo, 'probe_messages', 'recipient_id', 'TEXT NULL');
+            $this->ensureSqliteColumn($pdo, 'probe_messages', 'recipient_name', 'TEXT NULL');
+            $columns = $pdo->query('PRAGMA table_info(probe_messages)')->fetchAll(PDO::FETCH_ASSOC);
+            $byName = [];
+            foreach ($columns as $column) {
+                $byName[(string) $column['name']] = $column;
+            }
+            if (((int) ($byName['sender_probe_id']['notnull'] ?? 0)) === 1 || ((int) ($byName['recipient_probe_id']['notnull'] ?? 0)) === 1) {
+                $this->rebuildSqliteProbeMessages($pdo);
+            } else {
+                $this->backfillProbeMessageEndpoints($pdo);
+            }
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient ON probe_messages(recipient_probe_id, status, created_at)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_sender ON probe_messages(sender_probe_id, created_at)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type, recipient_id, status, created_at)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type, sender_id, created_at)');
+            return;
+        }
+
+        $this->ensureMysqlColumn($pdo, 'probe_messages', 'sender_type', "VARCHAR(255) NOT NULL DEFAULT 'probe' AFTER id");
+        $this->ensureMysqlColumn($pdo, 'probe_messages', 'sender_id', 'VARCHAR(255) NULL AFTER sender_type');
+        $this->ensureMysqlColumn($pdo, 'probe_messages', 'sender_name', 'VARCHAR(255) NULL AFTER sender_id');
+        $this->ensureMysqlColumn($pdo, 'probe_messages', 'recipient_type', "VARCHAR(255) NOT NULL DEFAULT 'probe' AFTER sender_probe_id");
+        $this->ensureMysqlColumn($pdo, 'probe_messages', 'recipient_id', 'VARCHAR(255) NULL AFTER recipient_type');
+        $this->ensureMysqlColumn($pdo, 'probe_messages', 'recipient_name', 'VARCHAR(255) NULL AFTER recipient_id');
+        $pdo->exec('ALTER TABLE probe_messages MODIFY sender_probe_id INTEGER NULL');
+        $pdo->exec('ALTER TABLE probe_messages MODIFY recipient_probe_id INTEGER NULL');
+        $this->backfillProbeMessageEndpoints($pdo);
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type, recipient_id, status, created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type, sender_id, created_at)');
+    }
+
+    private function backfillProbeMessageEndpoints(PDO $pdo): void
+    {
+        $pdo->exec("UPDATE probe_messages SET sender_type = 'probe' WHERE sender_type IS NULL OR sender_type = ''");
+        $pdo->exec("UPDATE probe_messages SET recipient_type = 'probe' WHERE recipient_type IS NULL OR recipient_type = ''");
+        $castType = $this->driver === 'mysql' ? 'CHAR' : 'TEXT';
+        $pdo->exec("UPDATE probe_messages SET sender_id = CAST(sender_probe_id AS $castType) WHERE (sender_id IS NULL OR sender_id = '') AND sender_probe_id IS NOT NULL");
+        $pdo->exec("UPDATE probe_messages SET recipient_id = CAST(recipient_probe_id AS $castType) WHERE (recipient_id IS NULL OR recipient_id = '') AND recipient_probe_id IS NOT NULL");
+    }
+
+    private function rebuildSqliteProbeMessages(PDO $pdo): void
+    {
+        $rows = $pdo->query('SELECT * FROM probe_messages')->fetchAll(PDO::FETCH_ASSOC);
+        $pdo->exec('PRAGMA foreign_keys=OFF');
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec('ALTER TABLE probe_messages RENAME TO probe_messages_endpoint_backup');
+            $pdo->exec(
+                "CREATE TABLE probe_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_type TEXT NOT NULL DEFAULT 'probe',
+                    sender_id TEXT NOT NULL,
+                    sender_name TEXT NULL,
+                    sender_probe_id INTEGER NULL,
+                    recipient_type TEXT NOT NULL DEFAULT 'probe',
+                    recipient_id TEXT NOT NULL,
+                    recipient_name TEXT NULL,
+                    recipient_probe_id INTEGER NULL,
+                    sector_x INTEGER NOT NULL,
+                    sector_y INTEGER NOT NULL,
+                    sector_z INTEGER NOT NULL,
+                    body TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    read_at TEXT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(sender_probe_id) REFERENCES neumann_probes(id),
+                    FOREIGN KEY(recipient_probe_id) REFERENCES neumann_probes(id)
+                )"
+            );
+
+            $insert = $pdo->prepare(
+                'INSERT INTO probe_messages
+                 (id, sender_type, sender_id, sender_name, sender_probe_id, recipient_type, recipient_id, recipient_name, recipient_probe_id, sector_x, sector_y, sector_z, body, status, read_at, created_at, updated_at)
+                 VALUES (:id, :sender_type, :sender_id, :sender_name, :sender_probe_id, :recipient_type, :recipient_id, :recipient_name, :recipient_probe_id, :sector_x, :sector_y, :sector_z, :body, :status, :read_at, :created_at, :updated_at)'
+            );
+            foreach ($rows as $row) {
+                $senderProbeId = $row['sender_probe_id'] !== null ? (int) $row['sender_probe_id'] : null;
+                $recipientProbeId = $row['recipient_probe_id'] !== null ? (int) $row['recipient_probe_id'] : null;
+                $insert->execute([
+                    'id' => (int) $row['id'],
+                    'sender_type' => (string) (($row['sender_type'] ?? null) ?: 'probe'),
+                    'sender_id' => (string) (($row['sender_id'] ?? null) ?: ($senderProbeId !== null ? (string) $senderProbeId : '')),
+                    'sender_name' => $row['sender_name'] ?? null,
+                    'sender_probe_id' => $senderProbeId,
+                    'recipient_type' => (string) (($row['recipient_type'] ?? null) ?: 'probe'),
+                    'recipient_id' => (string) (($row['recipient_id'] ?? null) ?: ($recipientProbeId !== null ? (string) $recipientProbeId : '')),
+                    'recipient_name' => $row['recipient_name'] ?? null,
+                    'recipient_probe_id' => $recipientProbeId,
+                    'sector_x' => (int) $row['sector_x'],
+                    'sector_y' => (int) $row['sector_y'],
+                    'sector_z' => (int) $row['sector_z'],
+                    'body' => (string) $row['body'],
+                    'status' => (string) $row['status'],
+                    'read_at' => $row['read_at'] !== null ? (string) $row['read_at'] : null,
+                    'created_at' => (string) $row['created_at'],
+                    'updated_at' => (string) $row['updated_at'],
+                ]);
+            }
+
+            $pdo->exec('DROP TABLE probe_messages_endpoint_backup');
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            $pdo->exec('PRAGMA foreign_keys=ON');
+            throw $e;
+        }
+        $pdo->exec('PRAGMA foreign_keys=ON');
     }
 
     private function ensureDamageWarningSchema(PDO $pdo): void

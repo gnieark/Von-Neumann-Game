@@ -7,7 +7,7 @@
     </div>
     <p class="message-intro">{{t.messageIntro}}</p>
     <form id="message-form" class="message-form">
-        <label>{{t.messageRecipient}}<select id="message-recipient" name="recipientProbeId" required></select></label>
+        <label>{{t.messageRecipient}}<select id="message-recipient" name="recipient" required></select></label>
         <label class="message-body-label">{{t.messageBody}}<textarea id="message-body" name="body" rows="4" maxlength="2000" required></textarea></label>
         <button id="message-submit" class="primary" type="submit">{{t.sendMessage}}</button>
     </form>
