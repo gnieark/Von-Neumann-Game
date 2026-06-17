@@ -495,6 +495,28 @@ if ($binarySector !== null) {
     }
 }
 
+$intelligentLifeSector = findGeneratedSector(
+    $contentGenerator,
+    'intelligent_life_search_seed',
+    static function (SectorContent $sector): bool {
+        foreach ($sector->getObjects() as $object) {
+            if ($object instanceof SolarSystem) {
+                foreach ($object->getOrbitalBodies() as $body) {
+                    $planet = $body->getObject();
+                    if ($planet instanceof Planet && $planet->hasIntelligentLife()) {
+                        return true;
+                    }
+                }
+            } elseif ($object instanceof Planet && $object->hasIntelligentLife()) {
+                return true;
+            }
+        }
+        return false;
+    },
+    50000,
+);
+$test->assert($intelligentLifeSector !== null, 'deterministic search finds an intelligent-life world');
+
 $tmpBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_sector_tests_' . bin2hex(random_bytes(4));
 $repository = new SectorFileRepository($tmpBase);
 $negativeCoordinates = new SectorCoordinates(-2, 0, 0);
@@ -507,6 +529,21 @@ $repository->save($roundTripSector);
 $loadedRoundTrip = $repository->load($negativeCoordinates);
 $expectedLoadedRoundTrip = SectorContent::fromArray($roundTripSector->toArray(), 'loaded');
 $test->assertEquals($expectedLoadedRoundTrip->toArray(), $loadedRoundTrip->toArray(), 'JSON write then read restores the same sector data');
+
+$intelligentLifePlanet = new Planet('intelligent-life-test', null, 'ocean', 1.0, 1.0, true, 0.8, ['water'], intelligentLife: true);
+$test->assert($intelligentLifePlanet->hasIntelligentLife(), 'Planet exposes intelligent-life worlds');
+$test->assertEquals(true, Planet::fromArray($intelligentLifePlanet->toArray())->hasIntelligentLife(), 'Planet JSON preserves intelligent life');
+$legacyPlanet = Planet::fromArray([
+    'id' => 'legacy-planet',
+    'type' => 'planet',
+    'name' => null,
+    'category' => 'rocky',
+    'mass' => 1.0,
+    'radius' => 1.0,
+    'atmosphere' => true,
+    'habitabilityScore' => 0.7,
+]);
+$test->assert(!$legacyPlanet->hasIntelligentLife(), 'legacy planet JSON defaults intelligent life to false');
 
 $mannySector = new SectorContent($coord000, [
     new SectorManny(SectorManny::objectIdForUid('mny_test'), 'manny-test', 'mny_test', SectorManny::STATE_FORGOTTEN),

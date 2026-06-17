@@ -1301,6 +1301,7 @@ button.account-menu-item {
 .sector-bookmark-alert,
 .sector-probe-alert,
 .sector-detached-container-alert,
+.sector-intelligent-life-alert,
 .sector-damage-alert {
     display: flex;
     align-items: center;
@@ -1319,6 +1320,7 @@ button.account-menu-item {
 .sector-bookmark-alert[hidden],
 .sector-probe-alert[hidden],
 .sector-detached-container-alert[hidden],
+.sector-intelligent-life-alert[hidden],
 .sector-damage-alert[hidden] {
     display: none;
 }
@@ -1326,6 +1328,7 @@ button.account-menu-item {
 .sector-bookmark-alert.acknowledged,
 .sector-probe-alert.acknowledged,
 .sector-detached-container-alert.acknowledged,
+.sector-intelligent-life-alert.acknowledged,
 .sector-damage-alert.acknowledged {
     animation: none;
     border-color: rgba(143, 182, 189, .28);
@@ -1341,6 +1344,13 @@ button.account-menu-item {
     background: rgba(255, 176, 32, .18);
     color: #ffe4b3;
     box-shadow: 0 0 0 1px rgba(255, 176, 32, .32), 0 0 20px rgba(255, 176, 32, .28);
+}
+
+.sector-intelligent-life-alert:not(.acknowledged) {
+    border-color: #5ee7ff;
+    background: rgba(94, 231, 255, .16);
+    color: #c7fbff;
+    box-shadow: 0 0 0 1px rgba(94, 231, 255, .32), 0 0 20px rgba(94, 231, 255, .28);
 }
 
 .sector-alert-message {
@@ -1373,7 +1383,7 @@ button.account-menu-item {
 
 .message-form {
     display: grid;
-    grid-template-columns: minmax(170px, .8fr) minmax(260px, 1.5fr) minmax(110px, auto);
+    grid-template-columns: 1fr;
     gap: 12px;
     align-items: end;
     margin-bottom: 12px;
@@ -2985,7 +2995,6 @@ button.account-menu-item {
     .tutorial-step,
     .coordinate-form,
     .action-panel,
-    .message-form,
     .manny-form,
     .inventory-card,
     .storage-rules-form,

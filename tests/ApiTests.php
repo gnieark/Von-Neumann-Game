@@ -293,7 +293,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(31, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(33, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -364,7 +364,7 @@ if ($oauthProbe !== null) {
             null,
             [
                 new OrbitingBody(
-                    new Planet('stats-visited-habitable', null, 'rocky', 1.0, 1.0, true, 0.7),
+                    new Planet('stats-visited-habitable', null, 'rocky', 1.0, 1.0, true, 0.7, intelligentLife: true),
                     new OrbitDescriptor(1.0, 0.01, 0.0),
                 ),
                 new OrbitingBody(
@@ -385,7 +385,7 @@ if ($oauthProbe !== null) {
             null,
             [
                 new OrbitingBody(
-                    new Planet('stats-generated-habitable-nested', null, 'rocky', 1.0, 1.0, true, 0.4),
+                    new Planet('stats-generated-habitable-nested', null, 'rocky', 1.0, 1.0, true, 0.4, intelligentLife: true),
                     new OrbitDescriptor(0.8, 0.01, 0.0),
                 ),
             ],
@@ -396,6 +396,7 @@ if ($oauthProbe !== null) {
     $habitabilityStats = (new UniverseStatsService($pdo, $statsUniversePath))->collect();
     $test->assertEquals(3, $habitabilityStats['metrics']['habitablePlanetsInGeneratedSectors'] ?? null, 'public stats count habitable planets in generated sectors');
     $test->assertEquals(1, $habitabilityStats['metrics']['habitablePlanetsInVisitedSectors'] ?? null, 'public stats count habitable planets in visited sectors');
+    $test->assertEquals(2, $habitabilityStats['metrics']['intelligentLifeWorlds'] ?? null, 'public stats count intelligent-life worlds in generated sectors');
 }
 $test->assertThrows(
     fn() => $auth->registerPlayerWithExternalAuth('Nova Pilot', 'discord', 'discord-openid-subject'),
@@ -1161,12 +1162,14 @@ if ($damageWarningProbe !== null) {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $damageMove->status, 'movement with fourteen additional containers starts');
 
-    $damageWarningsResponse = $kernel->handle('GET', '/api/probe/damage-warnings', $damageWarningHeaders);
-    $test->assertEquals(200, $damageWarningsResponse->status, 'GET /api/probe/damage-warnings lists movement damage warnings');
-    $damageWarning = $damageWarningsResponse->body['damageWarnings'][0] ?? null;
+    $probeAlertsResponse = $kernel->handle('GET', '/api/probe/alerts', $damageWarningHeaders);
+    $test->assertEquals(200, $probeAlertsResponse->status, 'GET /api/probe/alerts lists movement alerts');
+    $damageWarning = $probeAlertsResponse->body['alerts'][0] ?? null;
     $test->assertEquals('unread', $damageWarning['status'] ?? null, 'damage warning starts unread');
     $test->assertEquals(100.0, $damageWarning['risk']['percent'] ?? null, 'fourteen additional containers produce a 100 percent break risk');
     $test->assertEquals(14, $damageWarning['risk']['additionalContainerCount'] ?? null, 'damage warning exposes the additional container count');
+    $legacyDamageWarningsResponse = $kernel->handle('GET', '/api/probe/damage-warnings', $damageWarningHeaders);
+    $test->assertEquals(200, $legacyDamageWarningsResponse->status, 'GET /api/probe/damage-warnings remains available as a compatibility alias');
     $warningContainerId = (string) ($damageWarning['container']['id'] ?? '');
     $warningObjectId = (string) ($damageWarning['container']['detachedObjectId'] ?? '');
     $warningId = (int) ($damageWarning['id'] ?? 0);
@@ -1177,9 +1180,9 @@ if ($damageWarningProbe !== null) {
         $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.2 WHERE id = :id')->execute(['id' => $damageWarningProbe->id]);
     }
 
-    $markDamageWarningRead = $kernel->handle('PATCH', '/api/probe/damage-warnings/' . $warningId, $damageWarningHeaders, json_encode([], JSON_THROW_ON_ERROR));
-    $test->assertEquals(200, $markDamageWarningRead->status, 'PATCH /api/probe/damage-warnings/{id} marks the warning read');
-    $test->assertEquals('read', $markDamageWarningRead->body['damageWarning']['status'] ?? null, 'damage warning read response exposes read status');
+    $markDamageWarningRead = $kernel->handle('PATCH', '/api/probe/alerts/' . $warningId, $damageWarningHeaders, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $markDamageWarningRead->status, 'PATCH /api/probe/alerts/{id} marks the alert read');
+    $test->assertEquals('read', $markDamageWarningRead->body['alert']['status'] ?? null, 'alert read response exposes read status');
 
     $pdo->exec("UPDATE scheduled_events SET run_at = '2000-01-01T00:00:00+00:00' WHERE type = 'probe.storage_container.break'");
     $schedulerStats = $scheduler->processDueEvents();
@@ -1193,6 +1196,53 @@ if ($damageWarningProbe !== null) {
         $warningSector = new SectorCoordinates($storedWarning->sectorX, $storedWarning->sectorY, $storedWarning->sectorZ);
         $detachedByMovement = $sectorRepository->load($warningSector)->findObjectById($warningObjectId);
         $test->assertEquals('detached_container', $detachedByMovement?->getType()->value, 'storage break persists the lost container as a drifting sector object');
+    }
+}
+
+$intelligentLifePlayer = $auth->registerPlayerWithPassword('life-alert', 'secret', 'Life Alert', 'Life probe');
+$intelligentLifeProbe = $probes->findByPlayerId($intelligentLifePlayer->id);
+$intelligentLifeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'life-alert', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$intelligentLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($intelligentLifeSession->body['token'] ?? '')];
+if ($intelligentLifeProbe !== null) {
+    $intelligentLifeTarget = $intelligentLifeProbe->currentSector->add(2, 0, 0);
+    $sectorRepository->save(new SectorContent($intelligentLifeTarget, [
+        new Planet('life-alert-planet', 'Pale Signal', 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
+    ]));
+
+    $intelligentLifeMove = $kernel->handle('POST', '/api/probe/move', $intelligentLifeHeaders, json_encode([
+        'target' => [
+            'x' => 2,
+            'y' => 0,
+            'z' => 0,
+        ],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $intelligentLifeMove->status, 'movement toward an intelligent-life sector starts');
+    $intelligentLifeMovement = $movements->findActiveByProbeId($intelligentLifeProbe->id);
+    if ($intelligentLifeMovement !== null) {
+        $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+            'id' => $intelligentLifeMovement->id,
+            'arrival' => gmdate('c', time() - 60),
+        ]);
+        $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $intelligentLifeMovement->id, gmdate('c'), ['probeId' => $intelligentLifeMovement->probeId, 'phase' => 'arrived']);
+        $lifeSchedulerStats = $scheduler->processDueEvents();
+        $test->assert($lifeSchedulerStats['processed'] >= 1, 'scheduler finalizes movement into intelligent-life sector');
+
+        $lifeAlertsResponse = $kernel->handle('GET', '/api/probe/alerts', $intelligentLifeHeaders);
+        $test->assertEquals(200, $lifeAlertsResponse->status, 'GET /api/probe/alerts exposes intelligent-life alerts');
+        $lifeAlerts = array_values(array_filter(
+            $lifeAlertsResponse->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'intelligent_life',
+        ));
+        $lifeAlert = $lifeAlerts[0] ?? null;
+        $test->assertEquals('unread', $lifeAlert['status'] ?? null, 'intelligent-life alert starts unread');
+        $test->assertEquals('life-alert-planet', $lifeAlert['planet']['id'] ?? null, 'intelligent-life alert exposes the planet id');
+        $test->assertEquals('Pale Signal', $lifeAlert['planet']['name'] ?? null, 'intelligent-life alert exposes the planet name');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $lifeAlert['sector']['relative'] ?? null, 'intelligent-life alert exposes the relative sector');
+        $test->assert(is_string($lifeAlert['message'] ?? null) && str_contains((string) $lifeAlert['message'], 'Intelligent life detected'), 'intelligent-life alert stores a readable message');
+
+        $markLifeAlertRead = $kernel->handle('PATCH', '/api/probe/alerts/' . (int) ($lifeAlert['id'] ?? 0), $intelligentLifeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+        $test->assertEquals(200, $markLifeAlertRead->status, 'PATCH /api/probe/alerts/{id} marks an intelligent-life alert read');
+        $test->assertEquals('read', $markLifeAlertRead->body['alert']['status'] ?? null, 'intelligent-life alert read response exposes read status');
     }
 }
 
@@ -1473,7 +1523,7 @@ if ($createdProbe !== null) {
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
         new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
         new Star('unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
-        new Planet('current-habitable-planet', null, 'rocky', 1.0, 1.0, true, 0.72, ['silicates']),
+        new Planet('current-habitable-planet', null, 'rocky', 1.0, 1.0, true, 0.72, ['silicates'], intelligentLife: true),
     ]));
     $mineableSector = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('mine-rock', $mineableSector->body['sector']['objects'][0]['id'] ?? null, 'sector observation exposes object ids for Manny mining orders');
@@ -1490,15 +1540,17 @@ if ($createdProbe !== null) {
     $test->assertEquals('solar_mass', $unitObjectsById['unit-star']['massUnit'] ?? null, 'star sector object exposes solar mass unit');
     $test->assertEquals('solar_radius', $unitObjectsById['unit-star']['radiusUnit'] ?? null, 'star sector object exposes solar radius unit');
     $test->assertEquals(0.72, $unitObjectsById['current-habitable-planet']['habitabilityScore'] ?? null, 'current-sector planet observations expose habitability score');
+    $test->assertEquals(true, $unitObjectsById['current-habitable-planet']['intelligentLife'] ?? null, 'current-sector planet observations expose intelligent life');
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);
     $sectorRepository->save(new SectorContent($visitedPlanetSector, [
-        new Planet('visited-habitable-planet', null, 'ocean', 1.1, 1.2, true, 0.81, ['water_ice']),
+        new Planet('visited-habitable-planet', null, 'ocean', 1.1, 1.2, true, 0.81, ['water_ice'], intelligentLife: true),
     ]));
     $visitedPlanetObservation = $kernel->handle('GET', '/api/sector?x=8&y=0&z=0', $headers);
     $test->assertEquals(200, $visitedPlanetObservation->status, 'visited planet sector can be scanned through GET /api/sector');
     $test->assertEquals(0.81, $visitedPlanetObservation->body['sector']['objects'][0]['habitabilityScore'] ?? null, 'visited-sector planet observations expose habitability score');
+    $test->assertEquals(true, $visitedPlanetObservation->body['sector']['objects'][0]['intelligentLife'] ?? null, 'visited-sector planet observations expose intelligent life');
 
     $mineManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
         'objectId' => 'mine-rock',

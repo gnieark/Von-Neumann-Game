@@ -49,7 +49,7 @@ final class UniverseStatsService
                 'furthestProbeDistance' => $probeDistances['furthest'],
                 'closestProbeDistance' => $probeDistances['closest'],
                 'waypointBookmarksInstalled' => $waypointStats['installed'],
-                'intelligentLifeWorlds' => 0,
+                'intelligentLifeWorlds' => $sectorStats['intelligentLifeWorlds'],
                 'successfulMissions' => 0,
                 'failedMissions' => 0,
                 'topVisitedProbes' => $this->topVisitedProbes(),
@@ -220,7 +220,8 @@ final class UniverseStatsService
      *     lostMannies: int,
      *     forgottenMannies: int,
      *     driftingContainers: int,
-     *     hiddenContainers: int
+     *     hiddenContainers: int,
+     *     intelligentLifeWorlds: int
      * }
      */
     private function sectorStats(array $visitedSectorKeys): array
@@ -235,6 +236,7 @@ final class UniverseStatsService
             'forgottenMannies' => 0,
             'driftingContainers' => 0,
             'hiddenContainers' => 0,
+            'intelligentLifeWorlds' => 0,
         ];
 
         $sectorDirectory = rtrim($this->universePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'sectors';
@@ -256,6 +258,7 @@ final class UniverseStatsService
             $stats['generatedSectors']++;
             $habitablePlanets = $this->habitablePlanetCount($data['objects'] ?? []);
             $stats['habitablePlanetsInGeneratedSectors'] += $habitablePlanets;
+            $stats['intelligentLifeWorlds'] += $this->intelligentLifeWorldCount($data['objects'] ?? []);
             $sectorKey = $this->sectorKeyFromData($data);
             if ($sectorKey !== null && isset($visitedSectorKeys[$sectorKey])) {
                 $stats['habitablePlanetsInVisitedSectors'] += $habitablePlanets;
@@ -497,6 +500,36 @@ final class UniverseStatsService
     private function isHabitablePlanet(array $planet): bool
     {
         return (float) ($planet['habitabilityScore'] ?? 0.0) >= self::HABITABLE_PLANET_THRESHOLD;
+    }
+
+    /**
+     * @param mixed $objects
+     */
+    private function intelligentLifeWorldCount(mixed $objects): int
+    {
+        if (!is_array($objects)) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach ($objects as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+
+            $type = (string) ($object['type'] ?? '');
+            if ($type === 'planet' && (bool) ($object['intelligentLife'] ?? false)) {
+                $count++;
+            } elseif ($type === 'solar_system') {
+                foreach ($object['orbitalBodies'] ?? [] as $body) {
+                    if (is_array($body) && is_array($body['object'] ?? null)) {
+                        $count += $this->intelligentLifeWorldCount([$body['object']]);
+                    }
+                }
+            }
+        }
+
+        return $count;
     }
 
     /**

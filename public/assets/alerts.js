@@ -22,15 +22,29 @@
         return window.VNG.t(i18n, key, fallback);
     }
 
-    function damageWarningMessage(warning) {
-        const sector = warning && warning.sector && warning.sector.relative
-            ? window.VNG.coordinate(warning.sector.relative)
+    function persistentAlertMessage(alert) {
+        if (alert && alert.type === "intelligent_life") {
+            const sector = alert.sector && alert.sector.relative
+                ? window.VNG.coordinate(alert.sector.relative)
+                : "-";
+            const planet = alert.planet
+                ? (alert.planet.name || alert.planet.id || tr("planetSingular", "planet"))
+                : tr("planetSingular", "planet");
+
+            return window.VNG.formatText(
+                tr("intelligentLifeAlertMessage", "Intelligent life detected: technological signatures from {planet} in sector {sector}."),
+                {planet, sector}
+            );
+        }
+
+        const sector = alert && alert.sector && alert.sector.relative
+            ? window.VNG.coordinate(alert.sector.relative)
             : "-";
-        const container = warning && warning.container
-            ? (warning.container.label || warning.container.id || "-")
+        const container = alert && alert.container
+            ? (alert.container.label || alert.container.id || "-")
             : "-";
-        const risk = warning && warning.risk ? window.VNG.numberValue(warning.risk.percent, "%") : "-";
-        const when = warning && warning.phase === "deceleration_start"
+        const risk = alert && alert.risk ? window.VNG.numberValue(alert.risk.percent, "%") : "-";
+        const when = alert && alert.phase === "deceleration_start"
             ? tr("damageWarningArrivalSector", "arrival sector")
             : tr("damageWarningOriginSector", "origin sector");
 
@@ -40,23 +54,24 @@
         );
     }
 
-    function damageWarningAlerts(warnings) {
-        return (Array.isArray(warnings) ? warnings : []).map((warning) => ({
-            "kind": "damage-warning",
-            "id": warning.id,
-            "className": "sector-damage-alert",
-            "message": damageWarningMessage(warning),
-            "acknowledged": warning.status !== "unread",
+    function persistentAlerts(alerts) {
+        return (Array.isArray(alerts) ? alerts : []).map((alert) => ({
+            "kind": "persistent-alert",
+            "id": alert.id,
+            "type": alert.type,
+            "className": alert.type === "intelligent_life" ? "sector-intelligent-life-alert" : "sector-damage-alert",
+            "message": persistentAlertMessage(alert),
+            "acknowledged": alert.status !== "unread",
         }));
     }
 
-    function renderAlerts(sector, damageWarnings) {
+    function renderAlerts(sector, persistentAlertData) {
         currentSector = sector || {};
         const sectorAlerts = window.VNG.sectorAlerts(currentSector, i18n).map((alert) => ({
             ...alert,
             "kind": "sector-alert",
         }));
-        const alerts = sectorAlerts.concat(damageWarningAlerts(damageWarnings));
+        const alerts = sectorAlerts.concat(persistentAlerts(persistentAlertData));
         currentAlerts = alerts;
         const list = document.getElementById("console-alerts-list");
         const empty = document.getElementById("console-alerts-empty");
@@ -64,8 +79,8 @@
             return;
         }
 
-        const hasUnreadDamageWarning = alerts.some((alert) => alert.kind === "damage-warning" && !alert.acknowledged);
-        window.VNG.setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged), hasUnreadDamageWarning);
+        const hasUnreadPersistentAlert = alerts.some((alert) => alert.kind === "persistent-alert" && !alert.acknowledged);
+        window.VNG.setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged), hasUnreadPersistentAlert);
         if (empty) {
             empty.hidden = alerts.length > 0;
         }
@@ -107,19 +122,19 @@
         }
 
         try {
-            const [sectorData, damageWarningData] = await Promise.all([
+            const [sectorData, alertData] = await Promise.all([
                 window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch((error) => ({"sector": {}, "error": error})),
-                window.VNG.apiJson("/api/probe/damage-warnings", {"method": "GET"}).catch(() => ({"damageWarnings": []})),
+                window.VNG.apiJson("/api/probe/alerts", {"method": "GET"}).catch(() => ({"alerts": []})),
             ]);
-            renderAlerts(sectorData.sector || {}, damageWarningData.damageWarnings || []);
-            if (sectorData.error && (damageWarningData.damageWarnings || []).length === 0) {
+            renderAlerts(sectorData.sector || {}, alertData.alerts || []);
+            if (sectorData.error && (alertData.alerts || []).length === 0) {
                 const empty = document.getElementById("console-alerts-empty");
                 if (empty) {
                     empty.hidden = false;
                     empty.textContent = sectorData.error.message || tr("sectorContextUnavailable", "Displayed sector: observation unavailable.");
                 }
             }
-            scheduleRefresh({"sector": sectorData, "damageWarnings": damageWarningData.damageWarnings || []});
+            scheduleRefresh({"sector": sectorData, "alerts": alertData.alerts || []});
         } catch (error) {
             const list = document.getElementById("console-alerts-list");
             const empty = document.getElementById("console-alerts-empty");
@@ -149,10 +164,10 @@
                 return;
             }
 
-            if (alert.kind === "damage-warning") {
+            if (alert.kind === "persistent-alert") {
                 button.disabled = true;
                 button.setAttribute("aria-disabled", "true");
-                window.VNG.apiJson("/api/probe/damage-warnings/" + encodeURIComponent(String(alert.id)), {
+                window.VNG.apiJson("/api/probe/alerts/" + encodeURIComponent(String(alert.id)), {
                     "method": "PATCH",
                     "body": JSON.stringify({}),
                 }).then(refreshAlertsPage).then(window.VNG.syncNavigationWarnings).catch(() => {
