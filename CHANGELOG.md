@@ -6,9 +6,13 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+<<<<<<< HEAD
 - API v34 : la messagerie `/api/probe/messages` accepte des destinataires typés via `recipient.type` (`probe` par défaut, ou `planet`) et `recipient.id`.
 - Messagerie : les messages exposent désormais `sender.type` et `recipient.type`; les endpoints peuvent être une sonde (`probeId`) ou une planète habitée (`planetId`).
 - Interface : la page `/messaging` permet d’envoyer un message aux sondes du secteur courant et aux planètes habitées détectées dans ce secteur.
+=======
+- Debug : ajout de `scripts/userinfos.php` pour auditer en CLI l'état complet d'une sonde, dont position absolue/relative, inventaire brut, secteurs visités, mouvements et événements planifiés.
+>>>>>>> 150a0d8 (add debog script)
 
 ### Fixed
 

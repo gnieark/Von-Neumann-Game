@@ -325,6 +325,23 @@ $test->assert($homeSum % 2 === 0, 'random initial sector respects the FCC parity
 $test->assert($visitedSectors->hasVisited($player, $player->homeSector), 'initial sector is automatically marked as visited');
 if ($createdProbe !== null) {
     $test->assert($createdProbe->currentSector->equals($player->homeSector), 'initial probe starts in the player home sector');
+    $userinfosDbConfig = $tmp . DIRECTORY_SEPARATOR . 'userinfos-database.json';
+    file_put_contents($userinfosDbConfig, json_encode([
+        'driver' => 'sqlite',
+        'path' => $dbPath,
+    ], JSON_THROW_ON_ERROR));
+    $userinfosCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/userinfos.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --probe-id=' . $createdProbe->id
+        . ' --limit=3';
+    exec($userinfosCommand . ' 2>&1', $userinfosOutput, $userinfosStatus);
+    $userinfosText = implode("\n", $userinfosOutput);
+    $test->assertEquals(0, $userinfosStatus, 'userinfos CLI exits successfully for an existing probe');
+    $test->assert(str_contains($userinfosText, 'absolute: '), 'userinfos CLI reports absolute position');
+    $test->assert(str_contains($userinfosText, 'relative: 0:0:0 from player home'), 'userinfos CLI reports relative position');
+    $test->assert(str_contains($userinfosText, 'Inventory'), 'userinfos CLI reports inventory state');
+    $test->assert(str_contains($userinfosText, 'Visited sectors'), 'userinfos CLI reports visited sector history');
 }
 $test->assertThrows(
     fn() => $auth->registerPlayerWithPassword('remi', 'other-secret', 'Duplicate'),
