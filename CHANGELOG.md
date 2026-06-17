@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-17
+
+### Fixed
+
+- Interface : le container interne de la sonde est traduit en anglais dans les vues d'inventaire.
+
 ## 2026-06-15
 
 ### Added

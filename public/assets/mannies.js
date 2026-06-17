@@ -435,6 +435,10 @@
     }
 
     function storageContainerLabel(container) {
+        if (container && (container.id === "probe-core" || container.kind === "probe")) {
+            return tr("probeCoreContainer", "Probe");
+        }
+
         return container && (container.label || container.id)
             ? (container.label || container.id)
             : tr("unknownContainer", "Unknown container");
