@@ -982,6 +982,66 @@ button.account-menu-item {
     margin-bottom: 16px;
 }
 
+.probe-terminal-alert {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: -4px 0 16px;
+    padding: 14px 16px;
+    border: 1px solid #ffb020;
+    border-radius: 4px;
+    background: linear-gradient(135deg, rgba(255, 176, 32, .22), rgba(14, 18, 18, .94) 58%);
+    box-shadow: 0 0 0 1px rgba(255, 176, 32, .22), 0 0 24px rgba(255, 176, 32, .18);
+    color: #ffe4b3;
+}
+
+.probe-terminal-alert[hidden] {
+    display: none;
+}
+
+.probe-terminal-alert-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.probe-terminal-alert h3 {
+    margin: 0 0 6px;
+    color: #fff2d7;
+    font-size: .9rem;
+    letter-spacing: 0;
+}
+
+.probe-terminal-alert p {
+    margin: 0;
+    color: #ffe4b3;
+    font-size: .88rem;
+    line-height: 1.45;
+}
+
+.probe-terminal-alert-action {
+    flex: 0 0 auto;
+    border-color: #ffcc73;
+    color: #1a1205;
+    background: #ffcc73;
+    font-weight: 800;
+}
+
+.probe-terminal-alert-action:disabled {
+    color: #665338;
+    background: #e2b862;
+}
+
+@media (max-width: 640px) {
+    .probe-terminal-alert {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .probe-terminal-alert-action {
+        width: 100%;
+    }
+}
+
 .metric {
     position: relative;
     min-height: 78px;

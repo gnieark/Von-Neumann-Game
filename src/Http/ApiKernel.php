@@ -30,6 +30,8 @@ use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ObservationAccessException;
 use VonNeumannGame\Service\ProbeMovementException;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\ProbeReinstantiationException;
+use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
@@ -40,7 +42,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 35;
+    public const API_VERSION = 36;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -55,6 +57,7 @@ final class ApiKernel
         private readonly ProbeDamageWarningRepository $damageWarnings,
         private readonly ForumRepository $forum,
         private readonly MissionService $missions,
+        private readonly ProbeReinstantiationService $reinstantiation,
         private readonly array $gameplayConfig = [],
     ) {}
 
@@ -130,6 +133,7 @@ final class ApiKernel
                 '/api/me/api-key' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->apiKeyResponse($player)),
                 '/api/crafting-recipes' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $_player): ApiResponse => $this->craftingRecipesResponse()),
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
+                '/api/probe/mind-snapshot/reassign' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMindSnapshotReassignResponse($player)),
                 '/api/probe/storage-containers' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player)),
                 '/api/probe/storage-moves' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeStorageMoveResponse($player, $body)),
                 '/api/probe/atomic-printer/craft' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeAtomicPrinterCraftResponse($player, $body)),
@@ -149,6 +153,8 @@ final class ApiKernel
                 default => ApiResponse::error(404, 'not_found', 'Endpoint not found'),
             };
         } catch (ProbeMovementException $e) {
+            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
+        } catch (ProbeReinstantiationException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (MannyActionException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
@@ -537,6 +543,7 @@ final class ApiKernel
                     'name' => $probe->name,
                     'status' => 'trapped_by_black_hole',
                     'message' => 'The probe has crossed a black hole escape threshold. No signal or actuator response can be recovered.',
+                    'alert' => $this->terminalProbeAlert($probe),
                     'fuel' => ['deuterium' => $probe->deuteriumStock],
                     'sensorMode' => 'blind',
                     'systems' => [
@@ -552,6 +559,7 @@ final class ApiKernel
                     'name' => $probe->name,
                     'status' => 'dead',
                     'message' => 'The probe is no longer operational. Its intelligence core is isolated from all sensors and actuators.',
+                    'alert' => $this->terminalProbeAlert($probe),
                     'fuel' => ['deuterium' => $probe->deuteriumStock],
                     'sensorMode' => 'blind',
                     'systems' => [
@@ -568,6 +576,43 @@ final class ApiKernel
         )->globalToRelative($probe->currentSector);
 
         return new ApiResponse(200, ['probe' => $this->probeArray($player, $probe, $relative)]);
+    }
+
+    private function probeMindSnapshotReassignResponse(Player $player): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $result = $this->reinstantiation->reassignMindSnapshot($player, $probe);
+        $newPlayer = $result['player'];
+        $newProbe = $result['probe'];
+
+        return new ApiResponse(200, [
+            'reassigned' => true,
+            'previousProbeId' => $result['previousProbeId'],
+            'probe' => $this->probeArray($newPlayer, $newProbe, ['x' => 0, 'y' => 0, 'z' => 0]),
+            'message' => 'Mind snapshot reassigned to a fresh probe chassis. Local reference frame reset to 0,0,0.',
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function terminalProbeAlert(NeumannProbe $probe): array
+    {
+        $trapped = $probe->status === ProbeStatus::TrappedByBlackHole;
+
+        return [
+            'type' => 'mind_snapshot_reassignment_available',
+            'severity' => 'critical',
+            'title' => $trapped ? 'No-return threshold crossed' : 'Probe destroyed',
+            'message' => $trapped
+                ? 'Your probe crossed a black-hole escape threshold. From the outside, no signal can return. The last stable backup of your mind awaits, stored cold, a new chassis.'
+                : 'Your probe was destroyed and the hull is gone. The last stable mind snapshot is still coherent, Bobiverse-style, and can be assigned to a fresh Von Neumann chassis.',
+            'action' => [
+                'label' => 'Restore your mind into a new probe',
+                'method' => 'POST',
+                'endpoint' => '/api/probe/mind-snapshot/reassign',
+            ],
+        ];
     }
 
     private function probeVisitedSectorsResponse(Player $player): ApiResponse

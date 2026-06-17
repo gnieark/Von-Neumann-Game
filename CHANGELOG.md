@@ -6,10 +6,12 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- API v36 : ajout de `POST /api/probe/mind-snapshot/reassign` pour réassigner le snapshot d'esprit d'une sonde morte ou piégée par un trou noir vers une nouvelle sonde, avec reset du référentiel local à `0,0,0`.
 - API v35 : ajout du socle générique des missions de sonde avec persistance `probe_missions` / `probe_mission_steps`, objets `Mission` / `MissionStep`, `GET /api/probe/missions` (`/api/probe/mission` en alias) et `POST /api/probe/missions/{missionId}/abandon`.
 - API v34 : la messagerie `/api/probe/messages` accepte des destinataires typés via `recipient.type` (`probe` par défaut, ou `planet`) et `recipient.id`.
 - Messagerie : les messages exposent désormais `sender.type` et `recipient.type`; les endpoints peuvent être une sonde (`probeId`) ou une planète habitée (`planetId`).
 - Interface : la page `/messaging` permet d’envoyer un message aux sondes du secteur courant et aux planètes habitées détectées dans ce secteur.
+- Interface : les sondes mortes ou piégées par un trou noir affichent maintenant une alerte explicite avec une action de réattribution du snapshot d'esprit.
 - Debug : ajout de `scripts/userinfos.php` pour auditer en CLI l'état complet d'une sonde, dont position absolue/relative, inventaire brut, secteurs visités, mouvements et événements planifiés.
 
 ### Fixed

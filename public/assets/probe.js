@@ -112,6 +112,45 @@
         updateLiveMovementRemainingValues();
     }
 
+    function renderTerminalAlert(probe) {
+        const node = document.getElementById("probe-terminal-alert");
+        if (!node) {
+            return;
+        }
+
+        const alert = probe && probe.alert ? probe.alert : null;
+        if (!alert) {
+            node.hidden = true;
+            node.innerHTML = "";
+            return;
+        }
+
+        const action = alert.action || {};
+        const endpoint = action.endpoint || "";
+        const method = action.method || "POST";
+        const title = probe.status === "trapped_by_black_hole"
+            ? translate("probeTerminalAlertBlackHoleTitle", alert.title || "No-return threshold crossed")
+            : (probe.status === "dead"
+                ? translate("probeTerminalAlertDeadTitle", alert.title || "Probe destroyed")
+                : (alert.title || translate("probeTerminalAlertTitle", "Probe terminal state")));
+        const message = probe.status === "trapped_by_black_hole"
+            ? translate("probeTerminalAlertBlackHoleMessage", alert.message || probe.message || "")
+            : (probe.status === "dead"
+                ? translate("probeTerminalAlertDeadMessage", alert.message || probe.message || "")
+                : (alert.message || probe.message || ""));
+        node.hidden = false;
+        node.innerHTML = "<div class=\"probe-terminal-alert-copy\">"
+            + "<h3>" + window.VNG.escapeHtml(title) + "</h3>"
+            + "<p>" + window.VNG.escapeHtml(message) + "</p>"
+            + "</div>"
+            + "<button class=\"probe-terminal-alert-action\" type=\"button\" data-endpoint=\"" + window.VNG.escapeHtml(endpoint) + "\" data-method=\"" + window.VNG.escapeHtml(method) + "\">"
+            + window.VNG.escapeHtml(translate("reassignMindSnapshot", action.label || "Restore your mind into a new probe"))
+            + "</button>";
+
+        const button = node.querySelector(".probe-terminal-alert-action");
+        button?.addEventListener("click", reassignMindSnapshot);
+    }
+
     function renderProbeMetrics(data) {
         const probe = data && data.probe ? data.probe : {};
         const nav = probe.navigation || {};
@@ -129,6 +168,7 @@
             {"label": translate("remainingTime", "Remaining time"), "htmlValue": movementRemainingHtml(movement, observedAt)},
         ]) : null;
 
+        renderTerminalAlert(probe);
         window.VNG.renderMetrics(document.getElementById("probe-summary"), [
             {
                 "name": "status",
@@ -174,6 +214,7 @@
     }
 
     function renderProbeError(error) {
+        renderTerminalAlert(null);
         window.VNG.renderMetrics(document.getElementById("probe-summary"), [
             {
                 "name": "status",
@@ -212,6 +253,26 @@
                 "valueId": "probe-metric-heading",
             },
         ]);
+    }
+
+    async function reassignMindSnapshot(event) {
+        const button = event.currentTarget;
+        const endpoint = button.dataset.endpoint || "/api/probe/mind-snapshot/reassign";
+        const method = button.dataset.method || "POST";
+        button.disabled = true;
+        button.textContent = translate("mindSnapshotReassigning", "Reassigning...");
+
+        try {
+            await window.VNG.apiJson(endpoint, {
+                "method": method,
+                "body": JSON.stringify({}),
+            });
+            button.textContent = translate("mindSnapshotReassigned", "Snapshot reassigned");
+            await loadProbe();
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = error && error.message ? error.message : translate("requestDenied", "Request denied");
+        }
     }
 
     async function loadProbe() {

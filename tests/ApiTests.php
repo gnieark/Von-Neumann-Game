@@ -33,6 +33,7 @@ use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
 use VonNeumannGame\Service\SectorObservationService;
@@ -309,11 +310,12 @@ $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
 $missionService = new MissionService($missions);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService);
+$reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(35, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(36, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1369,6 +1371,9 @@ $test->assert(!array_key_exists('damagePercent', $probe->body['probe']['systems'
 $test->assert(isset($probe->body['probe']['sector']['relative']), 'GET /api/probe exposes relative sector coordinates');
 $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $probe->body['probe']['sector']['relative'] ?? null, 'player sees initial sector as relative coordinates [0,0,0]');
 $test->assert(!str_contains(json_encode($probe->body, JSON_THROW_ON_ERROR), 'absolute'), 'GET /api/probe does not expose absolute coordinates');
+$aliveReassignment = $kernel->handle('POST', '/api/probe/mind-snapshot/reassign', $headers, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(409, $aliveReassignment->status, 'POST /api/probe/mind-snapshot/reassign rejects an operational probe');
+$test->assertEquals('probe_reassignment_unavailable', $aliveReassignment->body['error']['code'] ?? null, 'operational probe reassignment error code is explicit');
 
 $visitedSectorList = $kernel->handle('GET', '/api/probe/visited-sectors', $headers);
 $test->assertEquals(200, $visitedSectorList->status, 'valid token allows GET /api/probe/visited-sectors');
@@ -2352,6 +2357,8 @@ if ($riskProbe !== null) {
 
         $destroyedProbe = $kernel->handle('GET', '/api/probe', $riskHeaders);
         $test->assertEquals('dead', $destroyedProbe->body['probe']['status'] ?? null, 'deterministic destruction sets probe status dead');
+        $test->assertEquals('mind_snapshot_reassignment_available', $destroyedProbe->body['probe']['alert']['type'] ?? null, 'dead probe response exposes mind snapshot reassignment alert');
+        $test->assertEquals('/api/probe/mind-snapshot/reassign', $destroyedProbe->body['probe']['alert']['action']['endpoint'] ?? null, 'dead probe alert exposes the reassignment endpoint');
         $destroyedMovement = $movements->findLatestByProbeId($riskProbe->id);
         $test->assertEquals('destroyed', $destroyedMovement?->status, 'deterministic destruction sets movement status destroyed');
         $firstCheckedAt = $destroyedMovement?->destructionCheckedAt;
@@ -2364,6 +2371,19 @@ if ($riskProbe !== null) {
         $deadSector = $kernel->handle('GET', '/api/probe/sector', $riskHeaders);
         $test->assertEquals(409, $deadSector->status, 'dead probe cannot access current sector details');
         $test->assert(!str_contains(json_encode($destroyedProbe->body, JSON_THROW_ON_ERROR), 'sector_x'), 'dead probe response does not expose absolute coordinates');
+
+        $reassignedProbe = $kernel->handle('POST', '/api/probe/mind-snapshot/reassign', $riskHeaders, json_encode([], JSON_THROW_ON_ERROR));
+        $test->assertEquals(200, $reassignedProbe->status, 'POST /api/probe/mind-snapshot/reassign reassigns a dead probe snapshot');
+        $test->assertEquals(true, $reassignedProbe->body['reassigned'] ?? null, 'mind snapshot reassignment response confirms the reset');
+        $test->assertEquals($riskProbe->id, $reassignedProbe->body['previousProbeId'] ?? null, 'mind snapshot reassignment identifies the destroyed probe');
+        $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $reassignedProbe->body['probe']['sector']['relative'] ?? null, 'reassigned probe starts at a fresh relative origin');
+        $test->assertEquals('idle', $reassignedProbe->body['probe']['status'] ?? null, 'reassigned probe is operational');
+        $test->assert($probes->findById($riskProbe->id) === null, 'mind snapshot reassignment deletes the terminal probe');
+        $newRiskProbe = $probes->findByPlayerId($riskPlayer->id);
+        $updatedRiskPlayer = $players->findById($riskPlayer->id);
+        $test->assert($newRiskProbe !== null && $newRiskProbe->id !== $riskProbe->id, 'mind snapshot reassignment creates a fresh probe row');
+        $test->assert($newRiskProbe !== null && $updatedRiskPlayer !== null && $newRiskProbe->currentSector->equals($updatedRiskPlayer->homeSector), 'fresh probe starts in the player new home sector');
+        $test->assert($updatedRiskPlayer !== null && count($visitedSectors->listVisited($updatedRiskPlayer)) === 1, 'mind snapshot reassignment resets visited sectors to the fresh origin only');
     }
 }
 
@@ -2398,6 +2418,7 @@ if ($blackHoleProbe !== null) {
         $trappedProbe = $kernel->handle('GET', '/api/probe', $blackHoleHeaders);
         $test->assertEquals('trapped_by_black_hole', $trappedProbe->body['probe']['status'] ?? null, 'GET /api/probe reports black hole trapped status');
         $test->assertEquals('blind', $trappedProbe->body['probe']['sensorMode'] ?? null, 'black hole trapped probe has blind sensors');
+        $test->assertEquals('mind_snapshot_reassignment_available', $trappedProbe->body['probe']['alert']['type'] ?? null, 'black hole trapped probe response exposes mind snapshot reassignment alert');
         $trappedSector = $kernel->handle('GET', '/api/probe/sector', $blackHoleHeaders);
         $test->assertEquals(409, $trappedSector->status, 'black hole trapped probe cannot access sector sensors');
         $trappedMove = $kernel->handle('POST', '/api/probe/move', $blackHoleHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
@@ -2425,6 +2446,7 @@ if ($escapeProbe !== null) {
 foreach ([
     'GET /api/me',
     'GET /api/probe',
+    'POST /api/probe/mind-snapshot/reassign',
     'POST /api/probe/atomic-printer/craft',
     'GET /api/probe/messages',
     'GET /api/probe/messages/sent',
