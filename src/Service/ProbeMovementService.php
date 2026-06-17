@@ -17,14 +17,11 @@ use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\BlackHole;
-use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
-use VonNeumannGame\Sector\SolarSystem;
-use VonNeumannGame\Sector\UniverseObject;
 
 final class ProbeMovementService
 {
@@ -125,7 +122,6 @@ final class ProbeMovementService
             $this->applyIntersectorIntegrityLoss($probe, $movement);
             $this->probes->save($probe);
             $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
-            $this->createIntelligentLifeAlerts($probe, $movement);
             $this->scheduleBlackHoleTrapIfNeeded($probe);
 
             return $this->probes->findById($probe->id) ?? $probe;
@@ -346,57 +342,6 @@ final class ProbeMovementService
         if ($changed && $sector !== null) {
             $this->sectors->saveSector($sector);
         }
-    }
-
-    private function createIntelligentLifeAlerts(NeumannProbe $probe, ProbeMovement $movement): void
-    {
-        if ($this->sectors === null || $this->damageWarnings === null) {
-            return;
-        }
-
-        $sector = $this->sectors->getOrCreateSector($movement->target);
-        foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
-            $planetName = $planet->getName() ?? $planet->getId();
-            $message = 'Intelligent life detected: technological signatures confirmed on '
-                . $planetName
-                . ' in sector '
-                . $movement->target->toKey()
-                . '.';
-            $this->damageWarnings->createIntelligentLifeAlert(
-                $probe->id,
-                $movement->id,
-                $movement->target,
-                $planet->getId(),
-                $planetName,
-                $message,
-            );
-        }
-    }
-
-    /**
-     * @param array<UniverseObject> $objects
-     * @return array<Planet>
-     */
-    private function intelligentLifePlanets(array $objects): array
-    {
-        $planets = [];
-        foreach ($objects as $object) {
-            if ($object instanceof Planet && $object->hasIntelligentLife()) {
-                $planets[] = $object;
-                continue;
-            }
-
-            if ($object instanceof SolarSystem) {
-                foreach ($object->getOrbitalBodies() as $body) {
-                    $bodyObject = $body->getObject();
-                    if ($bodyObject instanceof Planet && $bodyObject->hasIntelligentLife()) {
-                        $planets[] = $bodyObject;
-                    }
-                }
-            }
-        }
-
-        return $planets;
     }
 
     private function directionBetween(SectorCoordinates $origin, SectorCoordinates $target): ProbeDirection

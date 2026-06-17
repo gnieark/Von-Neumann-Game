@@ -229,7 +229,6 @@ final class SectorObservationService
             if ($object instanceof Planet) {
                 $data['category'] = $object->getCategory();
                 $data['habitabilityScore'] = $object->getHabitabilityScore();
-                $data['intelligentLife'] = $object->hasIntelligentLife();
             }
         }
 
@@ -338,7 +337,6 @@ final class SectorObservationService
             if ($object instanceof Planet) {
                 $target['category'] = $object->getCategory();
                 $target['habitabilityScore'] = $object->getHabitabilityScore();
-                $target['intelligentLife'] = $object->hasIntelligentLife();
             }
             $targets[] = $target;
         }
@@ -372,7 +370,6 @@ final class SectorObservationService
         if ($object instanceof Planet) {
             $target['category'] = $object->getCategory();
             $target['habitabilityScore'] = $object->getHabitabilityScore();
-            $target['intelligentLife'] = $object->hasIntelligentLife();
         }
         if ($object->getWaypointBookmarks() !== []) {
             $target['waypointBookmarks'] = $object->getWaypointBookmarks();

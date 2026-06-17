@@ -12,9 +12,6 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
-- API v32 : les observations détaillées de secteur exposent `intelligentLife` sur les planètes des secteurs courants ou déjà visités.
-- Génération : une planète habitable (`habitabilityScore > 0.35`) a désormais 20% de chance d’héberger une espèce intelligente, information persistée dans le JSON du secteur.
-- Stats : le compteur de mondes avec vie intelligente est alimenté depuis les secteurs générés.
 - API v31 : les observations détaillées de secteur exposent `habitabilityScore` sur les planètes des secteurs courants ou déjà visités.
 - API v30 : ajout des recettes `thermal_protection_shell`, `parachute_pack`, `descent_guidance_module` et `atmospheric_drop_kit`.
 - API : ajout de `POST /api/probe/mannies/{mannyId}/drop-storage-container` pour larguer un container additionnel sur une planète avec consommation d’un kit de largage atmosphérique.

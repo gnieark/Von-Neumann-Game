@@ -39,7 +39,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 33;
+    public const API_VERSION = 31;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -87,9 +87,6 @@ final class ApiKernel
             if (preg_match('#^/api/probe/messages/(\d+)/read$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, (int) $matches[1]));
             }
-            if (preg_match('#^/api/probe/alerts/(\d+)$#', $routePath, $matches) === 1) {
-                return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeAlertReadResponse($player, (int) $matches[1]));
-            }
             if (preg_match('#^/api/probe/damage-warnings/(\d+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeDamageWarningReadResponse($player, (int) $matches[1]));
             }
@@ -130,7 +127,6 @@ final class ApiKernel
                 '/api/probe/atomic-printer/craft' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeAtomicPrinterCraftResponse($player, $body)),
                 '/api/probe/messages/sent' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSentMessagesResponse($player, $query)),
                 '/api/probe/messages' => $this->protectedRoute($method, ['GET', 'POST'], $headers, fn(Player $player): ApiResponse => $method === 'POST' ? $this->probeMessageSendResponse($player, $body) : $this->probeMessagesResponse($player, $query)),
-                '/api/probe/alerts' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeAlertsResponse($player)),
                 '/api/probe/damage-warnings' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeDamageWarningsResponse($player)),
                 '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
@@ -816,20 +812,6 @@ final class ApiKernel
         return new ApiResponse(200, ['message' => $this->probeMessageArray($player, $this->messages->markRead($message))]);
     }
 
-    private function probeAlertsResponse(Player $player): ApiResponse
-    {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $alerts = $this->damageWarnings->findByProbeId($probe->id);
-
-        return new ApiResponse(200, [
-            'alerts' => array_map(
-                fn(ProbeDamageWarning $alert): array => $this->probeAlertArray($player, $alert),
-                $alerts,
-            ),
-            'rules' => $this->probeAlertRules(),
-        ]);
-    }
-
     private function probeDamageWarningsResponse(Player $player): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
@@ -837,23 +819,16 @@ final class ApiKernel
 
         return new ApiResponse(200, [
             'damageWarnings' => array_map(
-                fn(ProbeDamageWarning $warning): array => $this->probeAlertArray($player, $warning),
+                fn(ProbeDamageWarning $warning): array => $this->probeDamageWarningArray($player, $warning),
                 $warnings,
             ),
-            'rule' => $this->storageContainerBreakRule(),
-        ]);
-    }
-
-    private function probeAlertReadResponse(Player $player, int $alertId): ApiResponse
-    {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $alert = $this->damageWarnings->findByIdForProbe($alertId, $probe->id);
-        if ($alert === null) {
-            return ApiResponse::error(404, 'not_found', 'Alert not found.');
-        }
-
-        return new ApiResponse(200, [
-            'alert' => $this->probeAlertArray($player, $this->damageWarnings->markRead($alert)),
+            'rule' => [
+                'type' => ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
+                'startsAtAdditionalContainers' => 5,
+                'riskPerAdditionalContainerAfterFourPercent' => 10,
+                'maximumRiskPercent' => 100,
+                'message' => 'From 5 additional containers onward, movement stress can break one container link. Risk is 10% at 5 containers, 20% at 6, and continues up to 100%.',
+            ],
         ]);
     }
 
@@ -866,32 +841,8 @@ final class ApiKernel
         }
 
         return new ApiResponse(200, [
-            'damageWarning' => $this->probeAlertArray($player, $this->damageWarnings->markRead($warning)),
+            'damageWarning' => $this->probeDamageWarningArray($player, $this->damageWarnings->markRead($warning)),
         ]);
-    }
-
-    /**
-     * @return array<string, array<string, mixed>>
-     */
-    private function probeAlertRules(): array
-    {
-        return [
-            'storageContainerBreak' => $this->storageContainerBreakRule(),
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function storageContainerBreakRule(): array
-    {
-        return [
-            'type' => ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
-            'startsAtAdditionalContainers' => 5,
-            'riskPerAdditionalContainerAfterFourPercent' => 10,
-            'maximumRiskPercent' => 100,
-            'message' => 'From 5 additional containers onward, movement stress can break one container link. Risk is 10% at 5 containers, 20% at 6, and continues up to 100%.',
-        ];
     }
 
     private function messageRecipientProbeId(mixed $value): ?int
@@ -1554,11 +1505,11 @@ final class ApiKernel
         return (int) $value;
     }
 
-    private function probeAlertArray(Player $player, ProbeDamageWarning $warning): array
+    private function probeDamageWarningArray(Player $player, ProbeDamageWarning $warning): array
     {
         $frame = new PlayerReferenceFrame($player->homeSector);
 
-        $alert = [
+        return [
             'id' => $warning->id,
             'type' => $warning->type,
             'status' => $warning->status,
@@ -1568,33 +1519,21 @@ final class ApiKernel
             'sector' => [
                 'relative' => $frame->globalToRelative(new SectorCoordinates($warning->sectorX, $warning->sectorY, $warning->sectorZ)),
             ],
+            'container' => [
+                'id' => $warning->containerId,
+                'label' => $warning->containerLabel,
+                'detachedObjectId' => $warning->objectId,
+            ],
+            'risk' => [
+                'percent' => $warning->riskPercent,
+                'additionalContainerCount' => $warning->additionalContainerCount,
+                'ruleStartsAtAdditionalContainers' => 5,
+            ],
             'createdAt' => $warning->createdAt,
             'updatedAt' => $warning->updatedAt,
             'readAt' => $warning->readAt,
             'resolvedAt' => $warning->resolvedAt,
         ];
-
-        if ($warning->type === ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK) {
-            $alert['container'] = [
-                'id' => $warning->containerId,
-                'label' => $warning->containerLabel,
-                'detachedObjectId' => $warning->objectId,
-            ];
-            $alert['risk'] = [
-                'percent' => $warning->riskPercent,
-                'additionalContainerCount' => $warning->additionalContainerCount,
-                'ruleStartsAtAdditionalContainers' => 5,
-            ];
-        }
-
-        if ($warning->type === ProbeDamageWarning::TYPE_INTELLIGENT_LIFE) {
-            $alert['planet'] = [
-                'id' => $warning->objectId,
-                'name' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
-            ];
-        }
-
-        return $alert;
     }
 
     private function movementArray(Player $player, ProbeMovement $movement, bool $includeLive = true): array

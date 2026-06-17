@@ -1,5 +1,5 @@
 {
-  "generationVersion": 4,
+  "generationVersion": 3,
   "resourceContainersPerEarthMass": 1000000.0,
   "categoryWeights": {
     "empty": 72.0,
@@ -77,8 +77,6 @@
     "habitableCategories": ["rocky", "ocean"],
     "habitableChance": 0.08,
     "habitableRange": [0.35, 0.92],
-    "intelligentLifeThreshold": 0.35,
-    "intelligentLifeChance": 0.2,
     "backgroundHabitabilityRange": [0.0, 0.18],
     "rareMetalsTraceChance": 0.22
   },

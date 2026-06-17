@@ -7,7 +7,6 @@ namespace VonNeumannGame\Domain;
 final class ProbeDamageWarning
 {
     public const TYPE_STORAGE_CONTAINER_BREAK = 'storage_container_break';
-    public const TYPE_INTELLIGENT_LIFE = 'intelligent_life';
     public const STATUS_UNREAD = 'unread';
     public const STATUS_READ = 'read';
 
