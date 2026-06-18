@@ -204,8 +204,6 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient ON probe_messages(recipient_probe_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_sender ON probe_messages(sender_probe_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type, recipient_id, status, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type, sender_id, created_at)",
             "CREATE TABLE IF NOT EXISTS probe_missions (
                 id $id,
                 uid $text NOT NULL UNIQUE,

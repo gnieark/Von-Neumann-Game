@@ -208,6 +208,43 @@ $test->assertThrows(
     'OAuth service rejects an OpenID token for another client'
 );
 
+$legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
+$legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
+$legacyMessagePdo = $legacyMessageFactory->create();
+$legacyMessagePdo->exec(
+    "CREATE TABLE probe_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_probe_id INTEGER NOT NULL,
+        recipient_probe_id INTEGER NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL,
+        read_at TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )"
+);
+$legacyMessagePdo->exec(
+    "INSERT INTO probe_messages
+     (sender_probe_id, recipient_probe_id, sector_x, sector_y, sector_z, body, status, read_at, created_at, updated_at)
+     VALUES (1, 2, 0, 0, 0, 'Legacy hello', 'unread', NULL, '2026-06-18T00:00:00+00:00', '2026-06-18T00:00:00+00:00')"
+);
+$legacyMessageFactory->initializeSchema($legacyMessagePdo);
+$legacyMessageColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacyMessagePdo->query('PRAGMA table_info(probe_messages)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('recipient_type', $legacyMessageColumns, true), 'legacy probe message schema migrates recipient_type before endpoint indexes');
+$legacyEndpointIndexes = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacyMessagePdo->query('PRAGMA index_list(probe_messages)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('idx_probe_messages_recipient_endpoint', $legacyEndpointIndexes, true), 'legacy probe message schema creates endpoint recipient index after migration');
+$legacyMessage = $legacyMessagePdo->query('SELECT sender_type, sender_id, recipient_type, recipient_id FROM probe_messages')->fetch(PDO::FETCH_ASSOC);
+$test->assertEquals(['sender_type' => 'probe', 'sender_id' => '1', 'recipient_type' => 'probe', 'recipient_id' => '2'], $legacyMessage, 'legacy probe message migration backfills typed endpoints');
+
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();
 $dbFactory->initializeSchema($pdo);

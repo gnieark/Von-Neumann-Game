@@ -16,6 +16,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Base de donnees : l'initialisation d'une ancienne table `probe_messages` migre maintenant les colonnes `sender_type` / `recipient_type` avant de creer leurs index, evitant un crash au demarrage apres changement de branche.
 - Stockage : `GET /api/probe/mannies` initialise/répare désormais le container interne de la sonde, réattache les items/Mannys à bord dont le container a disparu et libère les Mannys coincés sur un déplacement de stockage expiré devenu impossible.
 - Interface : le container interne de la sonde est traduit en anglais dans les vues d'inventaire.
 
