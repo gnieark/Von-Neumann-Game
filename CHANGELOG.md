@@ -8,6 +8,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 
+### Fixed
+
+- Interface : les rafraîchissements automatiques de la page Inventaires ne réinitialisent plus les règles de stockage en cours de modification.
+
 ## 2026-06-17
 
 ### Added

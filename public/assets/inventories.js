@@ -2,12 +2,15 @@
     const DEFAULT_REFRESH_MS = 15000;
     const MIN_REFRESH_MS = 750;
     const REFRESH_CUSHION_MS = 500;
+    const STORAGE_RULES_IDLE_PRESERVE_MS = 60000;
 
     const state = {
         currentInventory: null,
         currentMannies: [],
         currentSectorObjects: [],
         inventoryContainerFilter: "all",
+        storageRulesDirty: false,
+        storageRulesTouchedAt: 0,
     };
 
     let i18n = {};
@@ -417,6 +420,29 @@
         });
     }
 
+    function markStorageRulesTouched() {
+        state.storageRulesTouchedAt = Date.now();
+    }
+
+    function storageRulesAreActive() {
+        const node = document.getElementById("storage-rules-panel");
+        const active = document.activeElement;
+        return Boolean(
+            node
+            && active instanceof Element
+            && node.contains(active)
+            && active.matches("select, input, button, textarea")
+        );
+    }
+
+    function shouldPreserveStorageRules() {
+        return Boolean(
+            state.storageRulesDirty
+            || storageRulesAreActive()
+            || (state.storageRulesTouchedAt > 0 && Date.now() - state.storageRulesTouchedAt < STORAGE_RULES_IDLE_PRESERVE_MS)
+        );
+    }
+
     function renderStorageRules(inventory) {
         const node = document.getElementById("storage-rules-panel");
         if (!node) {
@@ -424,6 +450,9 @@
         }
 
         const containers = inventoryContainers(inventory);
+        state.storageRulesDirty = false;
+        state.storageRulesTouchedAt = 0;
+
         if (!inventory || containers.length === 0) {
             node.innerHTML = "";
             return;
@@ -477,12 +506,16 @@
         if (select) {
             select.addEventListener("change", () => {
                 state.inventoryContainerFilter = select.value || "all";
-                renderInventory(state.currentInventory);
+                renderInventory(state.currentInventory, {"preserveStorageRules": true});
             });
         }
         node.querySelectorAll(".storage-rules-form").forEach((form) => syncStorageRuleForm(form));
         node.querySelectorAll(".storage-rule-select").forEach((selectNode) => {
+            selectNode.addEventListener("focus", markStorageRulesTouched);
+            selectNode.addEventListener("pointerdown", markStorageRulesTouched);
             selectNode.addEventListener("change", () => {
+                state.storageRulesDirty = true;
+                markStorageRulesTouched();
                 syncStorageRuleForm(selectNode.closest(".storage-rules-form"), selectNode);
             });
         });
@@ -550,16 +583,19 @@
         return Array.from(groups.values());
     }
 
-    function renderInventory(inventory) {
+    function renderInventory(inventory, options) {
         const node = document.getElementById("inventory-list");
         if (!node) {
             return;
         }
+        const renderOptions = options || {};
         state.currentInventory = inventory && typeof inventory === "object" ? inventory : null;
         if (!state.inventoryContainerFilter) {
             state.inventoryContainerFilter = "all";
         }
-        renderStorageRules(inventory);
+        if (!renderOptions.preserveStorageRules || !shouldPreserveStorageRules()) {
+            renderStorageRules(inventory);
+        }
         if (!inventory || typeof inventory !== "object") {
             node.innerHTML = "";
             return;
@@ -932,7 +968,7 @@
 
     function scheduleRefresh(data) {
         clearRefreshTimer();
-        refreshTimer = window.setTimeout(refreshInventoryPage, window.VNG.nextRefreshDelay(
+        refreshTimer = window.setTimeout(() => refreshInventoryPage({"preserveStorageRules": true}), window.VNG.nextRefreshDelay(
             data,
             DEFAULT_REFRESH_MS,
             MIN_REFRESH_MS,
@@ -940,7 +976,8 @@
         ));
     }
 
-    async function refreshInventoryPage() {
+    async function refreshInventoryPage(options) {
+        const refreshOptions = options || {};
         if (loadInProgress) {
             return;
         }
@@ -955,12 +992,12 @@
             ]);
             const probe = probeData.probe || {};
             renderSystemsSummary(probe);
-            renderInventory(probe.inventory || {});
+            renderInventory(probe.inventory || {}, refreshOptions);
             scheduleRefresh({"probe": probe, "mannies": mannyData.mannies, "sector": sectorData && sectorData.sector});
         } catch (error) {
             setText("inventory-status", error.message || tr("requestDenied", "Request denied"));
             renderSystemsSummary(null);
-            renderInventory(null);
+            renderInventory(null, refreshOptions);
             scheduleRefresh(null);
         } finally {
             loadInProgress = false;
@@ -1034,6 +1071,8 @@
                 }),
                 async (data) => {
                     setText("inventory-status", tr("storageRulesSaved", "Storage rules saved."));
+                    state.storageRulesDirty = false;
+                    state.storageRulesTouchedAt = 0;
                     if (data.inventory) {
                         renderInventory(data.inventory);
                     }
