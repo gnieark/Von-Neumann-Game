@@ -66,6 +66,34 @@
       "maxMass": 30.0
     }
   },
+  "intelligentLife": {
+    "scenarios": {
+      "return_to_space_program": {
+        "weight": 100
+      },
+      "orbital_cleanup": {
+        "weight": 0
+      },
+      "exodus": {
+        "weight": 0
+      },
+      "genetic_ark": {
+        "weight": 0
+      },
+      "last_telescope": {
+        "weight": 0
+      },
+      "communication_relay": {
+        "weight": 0
+      },
+      "forgotten_depot": {
+        "weight": 0
+      },
+      "foreign_von_neumann_probe_assistance": {
+        "weight": 0
+      }
+    }
+  },
   "scan": {
     "residenceSecondsByDistance": {
       "0": 0,

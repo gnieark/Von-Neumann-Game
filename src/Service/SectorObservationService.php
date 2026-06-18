@@ -68,7 +68,7 @@ final class SectorObservationService
                 $distance,
                 SectorKnowledgeLevel::Detailed,
                 1.0,
-                ['objects' => $this->detailedObjects($content, $current)],
+                ['objects' => $this->detailedObjects($content, $current, $relative)],
                 $scan,
             );
         }
@@ -183,12 +183,12 @@ final class SectorObservationService
         ];
     }
 
-    private function detailedObject(UniverseObject $object): array
+    private function detailedObject(UniverseObject $object, SectorCoordinates $sector, array $relativeCoordinates): array
     {
         $data = [
             'id' => $object->getId(),
             'type' => $object->getType()->value,
-            'name' => $object->getName(),
+            'name' => $this->publicObjectName($object, $sector, $relativeCoordinates),
             'estimated' => false,
             'summary' => $this->summary($object),
             'mass' => $object->getMass(),
@@ -207,8 +207,8 @@ final class SectorObservationService
             $data['starCount'] = count($object->getStars());
             $data['planetCount'] = $planetCount;
             $data['orbitalBodyCount'] = count($object->getOrbitalBodies());
-            $data['bookmarkTargets'] = $this->bookmarkTargets($object);
-            $data['minableTargets'] = $this->minableTargets($object);
+            $data['bookmarkTargets'] = $this->bookmarkTargets($object, $sector, $relativeCoordinates);
+            $data['minableTargets'] = $this->minableTargets($object, $sector, $relativeCoordinates);
         }
 
         if ($object instanceof Star) {
@@ -265,7 +265,7 @@ final class SectorObservationService
     /**
      * @return array<array<string, mixed>>
      */
-    private function detailedObjects(SectorContent $content, bool $isCurrentSector): array
+    private function detailedObjects(SectorContent $content, bool $isCurrentSector, array $relativeCoordinates): array
     {
         $objects = [];
         foreach ($content->getObjects() as $object) {
@@ -273,10 +273,35 @@ final class SectorObservationService
                 continue;
             }
 
-            $objects[] = $this->detailedObject($object);
+            $objects[] = $this->detailedObject($object, $content->getCoordinates(), $relativeCoordinates);
         }
 
         return $objects;
+    }
+
+    /**
+     * @param array<UniverseObject> $objects
+     * @return array<Planet>
+     */
+    private function intelligentLifePlanets(array $objects): array
+    {
+        $planets = [];
+        foreach ($objects as $object) {
+            if ($object instanceof Planet && $object->hasIntelligentLife()) {
+                $planets[] = $object;
+                continue;
+            }
+            if ($object instanceof SolarSystem) {
+                foreach ($object->getOrbitalBodies() as $body) {
+                    $bodyObject = $body->getObject();
+                    if ($bodyObject instanceof Planet && $bodyObject->hasIntelligentLife()) {
+                        $planets[] = $bodyObject;
+                    }
+                }
+            }
+        }
+
+        return $planets;
     }
 
     private function abandonOrphanedForgottenMannies(SectorContent $content): SectorContent
@@ -308,7 +333,7 @@ final class SectorObservationService
         return $content;
     }
 
-    private function minableTargets(SolarSystem $system): array
+    private function minableTargets(SolarSystem $system, SectorCoordinates $sector, array $relativeCoordinates): array
     {
         $targets = [];
         foreach ($system->getOrbitalBodies() as $body) {
@@ -322,7 +347,7 @@ final class SectorObservationService
             $target = [
                 'id' => $object->getId(),
                 'type' => $object->getType()->value,
-                'name' => $object->getName(),
+                'name' => $this->publicObjectName($object, $sector, $relativeCoordinates),
                 'mass' => $object->getMass(),
                 'massUnit' => $this->massUnit($object),
                 'resources' => $resources,
@@ -346,25 +371,25 @@ final class SectorObservationService
         return $targets;
     }
 
-    private function bookmarkTargets(SolarSystem $system): array
+    private function bookmarkTargets(SolarSystem $system, SectorCoordinates $sector, array $relativeCoordinates): array
     {
         $targets = [];
         foreach ($system->getStars() as $star) {
-            $targets[] = $this->bookmarkTargetArray($star);
+            $targets[] = $this->bookmarkTargetArray($star, $sector, $relativeCoordinates);
         }
         foreach ($system->getOrbitalBodies() as $body) {
-            $targets[] = $this->bookmarkTargetArray($body->getObject());
+            $targets[] = $this->bookmarkTargetArray($body->getObject(), $sector, $relativeCoordinates);
         }
 
         return $targets;
     }
 
-    private function bookmarkTargetArray(UniverseObject $object): array
+    private function bookmarkTargetArray(UniverseObject $object, SectorCoordinates $sector, array $relativeCoordinates): array
     {
         $target = [
             'id' => $object->getId(),
             'type' => $object->getType()->value,
-            'name' => $object->getName(),
+            'name' => $this->publicObjectName($object, $sector, $relativeCoordinates),
             'mass' => $object->getMass(),
             'radius' => $object->getRadius(),
         ];
@@ -379,6 +404,48 @@ final class SectorObservationService
         }
 
         return $target;
+    }
+
+    /**
+     * @param array{x: int, y: int, z: int} $relativeCoordinates
+     */
+    private function publicObjectName(UniverseObject $object, SectorCoordinates $sector, array $relativeCoordinates): ?string
+    {
+        $name = $object->getName();
+        if (!$object instanceof Planet || !$object->hasIntelligentLife()) {
+            return $name;
+        }
+
+        if ($name !== null && !$this->nameContainsSectorCoordinates($name, $sector)) {
+            return $name;
+        }
+
+        return 'Monde habite du secteur relatif ' . $this->coordinateLabel($relativeCoordinates);
+    }
+
+    private function nameContainsSectorCoordinates(string $name, SectorCoordinates $sector): bool
+    {
+        $absoluteKey = $sector->toKey();
+        if (str_contains($name, $absoluteKey)) {
+            return true;
+        }
+
+        $hyphenatedKey = str_replace(':', '-', $absoluteKey);
+        if (str_contains($name, $hyphenatedKey)) {
+            return true;
+        }
+
+        return str_contains($name, str_replace(':', ' ', $absoluteKey));
+    }
+
+    /**
+     * @param array{x: int, y: int, z: int} $coordinates
+     */
+    private function coordinateLabel(array $coordinates): string
+    {
+        return (string) ($coordinates['x'] ?? 0)
+            . ':' . (string) ($coordinates['y'] ?? 0)
+            . ':' . (string) ($coordinates['z'] ?? 0);
     }
 
     private function objectUnitFields(UniverseObject $object): array

@@ -99,7 +99,7 @@
                 recipients.push({
                     "type": "planet",
                     "id": String(object.id),
-                    "name": object.name || object.id,
+                    "name": object.displayName || object.name || tr("inhabitedPlanetRecipient", "Inhabited planet"),
                 });
             }
             ["minableTargets", "bookmarkTargets"].forEach((key) => {

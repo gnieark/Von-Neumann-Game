@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '36'
+  version: '39'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 36
+                apiVersion: 39
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -979,7 +979,7 @@ paths:
                   - id: 8
                     type: intelligent_life
                     status: unread
-                    message: Intelligent life detected: technological signatures confirmed on Pale Signal in sector 12:4:-2.
+                    message: 'Intelligent life detected: technological signatures confirmed on Pale Signal in sector 12:4:-2.'
                     phase: arrival
                     scheduledAt: '2026-06-12T14:42:00+00:00'
                     sector:
@@ -2538,6 +2538,7 @@ components:
         name:
           type: string
           nullable: true
+          description: Public target label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         mass:
           type: number
         massUnit:
@@ -2632,7 +2633,7 @@ components:
           description: Stable public mission id.
         type:
           type: string
-          description: Mission family identifier, chosen by the future event that creates the mission.
+          description: Mission family identifier, chosen by the event that creates the mission. First-contact intelligent-life scenarios currently use `first_contact.return_to_space_program`.
         title:
           type: string
         description:
@@ -2647,10 +2648,12 @@ components:
           description: Whether pending steps may be completed in any order or must follow sortOrder.
         metadata:
           type: object
+          description: Public mission metadata. Sector coordinates, when present, are exposed as player-relative coordinates under `sector.relative`; inhabited-planet names that would reveal absolute coordinates are replaced by a public label.
           additionalProperties: true
         createdByEvent:
           type: object
           nullable: true
+          description: Public mission creation context. Sector coordinates, when present, are exposed as player-relative coordinates under `sector.relative`.
           additionalProperties: true
         startedAt:
           type: string
@@ -2990,11 +2993,11 @@ components:
           type: integer
           minimum: 1
           deprecated: true
-          description: Legacy shortcut for `recipient: { type: probe, id: ... }`.
+          description: 'Legacy shortcut for `recipient: { type: probe, id: ... }`.'
         recipientPlanetId:
           type: string
           deprecated: true
-          description: Legacy shortcut for `recipient: { type: planet, id: ... }`.
+          description: 'Legacy shortcut for `recipient: { type: planet, id: ... }`.'
         body:
           type: string
           minLength: 1
@@ -3406,6 +3409,7 @@ components:
             name:
               type: string
               nullable: true
+              description: Public planet label; inhabited-planet names that would reveal absolute coordinates are replaced by a public label.
         createdAt:
           type: string
           format: date-time
@@ -3475,7 +3479,7 @@ components:
           oneOf:
             - type: integer
             - type: string
-          description: Numeric probe id for probe endpoints, planet object id for planet endpoints.
+          description: Numeric probe id for probe endpoints, opaque planet object id for planet endpoints. Planet ids must not be interpreted as coordinates.
         probeId:
           type: integer
           description: Present when `type` is `probe`.
@@ -3484,6 +3488,7 @@ components:
           description: Present when `type` is `planet`.
         name:
           type: string
+          description: Public endpoint label. Planet endpoint names that would reveal absolute coordinates are replaced by a public label.
     ProbeInventory:
       type: object
       required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, containers, externalTanks]
@@ -4046,12 +4051,14 @@ components:
       properties:
         id:
           type: string
+          description: Opaque object id. Clients must not parse coordinates from it.
         type:
           type: string
           enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container]
         name:
           type: string
           nullable: true
+          description: Public object label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         estimated:
           type: boolean
         summary:
@@ -4166,12 +4173,14 @@ components:
       properties:
         id:
           type: string
+          description: Opaque target object id. Clients must not parse coordinates from it.
         type:
           type: string
           enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system]
         name:
           type: string
           nullable: true
+          description: Public target label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         mass:
           type: number
         massUnit:

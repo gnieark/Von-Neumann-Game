@@ -44,6 +44,7 @@ final class ProbeMovementService
         private readonly ?MannyRepository $mannies = null,
         private readonly ?ProbeStorageService $storage = null,
         private readonly ?ProbeDamageWarningRepository $damageWarnings = null,
+        private readonly ?MissionService $missions = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -124,8 +125,12 @@ final class ProbeMovementService
             $probe->enteredCurrentSectorAt = $now->format('c');
             $this->applyIntersectorIntegrityLoss($probe, $movement);
             $this->probes->save($probe);
+            $alreadyVisited = $this->visitedSectors->getVisitedSectorByPlayerId($probe->playerId, $movement->target) !== null;
             $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
             $this->createIntelligentLifeAlerts($probe, $movement);
+            if (!$alreadyVisited) {
+                $this->startIntelligentLifeScenarios($probe, $movement);
+            }
             $this->scheduleBlackHoleTrapIfNeeded($probe);
 
             return $this->probes->findById($probe->id) ?? $probe;
@@ -356,11 +361,10 @@ final class ProbeMovementService
 
         $sector = $this->sectors->getOrCreateSector($movement->target);
         foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
-            $planetName = $planet->getName() ?? $planet->getId();
+            $planetName = $this->publicPlanetName($planet, $movement->target);
             $message = 'Intelligent life detected: technological signatures confirmed on '
                 . $planetName
-                . ' in sector '
-                . $movement->target->toKey()
+                . ' in the arrival sector'
                 . '.';
             $this->damageWarnings->createIntelligentLifeAlert(
                 $probe->id,
@@ -370,6 +374,18 @@ final class ProbeMovementService
                 $planetName,
                 $message,
             );
+        }
+    }
+
+    private function startIntelligentLifeScenarios(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->sectors === null || $this->missions === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($movement->target);
+        foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
+            $this->missions->startIntelligentLifeScenario($probe, $movement->target, $planet, $movement->id);
         }
     }
 
@@ -410,6 +426,25 @@ final class ProbeMovementService
         }
 
         return new ProbeDirection(round($dx / $length, 4), round($dy / $length, 4), round($dz / $length, 4));
+    }
+
+    private function publicPlanetName(Planet $planet, SectorCoordinates $sector): string
+    {
+        $name = $planet->getName();
+        if ($name !== null && !$this->nameContainsSectorCoordinates($name, $sector)) {
+            return $name;
+        }
+
+        return 'Monde habite';
+    }
+
+    private function nameContainsSectorCoordinates(string $name, SectorCoordinates $sector): bool
+    {
+        $absoluteKey = $sector->toKey();
+
+        return str_contains($name, $absoluteKey)
+            || str_contains($name, str_replace(':', '-', $absoluteKey))
+            || str_contains($name, str_replace(':', ' ', $absoluteKey));
     }
 
     private function progressBetween(\DateTimeImmutable $now, string $start, string $end): float

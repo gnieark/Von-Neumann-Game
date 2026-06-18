@@ -11,8 +11,12 @@ use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
+use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\Player;
+use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
+use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
@@ -342,19 +346,62 @@ $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, worldSeed: 'api-test-world');
+$missionService = new MissionService($missions, $messages, [], 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
-$missionService = new MissionService($missions);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
 $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(36, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(39, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
+
+$privacyHome = new SectorCoordinates(1000, 1000, 0);
+$privacySector = new SectorCoordinates(1002, 1000, 0);
+$privacyRelativeLabel = '2:0:0';
+$leakyPlanetName = 'Signal-' . str_replace(':', '-', $privacySector->toKey());
+$sectorRepository->save(new SectorContent($privacySector, [
+    new Planet('privacy-life-planet', $leakyPlanetName, 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
+    new SolarSystem(
+        'privacy-system',
+        null,
+        new Star('privacy-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+        null,
+        [
+            new OrbitingBody(
+                new Planet('privacy-nested-life-planet', $leakyPlanetName, 'rocky', 1.0, 1.0, true, 0.72, ['silicates'], intelligentLife: true),
+                new OrbitDescriptor(1.0, 0.01, 0.0),
+            ),
+        ],
+        1.0,
+        4.0,
+    ),
+]));
+$privacyObservation = (new SectorObservationService($sectorService, $visitedSectors))->observe(
+    new Player(424242, 'privacy-observer', 'Privacy Observer', $privacyHome, gmdate('c'), gmdate('c')),
+    new NeumannProbe(424242, 424242, 'Privacy probe', $privacySector, 0.0, 0.0, new ProbeDirection(), ProbeStatus::Idle, 100.0, 0.0, 100.0, 0.0, 0.0, 0.0, 1.0, null, gmdate('c'), gmdate('c'), gmdate('c'), false),
+    $privacySector,
+)->toArray();
+$privacyJson = json_encode($privacyObservation, JSON_THROW_ON_ERROR);
+$privacyTopObject = $privacyObservation['objects'][0] ?? [];
+$privacyNestedTarget = $privacyObservation['objects'][1]['bookmarkTargets'][1] ?? [];
+$test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $privacyObservation['relativeCoordinates'] ?? null, 'sector observation computes player-relative coordinates');
+$test->assertEquals('Monde habite du secteur relatif ' . $privacyRelativeLabel, $privacyTopObject['name'] ?? null, 'sector observation hides absolute coordinates in unnamed inhabited planet labels');
+$test->assertEquals('Monde habite du secteur relatif ' . $privacyRelativeLabel, $privacyNestedTarget['name'] ?? null, 'nested inhabited planet targets hide absolute-coordinate debug names');
+$test->assert(!str_contains($privacyJson, $privacySector->toKey()), 'sector observation payload does not expose absolute sector keys through inhabited planet names');
+$test->assert(!str_contains($privacyJson, str_replace(':', '-', $privacySector->toKey())), 'sector observation payload does not expose hyphenated absolute sector keys through inhabited planet names');
+$forceInhabitedOutput = [];
+$forceInhabitedExit = 0;
+exec(PHP_BINARY . ' ' . escapeshellarg(__DIR__ . '/../scripts/force-inhabited-planet.php') . ' --sector=-114:-348:-650 --dry-run 2>&1', $forceInhabitedOutput, $forceInhabitedExit);
+$forceInhabitedText = implode("\n", $forceInhabitedOutput);
+$test->assertEquals(0, $forceInhabitedExit, 'force-inhabited-planet dry-run exits successfully');
+$test->assert(str_contains($forceInhabitedText, '- planet id: debug-inhabited-'), 'force-inhabited-planet dry-run reports an opaque debug planet id');
+$test->assert(!str_contains($forceInhabitedText, 'debug-inhabited-n114-n348-n650'), 'force-inhabited-planet default id does not expose encoded absolute coordinates');
+$test->assert(!str_contains($forceInhabitedText, '- planet id: debug-inhabited--114:-348:-650'), 'force-inhabited-planet default id does not expose raw absolute coordinates');
 
 $movementTimeline = (new MovementDurationCalculator())->timeline(new DateTimeImmutable('2026-01-01T00:00:00+00:00'), 2);
 $test->assertEquals('2026-01-01T00:05:00+00:00', $movementTimeline['preparationEndsAt']->format('c'), 'beta movement preparation delay is halved');
@@ -1401,8 +1448,9 @@ $intelligentLifeSession = $kernel->handle('POST', '/api/session', [], json_encod
 $intelligentLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($intelligentLifeSession->body['token'] ?? '')];
 if ($intelligentLifeProbe !== null) {
     $intelligentLifeTarget = $intelligentLifeProbe->currentSector->add(2, 0, 0);
+    $intelligentLifeLeakyPlanetName = 'Signal-' . str_replace(':', '-', $intelligentLifeTarget->toKey());
     $sectorRepository->save(new SectorContent($intelligentLifeTarget, [
-        new Planet('life-alert-planet', 'Pale Signal', 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
+        new Planet('life-alert-planet', $intelligentLifeLeakyPlanetName, 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
     ]));
 
     $intelligentLifeMove = $kernel->handle('POST', '/api/probe/move', $intelligentLifeHeaders, json_encode([
@@ -1432,9 +1480,52 @@ if ($intelligentLifeProbe !== null) {
         $lifeAlert = $lifeAlerts[0] ?? null;
         $test->assertEquals('unread', $lifeAlert['status'] ?? null, 'intelligent-life alert starts unread');
         $test->assertEquals('life-alert-planet', $lifeAlert['planet']['id'] ?? null, 'intelligent-life alert exposes the planet id');
-        $test->assertEquals('Pale Signal', $lifeAlert['planet']['name'] ?? null, 'intelligent-life alert exposes the planet name');
+        $test->assertEquals('Monde habite', $lifeAlert['planet']['name'] ?? null, 'intelligent-life alert hides absolute-coordinate debug planet names');
         $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $lifeAlert['sector']['relative'] ?? null, 'intelligent-life alert exposes the relative sector');
         $test->assert(is_string($lifeAlert['message'] ?? null) && str_contains((string) $lifeAlert['message'], 'Intelligent life detected'), 'intelligent-life alert stores a readable message');
+        $test->assert(is_string($lifeAlert['message'] ?? null) && str_contains((string) $lifeAlert['message'], 'relative sector 2:0:0'), 'intelligent-life alert message uses relative sector coordinates');
+        $test->assert(!str_contains(json_encode($lifeAlert, JSON_THROW_ON_ERROR), $intelligentLifeTarget->toKey()), 'intelligent-life alert response does not expose absolute sector keys');
+        $test->assert(!str_contains(json_encode($lifeAlert, JSON_THROW_ON_ERROR), str_replace(':', '-', $intelligentLifeTarget->toKey())), 'intelligent-life alert response does not expose hyphenated absolute sector keys');
+
+        $firstContactMessages = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+        $test->assertEquals(200, $firstContactMessages->status, 'GET /api/probe/messages exposes first-contact planet messages');
+        $test->assertEquals('- -- --- ----- -------', $firstContactMessages->body['messages'][0]['body'] ?? null, 'first-contact planet message contains the prime-count signal');
+        $test->assertEquals('planet', $firstContactMessages->body['messages'][0]['sender']['type'] ?? null, 'first-contact message comes from the planet endpoint');
+        $test->assertEquals('life-alert-planet', $firstContactMessages->body['messages'][0]['sender']['planetId'] ?? null, 'first-contact message exposes the sender planet id');
+        $test->assertEquals('Monde habite', $firstContactMessages->body['messages'][0]['sender']['name'] ?? null, 'first-contact message hides absolute-coordinate debug planet names');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $firstContactMessages->body['messages'][0]['sector']['relative'] ?? null, 'first-contact message exposes only relative sector coordinates');
+        $test->assert(!str_contains(json_encode($firstContactMessages->body['messages'][0], JSON_THROW_ON_ERROR), $intelligentLifeTarget->toKey()), 'first-contact message response does not expose absolute sector keys');
+        $test->assert(!str_contains(json_encode($firstContactMessages->body['messages'][0], JSON_THROW_ON_ERROR), str_replace(':', '-', $intelligentLifeTarget->toKey())), 'first-contact message response does not expose hyphenated absolute sector keys');
+
+        $firstContactMissions = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
+        $test->assertEquals(200, $firstContactMissions->status, 'GET /api/probe/missions exposes first-contact missions');
+        $firstContactMission = $firstContactMissions->body['missions'][0] ?? null;
+        $test->assertEquals('Premier contact', $firstContactMission['title'] ?? null, 'first-contact mission exposes its title');
+        $test->assertEquals('first_contact.return_to_space_program', $firstContactMission['type'] ?? null, 'first-contact mission exposes the selected scenario type');
+        $test->assertEquals('return_to_space_program', $firstContactMission['metadata']['scenario'] ?? null, 'first-contact mission metadata exposes the selected scenario key');
+        $test->assertEquals('life-alert-planet', $firstContactMission['metadata']['planetId'] ?? null, 'first-contact mission metadata exposes the planet id');
+        $test->assertEquals('Monde habite', $firstContactMission['metadata']['planetName'] ?? null, 'first-contact mission metadata hides absolute-coordinate debug planet names');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $firstContactMission['metadata']['sector']['relative'] ?? null, 'first-contact mission metadata exposes relative sector coordinates');
+        $test->assert(!array_key_exists('x', $firstContactMission['metadata']['sector'] ?? []), 'first-contact mission metadata does not expose absolute sector x');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $firstContactMission['createdByEvent']['sector']['relative'] ?? null, 'first-contact mission event exposes relative sector coordinates');
+        $test->assert(!str_contains(json_encode($firstContactMission, JSON_THROW_ON_ERROR), $intelligentLifeTarget->toKey()), 'first-contact mission response does not expose absolute sector keys');
+        $test->assert(is_string($firstContactMission['description'] ?? null) && str_contains((string) $firstContactMission['description'], '- -- --- ----- -------'), 'first-contact mission description includes the received signal');
+        $test->assert(is_string($firstContactMission['description'] ?? null) && str_contains((string) $firstContactMission['description'], 'secteur relatif 2:0:0'), 'first-contact mission description uses relative sector coordinates');
+        $test->assertEquals('pending', $firstContactMission['steps'][0]['status'] ?? null, 'first-contact reply step starts pending');
+
+        $firstContactReply = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
+            'recipient' => [
+                'type' => 'planet',
+                'id' => 'life-alert-planet',
+            ],
+            'body' => '-----------',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(201, $firstContactReply->status, 'POST /api/probe/messages sends the prime-sequence reply to the planet');
+        $firstContactAfterReply = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
+        $firstContactMissionAfterReply = $firstContactAfterReply->body['missions'][0] ?? null;
+        $test->assertEquals('active', $firstContactMissionAfterReply['status'] ?? null, 'first-contact mission remains active for its next scenario step');
+        $test->assertEquals('completed', $firstContactMissionAfterReply['steps'][0]['status'] ?? null, 'valid prime-sequence reply completes the first-contact decoding step');
+        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][1]['status'] ?? null, 'first-contact mission waits for the future scenario continuation');
 
         $markLifeAlertRead = $kernel->handle('PATCH', '/api/probe/alerts/' . (int) ($lifeAlert['id'] ?? 0), $intelligentLifeHeaders, json_encode([], JSON_THROW_ON_ERROR));
         $test->assertEquals(200, $markLifeAlertRead->status, 'PATCH /api/probe/alerts/{id} marks an intelligent-life alert read');
