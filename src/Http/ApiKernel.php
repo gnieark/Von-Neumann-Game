@@ -648,6 +648,7 @@ final class ApiKernel
         $observableSector = $this->movements->observableSectorFor($probe, $movement) ?? $probe->currentSector;
         if ($movement === null && $observableSector->equals($probe->currentSector)) {
             $this->movements->refreshCurrentSectorHazards($probe);
+            $this->movements->ensureCurrentSectorIntelligentLifeScenarios($probe);
         }
         if ($sensorMode === 'degraded') {
             $frame = new PlayerReferenceFrame($player->homeSector);

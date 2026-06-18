@@ -6,21 +6,18 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
-<<<<<<< HEAD
 - API v38 : `/api/probe/missions` et les reponses de mission n'exposent plus de coordonnees absolues dans les descriptions, `metadata` ou `createdByEvent`; les secteurs publics y sont convertis en `sector.relative`.
 - API v37 : les arrivees dans un secteur jamais visite contenant une planete habitee peuvent declencher un scenario de premier contact pondere par `gameplay.intelligentLife.scenarios`; le premier scenario implemente, `return_to_space_program`, cree une mission `Premier contact` et un message planetaire en nombres premiers.
 - Debug : ajout de `scripts/force-inhabited-planet.php` pour injecter en CLI une planete habitee dans un secteur donne.
+- Scénario : le premier contact `return_to_space_program` progresse après la réponse en nombres premiers et demande 5 ECE de métaux ainsi que 3 Mannys.
+- Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 
 ### Fixed
 
 - API v39 : `/api/probe/sector`, la messagerie, les alertes de vie intelligente et les reponses de mission remplacent les noms publics de planetes habitees qui contiendraient les coordonnees absolues du secteur par un libelle public sans coordonnees absolues; la messagerie n'utilise plus l'identifiant technique d'une planete comme libelle de destinataire.
 - Debug : `scripts/force-inhabited-planet.php` genere maintenant un id opaque et stable par secteur pour ses planetes forcees, et retire l'ancien objet debug du meme secteur lorsqu'il est relance.
-=======
-- Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
->>>>>>> 0a6d6a7 (fix 404 routes)
-
-### Fixed
-
+- Debug : `scripts/teleport-probe.php` finalise désormais les téléportations via `ProbeMovementService`, afin de déclencher les effets d'arrivée comme les scénarios de premier contact.
+- Scénarios : observer un secteur courant contenant une planète habitée lance désormais le premier contact manquant, même si l'arrivée normale a été contournée par un outil de debug.
 - Interface : les rafraîchissements automatiques de la page Inventaires ne réinitialisent plus les règles de stockage en cours de modification.
 
 ## 2026-06-17
@@ -37,11 +34,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
-<<<<<<< HEAD
 - Base de donnees : l'initialisation d'une ancienne table `probe_messages` migre maintenant les colonnes `sender_type` / `recipient_type` avant de creer leurs index, evitant un crash au demarrage apres changement de branche.
-=======
 - Craft : un craft terminé alors que le cargo est plein ne casse plus `GET /api/probe` ou `GET /api/probe/mannies`; il reste en attente de place et se finalise après libération de stockage.
->>>>>>> 50c4bc4 (fix tasks over storages)
 - Stockage : `GET /api/probe/mannies` initialise/répare désormais le container interne de la sonde, réattache les items/Mannys à bord dont le container a disparu et libère les Mannys coincés sur un déplacement de stockage expiré devenu impossible.
 - Interface : le container interne de la sonde est traduit en anglais dans les vues d'inventaire.
 

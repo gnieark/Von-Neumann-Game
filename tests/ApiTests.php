@@ -1462,6 +1462,37 @@ $intelligentLifePlayer = $auth->registerPlayerWithPassword('life-alert', 'secret
 $intelligentLifeProbe = $probes->findByPlayerId($intelligentLifePlayer->id);
 $intelligentLifeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'life-alert', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $intelligentLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($intelligentLifeSession->body['token'] ?? '')];
+
+$teleportLifePlayer = $auth->registerPlayerWithPassword('teleport-life', 'secret', 'Teleport Life', 'Teleport probe');
+$teleportLifeProbe = $probes->findByPlayerId($teleportLifePlayer->id);
+$teleportLifeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'teleport-life', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$teleportLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($teleportLifeSession->body['token'] ?? '')];
+if ($teleportLifeProbe !== null) {
+    $teleportLifeTarget = $teleportLifeProbe->currentSector->add(4, 0, 0);
+    $sectorRepository->save(new SectorContent($teleportLifeTarget, [
+        new Planet('teleport-life-planet', null, 'ocean', 1.0, 1.0, true, 0.91, ['water_ice'], intelligentLife: true),
+    ]));
+    $pdo->prepare(
+        "UPDATE neumann_probes
+         SET sector_x = :x, sector_y = :y, sector_z = :z, status = 'idle', current_task = NULL, entered_current_sector_at = :now, updated_at = :now
+         WHERE id = :id"
+    )->execute([
+        'id' => $teleportLifeProbe->id,
+        'x' => $teleportLifeTarget->getX(),
+        'y' => $teleportLifeTarget->getY(),
+        'z' => $teleportLifeTarget->getZ(),
+        'now' => gmdate('c'),
+    ]);
+    $visitedSectors->markVisited($teleportLifePlayer, $teleportLifeTarget);
+
+    $teleportLifeSector = $kernel->handle('GET', '/api/probe/sector', $teleportLifeHeaders);
+    $test->assertEquals(200, $teleportLifeSector->status, 'GET /api/probe/sector succeeds after debug teleport into intelligent-life sector');
+    $teleportLifeMessages = $kernel->handle('GET', '/api/probe/messages', $teleportLifeHeaders);
+    $test->assertEquals('- -- --- ----- -------', $teleportLifeMessages->body['messages'][0]['body'] ?? null, 'observing current intelligent-life sector creates missing first-contact message');
+    $teleportLifeMissions = $kernel->handle('GET', '/api/probe/missions', $teleportLifeHeaders);
+    $test->assertEquals('first_contact.return_to_space_program', $teleportLifeMissions->body['missions'][0]['type'] ?? null, 'observing current intelligent-life sector creates missing first-contact mission');
+}
+
 if ($intelligentLifeProbe !== null) {
     $intelligentLifeTarget = $intelligentLifeProbe->currentSector->add(2, 0, 0);
     $intelligentLifeLeakyPlanetName = 'Signal-' . str_replace(':', '-', $intelligentLifeTarget->toKey());
@@ -1537,11 +1568,37 @@ if ($intelligentLifeProbe !== null) {
             'body' => '-----------',
         ], JSON_THROW_ON_ERROR));
         $test->assertEquals(201, $firstContactReply->status, 'POST /api/probe/messages sends the prime-sequence reply to the planet');
+        $firstContactMessagesAfterReply = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+        $planetScenarioReply = $firstContactMessagesAfterReply->body['messages'][0] ?? null;
+        $test->assertEquals('planet', $planetScenarioReply['sender']['type'] ?? null, 'planet answers the valid prime-sequence reply');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'Nous sommes les habitants de ce monde.'), 'planet reply introduces the inhabited world');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], '5 ECE'), 'planet reply asks for five ECE of metals');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], '3 unités'), 'planet reply asks for three Mannys');
         $firstContactAfterReply = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
         $firstContactMissionAfterReply = $firstContactAfterReply->body['missions'][0] ?? null;
         $test->assertEquals('active', $firstContactMissionAfterReply['status'] ?? null, 'first-contact mission remains active for its next scenario step');
         $test->assertEquals('completed', $firstContactMissionAfterReply['steps'][0]['status'] ?? null, 'valid prime-sequence reply completes the first-contact decoding step');
-        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][1]['status'] ?? null, 'first-contact mission waits for the future scenario continuation');
+        $test->assertEquals('completed', $firstContactMissionAfterReply['steps'][1]['status'] ?? null, 'planet reply completes the waiting-for-reply step');
+        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][2]['status'] ?? null, 'first-contact mission waits for metal delivery');
+        $test->assertEquals(5, $firstContactMissionAfterReply['steps'][2]['metadata']['amount'] ?? null, 'metal delivery step exposes the requested amount');
+        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][3]['status'] ?? null, 'first-contact mission waits for Manny delivery');
+        $test->assertEquals(3, $firstContactMissionAfterReply['steps'][3]['metadata']['quantity'] ?? null, 'Manny delivery step exposes the requested quantity');
+
+        $duplicateFirstContactReply = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
+            'recipient' => [
+                'type' => 'planet',
+                'id' => 'life-alert-planet',
+            ],
+            'body' => '-----------',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(201, $duplicateFirstContactReply->status, 'POST /api/probe/messages accepts a repeated prime-sequence reply');
+        $messagesAfterDuplicateReply = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+        $planetScenarioReplies = array_values(array_filter(
+            $messagesAfterDuplicateReply->body['messages'] ?? [],
+            static fn(array $message): bool => is_string($message['body'] ?? null)
+                && str_contains((string) $message['body'], 'Nous sommes les habitants de ce monde.')
+        ));
+        $test->assertEquals(1, count($planetScenarioReplies), 'repeated prime-sequence replies do not duplicate the planet scenario response');
 
         $markLifeAlertRead = $kernel->handle('PATCH', '/api/probe/alerts/' . (int) ($lifeAlert['id'] ?? 0), $intelligentLifeHeaders, json_encode([], JSON_THROW_ON_ERROR));
         $test->assertEquals(200, $markLifeAlertRead->status, 'PATCH /api/probe/alerts/{id} marks an intelligent-life alert read');
@@ -1686,9 +1743,13 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
 
     $senderMessages = $kernel->handle('GET', '/api/probe/messages', $headers);
     $test->assertEquals(200, $senderMessages->status, 'GET /api/probe/messages lists received messages');
-    $test->assertEquals(0, count($senderMessages->body['messages'] ?? []), 'sender does not receive its own outbound probe message');
+    $senderReceivedOwnProbeMessages = array_values(array_filter(
+        $senderMessages->body['messages'] ?? [],
+        static fn(array $message): bool => ($message['body'] ?? null) === 'Signal de bienvenue'
+    ));
+    $test->assertEquals(0, count($senderReceivedOwnProbeMessages), 'sender does not receive its own outbound probe message');
     $test->assertEquals(50, $senderMessages->body['pagination']['limit'] ?? null, 'probe message list defaults to a 50 message limit');
-    $test->assertEquals(0, $senderMessages->body['pagination']['total'] ?? null, 'probe message list exposes the total received message count');
+    $test->assertEquals(1, $senderMessages->body['pagination']['total'] ?? null, 'probe message list exposes the total received message count');
     $senderSentMessages = $kernel->handle('GET', '/api/probe/messages/sent', $headers);
     $test->assertEquals(200, $senderSentMessages->status, 'GET /api/probe/messages/sent lists sent messages');
     $test->assertEquals('Signal de bienvenue', $senderSentMessages->body['messages'][0]['body'] ?? null, 'sender sees the outbound probe message body');

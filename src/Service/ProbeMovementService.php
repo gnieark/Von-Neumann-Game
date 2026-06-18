@@ -165,6 +165,18 @@ final class ProbeMovementService
         $this->scheduleBlackHoleTrapIfNeeded($probe);
     }
 
+    public function ensureCurrentSectorIntelligentLifeScenarios(NeumannProbe $probe): void
+    {
+        if ($this->sectors === null || $this->missions === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
+            $this->missions->startIntelligentLifeScenario($probe, $probe->currentSector, $planet, null);
+        }
+    }
+
     public function latestMovementForProbe(NeumannProbe $probe): ?ProbeMovement
     {
         return $this->movements->findLatestByProbeId($probe->id);
