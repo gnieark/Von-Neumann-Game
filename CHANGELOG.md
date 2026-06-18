@@ -12,6 +12,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Craft : un craft terminé alors que le cargo est plein ne casse plus `GET /api/probe` ou `GET /api/probe/mannies`; il reste en attente de place et se finalise après libération de stockage.
 - Stockage : `GET /api/probe/mannies` initialise/répare désormais le container interne de la sonde, réattache les items/Mannys à bord dont le container a disparu et libère les Mannys coincés sur un déplacement de stockage expiré devenu impossible.
 - Interface : le container interne de la sonde est traduit en anglais dans les vues d'inventaire.
 
