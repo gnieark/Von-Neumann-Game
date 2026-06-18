@@ -1065,11 +1065,26 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(300, $steelBarCraft->body['manny']['task']['durationSeconds'] ?? null, 'steel-bar craft task lasts five minutes');
     $test->assertEquals(0.0, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'steel-bar craft commits its metals immediately');
 
+    $freeBeforeCrowding = $storage->freeCargoCapacity($craftProbeEntity);
+    $storage->addResource($craftProbeEntity, 'metals', max(0.0, $freeBeforeCrowding - 0.005));
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
-    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $crowdedCraftRefresh = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $test->assertEquals(200, $crowdedCraftRefresh->status, 'completed craft waiting for storage does not break Manny refresh');
+    $crowdedCraftManny = array_values(array_filter(
+        $crowdedCraftRefresh->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $craftMannyId,
+    ))[0] ?? null;
+    $test->assertEquals('crafting', $crowdedCraftManny['currentTask'] ?? null, 'completed craft remains pending while storage is full');
+    $test->assertEquals('storage_space', $crowdedCraftManny['task']['waitingFor'] ?? null, 'completed craft records that storage space is required');
+    $crowdedProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $test->assertEquals(200, $crowdedProbe->status, 'GET /api/probe tolerates completed craft output waiting for storage');
+    $jettisonCrowdedMetals = $kernel->handle('POST', '/api/probe/inventory/probe-' . $craftProbeEntity->id . '-stock-metals/jettison', $craftHeaders, json_encode([
+        'amount' => 0.02,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $jettisonCrowdedMetals->status, 'jettisoning resources frees space for a pending craft output');
     $steelBarProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $steelBars = array_values(array_filter(
         $steelBarProbe->body['probe']['inventory']['items'] ?? [],
@@ -1077,6 +1092,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ));
     $test->assertEquals(1, count($steelBars), 'completed steel-bar craft adds a steel bar item');
     $test->assertEquals(0.01, $steelBars[0]['containerSpace'] ?? null, 'steel bar item occupies 0.01 containers');
+    $storage->consumeResource($craftProbeEntity, 'metals', $storage->resourceStock($craftProbeEntity, 'metals'));
     $storageMove = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
         'actorMannyId' => $craftMannyId,
         'kind' => 'item',

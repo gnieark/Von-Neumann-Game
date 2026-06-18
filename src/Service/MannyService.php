@@ -887,7 +887,22 @@ final class MannyService
             return $manny;
         }
 
-        $this->createCraftingOutput($probe, $manny, $now);
+        try {
+            $this->createCraftingOutput($probe, $manny, $now);
+        } catch (MannyActionException $e) {
+            if ($e->errorCode !== 'insufficient_cargo_capacity') {
+                throw $e;
+            }
+
+            $manny->taskPayload = array_merge($manny->taskPayload, [
+                'waitingFor' => 'storage_space',
+                'reason' => 'crafting_output',
+                'failureReason' => $e->errorCode,
+            ]);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
 
         $this->clearTask($manny);
         $this->mannies->save($manny);
