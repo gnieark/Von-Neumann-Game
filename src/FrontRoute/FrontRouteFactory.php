@@ -24,32 +24,7 @@ class FrontRouteFactory{
                 }
 
                 $frontRoute = new $routeClass();
-
-                //Add menus items
-                foreach($availableRoutes as $route2){
-
-                    if(isset($route2['displayOnMainMenu']) && $route2['displayOnMainMenu'] === true){
-                        //(string $title, string $href, bool $active = false)
-                        $active = $route['linkUri'] === $route2['linkUri']; 
-                        $frontRoute->addLeftMenuItem(
-                            new MenuLinkItem(
-                            $route2['name'],
-                            $route2['linkUri'],
-                            $active
-                        ));
-
-                    }
-                    if(isset($route2['displayOnFooter']) && $route2['displayOnFooter'] === true){
-                        $frontRoute->addFooterMenuItem(
-                            new MenuLinkItem(
-                            $route2['name'],
-                            $route2['linkUri']
-                        ));
-
-                    }
-                }
-
-
+                self::addMenuItems($frontRoute, $availableRoutes, $route);
 
                 return $frontRoute;
             }
@@ -59,9 +34,38 @@ class FrontRouteFactory{
 
 
         // Si aucune route ne correspond, on retourne une route 404
-        return new FrontRoute404();
+        $frontRoute = new FrontRoute404();
+        self::addMenuItems($frontRoute, $availableRoutes, null);
+
+        return $frontRoute;
     }
 
+    private static function addMenuItems(FrontRoute $frontRoute, array $availableRoutes, ?array $activeRoute): void
+    {
+        //Add menus items
+        foreach($availableRoutes as $route){
+
+            if(isset($route['displayOnMainMenu']) && $route['displayOnMainMenu'] === true){
+                //(string $title, string $href, bool $active = false)
+                $active = $activeRoute !== null && $activeRoute['linkUri'] === $route['linkUri'];
+                $frontRoute->addLeftMenuItem(
+                    new MenuLinkItem(
+                    $route['name'],
+                    $route['linkUri'],
+                    $active
+                ));
+
+            }
+            if(isset($route['displayOnFooter']) && $route['displayOnFooter'] === true){
+                $frontRoute->addFooterMenuItem(
+                    new MenuLinkItem(
+                    $route['name'],
+                    $route['linkUri']
+                ));
+
+            }
+        }
+    }
 
 
 }
