@@ -302,7 +302,8 @@ button:disabled {
 }
 
 .about-page,
-.stats-page {
+.stats-page,
+.not-found-page {
     max-width: 780px;
     margin: 0 auto;
     padding: 28px;
@@ -315,7 +316,8 @@ button:disabled {
 
 .about-page h1,
 .stats-page h1,
-.changelog-page h1 {
+.changelog-page h1,
+.not-found-page h1 {
     margin-bottom: 18px;
 }
 
@@ -327,9 +329,73 @@ button:disabled {
 
 .about-page p,
 .changelog-page p,
-.changelog-page li {
+.changelog-page li,
+.not-found-page p {
     color: var(--text);
     line-height: 1.65;
+}
+
+.not-found-page {
+    position: relative;
+    overflow: hidden;
+}
+
+.not-found-page::before {
+    content: "404";
+    position: absolute;
+    right: 22px;
+    top: 10px;
+    color: rgba(143, 182, 189, .08);
+    font-size: 7rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.not-found-page > * {
+    position: relative;
+}
+
+.not-found-lead {
+    max-width: 620px;
+    margin: 0 0 20px;
+}
+
+.not-found-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0 0 22px;
+}
+
+.not-found-details div {
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(143, 182, 189, .22);
+    background: rgba(0,0,0,.18);
+}
+
+.not-found-details dt {
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: .78rem;
+    text-transform: uppercase;
+}
+
+.not-found-details dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.not-found-details code {
+    color: #dce9eb;
+}
+
+.not-found-help {
+    margin: 0 0 20px;
+}
+
+.not-found-home {
+    width: fit-content;
 }
 
 .changelog-page h3 {
@@ -3046,6 +3112,10 @@ button.account-menu-item {
     }
 
     .stats-podium-list {
+        grid-template-columns: 1fr;
+    }
+
+    .not-found-details {
         grid-template-columns: 1fr;
     }
 

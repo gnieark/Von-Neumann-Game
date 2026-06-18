@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+<<<<<<< HEAD
 - API v38 : `/api/probe/missions` et les reponses de mission n'exposent plus de coordonnees absolues dans les descriptions, `metadata` ou `createdByEvent`; les secteurs publics y sont convertis en `sector.relative`.
 - API v37 : les arrivees dans un secteur jamais visite contenant une planete habitee peuvent declencher un scenario de premier contact pondere par `gameplay.intelligentLife.scenarios`; le premier scenario implemente, `return_to_space_program`, cree une mission `Premier contact` et un message planetaire en nombres premiers.
 - Debug : ajout de `scripts/force-inhabited-planet.php` pour injecter en CLI une planete habitee dans un secteur donne.
@@ -14,6 +15,9 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - API v39 : `/api/probe/sector`, la messagerie, les alertes de vie intelligente et les reponses de mission remplacent les noms publics de planetes habitees qui contiendraient les coordonnees absolues du secteur par un libelle public sans coordonnees absolues; la messagerie n'utilise plus l'identifiant technique d'une planete comme libelle de destinataire.
 - Debug : `scripts/force-inhabited-planet.php` genere maintenant un id opaque et stable par secteur pour ses planetes forcees, et retire l'ancien objet debug du meme secteur lorsqu'il est relance.
+=======
+- Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
+>>>>>>> 0a6d6a7 (fix 404 routes)
 
 ## 2026-06-17
 
