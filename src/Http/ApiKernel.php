@@ -1893,7 +1893,8 @@ final class ApiKernel
                 'percent' => $warning->riskPercent,
                 'additionalContainerCount' => $warning->additionalContainerCount,
                 'ruleStartsAtAdditionalContainers' => 5,
-            ];
+            ]
+        ];
         }
 
         if ($warning->type === ProbeDamageWarning::TYPE_INTELLIGENT_LIFE) {
