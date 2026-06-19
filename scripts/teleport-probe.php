@@ -16,13 +16,16 @@ avec 42 l'id de a sonde
 use VonNeumannGame\AppFactory;
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
-use VonNeumannGame\Domain\ProbeDirection;
-use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\MannyRepository;
+use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
+use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
@@ -31,8 +34,11 @@ use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
+use VonNeumannGame\Sector\SectorGrid;
+use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\ProbeMovementService;
+use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -56,14 +62,30 @@ try {
     $visitedSectors = new VisitedSectorRepository($pdo);
     $scheduledEvents = new ScheduledEventRepository($pdo);
     $mannies = new MannyRepository($pdo, $gameplayConfig);
+    $items = new ProbeItemRepository($pdo);
+    $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
+    $messages = new ProbeMessageRepository($pdo);
+    $missions = new MissionRepository($pdo);
+    $damageWarnings = new ProbeDamageWarningRepository($pdo);
     $sectorService = buildSectorService($factory, $root);
     $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
+    $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
+    $missionService = new MissionService(
+        $missions,
+        $messages,
+        $gameplayConfig,
+        (string) ($appConfig['worldSeed'] ?? 'default-world'),
+    );
     $movementService = new ProbeMovementService(
         $probes,
         $movements,
         $visitedSectors,
         $scheduledEvents,
         $sectorService,
+        mannies: $mannies,
+        storage: $storage,
+        damageWarnings: $damageWarnings,
+        missions: $missionService,
         durations: $durations,
         worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'),
         gameplayConfig: $gameplayConfig,
@@ -83,17 +105,18 @@ try {
     $relativeDestination = (new PlayerReferenceFrame($player->homeSector))->globalToRelative($destination);
     $activeMovementIds = activeMovementIds($pdo, $probe->id);
     $sameSector = $probe->currentSector->equals($destination);
+    $distance = (new SectorGrid())->getDistance($probe->currentSector, $destination);
 
     if ($options['dryRun']) {
         echo "[dry-run] Probe #{$probe->id} ({$probe->name}) would be teleported.\n";
         echo '- from absolute ' . formatCoordinates($probe->currentSector) . "\n";
         echo '- to absolute ' . formatCoordinates($destination) . "\n";
         echo '- to relative ' . formatCoordinateArray($relativeDestination) . " from player #{$player->id} home\n";
+        echo "- debug movement to finalize: " . ($sameSector ? 'no, destination is already current sector' : 'yes') . "\n";
         echo '- active movements to fail: ' . count($activeMovementIds) . "\n";
         echo "- pending movement events to cancel: computed from active movements\n";
         echo "- pending black-hole trap events to cancel: yes, if any\n";
-        echo "- destination sector would be marked visited\n";
-        echo "- probe navigation/status would be reset to idle\n";
+        echo "- destination sector would be finalized through ProbeMovementService\n";
         exit(0);
     }
 
@@ -112,15 +135,14 @@ try {
             $probe->id,
         );
 
-        $probe->currentSector = $destination;
-        $probe->status = ProbeStatus::Idle;
-        $probe->velocityC = 0.0;
-        $probe->accelerationCPerDay = 0.0;
-        $probe->direction = new ProbeDirection(0.0, 0.0, 0.0);
-        $probe->currentTask = null;
-        $probe->enteredCurrentSectorAt = gmdate('c');
-        $probes->save($probe);
-        $visitedSectors->markVisitedByPlayerId($probe->playerId, $destination);
+        if (!$sameSector) {
+            createDueDebugMovement($movements, $probe, $destination, $distance);
+            $probe = $movementService->refreshProbeMovementState($probe);
+            $movementService->ensureCurrentSectorIntelligentLifeScenarios($probe);
+        } else {
+            $movementService->refreshCurrentSectorHazards($probe);
+            $movementService->ensureCurrentSectorIntelligentLifeScenarios($probe);
+        }
 
         $pdo->commit();
     } catch (Throwable $e) {
@@ -129,11 +151,11 @@ try {
     }
 
     $probe = $probes->findById($probe->id) ?? $probe;
-    $movementService->refreshCurrentSectorHazards($probe);
 
     echo "Probe #{$probe->id} ({$probe->name}) teleported.\n";
     echo '- absolute: ' . formatCoordinates($destination) . "\n";
     echo '- relative: ' . formatCoordinateArray($relativeDestination) . " from player #{$player->id} home\n";
+    echo "- debug movement finalized: " . ($sameSector ? 'no, destination was already current sector' : 'yes') . "\n";
     echo "- active movements failed: {$failedMovements}\n";
     echo "- pending movement events cancelled: {$cancelledMovementEvents}\n";
     echo "- pending black-hole trap events cancelled: {$cancelledTrapEvents}\n";
@@ -255,9 +277,10 @@ Coordinates:
   --absolute uses raw sector coordinates from neumann_probes.
   --relative uses coordinates relative to the owning player's home sector, like the API.
 
-The teleport fails active movements, cancels pending movement/trap events, marks the
-destination sector visited, resets navigation to idle, and schedules destination
-hazards such as black-hole traps.
+The teleport fails active movements, cancels pending movement/trap events, creates
+a due debug movement, and lets ProbeMovementService finalize the arrival. This
+marks the destination visited, resets navigation to idle, applies arrival effects,
+and triggers destination hazards or first-contact scenarios.
 
 TEXT;
 }
@@ -344,6 +367,26 @@ function cancelPendingMovementEvents(ScheduledEventRepository $events, array $mo
     }
 
     return $cancelled;
+}
+
+function createDueDebugMovement(
+    ProbeMovementRepository $movements,
+    NeumannProbe $probe,
+    SectorCoordinates $destination,
+    int $distance,
+): void {
+    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    $startedAt = $now->modify('-6 seconds');
+    $timeline = [
+        'startedAt' => $startedAt,
+        'preparationEndsAt' => $now->modify('-5 seconds'),
+        'accelerationEndsAt' => $now->modify('-4 seconds'),
+        'cruiseEndsAt' => $now->modify('-3 seconds'),
+        'decelerationEndsAt' => $now->modify('-2 seconds'),
+        'arrivalAt' => $now->modify('-1 second'),
+    ];
+
+    $movements->create($probe->id, $probe->currentSector, $destination, $distance, $timeline, 0.0);
 }
 
 function registerForgottenMannies(MannyRepository $mannies, SectorService $sectors, NeumannProbe $probe, array $gameplayConfig): int

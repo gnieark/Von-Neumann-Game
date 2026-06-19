@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '32'
+  version: '39'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 32
+                apiVersion: 39
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -539,6 +539,56 @@ paths:
                     $ref: '#/components/schemas/Probe'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/probe/mission:
+    get:
+      summary: List active probe missions
+      description: Alias of /api/probe/missions kept for clients that use a singular mission route.
+      responses:
+        '200':
+          description: Active missions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/missions:
+    get:
+      summary: List active probe missions
+      description: Returns missions currently assigned to the authenticated probe. New probes return an empty list.
+      responses:
+        '200':
+          description: Active missions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionListResponse'
+              example:
+                missions: []
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/missions/{missionId}/abandon:
+    post:
+      summary: Abandon an active probe mission
+      parameters:
+        - $ref: '#/components/parameters/MissionId'
+      responses:
+        '200':
+          description: Mission abandoned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Mission is already terminal and cannot be abandoned again
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mind-snapshot/reassign:
     post:
       summary: Reassign a terminal probe mind snapshot
@@ -730,9 +780,31 @@ paths:
                 messages:
                   - id: 12
                     sender:
+                      type: planet
+                      id: planet-abc123
+                      planetId: planet-abc123
+                      name: Pale Signal
+                    recipient:
+                      type: probe
+                      id: 1
+                      probeId: 1
+                      name: Probe of remi
+                    sector:
+                      relative: { x: 0, y: 0, z: 0 }
+                    body: Signal local reçu.
+                    status: unread
+                    readAt: null
+                    createdAt: '2026-06-06T12:00:00+00:00'
+                    updatedAt: '2026-06-06T12:00:00+00:00'
+                  - id: 13
+                    sender:
+                      type: probe
+                      id: 2
                       probeId: 2
                       name: Probe of nova
                     recipient:
+                      type: probe
+                      id: 1
                       probeId: 1
                       name: Probe of remi
                     sector:
@@ -745,7 +817,7 @@ paths:
                 pagination:
                   limit: 50
                   offset: 0
-                  count: 1
+                  count: 2
                   total: 67
                   hasMore: true
         '401':
@@ -753,10 +825,12 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
     post:
-      summary: Send a message to another probe in the same sector
+      summary: Send a message to a local probe or inhabited planet
       description: >
-        Creates an unread message for another probe. The recipient probe must
-        currently be in the exact same sector as the sender probe.
+        Creates an unread message from the current probe to a local recipient.
+        Probe recipients must currently be in the exact same sector as the
+        sender probe. Planet recipients must be inhabited planets in the
+        current sector. If the recipient type is omitted, `probe` is used.
       requestBody:
         required: true
         content:
@@ -764,7 +838,9 @@ paths:
             schema:
               $ref: '#/components/schemas/ProbeMessageSendRequest'
             example:
-              recipientProbeId: 2
+              recipient:
+                type: planet
+                id: planet-abc123
               body: Signal local reçu ?
       responses:
         '201':
@@ -780,7 +856,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Recipient probe is invalid or not in the same sector
+          description: Recipient is invalid or not in the current sector
           content:
             application/json:
               schema:
@@ -822,11 +898,15 @@ paths:
                 messages:
                   - id: 12
                     sender:
+                      type: probe
+                      id: 1
                       probeId: 1
                       name: Probe of remi
                     recipient:
-                      probeId: 2
-                      name: Probe of nova
+                      type: planet
+                      id: planet-abc123
+                      planetId: planet-abc123
+                      name: Pale Signal
                     sector:
                       relative: { x: 0, y: 0, z: 0 }
                     body: Signal local reçu ?
@@ -856,6 +936,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProbeMessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/probe/alerts:
+    get:
+      summary: List persistent probe alerts
+      description: >
+        Returns persistent alerts produced for the authenticated probe. Alerts
+        currently cover fragile external storage movement warnings and
+        intelligent-life detections when the probe arrives in a sector.
+      responses:
+        '200':
+          description: Current and past alerts for the authenticated probe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeAlertsResponse'
+              example:
+                alerts:
+                  - id: 7
+                    type: storage_container_break
+                    status: unread
+                    message: From 5 additional containers onward, movement stress can break one container link. Risk is 30% for this jump.
+                    phase: acceleration_end
+                    scheduledAt: '2026-06-12T12:03:00+00:00'
+                    sector:
+                      relative: { x: 0, y: 0, z: 0 }
+                    container:
+                      id: cnt_extra_3
+                      label: Additional container 3
+                      detachedObjectId: detached-container-7
+                    risk:
+                      percent: 30
+                      additionalContainerCount: 7
+                      ruleStartsAtAdditionalContainers: 5
+                    createdAt: '2026-06-12T12:00:00+00:00'
+                    updatedAt: '2026-06-12T12:00:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                  - id: 8
+                    type: intelligent_life
+                    status: unread
+                    message: 'Intelligent life detected: technological signatures confirmed on Pale Signal in sector 12:4:-2.'
+                    phase: arrival
+                    scheduledAt: '2026-06-12T14:42:00+00:00'
+                    sector:
+                      relative: { x: 2, y: 0, z: 0 }
+                    planet:
+                      id: planet_4
+                      name: Pale Signal
+                    createdAt: '2026-06-12T14:42:00+00:00'
+                    updatedAt: '2026-06-12T14:42:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                rules:
+                  storageContainerBreak:
+                    type: storage_container_break
+                    startsAtAdditionalContainers: 5
+                    riskPerAdditionalContainerAfterFourPercent: 10
+                    maximumRiskPercent: 100
+                    message: From 5 additional containers onward, movement stress can break one container link. Risk is 10% at 5 containers, 20% at 6, and continues up to 100%.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/alerts/{alertId}:
+    patch:
+      summary: Mark a persistent probe alert as read
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '200':
+          description: Alert marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeAlertResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2048,6 +2204,13 @@ components:
       schema:
         type: string
       example: probe-core
+    MissionId:
+      name: missionId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: mis_8d4a2c1f5a91b334
     ProbeMessageId:
       name: messageId
       in: path
@@ -2144,7 +2307,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -2362,6 +2525,7 @@ components:
         name:
           type: string
           nullable: true
+          description: Public target label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         mass:
           type: number
         massUnit:
@@ -2430,6 +2594,111 @@ components:
         visitCount:
           type: integer
           minimum: 1
+    MissionListResponse:
+      type: object
+      required: [missions]
+      properties:
+        missions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mission'
+    MissionResponse:
+      type: object
+      required: [mission]
+      properties:
+        mission:
+          $ref: '#/components/schemas/Mission'
+    Mission:
+      type: object
+      required: [id, type, title, status, stepOrder, metadata, startedAt, createdAt, updatedAt, steps]
+      properties:
+        id:
+          type: string
+          description: Stable public mission id.
+        type:
+          type: string
+          description: Mission family identifier, chosen by the event that creates the mission. First-contact intelligent-life scenarios currently use `first_contact.return_to_space_program`.
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, completed, failed, abandoned]
+        stepOrder:
+          type: string
+          enum: [free, sequential]
+          description: Whether pending steps may be completed in any order or must follow sortOrder.
+        metadata:
+          type: object
+          description: Public mission metadata. Sector coordinates, when present, are exposed as player-relative coordinates under `sector.relative`; inhabited-planet names that would reveal absolute coordinates are replaced by a public label.
+          additionalProperties: true
+        createdByEvent:
+          type: object
+          nullable: true
+          description: Public mission creation context. Sector coordinates, when present, are exposed as player-relative coordinates under `sector.relative`.
+          additionalProperties: true
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          nullable: true
+          format: date-time
+        failedAt:
+          type: string
+          nullable: true
+          format: date-time
+        abandonedAt:
+          type: string
+          nullable: true
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissionStep'
+    MissionStep:
+      type: object
+      required: [id, sortOrder, title, status, metadata, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Stable public mission-step id.
+        sortOrder:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, completed, failed, skipped]
+        metadata:
+          type: object
+          additionalProperties: true
+        completedAt:
+          type: string
+          nullable: true
+          format: date-time
+        failedAt:
+          type: string
+          nullable: true
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     ProbeMovement:
       type: object
       required: [status, origin, target, distance, fuelCostDeuterium, startedAt, arrivalAt]
@@ -2688,16 +2957,49 @@ components:
           description: Optional cap applied to itemIds or targetMannyIds.
     ProbeMessageSendRequest:
       type: object
-      required: [recipientProbeId, body]
+      required: [body]
+      description: Provide `recipient`, or alternatively `recipientId` with optional `recipientType`. If no type is provided, `probe` is used.
       properties:
+        recipient:
+          $ref: '#/components/schemas/ProbeMessageRecipientRequest'
+        recipientId:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: string
+          description: Alternative recipient id. Used with `recipientType` or default `probe`.
+        recipientType:
+          type: string
+          enum: [probe, planet]
+          default: probe
+          description: Alternative recipient type for clients that do not send `recipient`.
         recipientProbeId:
           type: integer
           minimum: 1
-          description: Probe id of another probe currently in the same sector.
+          deprecated: true
+          description: 'Legacy shortcut for `recipient: { type: probe, id: ... }`.'
+        recipientPlanetId:
+          type: string
+          deprecated: true
+          description: 'Legacy shortcut for `recipient: { type: planet, id: ... }`.'
         body:
           type: string
           minLength: 1
           maxLength: 2000
+    ProbeMessageRecipientRequest:
+      type: object
+      required: [id]
+      properties:
+        type:
+          type: string
+          enum: [probe, planet]
+          default: probe
+        id:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: string
+          description: Probe id for `probe`, planet object id for `planet`.
     ProbeMessageResponse:
       type: object
       required: [message]
@@ -3072,6 +3374,20 @@ components:
             additionalContainerCount:
               type: integer
               minimum: 0
+            ruleStartsAtAdditionalContainers:
+              type: integer
+              minimum: 1
+        planet:
+          type: object
+          description: Present for `intelligent_life` alerts.
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+              nullable: true
+              description: Public planet label; inhabited-planet names that would reveal absolute coordinates are replaced by a public label.
         createdAt:
           type: string
           format: date-time
@@ -3106,12 +3422,25 @@ components:
           type: string
     ProbeMessageEndpoint:
       type: object
-      required: [probeId, name]
+      required: [type, id, name]
       properties:
+        type:
+          type: string
+          enum: [probe, planet]
+        id:
+          oneOf:
+            - type: integer
+            - type: string
+          description: Numeric probe id for probe endpoints, opaque planet object id for planet endpoints. Planet ids must not be interpreted as coordinates.
         probeId:
           type: integer
+          description: Present when `type` is `probe`.
+        planetId:
+          type: string
+          description: Present when `type` is `planet`.
         name:
           type: string
+          description: Public endpoint label. Planet endpoint names that would reveal absolute coordinates are replaced by a public label.
     ProbeInventory:
       type: object
       required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, containers, externalTanks]
@@ -3674,12 +4003,14 @@ components:
       properties:
         id:
           type: string
+          description: Opaque object id. Clients must not parse coordinates from it.
         type:
           type: string
           enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container]
         name:
           type: string
           nullable: true
+          description: Public object label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         estimated:
           type: boolean
         summary:
@@ -3791,12 +4122,14 @@ components:
       properties:
         id:
           type: string
+          description: Opaque target object id. Clients must not parse coordinates from it.
         type:
           type: string
           enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system]
         name:
           type: string
           nullable: true
+          description: Public target label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         mass:
           type: number
         massUnit:

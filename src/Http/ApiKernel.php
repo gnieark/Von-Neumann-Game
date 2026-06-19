@@ -7,6 +7,8 @@ namespace VonNeumannGame\Http;
 use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\Manny;
+use VonNeumannGame\Domain\Mission;
+use VonNeumannGame\Domain\MissionStep;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDamageWarning;
@@ -26,6 +28,7 @@ use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyActionException;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ObservationAccessException;
 use VonNeumannGame\Service\ProbeMovementException;
 use VonNeumannGame\Service\ProbeMovementService;
@@ -41,7 +44,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 32;
+    public const API_VERSION = 39;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -55,6 +58,7 @@ final class ApiKernel
         private readonly ProbeMessageRepository $messages,
         private readonly ProbeDamageWarningRepository $damageWarnings,
         private readonly ForumRepository $forum,
+        private readonly MissionService $missions,
         private readonly ProbeReinstantiationService $reinstantiation,
         private readonly array $gameplayConfig = [],
     ) {}
@@ -86,6 +90,9 @@ final class ApiKernel
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMannyRenameResponse($player, rawurldecode($matches[1]), $body));
+            }
+            if (preg_match('#^/api/probe/missions/([^/]+)/abandon$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMissionAbandonResponse($player, rawurldecode($matches[1])));
             }
             if (preg_match('#^/api/probe/messages/(\d+)/read$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, (int) $matches[1]));
@@ -134,6 +141,8 @@ final class ApiKernel
                 '/api/probe/damage-warnings' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeDamageWarningsResponse($player)),
                 '/api/probe/visited-sectors' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player)),
                 '/api/probe/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player)),
+                '/api/probe/mission' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player)),
+                '/api/probe/missions' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player)),
                 '/api/probe/move' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $body)),
                 '/api/probe/mannies' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeManniesResponse($player)),
                 '/api/sector' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $query)),
@@ -635,6 +644,7 @@ final class ApiKernel
         $observableSector = $this->movements->observableSectorFor($probe, $movement) ?? $probe->currentSector;
         if ($movement === null && $observableSector->equals($probe->currentSector)) {
             $this->movements->refreshCurrentSectorHazards($probe);
+            $this->movements->ensureCurrentSectorIntelligentLifeScenarios($probe);
         }
         if ($sensorMode === 'degraded') {
             $frame = new PlayerReferenceFrame($player->homeSector);
@@ -773,29 +783,68 @@ final class ApiKernel
             return ApiResponse::error(400, 'bad_request', 'JSON body must contain a probe message.');
         }
 
-        $recipientProbeId = $this->messageRecipientProbeId($data['recipientProbeId'] ?? null);
-        if ($recipientProbeId === null) {
-            return ApiResponse::error(400, 'bad_request', 'Message requires recipientProbeId.');
-        }
-        if ($recipientProbeId === $probe->id) {
-            return ApiResponse::error(422, 'invalid_message_recipient', 'A probe cannot send a message to itself.');
-        }
-
         $messageBody = isset($data['body']) && is_string($data['body']) ? trim($data['body']) : '';
         if ($messageBody === '' || strlen($messageBody) > 2000) {
             return ApiResponse::error(400, 'bad_request', 'Message body must contain 1 to 2000 characters.');
         }
 
-        $recipient = $this->probes->findById($recipientProbeId);
-        if ($recipient === null) {
-            return ApiResponse::error(404, 'not_found', 'Recipient probe not found.');
-        }
-        $recipient = $this->movements->refreshProbeMovementState($recipient);
-        if (!$recipient->currentSector->equals($probe->currentSector)) {
-            return ApiResponse::error(422, 'probe_not_in_same_sector', 'Recipient probe must be in the same sector.');
+        $recipient = $this->messageRecipientEndpoint($data);
+        if ($recipient instanceof ApiResponse) {
+            return $recipient;
         }
 
-        $message = $this->messages->create($probe->id, $recipient->id, $probe->currentSector, $messageBody);
+        if ($recipient['type'] === ProbeMessage::ENDPOINT_PROBE) {
+            $recipientProbeId = $this->messageRecipientProbeId($recipient['id']);
+            if ($recipientProbeId === null) {
+                return ApiResponse::error(400, 'bad_request', 'Message requires a recipient probe id.');
+            }
+            if ($recipientProbeId === $probe->id) {
+                return ApiResponse::error(422, 'invalid_message_recipient', 'A probe cannot send a message to itself.');
+            }
+
+            $recipientProbe = $this->probes->findById($recipientProbeId);
+            if ($recipientProbe === null) {
+                return ApiResponse::error(404, 'not_found', 'Recipient probe not found.');
+            }
+            $recipientProbe = $this->movements->refreshProbeMovementState($recipientProbe);
+            if (!$recipientProbe->currentSector->equals($probe->currentSector)) {
+                return ApiResponse::error(422, 'probe_not_in_same_sector', 'Recipient probe must be in the same sector.');
+            }
+
+            $message = $this->messages->createForEndpoints(
+                ProbeMessage::ENDPOINT_PROBE,
+                (string) $probe->id,
+                null,
+                $probe->id,
+                ProbeMessage::ENDPOINT_PROBE,
+                (string) $recipientProbe->id,
+                null,
+                $recipientProbe->id,
+                $probe->currentSector,
+                $messageBody,
+            );
+
+            return new ApiResponse(201, ['message' => $this->probeMessageArray($player, $message)]);
+        }
+
+        $recipientPlanet = $this->currentSectorIntelligentLifePlanet($player, $probe, $recipient['id']);
+        if ($recipientPlanet === null) {
+            return ApiResponse::error(422, 'invalid_message_recipient', 'Recipient planet must be an inhabited planet in the current sector.');
+        }
+
+        $message = $this->messages->createForEndpoints(
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $probe->id,
+            null,
+            $probe->id,
+            ProbeMessage::ENDPOINT_PLANET,
+            $recipientPlanet['id'],
+            $recipientPlanet['name'],
+            null,
+            $probe->currentSector,
+            $messageBody,
+        );
+        $this->missions->handlePlanetReply($probe, $recipientPlanet['id'], $messageBody);
 
         return new ApiResponse(201, ['message' => $this->probeMessageArray($player, $message)]);
     }
@@ -850,7 +899,7 @@ final class ApiKernel
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $message = $this->messages->findById($messageId);
-        if ($message === null || $message->recipientProbeId !== $probe->id) {
+        if ($message === null || $message->recipientType !== ProbeMessage::ENDPOINT_PROBE || $message->recipientProbeId !== $probe->id) {
             return ApiResponse::error(404, 'not_found', 'Message not found.');
         }
 
@@ -897,6 +946,87 @@ final class ApiKernel
         }
         if (is_string($value) && ctype_digit($value) && (int) $value > 0) {
             return (int) $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{type: string, id: mixed}|ApiResponse
+     */
+    private function messageRecipientEndpoint(array $data): array|ApiResponse
+    {
+        $recipient = is_array($data['recipient'] ?? null) ? $data['recipient'] : [];
+        $typeValue = $recipient['type'] ?? $data['recipientType'] ?? $data['type'] ?? ProbeMessage::ENDPOINT_PROBE;
+        $type = is_string($typeValue) ? strtolower(trim($typeValue)) : ProbeMessage::ENDPOINT_PROBE;
+        if ($type === '') {
+            $type = ProbeMessage::ENDPOINT_PROBE;
+        }
+        if (!in_array($type, [ProbeMessage::ENDPOINT_PROBE, ProbeMessage::ENDPOINT_PLANET], true)) {
+            return ApiResponse::error(400, 'bad_request', 'Recipient type must be probe or planet.');
+        }
+
+        $id = $recipient['id'] ?? $data['recipientId'] ?? null;
+        if ($type === ProbeMessage::ENDPOINT_PROBE && array_key_exists('recipientProbeId', $data)) {
+            $id = $data['recipientProbeId'];
+        }
+        if ($type === ProbeMessage::ENDPOINT_PLANET && array_key_exists('recipientPlanetId', $data)) {
+            $id = $data['recipientPlanetId'];
+        }
+
+        if (($type === ProbeMessage::ENDPOINT_PROBE && $this->messageRecipientProbeId($id) === null) || ($type === ProbeMessage::ENDPOINT_PLANET && (!is_string($id) || trim($id) === ''))) {
+            return ApiResponse::error(400, 'bad_request', 'Message requires a recipient id.');
+        }
+
+        return [
+            'type' => $type,
+            'id' => $type === ProbeMessage::ENDPOINT_PLANET ? trim((string) $id) : $id,
+        ];
+    }
+
+    /**
+     * @return array{id: string, name: ?string}|null
+     */
+    private function currentSectorIntelligentLifePlanet(Player $player, NeumannProbe $probe, string $planetId): ?array
+    {
+        $observation = $this->observations->observe($player, $probe, $probe->currentSector)->toArray();
+        foreach (($observation['objects'] ?? []) as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+            $planet = $this->findIntelligentLifePlanetInObservationObject($object, $planetId);
+            if ($planet !== null) {
+                return $planet;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $object
+     * @return array{id: string, name: ?string}|null
+     */
+    private function findIntelligentLifePlanetInObservationObject(array $object, string $planetId): ?array
+    {
+        if (($object['type'] ?? null) === ProbeMessage::ENDPOINT_PLANET && (string) ($object['id'] ?? '') === $planetId && (bool) ($object['intelligentLife'] ?? false)) {
+            return [
+                'id' => (string) $object['id'],
+                'name' => isset($object['name']) && $object['name'] !== null ? (string) $object['name'] : null,
+            ];
+        }
+
+        foreach (['minableTargets', 'bookmarkTargets'] as $childKey) {
+            foreach (($object[$childKey] ?? []) as $child) {
+                if (!is_array($child)) {
+                    continue;
+                }
+                $planet = $this->findIntelligentLifePlanetInObservationObject($child, $planetId);
+                if ($planet !== null) {
+                    return $planet;
+                }
+            }
         }
 
         return null;
@@ -1118,6 +1248,26 @@ final class ApiKernel
         return new ApiResponse(200, [
             'mannies' => array_map(fn($manny): array => $this->mannyArray($player, $probe, $manny), $mannies),
         ]);
+    }
+
+    private function probeMissionsResponse(Player $player): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+
+        return new ApiResponse(200, [
+            'missions' => array_map(
+                fn(Mission $mission): array => $this->missionArray($player, $mission),
+                $this->missions->activeMissionsForProbe($probe),
+            ),
+        ]);
+    }
+
+    private function probeMissionAbandonResponse(Player $player, string $missionId): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $mission = $this->missions->abandonMission($probe, $missionId);
+
+        return new ApiResponse(200, ['mission' => $this->missionArray($player, $mission)]);
     }
 
     private function probeMannyRenameResponse(Player $player, string $uid, ?string $body): ApiResponse
@@ -1345,21 +1495,140 @@ final class ApiKernel
         return $this->mannies->publicArray($probe, $manny, $relativeSector);
     }
 
+    private function missionArray(Player $player, Mission $mission): array
+    {
+        $metadata = $this->publicMissionData($player, $mission->metadata);
+        $payload = [
+            'id' => $mission->uid,
+            'type' => $mission->type,
+            'title' => $mission->title,
+            'description' => $this->publicMissionDescription($mission, $metadata),
+            'status' => $mission->status,
+            'stepOrder' => $mission->stepOrder,
+            'metadata' => $metadata,
+            'createdByEvent' => $mission->createdByEvent === null ? null : $this->publicMissionData($player, $mission->createdByEvent),
+            'startedAt' => $mission->startedAt,
+            'completedAt' => $mission->completedAt,
+            'failedAt' => $mission->failedAt,
+            'abandonedAt' => $mission->abandonedAt,
+            'createdAt' => $mission->createdAt,
+            'updatedAt' => $mission->updatedAt,
+            'steps' => array_map(fn(MissionStep $step): array => $this->missionStepArray($player, $step), $mission->steps),
+        ];
+
+        return $payload;
+    }
+
+    private function missionStepArray(Player $player, MissionStep $step): array
+    {
+        return [
+            'id' => $step->uid,
+            'sortOrder' => $step->sortOrder,
+            'title' => $step->title,
+            'description' => $step->description,
+            'status' => $step->status,
+            'metadata' => $this->publicMissionData($player, $step->metadata),
+            'completedAt' => $step->completedAt,
+            'failedAt' => $step->failedAt,
+            'createdAt' => $step->createdAt,
+            'updatedAt' => $step->updatedAt,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function publicMissionData(Player $player, array $data): array
+    {
+        $public = [];
+        foreach ($data as $key => $value) {
+            if ($key === 'planetName' && is_string($value)) {
+                $public[$key] = $this->publicPlanetName($value, null, 'Monde habite');
+                continue;
+            }
+            if ($key === 'sector' && is_array($value) && $this->isCoordinateArray($value)) {
+                $public[$key] = [
+                    'relative' => $this->relativeCoordinatesFromArray($player, $value),
+                ];
+                continue;
+            }
+
+            $public[$key] = is_array($value) ? $this->publicMissionNestedData($player, $value) : $value;
+        }
+
+        return $public;
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<mixed>
+     */
+    private function publicMissionNestedData(Player $player, array $data): array
+    {
+        $public = [];
+        foreach ($data as $key => $value) {
+            if ($key === 'sector' && is_array($value) && $this->isCoordinateArray($value)) {
+                $public[$key] = [
+                    'relative' => $this->relativeCoordinatesFromArray($player, $value),
+                ];
+                continue;
+            }
+            $public[$key] = is_array($value) ? $this->publicMissionNestedData($player, $value) : $value;
+        }
+
+        return $public;
+    }
+
+    /**
+     * @param array<mixed> $value
+     */
+    private function isCoordinateArray(array $value): bool
+    {
+        return isset($value['x'], $value['y'], $value['z'])
+            && is_numeric($value['x'])
+            && is_numeric($value['y'])
+            && is_numeric($value['z']);
+    }
+
+    /**
+     * @param array<mixed> $coordinates
+     * @return array{x:int, y:int, z:int}
+     */
+    private function relativeCoordinatesFromArray(Player $player, array $coordinates): array
+    {
+        return PlayerReferenceFrame::atGlobalCoordinates(
+            $player->homeSector->getX(),
+            $player->homeSector->getY(),
+            $player->homeSector->getZ(),
+        )->globalToRelative(new SectorCoordinates((int) $coordinates['x'], (int) $coordinates['y'], (int) $coordinates['z']));
+    }
+
+    /**
+     * @param array<string, mixed> $publicMetadata
+     */
+    private function publicMissionDescription(Mission $mission, array $publicMetadata): ?string
+    {
+        if ($mission->type !== 'first_contact.return_to_space_program') {
+            return $mission->description;
+        }
+
+        $planetName = is_string($publicMetadata['planetName'] ?? null) ? $publicMetadata['planetName'] : 'Monde habite';
+        $signal = is_string($publicMetadata['initialSignal'] ?? null) ? $publicMetadata['initialSignal'] : '- -- --- ----- -------';
+        $relative = is_array($publicMetadata['sector']['relative'] ?? null) ? $publicMetadata['sector']['relative'] : null;
+        $sector = $relative !== null
+            ? 'secteur relatif ' . (int) ($relative['x'] ?? 0) . ':' . (int) ($relative['y'] ?? 0) . ':' . (int) ($relative['z'] ?? 0)
+            : 'secteur detecte';
+
+        return 'Un signal bref venu de la planete ' . $planetName . ', ' . $sector . ', semble s\'adresser a votre sonde. Il contient "' . $signal . '".';
+    }
+
     private function probeMessageArray(Player $player, ProbeMessage $message, bool $includeReadState = true): array
     {
-        $sender = $this->probes->findById($message->senderProbeId);
-        $recipient = $this->probes->findById($message->recipientProbeId);
-
         $payload = [
             'id' => $message->id,
-            'sender' => [
-                'probeId' => $message->senderProbeId,
-                'name' => $sender?->name ?? 'Probe #' . $message->senderProbeId,
-            ],
-            'recipient' => [
-                'probeId' => $message->recipientProbeId,
-                'name' => $recipient?->name ?? 'Probe #' . $message->recipientProbeId,
-            ],
+            'sender' => $this->probeMessageEndpointArray($message->senderType, $message->senderId, $message->senderName, $message->senderProbeId, $message->sector),
+            'recipient' => $this->probeMessageEndpointArray($message->recipientType, $message->recipientId, $message->recipientName, $message->recipientProbeId, $message->sector),
             'sector' => [
                 'relative' => (new PlayerReferenceFrame($player->homeSector))->globalToRelative($message->sector),
             ],
@@ -1374,6 +1643,55 @@ final class ApiKernel
         }
 
         return $payload;
+    }
+
+    private function probeMessageEndpointArray(string $type, string $id, ?string $name, ?int $probeId, SectorCoordinates $sector): array
+    {
+        if ($type === ProbeMessage::ENDPOINT_PROBE) {
+            $probe = $probeId !== null ? $this->probes->findById($probeId) : null;
+            $publicId = $probeId ?? (int) $id;
+
+            return [
+                'type' => ProbeMessage::ENDPOINT_PROBE,
+                'id' => $publicId,
+                'probeId' => $publicId,
+                'name' => $probe?->name ?? $name ?? 'Probe #' . $publicId,
+            ];
+        }
+
+        return [
+            'type' => ProbeMessage::ENDPOINT_PLANET,
+            'id' => $id,
+            'planetId' => $id,
+            'name' => $this->publicPlanetName($name, $sector, 'Monde habite'),
+        ];
+    }
+
+    private function publicPlanetName(?string $name, ?SectorCoordinates $sector, string $fallback): string
+    {
+        if ($name !== null && trim($name) !== '' && !$this->nameContainsAbsoluteCoordinates($name, $sector)) {
+            return $name;
+        }
+
+        return $fallback;
+    }
+
+    private function nameContainsAbsoluteCoordinates(string $name, ?SectorCoordinates $sector): bool
+    {
+        if ($sector !== null) {
+            $absoluteKey = $sector->toKey();
+            if (
+                str_contains($name, $absoluteKey)
+                || str_contains($name, str_replace(':', '-', $absoluteKey))
+                || str_contains($name, str_replace(':', ' ', $absoluteKey))
+            ) {
+                return true;
+            }
+        }
+
+        return preg_match('/-?\d+:-?\d+:-?\d+/', $name) === 1
+            || preg_match('/--?\d+-\d+-\d+/', $name) === 1
+            || preg_match('/-?\d+\s+-?\d+\s+-?\d+/', $name) === 1;
     }
 
     private function canModerateForum(Player $player): bool
@@ -1553,6 +1871,8 @@ final class ApiKernel
     private function probeDamageWarningArray(Player $player, ProbeDamageWarning $warning): array
     {
         $frame = new PlayerReferenceFrame($player->homeSector);
+        $sector = new SectorCoordinates($warning->sectorX, $warning->sectorY, $warning->sectorZ);
+        $relativeSector = $frame->globalToRelative($sector);
 
         return [
             'id' => $warning->id,
@@ -1562,7 +1882,7 @@ final class ApiKernel
             'phase' => $warning->phase,
             'scheduledAt' => $warning->scheduledAt,
             'sector' => [
-                'relative' => $frame->globalToRelative(new SectorCoordinates($warning->sectorX, $warning->sectorY, $warning->sectorZ)),
+                'relative' => $relativeSector,
             ],
             'container' => [
                 'id' => $warning->containerId,
@@ -1573,6 +1893,29 @@ final class ApiKernel
                 'percent' => $warning->riskPercent,
                 'additionalContainerCount' => $warning->additionalContainerCount,
                 'ruleStartsAtAdditionalContainers' => 5,
+            ];
+        }
+
+        if ($warning->type === ProbeDamageWarning::TYPE_INTELLIGENT_LIFE) {
+            $planetName = $this->publicPlanetName(
+                $warning->containerLabel !== '' ? $warning->containerLabel : null,
+                $sector,
+                'Monde habite',
+            );
+            $alert['planet'] = [
+                'id' => $warning->objectId,
+                'name' => $planetName,
+            ];
+            $alert['message'] = 'Intelligent life detected: technological signatures confirmed on '
+                . $planetName
+                . ' in relative sector '
+                . (int) ($relativeSector['x'] ?? 0)
+                . ':' . (int) ($relativeSector['y'] ?? 0)
+                . ':' . (int) ($relativeSector['z'] ?? 0)
+                . '.';
+        }
+
+        return $alert;
             ],
             'createdAt' => $warning->createdAt,
             'updatedAt' => $warning->updatedAt,

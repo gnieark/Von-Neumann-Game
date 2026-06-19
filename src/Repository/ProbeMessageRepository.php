@@ -14,14 +14,47 @@ final class ProbeMessageRepository
 
     public function create(int $senderProbeId, int $recipientProbeId, SectorCoordinates $sector, string $body): ProbeMessage
     {
+        return $this->createForEndpoints(
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $senderProbeId,
+            null,
+            $senderProbeId,
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $recipientProbeId,
+            null,
+            $recipientProbeId,
+            $sector,
+            $body,
+        );
+    }
+
+    public function createForEndpoints(
+        string $senderType,
+        string $senderId,
+        ?string $senderName,
+        ?int $senderProbeId,
+        string $recipientType,
+        string $recipientId,
+        ?string $recipientName,
+        ?int $recipientProbeId,
+        SectorCoordinates $sector,
+        string $body,
+    ): ProbeMessage
+    {
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_messages
-             (sender_probe_id, recipient_probe_id, sector_x, sector_y, sector_z, body, status, read_at, created_at, updated_at)
-             VALUES (:sender_probe_id, :recipient_probe_id, :sector_x, :sector_y, :sector_z, :body, :status, NULL, :created_at, :updated_at)'
+             (sender_type, sender_id, sender_name, sender_probe_id, recipient_type, recipient_id, recipient_name, recipient_probe_id, sector_x, sector_y, sector_z, body, status, read_at, created_at, updated_at)
+             VALUES (:sender_type, :sender_id, :sender_name, :sender_probe_id, :recipient_type, :recipient_id, :recipient_name, :recipient_probe_id, :sector_x, :sector_y, :sector_z, :body, :status, NULL, :created_at, :updated_at)'
         );
         $stmt->execute([
+            'sender_type' => $senderType,
+            'sender_id' => $senderId,
+            'sender_name' => $senderName,
             'sender_probe_id' => $senderProbeId,
+            'recipient_type' => $recipientType,
+            'recipient_id' => $recipientId,
+            'recipient_name' => $recipientName,
             'recipient_probe_id' => $recipientProbeId,
             'sector_x' => $sector->getX(),
             'sector_y' => $sector->getY(),
@@ -128,10 +161,23 @@ final class ProbeMessageRepository
 
     private function hydrate(array $row): ProbeMessage
     {
+        $senderProbeId = isset($row['sender_probe_id']) && $row['sender_probe_id'] !== null ? (int) $row['sender_probe_id'] : null;
+        $recipientProbeId = isset($row['recipient_probe_id']) && $row['recipient_probe_id'] !== null ? (int) $row['recipient_probe_id'] : null;
+        $senderType = (string) ($row['sender_type'] ?? ProbeMessage::ENDPOINT_PROBE);
+        $recipientType = (string) ($row['recipient_type'] ?? ProbeMessage::ENDPOINT_PROBE);
+        $senderId = (string) (($row['sender_id'] ?? null) ?: ($senderProbeId !== null ? (string) $senderProbeId : ''));
+        $recipientId = (string) (($row['recipient_id'] ?? null) ?: ($recipientProbeId !== null ? (string) $recipientProbeId : ''));
+
         return new ProbeMessage(
             (int) $row['id'],
-            (int) $row['sender_probe_id'],
-            (int) $row['recipient_probe_id'],
+            $senderType,
+            $senderId,
+            isset($row['sender_name']) && $row['sender_name'] !== null ? (string) $row['sender_name'] : null,
+            $senderProbeId,
+            $recipientType,
+            $recipientId,
+            isset($row['recipient_name']) && $row['recipient_name'] !== null ? (string) $row['recipient_name'] : null,
+            $recipientProbeId,
             new SectorCoordinates((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z']),
             (string) $row['body'],
             (string) $row['status'],

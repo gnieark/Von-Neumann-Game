@@ -11,10 +11,16 @@ use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
+use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\Player;
+use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeItem;
+use VonNeumannGame\Domain\ProbeMessage;
+use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
+use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
@@ -29,6 +35,7 @@ use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MovementDurationCalculator;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
@@ -205,6 +212,43 @@ $test->assertThrows(
     'OAuth service rejects an OpenID token for another client'
 );
 
+$legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
+$legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
+$legacyMessagePdo = $legacyMessageFactory->create();
+$legacyMessagePdo->exec(
+    "CREATE TABLE probe_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_probe_id INTEGER NOT NULL,
+        recipient_probe_id INTEGER NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL,
+        read_at TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )"
+);
+$legacyMessagePdo->exec(
+    "INSERT INTO probe_messages
+     (sender_probe_id, recipient_probe_id, sector_x, sector_y, sector_z, body, status, read_at, created_at, updated_at)
+     VALUES (1, 2, 0, 0, 0, 'Legacy hello', 'unread', NULL, '2026-06-18T00:00:00+00:00', '2026-06-18T00:00:00+00:00')"
+);
+$legacyMessageFactory->initializeSchema($legacyMessagePdo);
+$legacyMessageColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacyMessagePdo->query('PRAGMA table_info(probe_messages)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('recipient_type', $legacyMessageColumns, true), 'legacy probe message schema migrates recipient_type before endpoint indexes');
+$legacyEndpointIndexes = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacyMessagePdo->query('PRAGMA index_list(probe_messages)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('idx_probe_messages_recipient_endpoint', $legacyEndpointIndexes, true), 'legacy probe message schema creates endpoint recipient index after migration');
+$legacyMessage = $legacyMessagePdo->query('SELECT sender_type, sender_id, recipient_type, recipient_id FROM probe_messages')->fetch(PDO::FETCH_ASSOC);
+$test->assertEquals(['sender_type' => 'probe', 'sender_id' => '1', 'recipient_type' => 'probe', 'recipient_id' => '2'], $legacyMessage, 'legacy probe message migration backfills typed endpoints');
+
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();
 $dbFactory->initializeSchema($pdo);
@@ -236,6 +280,8 @@ $messageSchemaColumns = array_map(
 );
 $test->assert(in_array('sender_probe_id', $messageSchemaColumns, true), 'Probe message table stores sender probes');
 $test->assert(in_array('recipient_probe_id', $messageSchemaColumns, true), 'Probe message table stores recipient probes');
+$test->assert(in_array('sender_type', $messageSchemaColumns, true), 'Probe message table stores typed senders');
+$test->assert(in_array('recipient_type', $messageSchemaColumns, true), 'Probe message table stores typed recipients');
 $test->assert(in_array('read_at', $messageSchemaColumns, true), 'Probe message table stores read timestamps');
 $playerSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
@@ -267,6 +313,19 @@ $forumMessageSchemaColumns = array_map(
 );
 $test->assert(in_array('body', $forumMessageSchemaColumns, true), 'Forum messages store a body');
 $test->assert(in_array('edited_at', $forumMessageSchemaColumns, true), 'Forum messages store an explicit edit timestamp');
+$missionSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_missions)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('probe_id', $missionSchemaColumns, true), 'Mission table assigns missions to probes');
+$test->assert(in_array('status', $missionSchemaColumns, true), 'Mission table stores mission status');
+$test->assert(in_array('step_order', $missionSchemaColumns, true), 'Mission table stores step ordering mode');
+$missionStepSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_mission_steps)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('mission_id', $missionStepSchemaColumns, true), 'Mission step table links steps to missions');
+$test->assert(in_array('sort_order', $missionStepSchemaColumns, true), 'Mission step table stores step order');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -274,6 +333,7 @@ $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
+$missions = new MissionRepository($pdo);
 $damageWarnings = new ProbeDamageWarningRepository($pdo);
 $forum = new ForumRepository($pdo);
 $storageContainers = new StorageContainerRepository($pdo);
@@ -286,18 +346,62 @@ $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, worldSeed: 'api-test-world');
+$missionService = new MissionService($missions, $messages, [], 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $reinstantiation);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(32, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(39, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
+
+$privacyHome = new SectorCoordinates(1000, 1000, 0);
+$privacySector = new SectorCoordinates(1002, 1000, 0);
+$privacyRelativeLabel = '2:0:0';
+$leakyPlanetName = 'Signal-' . str_replace(':', '-', $privacySector->toKey());
+$sectorRepository->save(new SectorContent($privacySector, [
+    new Planet('privacy-life-planet', $leakyPlanetName, 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
+    new SolarSystem(
+        'privacy-system',
+        null,
+        new Star('privacy-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+        null,
+        [
+            new OrbitingBody(
+                new Planet('privacy-nested-life-planet', $leakyPlanetName, 'rocky', 1.0, 1.0, true, 0.72, ['silicates'], intelligentLife: true),
+                new OrbitDescriptor(1.0, 0.01, 0.0),
+            ),
+        ],
+        1.0,
+        4.0,
+    ),
+]));
+$privacyObservation = (new SectorObservationService($sectorService, $visitedSectors))->observe(
+    new Player(424242, 'privacy-observer', 'Privacy Observer', $privacyHome, gmdate('c'), gmdate('c')),
+    new NeumannProbe(424242, 424242, 'Privacy probe', $privacySector, 0.0, 0.0, new ProbeDirection(), ProbeStatus::Idle, 100.0, 0.0, 100.0, 0.0, 0.0, 0.0, 1.0, null, gmdate('c'), gmdate('c'), gmdate('c'), false),
+    $privacySector,
+)->toArray();
+$privacyJson = json_encode($privacyObservation, JSON_THROW_ON_ERROR);
+$privacyTopObject = $privacyObservation['objects'][0] ?? [];
+$privacyNestedTarget = $privacyObservation['objects'][1]['bookmarkTargets'][1] ?? [];
+$test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $privacyObservation['relativeCoordinates'] ?? null, 'sector observation computes player-relative coordinates');
+$test->assertEquals('Monde habite du secteur relatif ' . $privacyRelativeLabel, $privacyTopObject['name'] ?? null, 'sector observation hides absolute coordinates in unnamed inhabited planet labels');
+$test->assertEquals('Monde habite du secteur relatif ' . $privacyRelativeLabel, $privacyNestedTarget['name'] ?? null, 'nested inhabited planet targets hide absolute-coordinate debug names');
+$test->assert(!str_contains($privacyJson, $privacySector->toKey()), 'sector observation payload does not expose absolute sector keys through inhabited planet names');
+$test->assert(!str_contains($privacyJson, str_replace(':', '-', $privacySector->toKey())), 'sector observation payload does not expose hyphenated absolute sector keys through inhabited planet names');
+$forceInhabitedOutput = [];
+$forceInhabitedExit = 0;
+exec(PHP_BINARY . ' ' . escapeshellarg(__DIR__ . '/../scripts/force-inhabited-planet.php') . ' --sector=-114:-348:-650 --dry-run 2>&1', $forceInhabitedOutput, $forceInhabitedExit);
+$forceInhabitedText = implode("\n", $forceInhabitedOutput);
+$test->assertEquals(0, $forceInhabitedExit, 'force-inhabited-planet dry-run exits successfully');
+$test->assert(str_contains($forceInhabitedText, '- planet id: debug-inhabited-'), 'force-inhabited-planet dry-run reports an opaque debug planet id');
+$test->assert(!str_contains($forceInhabitedText, 'debug-inhabited-n114-n348-n650'), 'force-inhabited-planet default id does not expose encoded absolute coordinates');
+$test->assert(!str_contains($forceInhabitedText, '- planet id: debug-inhabited--114:-348:-650'), 'force-inhabited-planet default id does not expose raw absolute coordinates');
 
 $movementTimeline = (new MovementDurationCalculator())->timeline(new DateTimeImmutable('2026-01-01T00:00:00+00:00'), 2);
 $test->assertEquals('2026-01-01T00:05:00+00:00', $movementTimeline['preparationEndsAt']->format('c'), 'beta movement preparation delay is halved');
@@ -324,6 +428,58 @@ $test->assert($homeSum % 2 === 0, 'random initial sector respects the FCC parity
 $test->assert($visitedSectors->hasVisited($player, $player->homeSector), 'initial sector is automatically marked as visited');
 if ($createdProbe !== null) {
     $test->assert($createdProbe->currentSector->equals($player->homeSector), 'initial probe starts in the player home sector');
+    $missionHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($player)['token']];
+    $emptyMissions = $kernel->handle('GET', '/api/probe/missions', $missionHeaders);
+    $test->assertEquals(200, $emptyMissions->status, 'GET /api/probe/missions returns mission list');
+    $test->assertEquals([], $emptyMissions->body['missions'] ?? null, 'new probes start without active missions');
+    $legacyMissionRoute = $kernel->handle('GET', '/api/probe/mission', $missionHeaders);
+    $test->assertEquals(200, $legacyMissionRoute->status, 'GET /api/probe/mission remains a mission-list alias');
+    $createdMission = $missionService->startMission(
+        $createdProbe,
+        'test_signal',
+        'Signal de test',
+        'Mission générée par le test API.',
+        \VonNeumannGame\Domain\Mission::STEP_ORDER_SEQUENTIAL,
+        ['test' => true],
+        ['type' => 'api_test'],
+        [
+            ['title' => 'Identifier le signal', 'metadata' => ['event' => 'scan']],
+            ['title' => 'Répondre', 'description' => 'Attendre une future action joueur.'],
+        ],
+    );
+    $activeMissions = $kernel->handle('GET', '/api/probe/missions', $missionHeaders);
+    $test->assertEquals(200, $activeMissions->status, 'GET /api/probe/missions lists active missions');
+    $test->assertEquals($createdMission->uid, $activeMissions->body['missions'][0]['id'] ?? null, 'mission response exposes a stable public mission id');
+    $test->assertEquals('sequential', $activeMissions->body['missions'][0]['stepOrder'] ?? null, 'mission response exposes step ordering');
+    $test->assertEquals(2, count($activeMissions->body['missions'][0]['steps'] ?? []), 'mission response exposes mission steps');
+    $abandonedMission = $kernel->handle('POST', '/api/probe/missions/' . rawurlencode($createdMission->uid) . '/abandon', $missionHeaders);
+    $test->assertEquals(200, $abandonedMission->status, 'POST /api/probe/missions/{missionId}/abandon abandons an active mission');
+    $test->assertEquals('abandoned', $abandonedMission->body['mission']['status'] ?? null, 'abandoned mission response exposes terminal status');
+    $missionsAfterAbandon = $kernel->handle('GET', '/api/probe/missions', $missionHeaders);
+    $test->assertEquals([], $missionsAfterAbandon->body['missions'] ?? null, 'abandoned missions are no longer listed as active');
+    $secondAbandon = $kernel->handle('POST', '/api/probe/missions/' . rawurlencode($createdMission->uid) . '/abandon', $missionHeaders);
+    $test->assertEquals(409, $secondAbandon->status, 'abandoning a terminal mission is rejected');
+    $missingMission = $kernel->handle('POST', '/api/probe/missions/missing/abandon', $missionHeaders);
+    $test->assertEquals(404, $missingMission->status, 'abandoning an unknown mission is rejected');
+    $sequentialMission = $missionService->startMission(
+        $createdProbe,
+        'sequential_test',
+        'Sequential mission test',
+        stepOrder: \VonNeumannGame\Domain\Mission::STEP_ORDER_SEQUENTIAL,
+        steps: [
+            ['title' => 'First sequential step'],
+            ['title' => 'Second sequential step'],
+        ],
+    );
+    $sequentialStepIds = array_map(static fn($step): string => $step->uid, $sequentialMission->steps);
+    $test->assertThrows(
+        fn() => $missionService->completeStep($createdProbe, $sequentialMission->uid, $sequentialStepIds[1] ?? ''),
+        'sequential missions block later steps until earlier steps complete'
+    );
+    $afterFirstStep = $missionService->completeStep($createdProbe, $sequentialMission->uid, $sequentialStepIds[0] ?? '');
+    $test->assertEquals('active', $afterFirstStep->status, 'sequential mission remains active after an intermediate step');
+    $afterSecondStep = $missionService->completeStep($createdProbe, $sequentialMission->uid, $sequentialStepIds[1] ?? '');
+    $test->assertEquals('completed', $afterSecondStep->status, 'sequential mission completes after its final step');
     $userinfosDbConfig = $tmp . DIRECTORY_SEPARATOR . 'userinfos-database.json';
     file_put_contents($userinfosDbConfig, json_encode([
         'driver' => 'sqlite',
@@ -468,6 +624,15 @@ $auth->createApiKeyForPlayer($deletePlayer);
 if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 2) {
     $deleteSentMessage = $messages->create($deleteProbe->id, $createdProbe->id, $deleteProbe->currentSector, 'Deleting sender ping');
     $deleteReceivedMessage = $messages->create($createdProbe->id, $deleteProbe->id, $deleteProbe->currentSector, 'Deleting recipient ping');
+    $deleteMission = $missionService->startMission(
+        $deleteProbe,
+        'delete_test',
+        'Delete test mission',
+        steps: [
+            ['title' => 'First deleted step'],
+            ['title' => 'Second deleted step'],
+        ],
+    );
     $outsideManny = $deleteMannies[0];
     $onboardManny = $deleteMannies[1];
     $outsideManny->locationType = 'sector';
@@ -497,11 +662,14 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assertEquals(1, $deleteStats['probes'] ?? null, 'account deletion reports the deleted probe');
     $test->assertEquals(1, $deleteStats['probeMessagesSent'] ?? null, 'account deletion reports sent probe messages');
     $test->assertEquals(1, $deleteStats['probeMessagesReceived'] ?? null, 'account deletion reports received probe messages');
+    $test->assertEquals(1, $deleteStats['probeMissions'] ?? null, 'account deletion reports probe missions');
+    $test->assertEquals(2, $deleteStats['probeMissionSteps'] ?? null, 'account deletion reports probe mission steps');
     $test->assertEquals(1, $deleteStats['manniesDetachedAsAbandoned'] ?? null, 'account deletion detaches outside Mannys as abandoned');
     $test->assert($players->findById($deletePlayer->id) === null, 'account deletion removes the player row');
     $test->assert($probes->findByPlayerId($deletePlayer->id) === null, 'account deletion removes the player probe');
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
+    $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
     $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
     $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
     $detachedManny = $mannies->findByUid($outsideManny->uid);
@@ -1287,6 +1455,154 @@ if ($damageWarningProbe !== null) {
     }
 }
 
+$intelligentLifePlayer = $auth->registerPlayerWithPassword('life-alert', 'secret', 'Life Alert', 'Life probe');
+$intelligentLifeProbe = $probes->findByPlayerId($intelligentLifePlayer->id);
+$intelligentLifeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'life-alert', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$intelligentLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($intelligentLifeSession->body['token'] ?? '')];
+
+$teleportLifePlayer = $auth->registerPlayerWithPassword('teleport-life', 'secret', 'Teleport Life', 'Teleport probe');
+$teleportLifeProbe = $probes->findByPlayerId($teleportLifePlayer->id);
+$teleportLifeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'teleport-life', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$teleportLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($teleportLifeSession->body['token'] ?? '')];
+if ($teleportLifeProbe !== null) {
+    $teleportLifeTarget = $teleportLifeProbe->currentSector->add(4, 0, 0);
+    $sectorRepository->save(new SectorContent($teleportLifeTarget, [
+        new Planet('teleport-life-planet', null, 'ocean', 1.0, 1.0, true, 0.91, ['water_ice'], intelligentLife: true),
+    ]));
+    $pdo->prepare(
+        "UPDATE neumann_probes
+         SET sector_x = :x, sector_y = :y, sector_z = :z, status = 'idle', current_task = NULL, entered_current_sector_at = :now, updated_at = :now
+         WHERE id = :id"
+    )->execute([
+        'id' => $teleportLifeProbe->id,
+        'x' => $teleportLifeTarget->getX(),
+        'y' => $teleportLifeTarget->getY(),
+        'z' => $teleportLifeTarget->getZ(),
+        'now' => gmdate('c'),
+    ]);
+    $visitedSectors->markVisited($teleportLifePlayer, $teleportLifeTarget);
+
+    $teleportLifeSector = $kernel->handle('GET', '/api/probe/sector', $teleportLifeHeaders);
+    $test->assertEquals(200, $teleportLifeSector->status, 'GET /api/probe/sector succeeds after debug teleport into intelligent-life sector');
+    $teleportLifeMessages = $kernel->handle('GET', '/api/probe/messages', $teleportLifeHeaders);
+    $test->assertEquals('- -- --- ----- -------', $teleportLifeMessages->body['messages'][0]['body'] ?? null, 'observing current intelligent-life sector creates missing first-contact message');
+    $teleportLifeMissions = $kernel->handle('GET', '/api/probe/missions', $teleportLifeHeaders);
+    $test->assertEquals('first_contact.return_to_space_program', $teleportLifeMissions->body['missions'][0]['type'] ?? null, 'observing current intelligent-life sector creates missing first-contact mission');
+}
+
+if ($intelligentLifeProbe !== null) {
+    $intelligentLifeTarget = $intelligentLifeProbe->currentSector->add(2, 0, 0);
+    $intelligentLifeLeakyPlanetName = 'Signal-' . str_replace(':', '-', $intelligentLifeTarget->toKey());
+    $sectorRepository->save(new SectorContent($intelligentLifeTarget, [
+        new Planet('life-alert-planet', $intelligentLifeLeakyPlanetName, 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
+    ]));
+
+    $intelligentLifeMove = $kernel->handle('POST', '/api/probe/move', $intelligentLifeHeaders, json_encode([
+        'target' => [
+            'x' => 2,
+            'y' => 0,
+            'z' => 0,
+        ],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $intelligentLifeMove->status, 'movement toward an intelligent-life sector starts');
+    $intelligentLifeMovement = $movements->findActiveByProbeId($intelligentLifeProbe->id);
+    if ($intelligentLifeMovement !== null) {
+        $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+            'id' => $intelligentLifeMovement->id,
+            'arrival' => gmdate('c', time() - 60),
+        ]);
+        $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $intelligentLifeMovement->id, gmdate('c'), ['probeId' => $intelligentLifeMovement->probeId, 'phase' => 'arrived']);
+        $lifeSchedulerStats = $scheduler->processDueEvents();
+        $test->assert($lifeSchedulerStats['processed'] >= 1, 'scheduler finalizes movement into intelligent-life sector');
+
+        $lifeAlertsResponse = $kernel->handle('GET', '/api/probe/alerts', $intelligentLifeHeaders);
+        $test->assertEquals(200, $lifeAlertsResponse->status, 'GET /api/probe/alerts exposes intelligent-life alerts');
+        $lifeAlerts = array_values(array_filter(
+            $lifeAlertsResponse->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'intelligent_life',
+        ));
+        $lifeAlert = $lifeAlerts[0] ?? null;
+        $test->assertEquals('unread', $lifeAlert['status'] ?? null, 'intelligent-life alert starts unread');
+        $test->assertEquals('life-alert-planet', $lifeAlert['planet']['id'] ?? null, 'intelligent-life alert exposes the planet id');
+        $test->assertEquals('Monde habite', $lifeAlert['planet']['name'] ?? null, 'intelligent-life alert hides absolute-coordinate debug planet names');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $lifeAlert['sector']['relative'] ?? null, 'intelligent-life alert exposes the relative sector');
+        $test->assert(is_string($lifeAlert['message'] ?? null) && str_contains((string) $lifeAlert['message'], 'Intelligent life detected'), 'intelligent-life alert stores a readable message');
+        $test->assert(is_string($lifeAlert['message'] ?? null) && str_contains((string) $lifeAlert['message'], 'relative sector 2:0:0'), 'intelligent-life alert message uses relative sector coordinates');
+        $test->assert(!str_contains(json_encode($lifeAlert, JSON_THROW_ON_ERROR), $intelligentLifeTarget->toKey()), 'intelligent-life alert response does not expose absolute sector keys');
+        $test->assert(!str_contains(json_encode($lifeAlert, JSON_THROW_ON_ERROR), str_replace(':', '-', $intelligentLifeTarget->toKey())), 'intelligent-life alert response does not expose hyphenated absolute sector keys');
+
+        $firstContactMessages = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+        $test->assertEquals(200, $firstContactMessages->status, 'GET /api/probe/messages exposes first-contact planet messages');
+        $test->assertEquals('- -- --- ----- -------', $firstContactMessages->body['messages'][0]['body'] ?? null, 'first-contact planet message contains the prime-count signal');
+        $test->assertEquals('planet', $firstContactMessages->body['messages'][0]['sender']['type'] ?? null, 'first-contact message comes from the planet endpoint');
+        $test->assertEquals('life-alert-planet', $firstContactMessages->body['messages'][0]['sender']['planetId'] ?? null, 'first-contact message exposes the sender planet id');
+        $test->assertEquals('Monde habite', $firstContactMessages->body['messages'][0]['sender']['name'] ?? null, 'first-contact message hides absolute-coordinate debug planet names');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $firstContactMessages->body['messages'][0]['sector']['relative'] ?? null, 'first-contact message exposes only relative sector coordinates');
+        $test->assert(!str_contains(json_encode($firstContactMessages->body['messages'][0], JSON_THROW_ON_ERROR), $intelligentLifeTarget->toKey()), 'first-contact message response does not expose absolute sector keys');
+        $test->assert(!str_contains(json_encode($firstContactMessages->body['messages'][0], JSON_THROW_ON_ERROR), str_replace(':', '-', $intelligentLifeTarget->toKey())), 'first-contact message response does not expose hyphenated absolute sector keys');
+
+        $firstContactMissions = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
+        $test->assertEquals(200, $firstContactMissions->status, 'GET /api/probe/missions exposes first-contact missions');
+        $firstContactMission = $firstContactMissions->body['missions'][0] ?? null;
+        $test->assertEquals('Premier contact', $firstContactMission['title'] ?? null, 'first-contact mission exposes its title');
+        $test->assertEquals('first_contact.return_to_space_program', $firstContactMission['type'] ?? null, 'first-contact mission exposes the selected scenario type');
+        $test->assertEquals('return_to_space_program', $firstContactMission['metadata']['scenario'] ?? null, 'first-contact mission metadata exposes the selected scenario key');
+        $test->assertEquals('life-alert-planet', $firstContactMission['metadata']['planetId'] ?? null, 'first-contact mission metadata exposes the planet id');
+        $test->assertEquals('Monde habite', $firstContactMission['metadata']['planetName'] ?? null, 'first-contact mission metadata hides absolute-coordinate debug planet names');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $firstContactMission['metadata']['sector']['relative'] ?? null, 'first-contact mission metadata exposes relative sector coordinates');
+        $test->assert(!array_key_exists('x', $firstContactMission['metadata']['sector'] ?? []), 'first-contact mission metadata does not expose absolute sector x');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $firstContactMission['createdByEvent']['sector']['relative'] ?? null, 'first-contact mission event exposes relative sector coordinates');
+        $test->assert(!str_contains(json_encode($firstContactMission, JSON_THROW_ON_ERROR), $intelligentLifeTarget->toKey()), 'first-contact mission response does not expose absolute sector keys');
+        $test->assert(is_string($firstContactMission['description'] ?? null) && str_contains((string) $firstContactMission['description'], '- -- --- ----- -------'), 'first-contact mission description includes the received signal');
+        $test->assert(is_string($firstContactMission['description'] ?? null) && str_contains((string) $firstContactMission['description'], 'secteur relatif 2:0:0'), 'first-contact mission description uses relative sector coordinates');
+        $test->assertEquals('pending', $firstContactMission['steps'][0]['status'] ?? null, 'first-contact reply step starts pending');
+
+        $firstContactReply = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
+            'recipient' => [
+                'type' => 'planet',
+                'id' => 'life-alert-planet',
+            ],
+            'body' => '-----------',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(201, $firstContactReply->status, 'POST /api/probe/messages sends the prime-sequence reply to the planet');
+        $firstContactMessagesAfterReply = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+        $planetScenarioReply = $firstContactMessagesAfterReply->body['messages'][0] ?? null;
+        $test->assertEquals('planet', $planetScenarioReply['sender']['type'] ?? null, 'planet answers the valid prime-sequence reply');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'Nous sommes les habitants de ce monde.'), 'planet reply introduces the inhabited world');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], '5 ECE'), 'planet reply asks for five ECE of metals');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], '3 unités'), 'planet reply asks for three Mannys');
+        $firstContactAfterReply = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
+        $firstContactMissionAfterReply = $firstContactAfterReply->body['missions'][0] ?? null;
+        $test->assertEquals('active', $firstContactMissionAfterReply['status'] ?? null, 'first-contact mission remains active for its next scenario step');
+        $test->assertEquals('completed', $firstContactMissionAfterReply['steps'][0]['status'] ?? null, 'valid prime-sequence reply completes the first-contact decoding step');
+        $test->assertEquals('completed', $firstContactMissionAfterReply['steps'][1]['status'] ?? null, 'planet reply completes the waiting-for-reply step');
+        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][2]['status'] ?? null, 'first-contact mission waits for metal delivery');
+        $test->assertEquals(5, $firstContactMissionAfterReply['steps'][2]['metadata']['amount'] ?? null, 'metal delivery step exposes the requested amount');
+        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][3]['status'] ?? null, 'first-contact mission waits for Manny delivery');
+        $test->assertEquals(3, $firstContactMissionAfterReply['steps'][3]['metadata']['quantity'] ?? null, 'Manny delivery step exposes the requested quantity');
+
+        $duplicateFirstContactReply = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
+            'recipient' => [
+                'type' => 'planet',
+                'id' => 'life-alert-planet',
+            ],
+            'body' => '-----------',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(201, $duplicateFirstContactReply->status, 'POST /api/probe/messages accepts a repeated prime-sequence reply');
+        $messagesAfterDuplicateReply = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+        $planetScenarioReplies = array_values(array_filter(
+            $messagesAfterDuplicateReply->body['messages'] ?? [],
+            static fn(array $message): bool => is_string($message['body'] ?? null)
+                && str_contains((string) $message['body'], 'Nous sommes les habitants de ce monde.')
+        ));
+        $test->assertEquals(1, count($planetScenarioReplies), 'repeated prime-sequence replies do not duplicate the planet scenario response');
+
+        $markLifeAlertRead = $kernel->handle('PATCH', '/api/probe/alerts/' . (int) ($lifeAlert['id'] ?? 0), $intelligentLifeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+        $test->assertEquals(200, $markLifeAlertRead->status, 'PATCH /api/probe/alerts/{id} marks an intelligent-life alert read');
+        $test->assertEquals('read', $markLifeAlertRead->body['alert']['status'] ?? null, 'intelligent-life alert read response exposes read status');
+    }
+}
+
 $apiKeyResponse = $kernel->handle('POST', '/api/me/api-key', $headers, json_encode([], JSON_THROW_ON_ERROR));
 $test->assertEquals(201, $apiKeyResponse->status, 'POST /api/me/api-key creates an API key');
 $apiKeyToken = $apiKeyResponse->body['apiKey']['token'] ?? null;
@@ -1359,6 +1675,10 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $probes->save($stationaryNeighborProbe);
     $movingNeighborProbe->currentSector = $createdProbe->currentSector;
     $probes->save($movingNeighborProbe);
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Planet('message-life-planet', 'Warm Chorus', 'ocean', 1.0, 1.0, true, 0.79, ['water_ice'], intelligentLife: true),
+        new Planet('message-empty-planet', 'Quiet Rock', 'rocky', 0.8, 0.9, true, 0.33, ['silicates']),
+    ]));
 
     $neighborTarget = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
     $movements->create(
@@ -1412,15 +1732,21 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assertEquals(201, $sentMessage->status, 'POST /api/probe/messages sends a message to a probe in the same sector');
     $test->assertEquals('Signal de bienvenue', $sentMessage->body['message']['body'] ?? null, 'sent probe message body is trimmed');
     $test->assertEquals($createdProbe->id, $sentMessage->body['message']['sender']['probeId'] ?? null, 'sent probe message exposes sender probe id');
+    $test->assertEquals('probe', $sentMessage->body['message']['sender']['type'] ?? null, 'sent probe message exposes sender type');
     $test->assertEquals($stationaryNeighborProbe->id, $sentMessage->body['message']['recipient']['probeId'] ?? null, 'sent probe message exposes recipient probe id');
+    $test->assertEquals('probe', $sentMessage->body['message']['recipient']['type'] ?? null, 'sent probe message exposes recipient type');
     $test->assertEquals('unread', $sentMessage->body['message']['status'] ?? null, 'new probe message starts unread');
     $sentMessageId = (int) ($sentMessage->body['message']['id'] ?? 0);
 
     $senderMessages = $kernel->handle('GET', '/api/probe/messages', $headers);
     $test->assertEquals(200, $senderMessages->status, 'GET /api/probe/messages lists received messages');
-    $test->assertEquals(0, count($senderMessages->body['messages'] ?? []), 'sender does not receive its own outbound probe message');
+    $senderReceivedOwnProbeMessages = array_values(array_filter(
+        $senderMessages->body['messages'] ?? [],
+        static fn(array $message): bool => ($message['body'] ?? null) === 'Signal de bienvenue'
+    ));
+    $test->assertEquals(0, count($senderReceivedOwnProbeMessages), 'sender does not receive its own outbound probe message');
     $test->assertEquals(50, $senderMessages->body['pagination']['limit'] ?? null, 'probe message list defaults to a 50 message limit');
-    $test->assertEquals(0, $senderMessages->body['pagination']['total'] ?? null, 'probe message list exposes the total received message count');
+    $test->assertEquals(1, $senderMessages->body['pagination']['total'] ?? null, 'probe message list exposes the total received message count');
     $senderSentMessages = $kernel->handle('GET', '/api/probe/messages/sent', $headers);
     $test->assertEquals(200, $senderSentMessages->status, 'GET /api/probe/messages/sent lists sent messages');
     $test->assertEquals('Signal de bienvenue', $senderSentMessages->body['messages'][0]['body'] ?? null, 'sender sees the outbound probe message body');
@@ -1429,6 +1755,29 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assert(!array_key_exists('readAt', $senderSentMessages->body['messages'][0] ?? []), 'sent probe message list does not expose read timestamp');
     $test->assert(!array_key_exists('updatedAt', $senderSentMessages->body['messages'][0] ?? []), 'sent probe message list does not expose read-driven update timestamp');
     $test->assertEquals(1, $senderSentMessages->body['pagination']['total'] ?? null, 'sent probe message list exposes the total sent message count');
+
+    $planetMessage = $kernel->handle('POST', '/api/probe/messages', $headers, json_encode([
+        'recipient' => [
+            'type' => 'planet',
+            'id' => 'message-life-planet',
+        ],
+        'body' => 'Salutations orbitales',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(201, $planetMessage->status, 'POST /api/probe/messages sends a message to an inhabited planet in the current sector');
+    $test->assertEquals('planet', $planetMessage->body['message']['recipient']['type'] ?? null, 'planet message exposes a planet recipient type');
+    $test->assertEquals('message-life-planet', $planetMessage->body['message']['recipient']['planetId'] ?? null, 'planet message exposes recipient planet id');
+    $test->assertEquals('Warm Chorus', $planetMessage->body['message']['recipient']['name'] ?? null, 'planet message exposes recipient planet name');
+
+    $uninhabitedPlanetMessage = $kernel->handle('POST', '/api/probe/messages', $headers, json_encode([
+        'recipient' => [
+            'type' => 'planet',
+            'id' => 'message-empty-planet',
+        ],
+        'body' => 'Y a-t-il quelqu’un ?',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $uninhabitedPlanetMessage->status, 'POST /api/probe/messages rejects uninhabited planet recipients');
+    $test->assertEquals('invalid_message_recipient', $uninhabitedPlanetMessage->body['error']['code'] ?? null, 'uninhabited planet recipient returns an explicit error');
+
     $recipientSentMessages = $kernel->handle('GET', '/api/probe/messages/sent', $stationaryHeaders);
     $test->assertEquals(0, $recipientSentMessages->body['pagination']['total'] ?? null, 'recipient does not see inbound messages in sent messages');
     $receivedMessages = $kernel->handle('GET', '/api/probe/messages', $stationaryHeaders);
@@ -1438,6 +1787,26 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assert(isset($receivedMessages->body['messages'][0]['sector']['relative']), 'received probe message exposes a relative sector');
     $test->assertEquals(1, $receivedMessages->body['pagination']['count'] ?? null, 'probe message list exposes the page item count');
     $test->assertEquals(false, $receivedMessages->body['pagination']['hasMore'] ?? null, 'probe message list reports when no older page remains');
+
+    $planetInbound = $messages->createForEndpoints(
+        ProbeMessage::ENDPOINT_PLANET,
+        'message-life-planet',
+        'Warm Chorus',
+        null,
+        ProbeMessage::ENDPOINT_PROBE,
+        (string) $createdProbe->id,
+        null,
+        $createdProbe->id,
+        $createdProbe->currentSector,
+        'Nous vous recevons.',
+    );
+    $probeReceivedPlanetMessages = $kernel->handle('GET', '/api/probe/messages', $headers);
+    $test->assertEquals(200, $probeReceivedPlanetMessages->status, 'probe can list messages received from inhabited planets');
+    $test->assertEquals('Nous vous recevons.', $probeReceivedPlanetMessages->body['messages'][0]['body'] ?? null, 'planet inbound message body is exposed');
+    $test->assertEquals('planet', $probeReceivedPlanetMessages->body['messages'][0]['sender']['type'] ?? null, 'planet inbound message exposes sender type');
+    $test->assertEquals('message-life-planet', $probeReceivedPlanetMessages->body['messages'][0]['sender']['planetId'] ?? null, 'planet inbound message exposes sender planet id');
+    $planetInboundRead = $kernel->handle('PATCH', '/api/probe/messages/' . $planetInbound->id . '/read', $headers);
+    $test->assertEquals(200, $planetInboundRead->status, 'probe can mark a planet-origin message as read');
 
     $senderRead = $kernel->handle('PATCH', '/api/probe/messages/' . $sentMessageId . '/read', $headers);
     $test->assertEquals(404, $senderRead->status, 'only the recipient can mark a probe message read');
@@ -1482,14 +1851,14 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $defaultSentMessagePage = $kernel->handle('GET', '/api/probe/messages/sent', $headers);
     $test->assertEquals(200, $defaultSentMessagePage->status, 'GET /api/probe/messages/sent returns the default sent message page');
     $test->assertEquals(50, count($defaultSentMessagePage->body['messages'] ?? []), 'GET /api/probe/messages/sent returns at most the 50 latest sent messages by default');
-    $test->assertEquals(56, $defaultSentMessagePage->body['pagination']['total'] ?? null, 'default sent message page exposes the total available sent messages');
+    $test->assertEquals(57, $defaultSentMessagePage->body['pagination']['total'] ?? null, 'default sent message page exposes the total available sent messages');
     $test->assertEquals('Archive message 55', $defaultSentMessagePage->body['messages'][0]['body'] ?? null, 'default sent message page is sorted newest first');
     $test->assert(!array_key_exists('status', $defaultSentMessagePage->body['messages'][0] ?? []), 'default sent message page does not expose read status');
     $test->assert(!array_key_exists('updatedAt', $defaultSentMessagePage->body['messages'][0] ?? []), 'default sent message page does not expose update timestamp');
     $olderSentMessagePage = $kernel->handle('GET', '/api/probe/messages/sent?limit=10&offset=50', $headers);
     $olderSentBodies = array_map(static fn(array $message): string => (string) ($message['body'] ?? ''), $olderSentMessagePage->body['messages'] ?? []);
     $test->assertEquals(200, $olderSentMessagePage->status, 'GET /api/probe/messages/sent accepts limit and offset query parameters');
-    $test->assertEquals(6, count($olderSentBodies), 'older sent message page returns remaining messages after the offset');
+    $test->assertEquals(7, count($olderSentBodies), 'older sent message page returns remaining messages after the offset');
     $test->assert(in_array('Signal de bienvenue', $olderSentBodies, true), 'older sent message page can reach messages beyond the first 50');
     $invalidSentLimitMessagePage = $kernel->handle('GET', '/api/probe/messages/sent?limit=0', $headers);
     $test->assertEquals(400, $invalidSentLimitMessagePage->status, 'GET /api/probe/messages/sent rejects a zero limit');

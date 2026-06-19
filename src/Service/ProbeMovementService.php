@@ -41,6 +41,7 @@ final class ProbeMovementService
         private readonly ?MannyRepository $mannies = null,
         private readonly ?ProbeStorageService $storage = null,
         private readonly ?ProbeDamageWarningRepository $damageWarnings = null,
+        private readonly ?MissionService $missions = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -121,7 +122,12 @@ final class ProbeMovementService
             $probe->enteredCurrentSectorAt = $now->format('c');
             $this->applyIntersectorIntegrityLoss($probe, $movement);
             $this->probes->save($probe);
+            $alreadyVisited = $this->visitedSectors->getVisitedSectorByPlayerId($probe->playerId, $movement->target) !== null;
             $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
+            $this->createIntelligentLifeAlerts($probe, $movement);
+            if (!$alreadyVisited) {
+                $this->startIntelligentLifeScenarios($probe, $movement);
+            }
             $this->scheduleBlackHoleTrapIfNeeded($probe);
 
             return $this->probes->findById($probe->id) ?? $probe;
@@ -154,6 +160,18 @@ final class ProbeMovementService
     public function refreshCurrentSectorHazards(NeumannProbe $probe): void
     {
         $this->scheduleBlackHoleTrapIfNeeded($probe);
+    }
+
+    public function ensureCurrentSectorIntelligentLifeScenarios(NeumannProbe $probe): void
+    {
+        if ($this->sectors === null || $this->missions === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
+            $this->missions->startIntelligentLifeScenario($probe, $probe->currentSector, $planet, null);
+        }
     }
 
     public function latestMovementForProbe(NeumannProbe $probe): ?ProbeMovement
@@ -344,6 +362,68 @@ final class ProbeMovementService
         }
     }
 
+    private function createIntelligentLifeAlerts(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->sectors === null || $this->damageWarnings === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($movement->target);
+        foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
+            $planetName = $this->publicPlanetName($planet, $movement->target);
+            $message = 'Intelligent life detected: technological signatures confirmed on '
+                . $planetName
+                . ' in the arrival sector'
+                . '.';
+            $this->damageWarnings->createIntelligentLifeAlert(
+                $probe->id,
+                $movement->id,
+                $movement->target,
+                $planet->getId(),
+                $planetName,
+                $message,
+            );
+        }
+    }
+
+    private function startIntelligentLifeScenarios(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->sectors === null || $this->missions === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($movement->target);
+        foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
+            $this->missions->startIntelligentLifeScenario($probe, $movement->target, $planet, $movement->id);
+        }
+    }
+
+    /**
+     * @param array<UniverseObject> $objects
+     * @return array<Planet>
+     */
+    private function intelligentLifePlanets(array $objects): array
+    {
+        $planets = [];
+        foreach ($objects as $object) {
+            if ($object instanceof Planet && $object->hasIntelligentLife()) {
+                $planets[] = $object;
+                continue;
+            }
+
+            if ($object instanceof SolarSystem) {
+                foreach ($object->getOrbitalBodies() as $body) {
+                    $bodyObject = $body->getObject();
+                    if ($bodyObject instanceof Planet && $bodyObject->hasIntelligentLife()) {
+                        $planets[] = $bodyObject;
+                    }
+                }
+            }
+        }
+
+        return $planets;
+    }
+
     private function directionBetween(SectorCoordinates $origin, SectorCoordinates $target): ProbeDirection
     {
         $dx = $target->getX() - $origin->getX();
@@ -355,6 +435,25 @@ final class ProbeMovementService
         }
 
         return new ProbeDirection(round($dx / $length, 4), round($dy / $length, 4), round($dz / $length, 4));
+    }
+
+    private function publicPlanetName(Planet $planet, SectorCoordinates $sector): string
+    {
+        $name = $planet->getName();
+        if ($name !== null && !$this->nameContainsSectorCoordinates($name, $sector)) {
+            return $name;
+        }
+
+        return 'Monde habite';
+    }
+
+    private function nameContainsSectorCoordinates(string $name, SectorCoordinates $sector): bool
+    {
+        $absoluteKey = $sector->toKey();
+
+        return str_contains($name, $absoluteKey)
+            || str_contains($name, str_replace(':', '-', $absoluteKey))
+            || str_contains($name, str_replace(':', ' ', $absoluteKey));
     }
 
     private function progressBetween(\DateTimeImmutable $now, string $start, string $end): float

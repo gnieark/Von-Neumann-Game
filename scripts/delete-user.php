@@ -158,7 +158,7 @@ Usage:
   php scripts/delete-user.php --id=<player-id> --yes
 
 Deletes one player, their probe, sessions, API keys, auth methods, visited
-sectors, movement history, inventory, storage and onboard Mannys.
+sectors, movement history, missions, inventory, storage and onboard Mannys.
 
 Mannys already outside the probe are detached and registered as abandoned sector
 objects so another probe can recover them later.
