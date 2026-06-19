@@ -498,6 +498,73 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($userinfosText, 'Inventory'), 'userinfos CLI reports inventory state');
     $test->assert(str_contains($userinfosText, 'Visited sectors'), 'userinfos CLI reports visited sector history');
 
+    $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
+    $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
+    if ($cliInventoryProbe !== null) {
+        $pdo->prepare('UPDATE neumann_probes SET exclude_from_stats = 1 WHERE id = :id')->execute(['id' => $cliInventoryProbe->id]);
+        $addInventoryItemCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' ' . escapeshellarg(ProbeItem::TYPE_STEEL_BAR)
+            . ' 2'
+            . ' ' . $cliInventoryPlayer->id;
+        exec($addInventoryItemCommand . ' 2>&1', $addInventoryItemOutput, $addInventoryItemStatus);
+        $addInventoryItemText = implode("\n", $addInventoryItemOutput);
+        $test->assertEquals(0, $addInventoryItemStatus, 'add-inventory-item CLI exits successfully for craftable items');
+        $test->assert(str_contains($addInventoryItemText, 'Added 2 x Steel bar'), 'add-inventory-item CLI reports added craftable items');
+        $cliSteelBars = array_values(array_filter(
+            $items->findByProbeId($cliInventoryProbe->id),
+            static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_STEEL_BAR,
+        ));
+        $test->assertEquals(2, count($cliSteelBars), 'add-inventory-item CLI creates one item row per requested quantity');
+
+        $beforeDryRunCount = count($items->findByProbeId($cliInventoryProbe->id));
+        $dryRunInventoryItemCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --dry-run'
+            . ' ' . escapeshellarg(ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT)
+            . ' 1'
+            . ' ' . $cliInventoryPlayer->id;
+        exec($dryRunInventoryItemCommand . ' 2>&1', $dryRunInventoryItemOutput, $dryRunInventoryItemStatus);
+        $test->assertEquals(0, $dryRunInventoryItemStatus, 'add-inventory-item CLI dry-run exits successfully');
+        $test->assertEquals($beforeDryRunCount, count($items->findByProbeId($cliInventoryProbe->id)), 'add-inventory-item CLI dry-run leaves inventory unchanged');
+
+        $addContainerCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' ' . escapeshellarg(ProbeItem::TYPE_ADDITIONAL_CONTAINER)
+            . ' 1'
+            . ' ' . $cliInventoryPlayer->id;
+        exec($addContainerCommand . ' 2>&1', $addContainerOutput, $addContainerStatus);
+        $test->assertEquals(0, $addContainerStatus, 'add-inventory-item CLI exits successfully for additional containers');
+        $cliContainers = array_values(array_filter(
+            $items->findByProbeId($cliInventoryProbe->id),
+            static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER,
+        ));
+        $test->assertEquals(1, count($cliContainers), 'add-inventory-item CLI creates an additional-container item');
+        $test->assert(
+            $storageContainers->findByUidForProbe($cliInventoryProbe->id, 'container-' . ($cliContainers[0]->uid ?? 'missing')) !== null,
+            'add-inventory-item CLI creates the paired storage container for additional containers',
+        );
+
+        $beforeMannyCount = count($mannies->findByProbeId($cliInventoryProbe->id));
+        $addMannyCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' manny 1'
+            . ' ' . $cliInventoryPlayer->id;
+        exec($addMannyCommand . ' 2>&1', $addMannyOutput, $addMannyStatus);
+        $test->assertEquals(0, $addMannyStatus, 'add-inventory-item CLI exits successfully for Mannys');
+        $cliMannies = $mannies->findByProbeId($cliInventoryProbe->id);
+        $test->assertEquals($beforeMannyCount + 1, count($cliMannies), 'add-inventory-item CLI creates real Manny entities');
+        $debugMannies = array_values(array_filter(
+            $cliMannies,
+            static fn($manny): bool => str_starts_with($manny->name, 'manny-debug-'),
+        ));
+        $test->assert($debugMannies !== [] && $debugMannies[0]->storageContainerId !== null, 'add-inventory-item CLI places created Mannys in storage');
+    }
+
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 9 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $deuteriumAsteroidCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-deuterium-asteroid-alert.php')
