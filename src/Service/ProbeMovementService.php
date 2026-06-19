@@ -17,14 +17,11 @@ use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\BlackHole;
-use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
-use VonNeumannGame\Sector\SolarSystem;
-use VonNeumannGame\Sector\UniverseObject;
 
 final class ProbeMovementService
 {

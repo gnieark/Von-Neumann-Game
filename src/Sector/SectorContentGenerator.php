@@ -8,9 +8,8 @@ use VonNeumannGame\Config\Config;
 
 final class SectorContentGenerator
 {
-    private const GENERATION_VERSION = 4;
+    private const GENERATION_VERSION = 3;
     private const ASTEROID_BELT_CHANCE_PER_PLANET = 0.075;
-    private const INTELLIGENT_LIFE_CHANCE = 0.2;
 
     public function __construct(private readonly array $config = []) {}
 
@@ -249,9 +248,6 @@ final class SectorContentGenerator
         $habitability = $habitableBand && $random->nextFloat() < $this->float('planets.habitableChance', 0.08)
             ? $random->nextFloatBetween($habitableMin, $habitableMax)
             : $random->nextFloatBetween($backgroundMin, $backgroundMax);
-        $habitability = $this->round(min(1.0, $habitability));
-        $intelligentLife = $habitability > $this->float('planets.intelligentLifeThreshold', 0.35)
-            && $random->nextFloat() < $this->float('planets.intelligentLifeChance', self::INTELLIGENT_LIFE_CHANCE);
 
         return new Planet(
             $this->objectId($coordinates, 'planet', $index),
@@ -260,10 +256,9 @@ final class SectorContentGenerator
             $this->round($mass),
             $this->round($radius),
             $atmosphere,
-            $habitability,
+            $this->round(min(1.0, $habitability)),
             $this->resourceHints($random, $category),
-            intelligentLife: $intelligentLife,
-            description: 'Planetary body classified as ' . $category . '.',
+            'Planetary body classified as ' . $category . '.',
         );
     }
 

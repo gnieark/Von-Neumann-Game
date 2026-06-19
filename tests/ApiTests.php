@@ -574,7 +574,7 @@ if ($oauthProbe !== null) {
             null,
             [
                 new OrbitingBody(
-                    new Planet('stats-visited-habitable', null, 'rocky', 1.0, 1.0, true, 0.7, intelligentLife: true),
+                    new Planet('stats-visited-habitable', null, 'rocky', 1.0, 1.0, true, 0.7),
                     new OrbitDescriptor(1.0, 0.01, 0.0),
                 ),
                 new OrbitingBody(
@@ -595,7 +595,7 @@ if ($oauthProbe !== null) {
             null,
             [
                 new OrbitingBody(
-                    new Planet('stats-generated-habitable-nested', null, 'rocky', 1.0, 1.0, true, 0.4, intelligentLife: true),
+                    new Planet('stats-generated-habitable-nested', null, 'rocky', 1.0, 1.0, true, 0.4),
                     new OrbitDescriptor(0.8, 0.01, 0.0),
                 ),
             ],
@@ -606,7 +606,6 @@ if ($oauthProbe !== null) {
     $habitabilityStats = (new UniverseStatsService($pdo, $statsUniversePath))->collect();
     $test->assertEquals(3, $habitabilityStats['metrics']['habitablePlanetsInGeneratedSectors'] ?? null, 'public stats count habitable planets in generated sectors');
     $test->assertEquals(1, $habitabilityStats['metrics']['habitablePlanetsInVisitedSectors'] ?? null, 'public stats count habitable planets in visited sectors');
-    $test->assertEquals(2, $habitabilityStats['metrics']['intelligentLifeWorlds'] ?? null, 'public stats count intelligent-life worlds in generated sectors');
 }
 $test->assertThrows(
     fn() => $auth->registerPlayerWithExternalAuth('Nova Pilot', 'discord', 'discord-openid-subject'),
@@ -1421,14 +1420,12 @@ if ($damageWarningProbe !== null) {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $damageMove->status, 'movement with fourteen additional containers starts');
 
-    $probeAlertsResponse = $kernel->handle('GET', '/api/probe/alerts', $damageWarningHeaders);
-    $test->assertEquals(200, $probeAlertsResponse->status, 'GET /api/probe/alerts lists movement alerts');
-    $damageWarning = $probeAlertsResponse->body['alerts'][0] ?? null;
+    $damageWarningsResponse = $kernel->handle('GET', '/api/probe/damage-warnings', $damageWarningHeaders);
+    $test->assertEquals(200, $damageWarningsResponse->status, 'GET /api/probe/damage-warnings lists movement damage warnings');
+    $damageWarning = $damageWarningsResponse->body['damageWarnings'][0] ?? null;
     $test->assertEquals('unread', $damageWarning['status'] ?? null, 'damage warning starts unread');
     $test->assertEquals(100.0, $damageWarning['risk']['percent'] ?? null, 'fourteen additional containers produce a 100 percent break risk');
     $test->assertEquals(14, $damageWarning['risk']['additionalContainerCount'] ?? null, 'damage warning exposes the additional container count');
-    $legacyDamageWarningsResponse = $kernel->handle('GET', '/api/probe/damage-warnings', $damageWarningHeaders);
-    $test->assertEquals(200, $legacyDamageWarningsResponse->status, 'GET /api/probe/damage-warnings remains available as a compatibility alias');
     $warningContainerId = (string) ($damageWarning['container']['id'] ?? '');
     $warningObjectId = (string) ($damageWarning['container']['detachedObjectId'] ?? '');
     $warningId = (int) ($damageWarning['id'] ?? 0);
@@ -1439,9 +1436,9 @@ if ($damageWarningProbe !== null) {
         $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.2 WHERE id = :id')->execute(['id' => $damageWarningProbe->id]);
     }
 
-    $markDamageWarningRead = $kernel->handle('PATCH', '/api/probe/alerts/' . $warningId, $damageWarningHeaders, json_encode([], JSON_THROW_ON_ERROR));
-    $test->assertEquals(200, $markDamageWarningRead->status, 'PATCH /api/probe/alerts/{id} marks the alert read');
-    $test->assertEquals('read', $markDamageWarningRead->body['alert']['status'] ?? null, 'alert read response exposes read status');
+    $markDamageWarningRead = $kernel->handle('PATCH', '/api/probe/damage-warnings/' . $warningId, $damageWarningHeaders, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $markDamageWarningRead->status, 'PATCH /api/probe/damage-warnings/{id} marks the warning read');
+    $test->assertEquals('read', $markDamageWarningRead->body['damageWarning']['status'] ?? null, 'damage warning read response exposes read status');
 
     $pdo->exec("UPDATE scheduled_events SET run_at = '2000-01-01T00:00:00+00:00' WHERE type = 'probe.storage_container.break'");
     $schedulerStats = $scheduler->processDueEvents();
@@ -1939,7 +1936,7 @@ if ($createdProbe !== null) {
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
         new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
         new Star('unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
-        new Planet('current-habitable-planet', null, 'rocky', 1.0, 1.0, true, 0.72, ['silicates'], intelligentLife: true),
+        new Planet('current-habitable-planet', null, 'rocky', 1.0, 1.0, true, 0.72, ['silicates']),
     ]));
     $mineableSector = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('mine-rock', $mineableSector->body['sector']['objects'][0]['id'] ?? null, 'sector observation exposes object ids for Manny mining orders');
@@ -1956,17 +1953,15 @@ if ($createdProbe !== null) {
     $test->assertEquals('solar_mass', $unitObjectsById['unit-star']['massUnit'] ?? null, 'star sector object exposes solar mass unit');
     $test->assertEquals('solar_radius', $unitObjectsById['unit-star']['radiusUnit'] ?? null, 'star sector object exposes solar radius unit');
     $test->assertEquals(0.72, $unitObjectsById['current-habitable-planet']['habitabilityScore'] ?? null, 'current-sector planet observations expose habitability score');
-    $test->assertEquals(true, $unitObjectsById['current-habitable-planet']['intelligentLife'] ?? null, 'current-sector planet observations expose intelligent life');
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);
     $sectorRepository->save(new SectorContent($visitedPlanetSector, [
-        new Planet('visited-habitable-planet', null, 'ocean', 1.1, 1.2, true, 0.81, ['water_ice'], intelligentLife: true),
+        new Planet('visited-habitable-planet', null, 'ocean', 1.1, 1.2, true, 0.81, ['water_ice']),
     ]));
     $visitedPlanetObservation = $kernel->handle('GET', '/api/sector?x=8&y=0&z=0', $headers);
     $test->assertEquals(200, $visitedPlanetObservation->status, 'visited planet sector can be scanned through GET /api/sector');
     $test->assertEquals(0.81, $visitedPlanetObservation->body['sector']['objects'][0]['habitabilityScore'] ?? null, 'visited-sector planet observations expose habitability score');
-    $test->assertEquals(true, $visitedPlanetObservation->body['sector']['objects'][0]['intelligentLife'] ?? null, 'visited-sector planet observations expose intelligent life');
 
     $mineManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
         'objectId' => 'mine-rock',

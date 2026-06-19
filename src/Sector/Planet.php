@@ -15,7 +15,6 @@ final class Planet extends UniverseObject
         private readonly bool $atmosphere,
         private readonly float $habitabilityScore,
         private readonly array $resourceHints = [],
-        private readonly bool $intelligentLife = false,
         ?string $description = null,
         array $waypointBookmarks = [],
     ) {
@@ -32,18 +31,12 @@ final class Planet extends UniverseObject
         return $this->habitabilityScore;
     }
 
-    public function hasIntelligentLife(): bool
-    {
-        return $this->intelligentLife;
-    }
-
     public function toArray(): array
     {
         return parent::toArray() + [
             'category' => $this->category,
             'atmosphere' => $this->atmosphere,
             'habitabilityScore' => $this->habitabilityScore,
-            'intelligentLife' => $this->intelligentLife,
             'resourceHints' => $this->resourceHints,
         ];
     }
@@ -59,7 +52,6 @@ final class Planet extends UniverseObject
             (bool) $data['atmosphere'],
             (float) $data['habitabilityScore'],
             $data['resourceHints'] ?? [],
-            (bool) ($data['intelligentLife'] ?? false),
             $data['description'] ?? null,
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
         );

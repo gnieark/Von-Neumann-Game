@@ -29,6 +29,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v34 : la messagerie `/api/probe/messages` accepte des destinataires typés via `recipient.type` (`probe` par défaut, ou `planet`) et `recipient.id`.
 - Messagerie : les messages exposent désormais `sender.type` et `recipient.type`; les endpoints peuvent être une sonde (`probeId`) ou une planète habitée (`planetId`).
 - Interface : la page `/messaging` permet d’envoyer un message aux sondes du secteur courant et aux planètes habitées détectées dans ce secteur.
+- API v32 : ajout de `POST /api/probe/mind-snapshot/reassign` pour réassigner le snapshot d'esprit d'une sonde morte ou piégée par un trou noir vers une nouvelle sonde, avec reset du référentiel local à `0,0,0`.
 - Interface : les sondes mortes ou piégées par un trou noir affichent maintenant une alerte explicite avec une action de réattribution du snapshot d'esprit.
 - Debug : ajout de `scripts/userinfos.php` pour auditer en CLI l'état complet d'une sonde, dont position absolue/relative, inventaire brut, secteurs visités, mouvements et événements planifiés.
 
@@ -43,9 +44,6 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
-- API v32 : les observations détaillées de secteur exposent `intelligentLife` sur les planètes des secteurs courants ou déjà visités.
-- Génération : une planète habitable (`habitabilityScore > 0.35`) a désormais 20% de chance d’héberger une espèce intelligente, information persistée dans le JSON du secteur.
-- Stats : le compteur de mondes avec vie intelligente est alimenté depuis les secteurs générés.
 - API v31 : les observations détaillées de secteur exposent `habitabilityScore` sur les planètes des secteurs courants ou déjà visités.
 - API v30 : ajout des recettes `thermal_protection_shell`, `parachute_pack`, `descent_guidance_module` et `atmospheric_drop_kit`.
 - API : ajout de `POST /api/probe/mannies/{mannyId}/drop-storage-container` pour larguer un container additionnel sur une planète avec consommation d’un kit de largage atmosphérique.

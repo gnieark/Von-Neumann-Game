@@ -1018,10 +1018,8 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/damage-warnings:
     get:
-      deprecated: true
       summary: List probe movement damage warnings
       description: >
-        Deprecated compatibility alias for `GET /api/probe/alerts`.
         Returns persistent warnings produced when a fragile chain of additional
         storage containers may lose one container during a sector movement.
         This rule starts at 5 additional containers with a 10% risk, then adds
@@ -1064,9 +1062,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/damage-warnings/{damageWarningId}:
     patch:
-      deprecated: true
       summary: Mark a movement damage warning as read
-      description: Deprecated compatibility alias for `PATCH /api/probe/alerts/{alertId}`.
       parameters:
         - $ref: '#/components/parameters/DamageWarningId'
       responses:
@@ -1196,7 +1192,6 @@ paths:
                       mannyMineable: false
                       category: rocky
                       habitabilityScore: 0.72
-                      intelligentLife: true
                   probes:
                     - id: 2
                       name: Probe of nova
@@ -2232,14 +2227,6 @@ components:
         type: integer
         minimum: 1
       example: 7
-    AlertId:
-      name: alertId
-      in: path
-      required: true
-      schema:
-        type: integer
-        minimum: 1
-      example: 7
     ForumCategoryId:
       name: categoryId
       in: path
@@ -2574,9 +2561,6 @@ components:
           minimum: 0
           maximum: 1
           description: Present for planet targets; 0 means hostile or unknown, 1 is highly habitable.
-        intelligentLife:
-          type: boolean
-          description: Present for planet targets; true when this habitable planet hosts an intelligent species.
         waypointBookmarks:
           type: array
           items:
@@ -3327,35 +3311,31 @@ components:
         createdAt:
           type: string
           format: date-time
-    ProbeAlertsResponse:
+    ProbeDamageWarningsResponse:
       type: object
-      required: [alerts, rules]
+      required: [damageWarnings, rule]
       properties:
-        alerts:
+        damageWarnings:
           type: array
           items:
-            $ref: '#/components/schemas/ProbeAlert'
-        rules:
-          type: object
-          required: [storageContainerBreak]
-          properties:
-            storageContainerBreak:
-              $ref: '#/components/schemas/ProbeAlertRule'
-    ProbeAlertResponse:
+            $ref: '#/components/schemas/ProbeDamageWarning'
+        rule:
+          $ref: '#/components/schemas/ProbeDamageWarningRule'
+    ProbeDamageWarningResponse:
       type: object
-      required: [alert]
+      required: [damageWarning]
       properties:
-        alert:
-          $ref: '#/components/schemas/ProbeAlert'
-    ProbeAlert:
+        damageWarning:
+          $ref: '#/components/schemas/ProbeDamageWarning'
+    ProbeDamageWarning:
       type: object
-      required: [id, type, status, message, phase, scheduledAt, sector, createdAt, updatedAt, readAt, resolvedAt]
+      required: [id, type, status, message, phase, scheduledAt, sector, container, risk, createdAt, updatedAt, readAt, resolvedAt]
       properties:
         id:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life]
+          enum: [storage_container_break]
         status:
           type: string
           enum: [unread, read]
@@ -3363,7 +3343,7 @@ components:
           type: string
         phase:
           type: string
-          enum: [acceleration_end, deceleration_start, arrival]
+          enum: [acceleration_end, deceleration_start]
         scheduledAt:
           type: string
           format: date-time
@@ -3375,22 +3355,20 @@ components:
               $ref: '#/components/schemas/Vector'
         container:
           type: object
-          description: Present for `storage_container_break` alerts.
-          required: [id, label, detachedObjectId]
+          required: [id, label, objectId]
           properties:
             id:
               type: string
             label:
               type: string
-            detachedObjectId:
+            objectId:
               type: string
         risk:
           type: object
-          description: Present for `storage_container_break` alerts.
-          required: [percent, additionalContainerCount, ruleStartsAtAdditionalContainers]
+          required: [percent, additionalContainerCount]
           properties:
             percent:
-              type: number
+              type: integer
               minimum: 0
               maximum: 100
             additionalContainerCount:
@@ -3424,7 +3402,7 @@ components:
           type: string
           format: date-time
           nullable: true
-    ProbeAlertRule:
+    ProbeDamageWarningRule:
       type: object
       required: [type, startsAtAdditionalContainers, riskPerAdditionalContainerAfterFourPercent, maximumRiskPercent, message]
       properties:
@@ -3442,32 +3420,6 @@ components:
           example: 100
         message:
           type: string
-    ProbeDamageWarningsResponse:
-      type: object
-      deprecated: true
-      required: [damageWarnings, rule]
-      properties:
-        damageWarnings:
-          type: array
-          items:
-            $ref: '#/components/schemas/ProbeAlert'
-        rule:
-          $ref: '#/components/schemas/ProbeAlertRule'
-    ProbeDamageWarningResponse:
-      type: object
-      deprecated: true
-      required: [damageWarning]
-      properties:
-        damageWarning:
-          $ref: '#/components/schemas/ProbeAlert'
-    ProbeDamageWarning:
-      deprecated: true
-      allOf:
-        - $ref: '#/components/schemas/ProbeAlert'
-    ProbeDamageWarningRule:
-      deprecated: true
-      allOf:
-        - $ref: '#/components/schemas/ProbeAlertRule'
     ProbeMessageEndpoint:
       type: object
       required: [type, id, name]
@@ -4115,9 +4067,6 @@ components:
           minimum: 0
           maximum: 1
           description: Present on planets in detailed current-sector or already-visited-sector observations.
-        intelligentLife:
-          type: boolean
-          description: Present on planets in detailed current-sector or already-visited-sector observations; true when this habitable planet hosts an intelligent species.
         salvageable:
           type: boolean
           description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage.
@@ -4199,9 +4148,6 @@ components:
           minimum: 0
           maximum: 1
           description: Present for planet targets; 0 means hostile or unknown, 1 is highly habitable.
-        intelligentLife:
-          type: boolean
-          description: Present for planet targets; true when this habitable planet hosts an intelligent species.
         waypointBookmarks:
           type: array
           items:
