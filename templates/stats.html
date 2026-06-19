@@ -24,6 +24,24 @@
             <!-- END emptyPodium -->
         </ol>
     </section>
+    <section class="stats-podium" aria-labelledby="stats-intelligent-life-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-intelligent-life-podium-title">{{t.statsTopIntelligentLifeDiscoverers}}</h2>
+            <p>{{t.statsTopIntelligentLifeDiscoverersHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN intelligentLifeDiscoverer -->
+            <li class="stats-podium-rank">
+                <span>{{intelligentLifeDiscoverer.rank}}</span>
+                <strong>{{intelligentLifeDiscoverer.name}}</strong>
+                <b>{{intelligentLifeDiscoverer.intelligentLifeWorlds}} {{intelligentLifeDiscoverer.intelligentLifeWorldsLabel}}</b>
+            </li>
+            <!-- END intelligentLifeDiscoverer -->
+            <!-- BEGIN emptyIntelligentLifePodium -->
+            <li class="stats-podium-empty">{{t.statsTopIntelligentLifeDiscoverersEmpty}}</li>
+            <!-- END emptyIntelligentLifePodium -->
+        </ol>
+    </section>
     <section class="stats-podium" aria-labelledby="stats-waypoint-podium-title">
         <div class="stats-podium-heading">
             <h2 id="stats-waypoint-podium-title">{{t.statsTopWaypointPlayers}}</h2>

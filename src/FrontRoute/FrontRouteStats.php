@@ -31,6 +31,19 @@ class FrontRouteStats extends FrontRoute{
                 ]));
             }
         }
+        $intelligentLifePodium = $this->topIntelligentLifeDiscovererRows($stats['metrics'], $translator);
+        if ($intelligentLifePodium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyIntelligentLifePodium'));
+        } else {
+            foreach ($intelligentLifePodium as $player) {
+                $tpl->addSubBlock((new TplBlock('intelligentLifeDiscoverer'))->addVars([
+                    'rank' => self::e($player['rank']),
+                    'name' => self::e($player['name']),
+                    'intelligentLifeWorlds' => self::e($player['intelligentLifeWorlds']),
+                    'intelligentLifeWorldsLabel' => self::e($player['intelligentLifeWorldsLabel']),
+                ]));
+            }
+        }
         $waypointPodium = $this->topWaypointPlayerRows($stats['metrics'], $translator);
         if ($waypointPodium === []) {
             $tpl->addSubBlock(new TplBlock('emptyWaypointPodium'));
@@ -97,6 +110,7 @@ class FrontRouteStats extends FrontRoute{
             'successfulMissions' => 0,
             'failedMissions' => 0,
             'topVisitedProbes' => [],
+            'topIntelligentLifeDiscoverers' => [],
             'topWaypointPlayers' => [],
         ];
 
@@ -163,6 +177,30 @@ class FrontRouteStats extends FrontRoute{
                 'name' => trim((string) ($row['playerName'] ?? '')) !== '' ? (string) $row['playerName'] : $translator->get('unknownPlayer'),
                 'waypointBookmarks' => $this->formatNumber($waypointBookmarks),
                 'waypointBookmarksLabel' => $translator->get($waypointBookmarks > 1 ? 'statsWaypointBookmarksPlural' : 'statsWaypointBookmarksSingular'),
+            ];
+        }
+
+        return $podium;
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
+     * @return array<int, array{rank: string, name: string, intelligentLifeWorlds: string, intelligentLifeWorldsLabel: string}>
+     */
+    private function topIntelligentLifeDiscovererRows(array $metrics, Translator $translator): array
+    {
+        $rows = is_array($metrics['topIntelligentLifeDiscoverers'] ?? null) ? $metrics['topIntelligentLifeDiscoverers'] : [];
+        $podium = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $worlds = max(0, (int) ($row['intelligentLifeWorlds'] ?? 0));
+            $podium[] = [
+                'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
+                'name' => trim((string) ($row['playerName'] ?? '')) !== '' ? (string) $row['playerName'] : $translator->get('unknownPlayer'),
+                'intelligentLifeWorlds' => $this->formatNumber($worlds),
+                'intelligentLifeWorldsLabel' => $translator->get($worlds > 1 ? 'statsIntelligentLifeWorldsPodiumPlural' : 'statsIntelligentLifeWorldsPodiumSingular'),
             ];
         }
 

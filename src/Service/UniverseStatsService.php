@@ -31,6 +31,7 @@ final class UniverseStatsService
         $sectorStats = $this->sectorStats($visitedSectorKeys);
         $probeDistances = $this->probeDistances($probeRows);
         $waypointStats = $this->waypointStats();
+        $intelligentLifeStats = $this->intelligentLifeDiscoveryStats();
 
         return [
             'generatedAt' => gmdate('c'),
@@ -49,11 +50,12 @@ final class UniverseStatsService
                 'furthestProbeDistance' => $probeDistances['furthest'],
                 'closestProbeDistance' => $probeDistances['closest'],
                 'waypointBookmarksInstalled' => $waypointStats['installed'],
-                'intelligentLifeWorlds' => 0,
+                'intelligentLifeWorlds' => $intelligentLifeStats['worlds'],
                 'successfulMissions' => 0,
                 'failedMissions' => 0,
                 'topVisitedProbes' => $this->topVisitedProbes(),
                 'topWaypointPlayers' => $waypointStats['topPlayers'],
+                'topIntelligentLifeDiscoverers' => $intelligentLifeStats['topDiscoverers'],
             ],
         ];
     }
@@ -165,6 +167,111 @@ final class UniverseStatsService
         }
 
         return ['installed' => $stats['installed'], 'topPlayers' => $topPlayers];
+    }
+
+    /**
+     * @return array{worlds: int, topDiscoverers: array<int, array{rank: int, playerName: string, intelligentLifeWorlds: int}>}
+     */
+    private function intelligentLifeDiscoveryStats(): array
+    {
+        $stats = [
+            'worlds' => 0,
+            'players' => [],
+        ];
+        $discoverersBySector = $this->firstDiscoverersBySector();
+        $sectorDirectory = rtrim($this->universePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'sectors';
+        if (!is_dir($sectorDirectory)) {
+            return ['worlds' => 0, 'topDiscoverers' => []];
+        }
+
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sectorDirectory));
+        foreach ($iterator as $file) {
+            if (!$file->isFile() || $file->getExtension() !== 'json') {
+                continue;
+            }
+
+            $data = $this->jsonFile((string) $file->getPathname());
+            if ($data === null) {
+                continue;
+            }
+
+            $sectorKey = $this->sectorKeyFromData($data);
+            if ($sectorKey === null || !isset($discoverersBySector[$sectorKey])) {
+                continue;
+            }
+
+            $worlds = $this->intelligentLifeWorldCount($data['objects'] ?? []);
+            if ($worlds <= 0) {
+                continue;
+            }
+
+            $discoverer = $discoverersBySector[$sectorKey];
+            $playerKey = 'id:' . $discoverer['playerId'];
+            if (!isset($stats['players'][$playerKey])) {
+                $stats['players'][$playerKey] = [
+                    'playerName' => $discoverer['playerName'],
+                    'intelligentLifeWorlds' => 0,
+                ];
+            }
+            $stats['worlds'] += $worlds;
+            $stats['players'][$playerKey]['intelligentLifeWorlds'] += $worlds;
+        }
+
+        uasort($stats['players'], static fn(array $a, array $b): int => (
+            ($b['intelligentLifeWorlds'] <=> $a['intelligentLifeWorlds'])
+            ?: strcasecmp($a['playerName'], $b['playerName'])
+        ));
+
+        $rank = 1;
+        $topDiscoverers = [];
+        foreach (array_slice($stats['players'], 0, 3) as $player) {
+            $topDiscoverers[] = [
+                'rank' => $rank++,
+                'playerName' => $player['playerName'],
+                'intelligentLifeWorlds' => $player['intelligentLifeWorlds'],
+            ];
+        }
+
+        return ['worlds' => $stats['worlds'], 'topDiscoverers' => $topDiscoverers];
+    }
+
+    /**
+     * @return array<string, array{playerId: int, playerName: string}>
+     */
+    private function firstDiscoverersBySector(): array
+    {
+        $excludedPlayerIds = $this->excludedStatsPlayerIds();
+        $stmt = $this->pdo->query(
+            "SELECT visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z,
+                    visited_sectors.player_id, players.username, players.display_name
+             FROM visited_sectors
+             INNER JOIN players ON players.id = visited_sectors.player_id
+             ORDER BY visited_sectors.sector_x ASC, visited_sectors.sector_y ASC, visited_sectors.sector_z ASC,
+                      visited_sectors.first_visited_at ASC, visited_sectors.id ASC"
+        );
+        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $discoverers = [];
+        foreach ($rows as $row) {
+            $playerId = (int) $row['player_id'];
+            if (isset($excludedPlayerIds[$playerId])) {
+                continue;
+            }
+
+            $sectorKey = $this->sectorKey((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z']);
+            if (isset($discoverers[$sectorKey])) {
+                continue;
+            }
+
+            $displayName = trim((string) ($row['display_name'] ?? ''));
+            $username = trim((string) ($row['username'] ?? ''));
+            $discoverers[$sectorKey] = [
+                'playerId' => $playerId,
+                'playerName' => $displayName !== '' ? $displayName : ($username !== '' ? $username : 'Unknown player'),
+            ];
+        }
+
+        return $discoverers;
     }
 
     /**
@@ -483,6 +590,36 @@ final class UniverseStatsService
                 foreach ($object['orbitalBodies'] ?? [] as $body) {
                     if (is_array($body) && is_array($body['object'] ?? null)) {
                         $count += $this->habitablePlanetCount([$body['object']]);
+                    }
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * @param mixed $objects
+     */
+    private function intelligentLifeWorldCount(mixed $objects): int
+    {
+        if (!is_array($objects)) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach ($objects as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+
+            $type = (string) ($object['type'] ?? '');
+            if ($type === 'planet' && (bool) ($object['intelligentLife'] ?? false)) {
+                $count++;
+            } elseif ($type === 'solar_system') {
+                foreach ($object['orbitalBodies'] ?? [] as $body) {
+                    if (is_array($body) && is_array($body['object'] ?? null)) {
+                        $count += $this->intelligentLifeWorldCount([$body['object']]);
                     }
                 }
             }
