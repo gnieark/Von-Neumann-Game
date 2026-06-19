@@ -694,7 +694,7 @@ if ($oauthProbe !== null) {
             null,
             [
                 new OrbitingBody(
-                    new Planet('stats-visited-habitable', null, 'rocky', 1.0, 1.0, true, 0.7),
+                    new Planet('stats-visited-habitable', null, 'rocky', 1.0, 1.0, true, 0.7, intelligentLife: true),
                     new OrbitDescriptor(1.0, 0.01, 0.0),
                 ),
                 new OrbitingBody(
@@ -707,7 +707,7 @@ if ($oauthProbe !== null) {
         ),
     ]));
     $statsSectorRepository->save(new SectorContent($statsGeneratedOnlySector, [
-        new Planet('stats-generated-habitable-top-level', null, 'ocean', 1.0, 1.1, true, 0.8),
+        new Planet('stats-generated-habitable-top-level', null, 'ocean', 1.0, 1.1, true, 0.8, intelligentLife: true),
         new SolarSystem(
             'stats-generated-system',
             'Stats generated system',
@@ -726,6 +726,10 @@ if ($oauthProbe !== null) {
     $habitabilityStats = (new UniverseStatsService($pdo, $statsUniversePath))->collect();
     $test->assertEquals(3, $habitabilityStats['metrics']['habitablePlanetsInGeneratedSectors'] ?? null, 'public stats count habitable planets in generated sectors');
     $test->assertEquals(1, $habitabilityStats['metrics']['habitablePlanetsInVisitedSectors'] ?? null, 'public stats count habitable planets in visited sectors');
+    $test->assertEquals(1, $habitabilityStats['metrics']['intelligentLifeWorlds'] ?? null, 'public stats count discovered intelligent-life worlds');
+    $topIntelligentLifeDiscoverers = $habitabilityStats['metrics']['topIntelligentLifeDiscoverers'] ?? [];
+    $test->assertEquals('Remi', $topIntelligentLifeDiscoverers[0]['playerName'] ?? null, 'public stats intelligent-life podium ranks discoverers');
+    $test->assertEquals(1, $topIntelligentLifeDiscoverers[0]['intelligentLifeWorlds'] ?? null, 'public stats intelligent-life podium exposes discovered world counts');
 }
 $test->assertThrows(
     fn() => $auth->registerPlayerWithExternalAuth('Nova Pilot', 'discord', 'discord-openid-subject'),
