@@ -346,17 +346,17 @@ $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
-$missionService = new MissionService($missions, $messages, [], 'api-test-world');
+$missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
 $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(41, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(42, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1690,7 +1690,7 @@ if ($intelligentLifeProbe !== null) {
         $test->assertEquals('planet', $planetScenarioReply['sender']['type'] ?? null, 'planet answers the valid prime-sequence reply');
         $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'Nous sommes les habitants de ce monde.'), 'planet reply introduces the inhabited world');
         $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], '5 ECE'), 'planet reply asks for five ECE of metals');
-        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], '3 unités'), 'planet reply asks for three Mannys');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'Composés carbonés: 1ECE'), 'planet reply asks for one ECE of carbon compounds');
         $firstContactAfterReply = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
         $firstContactMissionAfterReply = $firstContactAfterReply->body['missions'][0] ?? null;
         $test->assertEquals('active', $firstContactMissionAfterReply['status'] ?? null, 'first-contact mission remains active for its next scenario step');
@@ -1698,8 +1698,59 @@ if ($intelligentLifeProbe !== null) {
         $test->assertEquals('completed', $firstContactMissionAfterReply['steps'][1]['status'] ?? null, 'planet reply completes the waiting-for-reply step');
         $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][2]['status'] ?? null, 'first-contact mission waits for metal delivery');
         $test->assertEquals(5, $firstContactMissionAfterReply['steps'][2]['metadata']['amount'] ?? null, 'metal delivery step exposes the requested amount');
-        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][3]['status'] ?? null, 'first-contact mission waits for Manny delivery');
-        $test->assertEquals(3, $firstContactMissionAfterReply['steps'][3]['metadata']['quantity'] ?? null, 'Manny delivery step exposes the requested quantity');
+        $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][3]['status'] ?? null, 'first-contact mission waits for carbon-compound delivery');
+        $test->assertEquals('carbon_compounds', $firstContactMissionAfterReply['steps'][3]['metadata']['resourceType'] ?? null, 'carbon delivery step exposes the requested resource type');
+        $test->assertEquals(1, $firstContactMissionAfterReply['steps'][3]['metadata']['amount'] ?? null, 'carbon delivery step exposes the requested amount');
+        $initialMaterialCounter = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+        $test->assertEquals(5, $initialMaterialCounter['requirements']['metals'] ?? null, 'return-to-space counter stores the requested metals');
+        $test->assertEquals(1, $initialMaterialCounter['requirements']['carbon_compounds'] ?? null, 'return-to-space counter stores the requested carbon compounds');
+        $test->assertEquals([], $initialMaterialCounter['donations'] ?? null, 'return-to-space counter starts without donations');
+
+        $intelligentLifeProbeForDrop = $probes->findByPlayerId($intelligentLifePlayer->id);
+        $missionDropContainerItem = $intelligentLifeProbeForDrop !== null
+            ? $storage->addItem($intelligentLifeProbeForDrop, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0])
+            : null;
+        $missionDropContainerUid = $missionDropContainerItem !== null ? 'container-' . $missionDropContainerItem->uid : '';
+        $missionDropContainer = $intelligentLifeProbeForDrop !== null ? $storageContainers->findByUidForProbe($intelligentLifeProbeForDrop->id, $missionDropContainerUid) : null;
+        if ($intelligentLifeProbeForDrop !== null && $missionDropContainer !== null) {
+            $storage->addItem($intelligentLifeProbeForDrop, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT, ProbeItem::ATMOSPHERIC_DROP_KIT_NAME, 0.08);
+            $storageContainers->setResourceAmount($missionDropContainer->id, 'metals', 0.5);
+            $storageContainers->setResourceAmount($missionDropContainer->id, 'carbon_compounds', 0.4);
+            $intelligentLifeProbeForDrop->metalsStock = 0.5;
+            $intelligentLifeProbeForDrop->organicCompoundsStock = 0.4;
+            $probes->save($intelligentLifeProbeForDrop);
+            $missionDropManny = array_values(array_filter(
+                $mannies->findByProbeId($intelligentLifeProbeForDrop->id),
+                static fn($manny): bool => $manny->isOnProbe() && $manny->currentTask === null,
+            ))[0] ?? null;
+            if ($missionDropManny !== null) {
+                $missionDropAccepted = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($missionDropManny->uid) . '/drop-storage-container', $intelligentLifeHeaders, json_encode([
+                    'containerId' => $missionDropContainerUid,
+                    'planetId' => 'life-alert-planet',
+                ], JSON_THROW_ON_ERROR));
+                $test->assertEquals(202, $missionDropAccepted->status, 'first-contact material drop starts through the Manny drop endpoint');
+                $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+                    'id' => $missionDropManny->id,
+                    'ended' => gmdate('c', time() - 1),
+                ]);
+                $kernel->handle('GET', '/api/probe/mannies', $intelligentLifeHeaders);
+                $materialCounterAfterDrop = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+                $test->assertEquals(0.5, $materialCounterAfterDrop['totals']['metals'] ?? null, 'material drop counter adds dropped metals');
+                $test->assertEquals(0.4, $materialCounterAfterDrop['totals']['carbon_compounds'] ?? null, 'material drop counter adds dropped carbon compounds');
+                $test->assertEquals(4.5, $materialCounterAfterDrop['remaining']['metals'] ?? null, 'material drop counter tracks remaining metals');
+                $test->assertEquals(0.6, $materialCounterAfterDrop['remaining']['carbon_compounds'] ?? null, 'material drop counter tracks remaining carbon compounds');
+                $donation = $materialCounterAfterDrop['donations'][0] ?? null;
+                $test->assertEquals($intelligentLifePlayer->id, $donation['playerId'] ?? null, 'material drop donation records the donating player id');
+                $test->assertEquals(0.5, $donation['resources']['metals'] ?? null, 'material drop donation records donated metals');
+                $test->assertEquals(0.4, $donation['resources']['carbon_compounds'] ?? null, 'material drop donation records donated carbon compounds');
+                $messagesAfterMaterialDrop = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+                $materialThanks = $messagesAfterMaterialDrop->body['messages'][0] ?? null;
+                $test->assertEquals('planet', $materialThanks['sender']['type'] ?? null, 'planet thanks the player after a material drop');
+                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Merci pour votre aide.'), 'material drop thanks message thanks the player');
+                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Métaux : 4.5 ECE'), 'material drop thanks message reports remaining metals');
+                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Composés carbonés : 0.6 ECE'), 'material drop thanks message reports remaining carbon compounds');
+            }
+        }
 
         $duplicateFirstContactReply = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
             'recipient' => [

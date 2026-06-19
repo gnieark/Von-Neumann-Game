@@ -75,6 +75,7 @@ try {
         $messages,
         $gameplayConfig,
         (string) ($appConfig['worldSeed'] ?? 'default-world'),
+        $sectorService,
     );
     $movementService = new ProbeMovementService(
         $probes,

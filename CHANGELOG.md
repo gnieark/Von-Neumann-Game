@@ -12,7 +12,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v38 : `/api/probe/missions` et les reponses de mission n'exposent plus de coordonnees absolues dans les descriptions, `metadata` ou `createdByEvent`; les secteurs publics y sont convertis en `sector.relative`.
 - API v37 : les arrivees dans un secteur jamais visite contenant une planete habitee peuvent declencher un scenario de premier contact pondere par `gameplay.intelligentLife.scenarios`; le premier scenario implemente, `return_to_space_program`, cree une mission `Premier contact` et un message planetaire en nombres premiers.
 - Debug : ajout de `scripts/force-inhabited-planet.php` pour injecter en CLI une planete habitee dans un secteur donne.
-- Scénario : le premier contact `return_to_space_program` progresse après la réponse en nombres premiers et demande 5 ECE de métaux ainsi que 3 Mannys.
+- API v42 : le premier contact `return_to_space_program` demande maintenant 5 ECE de métaux et 1 ECE de composés carbonés, puis comptabilise les matériaux largués par container sur la planète avec le joueur donateur.
+- Scénario : chaque largage de matériaux demandé par `return_to_space_program` déclenche un message de remerciement planétaire indiquant les matériaux restant à envoyer.
 - Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 
 ### Fixed

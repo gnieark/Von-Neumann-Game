@@ -9,10 +9,13 @@ use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\MissionStep;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeMessage;
+use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
+use VonNeumannGame\Sector\SectorService;
 
 final class MissionService
 {
@@ -25,14 +28,19 @@ final class MissionService
     private const FIRST_CONTACT_REPLY_STEP_UID = 'decode_prime_signal';
     private const FIRST_CONTACT_WAIT_STEP_UID = 'await_planetary_reply';
     private const FIRST_CONTACT_DELIVER_METALS_STEP_UID = 'deliver_required_metals';
-    private const FIRST_CONTACT_DELIVER_MANNIES_STEP_UID = 'deliver_required_mannies';
-    private const RETURN_TO_SPACE_PLANET_REPLY = "Nous sommes les habitants de ce monde.\n\nNotre civilisation a atteint l'espace il y a 312 de nos cycles orbitaux. Nous avons construit des stations orbitales, des satellites scientifiques et plusieurs missions vers les autres corps de notre système.\n\nCes activités ont cessé.\n\nLes ressources nécessaires à la construction de véhicules spatiaux sont aujourd'hui épuisées, dispersées ou devenues inaccessibles. Les débris accumulés en orbite rendent également les lancements dangereux.\n\nNos connaissances subsistent. Notre capacité industrielle subsiste. Nos besoins énergétiques sont couverts.\n\nNos réserves de métaux  sont insuffisantes.\nNos réserves de composants électroniques avancés sont insuffisantes.\n\nNous avons détecté votre capacité à déplacer de la matière entre les corps célestes.\n\nNous sollicitons votre assistance.\n\nRessources demandées :\n\nMétaux : <Conversion faite par le logiciel de traduction>5 ECE\nMannys pour nous permettre de récolter nos ressources difficilement exploitables: 3 unités\n\nRécompense: Nous disposons de quantités énormes de deuterium, nous placerons en orbite des cuves de deuterium chaque fois que vous en aurrez besoin une fois notre capacité spaciale relancée.";
+    private const FIRST_CONTACT_DELIVER_CARBON_STEP_UID = 'deliver_required_carbon_compounds';
+    private const RETURN_TO_SPACE_PLANET_REPLY = "Nous sommes les habitants de ce monde.\n\nNotre civilisation a atteint l'espace il y a 312 de nos cycles orbitaux. Nous avons construit des stations orbitales, des satellites scientifiques et plusieurs missions vers les autres corps de notre système.\n\nCes activités ont cessé.\n\nLes ressources nécessaires à la construction de véhicules spatiaux sont aujourd'hui épuisées, dispersées ou devenues inaccessibles. Les débris accumulés en orbite rendent également les lancements dangereux.\n\nNos connaissances subsistent. Notre capacité industrielle subsiste. Nos besoins énergétiques sont couverts.\n\nNos réserves de métaux  sont insuffisantes.\nNos réserves de composants électroniques avancés sont insuffisantes.\n\nNous avons détecté votre capacité à déplacer de la matière entre les corps célestes.\n\nNous sollicitons votre assistance.\n\nRessources demandées :\n\nMétaux : <Conversion faite par le logiciel de traduction>5 ECE\nComposés carbonés: 1ECE\n\nRécompense: Nous disposons de quantités énormes de deuterium, nous placerons en orbite des cuves de deuterium chaque fois que vous en aurrez besoin une fois notre capacité spaciale relancée.";
+    private const RETURN_TO_SPACE_MATERIAL_REQUIREMENTS = [
+        ResourceComposition::METALS => 5.0,
+        ResourceComposition::CARBON_COMPOUNDS => 1.0,
+    ];
 
     public function __construct(
         private readonly MissionRepository $missions,
         private readonly ?ProbeMessageRepository $messages = null,
         private readonly array $gameplayConfig = [],
         private readonly string $worldSeed = 'default-world',
+        private readonly ?SectorService $sectors = null,
     ) {}
 
     /**
@@ -173,6 +181,8 @@ final class MissionService
             $mission = $this->completeStep($probe, $mission->uid, $waitStepUid);
         }
 
+        $this->initializeReturnToSpaceMaterialCounter($mission);
+
         return $this->missions->findByUidForProbe($probe->id, $mission->uid) ?? $mission;
     }
 
@@ -194,20 +204,73 @@ final class MissionService
             );
         }
 
-        $manniesUid = $this->firstContactStepUid($mission->uid, self::FIRST_CONTACT_DELIVER_MANNIES_STEP_UID);
-        if ($this->missions->findStepByUid($mission->id, $manniesUid) === null) {
+        $carbonUid = $this->firstContactStepUid($mission->uid, self::FIRST_CONTACT_DELIVER_CARBON_STEP_UID);
+        if ($this->missions->findStepByUid($mission->id, $carbonUid) === null) {
             $this->missions->createStep(
                 $mission->id,
-                'Fournir trois Mannys',
-                'Mettre 3 Mannys à disposition pour récolter les ressources locales difficilement exploitables.',
+                'Fournir les composés carbonés demandés',
+                'Livrer 1 ECE de composés carbonés à la civilisation afin de relancer sa capacité spatiale.',
                 [
-                    'itemType' => 'manny',
-                    'quantity' => 3,
+                    'resourceType' => ResourceComposition::CARBON_COMPOUNDS,
+                    'amount' => 1.0,
+                    'unit' => 'earth_container_equivalent',
                 ],
                 4,
-                $manniesUid,
+                $carbonUid,
             );
         }
+    }
+
+    /**
+     * @param array<string, mixed> $resources
+     * @return array<string, mixed>|null
+     */
+    public function handleReturnToSpaceProgramMaterialDrop(
+        NeumannProbe $probe,
+        SectorContent $sector,
+        string $planetId,
+        int $playerId,
+        string $containerObjectId,
+        array $resources,
+    ): ?array {
+        $resources = $this->returnToSpaceRelevantMaterials($resources);
+        if ($resources === []) {
+            return null;
+        }
+
+        $mission = $this->activeReturnToSpaceMissionForPlanet($probe, $planetId);
+        $counter = $sector->returnToSpaceProgramMaterialCounterForPlanet($planetId);
+        if ($counter === null) {
+            if ($mission === null || !$this->returnToSpaceResourceRequestStarted($mission)) {
+                return null;
+            }
+            $counter = $sector->ensureReturnToSpaceProgramMaterialCounter(
+                $planetId,
+                is_string($mission->metadata['planetName'] ?? null) ? $mission->metadata['planetName'] : null,
+                self::RETURN_TO_SPACE_MATERIAL_REQUIREMENTS,
+            );
+        }
+
+        $missionPlanetName = $mission !== null && is_string($mission->metadata['planetName'] ?? null)
+            ? $mission->metadata['planetName']
+            : null;
+        $planetName = is_string($counter['planetName'] ?? null) ? $counter['planetName'] : $missionPlanetName;
+        $counter = $sector->recordReturnToSpaceProgramMaterialDonation(
+            $planetId,
+            $planetName,
+            self::RETURN_TO_SPACE_MATERIAL_REQUIREMENTS,
+            $playerId,
+            $probe->id,
+            $containerObjectId,
+            $resources,
+        );
+
+        if ($mission !== null) {
+            $this->completeReturnToSpaceResourceStepsReachedByCounter($probe, $mission, $counter);
+        }
+        $this->createReturnToSpaceMaterialDropThanks($probe, $planetId, $planetName, $sector->getCoordinates(), $counter);
+
+        return $counter;
     }
 
     private function createReturnToSpacePlanetReply(NeumannProbe $probe, Mission $mission): void
@@ -234,6 +297,143 @@ final class MissionService
             new SectorCoordinates((int) $sectorData['x'], (int) $sectorData['y'], (int) $sectorData['z']),
             self::RETURN_TO_SPACE_PLANET_REPLY,
         );
+    }
+
+    private function initializeReturnToSpaceMaterialCounter(Mission $mission): void
+    {
+        if ($this->sectors === null) {
+            return;
+        }
+        $planetId = (string) ($mission->metadata['planetId'] ?? '');
+        if ($planetId === '') {
+            return;
+        }
+        $sectorData = is_array($mission->metadata['sector'] ?? null) ? $mission->metadata['sector'] : null;
+        if ($sectorData === null || !isset($sectorData['x'], $sectorData['y'], $sectorData['z'])) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $sectorData['x'], (int) $sectorData['y'], (int) $sectorData['z']));
+        $sector->ensureReturnToSpaceProgramMaterialCounter(
+            $planetId,
+            is_string($mission->metadata['planetName'] ?? null) ? $mission->metadata['planetName'] : null,
+            self::RETURN_TO_SPACE_MATERIAL_REQUIREMENTS,
+        );
+        $this->sectors->saveSector($sector);
+    }
+
+    private function activeReturnToSpaceMissionForPlanet(NeumannProbe $probe, string $planetId): ?Mission
+    {
+        foreach ($this->missions->activeForProbe($probe->id) as $mission) {
+            if ($mission->type !== self::FIRST_CONTACT_MISSION_TYPE) {
+                continue;
+            }
+            if (($mission->metadata['scenario'] ?? null) !== self::SCENARIO_RETURN_TO_SPACE_PROGRAM) {
+                continue;
+            }
+            if (($mission->metadata['planetId'] ?? null) !== $planetId) {
+                continue;
+            }
+
+            return $mission;
+        }
+
+        return null;
+    }
+
+    private function returnToSpaceResourceRequestStarted(Mission $mission): bool
+    {
+        $waitStep = $this->missions->findStepByUid($mission->id, $this->firstContactWaitStepUid($mission));
+        if ($waitStep !== null && $waitStep->status === MissionStep::STATUS_COMPLETED) {
+            return true;
+        }
+
+        return $this->missions->findStepByUid($mission->id, $this->firstContactStepUid($mission->uid, self::FIRST_CONTACT_DELIVER_METALS_STEP_UID)) !== null;
+    }
+
+    /**
+     * @param array<string, mixed> $resources
+     * @return array<string, float>
+     */
+    private function returnToSpaceRelevantMaterials(array $resources): array
+    {
+        $relevant = [];
+        foreach (self::RETURN_TO_SPACE_MATERIAL_REQUIREMENTS as $type => $_required) {
+            $amount = round(max(0.0, (float) ($resources[$type] ?? 0.0)), 4);
+            if ($amount > 0.0) {
+                $relevant[$type] = $amount;
+            }
+        }
+
+        return $relevant;
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function completeReturnToSpaceResourceStepsReachedByCounter(NeumannProbe $probe, Mission $mission, array $counter): void
+    {
+        $remaining = is_array($counter['remaining'] ?? null) ? $counter['remaining'] : [];
+        $steps = [
+            ResourceComposition::METALS => self::FIRST_CONTACT_DELIVER_METALS_STEP_UID,
+            ResourceComposition::CARBON_COMPOUNDS => self::FIRST_CONTACT_DELIVER_CARBON_STEP_UID,
+        ];
+
+        foreach ($steps as $type => $stepKey) {
+            if (round(max(0.0, (float) ($remaining[$type] ?? 0.0)), 4) > 0.0) {
+                continue;
+            }
+            $mission = $this->missions->findByUidForProbe($probe->id, $mission->uid) ?? $mission;
+            if ($mission->isTerminal()) {
+                return;
+            }
+            $stepUid = $this->firstContactStepUid($mission->uid, $stepKey);
+            $step = $this->missions->findStepByUid($mission->id, $stepUid);
+            if ($step === null || $step->status !== MissionStep::STATUS_PENDING) {
+                continue;
+            }
+            if ($mission->stepOrder === Mission::STEP_ORDER_SEQUENTIAL && !$this->previousStepsCompleted($mission, $step)) {
+                continue;
+            }
+            $mission = $this->completeStep($probe, $mission->uid, $stepUid);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function createReturnToSpaceMaterialDropThanks(
+        NeumannProbe $probe,
+        string $planetId,
+        ?string $planetName,
+        SectorCoordinates $sector,
+        array $counter,
+    ): void {
+        $remaining = is_array($counter['remaining'] ?? null) ? $counter['remaining'] : [];
+        $this->messages?->createForEndpoints(
+            ProbeMessage::ENDPOINT_PLANET,
+            $planetId,
+            $planetName,
+            null,
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $probe->id,
+            null,
+            $probe->id,
+            $sector,
+            "Nous accusons réception de votre largage. Merci pour votre aide.\n\nRessources restantes à envoyer :\nMétaux : "
+                . $this->formatEceAmount((float) ($remaining[ResourceComposition::METALS] ?? 0.0))
+                . " ECE\nComposés carbonés : "
+                . $this->formatEceAmount((float) ($remaining[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0))
+                . ' ECE',
+        );
+    }
+
+    private function formatEceAmount(float $amount): string
+    {
+        $amount = round(max(0.0, $amount), 4);
+        $formatted = rtrim(rtrim(number_format($amount, 4, '.', ''), '0'), '.');
+
+        return $formatted === '' ? '0' : $formatted;
     }
 
     private function activeMissionForProbe(NeumannProbe $probe, string $missionUid): Mission

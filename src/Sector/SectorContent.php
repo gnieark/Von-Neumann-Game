@@ -19,6 +19,7 @@ final class SectorContent
         private array $detachedContainers = [],
         private array $hiddenDetachedContainers = [],
         private array $planetDroppedContainers = [],
+        private array $returnToSpaceProgramMaterialDonations = [],
     ) {}
 
     public function getCoordinates(): SectorCoordinates
@@ -148,6 +149,95 @@ final class SectorContent
         $this->touch();
     }
 
+    /**
+     * @param array<string, float|int> $requirements
+     * @return array<string, mixed>
+     */
+    public function ensureReturnToSpaceProgramMaterialCounter(string $planetId, ?string $planetName, array $requirements): array
+    {
+        $requirements = $this->normalizedMaterialAmounts($requirements);
+        $existing = $this->returnToSpaceProgramMaterialDonations[$planetId] ?? null;
+        if (is_array($existing)) {
+            $existing['planetId'] = (string) ($existing['planetId'] ?? $planetId);
+            if ($planetName !== null && $planetName !== '') {
+                $existing['planetName'] = $planetName;
+            }
+            $existing['requirements'] = $requirements;
+            $existing['totals'] = $this->normalizedMaterialAmounts(is_array($existing['totals'] ?? null) ? $existing['totals'] : []);
+            $existing['donations'] = is_array($existing['donations'] ?? null) ? array_values($existing['donations']) : [];
+            $existing['createdAt'] = (string) ($existing['createdAt'] ?? gmdate('c'));
+            $existing['updatedAt'] = gmdate('c');
+        } else {
+            $existing = [
+                'planetId' => $planetId,
+                'planetName' => $planetName,
+                'requirements' => $requirements,
+                'totals' => [],
+                'donations' => [],
+                'createdAt' => gmdate('c'),
+                'updatedAt' => gmdate('c'),
+            ];
+        }
+
+        $existing['remaining'] = $this->remainingMaterialAmounts($requirements, is_array($existing['totals'] ?? null) ? $existing['totals'] : []);
+        $this->returnToSpaceProgramMaterialDonations[$planetId] = $existing;
+        $this->touch();
+
+        return $existing;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function returnToSpaceProgramMaterialCounterForPlanet(string $planetId): ?array
+    {
+        $counter = $this->returnToSpaceProgramMaterialDonations[$planetId] ?? null;
+
+        return is_array($counter) ? $counter : null;
+    }
+
+    /**
+     * @param array<string, float|int> $requirements
+     * @param array<string, float|int> $resources
+     * @return array<string, mixed>
+     */
+    public function recordReturnToSpaceProgramMaterialDonation(
+        string $planetId,
+        ?string $planetName,
+        array $requirements,
+        int $playerId,
+        int $probeId,
+        string $containerObjectId,
+        array $resources,
+    ): array {
+        $counter = $this->ensureReturnToSpaceProgramMaterialCounter($planetId, $planetName, $requirements);
+        $resources = $this->normalizedMaterialAmounts($resources);
+        $totals = $this->normalizedMaterialAmounts(is_array($counter['totals'] ?? null) ? $counter['totals'] : []);
+        foreach ($resources as $type => $amount) {
+            $totals[$type] = round((float) ($totals[$type] ?? 0.0) + $amount, 4);
+        }
+
+        $donations = is_array($counter['donations'] ?? null) ? array_values($counter['donations']) : [];
+        $donations[] = [
+            'playerId' => $playerId,
+            'probeId' => $probeId,
+            'containerObjectId' => $containerObjectId,
+            'resources' => $resources,
+            'createdAt' => gmdate('c'),
+        ];
+
+        $requirements = $this->normalizedMaterialAmounts($requirements);
+        $counter['requirements'] = $requirements;
+        $counter['totals'] = $totals;
+        $counter['remaining'] = $this->remainingMaterialAmounts($requirements, $totals);
+        $counter['donations'] = $donations;
+        $counter['updatedAt'] = gmdate('c');
+        $this->returnToSpaceProgramMaterialDonations[$planetId] = $counter;
+        $this->touch();
+
+        return $counter;
+    }
+
     public function replaceObject(UniverseObject $replacement): bool
     {
         if ($replacement instanceof SectorDetachedContainer) {
@@ -246,6 +336,7 @@ final class SectorContent
             'detachedContainers' => array_map(static fn(SectorDetachedContainer $container): array => $container->toArray(), $this->detachedContainers),
             'hiddenDetachedContainers' => array_map(static fn(SectorDetachedContainer $container): array => $container->toArray(), $this->hiddenDetachedContainers),
             'planetDroppedContainers' => array_map(static fn(SectorDetachedContainer $container): array => $container->toArray(), $this->planetDroppedContainers),
+            'returnToSpaceProgramMaterialDonations' => $this->returnToSpaceProgramMaterialDonations,
             'createdAt' => $this->createdAt,
             'updatedAt' => $this->updatedAt,
             'generationVersion' => $this->generationVersion,
@@ -267,7 +358,47 @@ final class SectorContent
             array_map(static fn(array $object): SectorDetachedContainer => SectorDetachedContainer::fromArray($object), $data['detachedContainers'] ?? []),
             array_map(static fn(array $object): SectorDetachedContainer => SectorDetachedContainer::fromArray($object), $data['hiddenDetachedContainers'] ?? []),
             array_map(static fn(array $object): SectorDetachedContainer => SectorDetachedContainer::fromArray($object), $data['planetDroppedContainers'] ?? []),
+            is_array($data['returnToSpaceProgramMaterialDonations'] ?? null) ? $data['returnToSpaceProgramMaterialDonations'] : [],
         );
+    }
+
+    /**
+     * @param array<string, mixed> $amounts
+     * @return array<string, float>
+     */
+    private function normalizedMaterialAmounts(array $amounts): array
+    {
+        $normalized = [];
+        foreach ($amounts as $type => $amount) {
+            if (!is_numeric($amount)) {
+                continue;
+            }
+            $amount = round(max(0.0, (float) $amount), 4);
+            if ($amount <= 0.0) {
+                continue;
+            }
+            $normalized[(string) $type] = $amount;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string, float|int> $requirements
+     * @param array<string, float|int> $totals
+     * @return array<string, float>
+     */
+    private function remainingMaterialAmounts(array $requirements, array $totals): array
+    {
+        $remaining = [];
+        foreach ($requirements as $type => $amount) {
+            if (!is_numeric($amount)) {
+                continue;
+            }
+            $remaining[(string) $type] = round(max(0.0, (float) $amount - (float) ($totals[$type] ?? 0.0)), 4);
+        }
+
+        return $remaining;
     }
 
     private function replaceObjectInSystem(SolarSystem $system, UniverseObject $replacement): ?SolarSystem
