@@ -1867,14 +1867,13 @@ final class ApiKernel
 
         return (int) $value;
     }
-
-    private function probeDamageWarningArray(Player $player, ProbeDamageWarning $warning): array
+    private function probeAlertArray(Player $player, ProbeDamageWarning $warning): array
     {
         $frame = new PlayerReferenceFrame($player->homeSector);
         $sector = new SectorCoordinates($warning->sectorX, $warning->sectorY, $warning->sectorZ);
         $relativeSector = $frame->globalToRelative($sector);
 
-        return [
+        $alert = [
             'id' => $warning->id,
             'type' => $warning->type,
             'status' => $warning->status,
@@ -1884,17 +1883,23 @@ final class ApiKernel
             'sector' => [
                 'relative' => $relativeSector,
             ],
-            'container' => [
+            'createdAt' => $warning->createdAt,
+            'updatedAt' => $warning->updatedAt,
+            'readAt' => $warning->readAt,
+            'resolvedAt' => $warning->resolvedAt,
+        ];
+
+        if ($warning->type === ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK) {
+            $alert['container'] = [
                 'id' => $warning->containerId,
                 'label' => $warning->containerLabel,
                 'detachedObjectId' => $warning->objectId,
-            ],
-            'risk' => [
+            ];
+            $alert['risk'] = [
                 'percent' => $warning->riskPercent,
                 'additionalContainerCount' => $warning->additionalContainerCount,
                 'ruleStartsAtAdditionalContainers' => 5,
-            ]
-        ];
+            ];
         }
 
         if ($warning->type === ProbeDamageWarning::TYPE_INTELLIGENT_LIFE) {
@@ -1917,12 +1922,6 @@ final class ApiKernel
         }
 
         return $alert;
-            ],
-            'createdAt' => $warning->createdAt,
-            'updatedAt' => $warning->updatedAt,
-            'readAt' => $warning->readAt,
-            'resolvedAt' => $warning->resolvedAt,
-        ];
     }
 
     private function movementArray(Player $player, ProbeMovement $movement, bool $includeLive = true): array
