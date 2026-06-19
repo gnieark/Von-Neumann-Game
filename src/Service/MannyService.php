@@ -721,9 +721,10 @@ final class MannyService
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $returnDurationSeconds = $this->recallReturnDurationSeconds($manny, $now);
         $manny->currentTask = Manny::TASK_RETURNING;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $this->miningTravelSeconds() . ' seconds')->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
         $manny->taskPayload = ['reason' => 'recall'];
         $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
@@ -2481,6 +2482,18 @@ final class MannyService
         }
 
         return $duration;
+    }
+
+    private function recallReturnDurationSeconds(Manny $manny, \DateTimeImmutable $now): int
+    {
+        $defaultDuration = $this->miningTravelSeconds();
+        if ($manny->taskStartedAt === null) {
+            return $defaultDuration;
+        }
+
+        $elapsedSeconds = max(0, $now->getTimestamp() - (new \DateTimeImmutable($manny->taskStartedAt))->getTimestamp());
+
+        return $elapsedSeconds < $defaultDuration ? $elapsedSeconds : $defaultDuration;
     }
 
     private function miningProgress(float $targetAmount, int $elapsedSeconds): array

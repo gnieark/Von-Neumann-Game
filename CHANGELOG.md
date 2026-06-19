@@ -16,10 +16,12 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- API v41 : le rappel d'une Manny sortie depuis moins d'un temps de trajet la fait maintenant faire demi-tour; la duree de retour correspond au temps deja passe sur la tache annulee.
 - API v39 : `/api/probe/sector`, la messagerie, les alertes de vie intelligente et les reponses de mission remplacent les noms publics de planetes habitees qui contiendraient les coordonnees absolues du secteur par un libelle public sans coordonnees absolues; la messagerie n'utilise plus l'identifiant technique d'une planete comme libelle de destinataire.
 - Debug : `scripts/force-inhabited-planet.php` genere maintenant un id opaque et stable par secteur pour ses planetes forcees, et retire l'ancien objet debug du meme secteur lorsqu'il est relance.
 - Debug : `scripts/teleport-probe.php` finalise désormais les téléportations via `ProbeMovementService`, afin de déclencher les effets d'arrivée comme les scénarios de premier contact.
 - Scénarios : observer un secteur courant contenant une planète habitée lance désormais le premier contact manquant, même si l'arrivée normale a été contournée par un outil de debug.
+- Interface : la carte de l'imprimante atomique dans `Mannys & imprimante` utilise maintenant le libelle traduit en anglais.
 - Interface : les rafraîchissements automatiques de la page Inventaires ne réinitialisent plus les règles de stockage en cours de modification.
 
 ## 2026-06-17

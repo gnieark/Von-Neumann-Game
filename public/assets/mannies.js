@@ -1412,7 +1412,7 @@
 
         const assistant = atomicPrinterAssistant();
         const busy = assistant !== null;
-        const printerName = printer && printer.name ? printer.name : tr("atomicPrinter", "Atomic printer");
+        const printerName = inventoryItemTypeLabel(printer.type, printer.name || tr("atomicPrinter", "Atomic printer"));
         const taskName = busy ? taskLabel("atomic_printing") : tr("noTask", "None");
         const panelId = "atomic-printer-panel";
         const buttonTitle = printerName + " - " + taskName;

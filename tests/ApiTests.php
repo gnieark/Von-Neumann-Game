@@ -356,7 +356,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(40, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(41, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2127,6 +2127,37 @@ if ($createdProbe !== null) {
     ]);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'Manny returns to the probe after completing all mining trips');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('recall-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+    ]));
+    $quickRecallMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'recall-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.05,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $quickRecallMine->status, 'Manny can start a mining task before quick recall');
+    $quickRecallOriginalStart = gmdate('c', time() - 300);
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started WHERE uid = :uid')->execute([
+        'uid' => $secondMannyId,
+        'started' => $quickRecallOriginalStart,
+    ]);
+    $quickRecall = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/recall', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $quickRecall->status, 'POST /api/probe/mannies/{id}/recall accepts a Manny before it reaches the mining target');
+    $test->assertEquals('returning', $quickRecall->body['manny']['currentTask'] ?? null, 'quick recalled Manny starts returning');
+    $quickRecallReturning = $mannies->findByUidForProbe($createdProbe->id, $secondMannyId);
+    $quickRecallDuration = (new DateTimeImmutable((string) $quickRecallReturning?->taskEndsAt))->getTimestamp()
+        - (new DateTimeImmutable((string) $quickRecallReturning?->taskStartedAt))->getTimestamp();
+    $quickRecallElapsed = (new DateTimeImmutable((string) $quickRecallReturning?->taskStartedAt))->getTimestamp()
+        - (new DateTimeImmutable($quickRecallOriginalStart))->getTimestamp();
+    $test->assertEquals($quickRecallElapsed, $quickRecallDuration, 'recall duration matches elapsed outbound time when below Manny travel time');
+    $test->assert($quickRecallDuration < 900, 'quick recall duration is shorter than the default Manny travel time');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+        'uid' => $secondMannyId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'quick recalled Manny returns to the probe after its shortened return');
 
     $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 96, metals_stock = 0.2 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 1], JSON_THROW_ON_ERROR));
