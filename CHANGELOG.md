@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- API v40 : `/api/probe/alerts` peut exposer des alertes `sector_object_detected` avec un objet detecte dans le secteur relatif.
+- Debug : ajout de `scripts/add-deuterium-asteroid-alert.php` et `scripts/add-deuterium-asteroid-alerts-for-low-fuel.php` pour injecter des asteroides de deuterium et avertir les joueurs concernes.
 - API v38 : `/api/probe/missions` et les reponses de mission n'exposent plus de coordonnees absolues dans les descriptions, `metadata` ou `createdByEvent`; les secteurs publics y sont convertis en `sector.relative`.
 - API v37 : les arrivees dans un secteur jamais visite contenant une planete habitee peuvent declencher un scenario de premier contact pondere par `gameplay.intelligentLife.scenarios`; le premier scenario implemente, `return_to_space_program`, cree une mission `Premier contact` et un message planetaire en nombres premiers.
 - Debug : ajout de `scripts/force-inhabited-planet.php` pour injecter en CLI une planete habitee dans un secteur donne.

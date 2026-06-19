@@ -44,7 +44,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 39;
+    public const API_VERSION = 40;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -913,7 +913,10 @@ final class ApiKernel
     private function probeDamageWarningsResponse(Player $player): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $warnings = $this->damageWarnings->findByProbeId($probe->id);
+        $warnings = array_values(array_filter(
+            $this->damageWarnings->findByProbeId($probe->id),
+            static fn(ProbeDamageWarning $warning): bool => $warning->type === ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
+        ));
 
         return new ApiResponse(200, [
             'damageWarnings' => array_map(
@@ -1968,6 +1971,15 @@ final class ApiKernel
                 . ':' . (int) ($relativeSector['y'] ?? 0)
                 . ':' . (int) ($relativeSector['z'] ?? 0)
                 . '.';
+        }
+
+        if ($warning->type === ProbeDamageWarning::TYPE_SECTOR_OBJECT_DETECTED) {
+            $alert['object'] = [
+                'id' => $warning->objectId,
+                'type' => $warning->containerId !== '' ? $warning->containerId : 'object',
+                'label' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
+                'resourceTypes' => ['deuterium'],
+            ];
         }
 
         return $alert;

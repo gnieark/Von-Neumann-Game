@@ -946,7 +946,8 @@ paths:
       description: >
         Returns persistent alerts produced for the authenticated probe. Alerts
         currently cover fragile external storage movement warnings and
-        intelligent-life detections when the probe arrives in a sector.
+        intelligent-life detections when the probe arrives in a sector, plus
+        debug-injected sector object detections.
       responses:
         '200':
           description: Current and past alerts for the authenticated probe
@@ -979,7 +980,7 @@ paths:
                   - id: 8
                     type: intelligent_life
                     status: unread
-                    message: 'Intelligent life detected: technological signatures confirmed on Pale Signal in sector 12:4:-2.'
+                    message: 'Intelligent life detected: technological signatures confirmed on Pale Signal in relative sector 2:0:0.'
                     phase: arrival
                     scheduledAt: '2026-06-12T14:42:00+00:00'
                     sector:
@@ -989,6 +990,23 @@ paths:
                       name: Pale Signal
                     createdAt: '2026-06-12T14:42:00+00:00'
                     updatedAt: '2026-06-12T14:42:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                  - id: 9
+                    type: sector_object_detected
+                    status: unread
+                    message: "Un nouvel objet vient d'être détecté dans le secteur : astéroïde contenant du deutérium. Il n'avait pas été détecté lors de votre arrivée dans ce secteur."
+                    phase: detection
+                    scheduledAt: '2026-06-12T15:00:00+00:00'
+                    sector:
+                      relative: { x: 0, y: 0, z: 0 }
+                    object:
+                      id: debug-deuterium-a9f0d8e7c6b5a4d3c2b1a0f9
+                      type: asteroid
+                      label: Astéroïde contenant du Deutérium
+                      resourceTypes: [deuterium]
+                    createdAt: '2026-06-12T15:00:00+00:00'
+                    updatedAt: '2026-06-12T15:00:00+00:00'
                     readAt: null
                     resolvedAt: null
                 rules:
@@ -3327,15 +3345,35 @@ components:
       properties:
         damageWarning:
           $ref: '#/components/schemas/ProbeDamageWarning'
+    ProbeAlertsResponse:
+      type: object
+      required: [alerts, rules]
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeDamageWarning'
+        rules:
+          type: object
+          required: [storageContainerBreak]
+          properties:
+            storageContainerBreak:
+              $ref: '#/components/schemas/ProbeDamageWarningRule'
+    ProbeAlertResponse:
+      type: object
+      required: [alert]
+      properties:
+        alert:
+          $ref: '#/components/schemas/ProbeDamageWarning'
     ProbeDamageWarning:
       type: object
-      required: [id, type, status, message, phase, scheduledAt, sector, container, risk, createdAt, updatedAt, readAt, resolvedAt]
+      required: [id, type, status, message, phase, scheduledAt, sector, createdAt, updatedAt, readAt, resolvedAt]
       properties:
         id:
           type: integer
         type:
           type: string
-          enum: [storage_container_break]
+          enum: [storage_container_break, intelligent_life, sector_object_detected]
         status:
           type: string
           enum: [unread, read]
@@ -3343,7 +3381,7 @@ components:
           type: string
         phase:
           type: string
-          enum: [acceleration_end, deceleration_start]
+          enum: [acceleration_end, deceleration_start, arrival, detection]
         scheduledAt:
           type: string
           format: date-time
@@ -3355,6 +3393,7 @@ components:
               $ref: '#/components/schemas/Vector'
         container:
           type: object
+          description: Present for `storage_container_break` alerts.
           required: [id, label, objectId]
           properties:
             id:
@@ -3365,6 +3404,7 @@ components:
               type: string
         risk:
           type: object
+          description: Present for `storage_container_break` alerts.
           required: [percent, additionalContainerCount]
           properties:
             percent:
@@ -3388,6 +3428,25 @@ components:
               type: string
               nullable: true
               description: Public planet label; inhabited-planet names that would reveal absolute coordinates are replaced by a public label.
+        object:
+          type: object
+          description: Present for `sector_object_detected` alerts.
+          required: [id, type, label, resourceTypes]
+          properties:
+            id:
+              type: string
+              description: Opaque sector object id. It must not be interpreted as coordinates.
+            type:
+              type: string
+              example: asteroid
+            label:
+              type: string
+              nullable: true
+            resourceTypes:
+              type: array
+              items:
+                type: string
+                enum: [deuterium, metals, ice, carbon_compounds]
         createdAt:
           type: string
           format: date-time

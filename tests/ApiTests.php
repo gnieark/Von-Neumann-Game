@@ -356,7 +356,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(39, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(40, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -497,6 +497,59 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($userinfosText, 'relative: 0:0:0 from player home'), 'userinfos CLI reports relative position');
     $test->assert(str_contains($userinfosText, 'Inventory'), 'userinfos CLI reports inventory state');
     $test->assert(str_contains($userinfosText, 'Visited sectors'), 'userinfos CLI reports visited sector history');
+
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 9 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $deuteriumAsteroidCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-deuterium-asteroid-alert.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --universe-path=' . escapeshellarg($universePath)
+        . ' --amount=12.5'
+        . ' ' . escapeshellarg($player->username);
+    exec($deuteriumAsteroidCommand . ' 2>&1', $deuteriumAsteroidOutput, $deuteriumAsteroidStatus);
+    $deuteriumAsteroidText = implode("\n", $deuteriumAsteroidOutput);
+    $test->assertEquals(0, $deuteriumAsteroidStatus, 'deuterium asteroid CLI exits successfully');
+    $test->assert(str_contains($deuteriumAsteroidText, 'alert id:'), 'deuterium asteroid CLI creates an alert');
+    $deuteriumSector = $sectorRepository->load($createdProbe->currentSector);
+    $deuteriumAsteroids = array_values(array_filter(
+        $deuteriumSector->getObjects(),
+        static fn($object): bool => $object instanceof Asteroid
+            && ($object->toArray()['resourceAmounts']['deuterium'] ?? 0.0) === 12.5,
+    ));
+    $test->assert(count($deuteriumAsteroids) >= 1, 'deuterium asteroid CLI persists a mineable asteroid in the current sector');
+    $deuteriumAsteroidData = $deuteriumAsteroids[0]->toArray();
+    $test->assertEquals('Astéroïde contenant du Deutérium', $deuteriumAsteroidData['name'] ?? null, 'deuterium asteroid CLI gives the asteroid a public non-debug name');
+    $test->assert(!str_contains(strtolower(json_encode($deuteriumAsteroidData, JSON_THROW_ON_ERROR)), 'debug'), 'deuterium asteroid CLI does not expose debug wording on the asteroid');
+    $deuteriumAlerts = $kernel->handle('GET', '/api/probe/alerts', $missionHeaders);
+    $deuteriumAlert = null;
+    foreach ($deuteriumAlerts->body['alerts'] ?? [] as $alert) {
+        if (($alert['type'] ?? null) === 'sector_object_detected') {
+            $deuteriumAlert = $alert;
+            break;
+        }
+    }
+    $test->assert($deuteriumAlert !== null, 'GET /api/probe/alerts exposes CLI object-detection alerts');
+    if ($deuteriumAlert !== null) {
+        $test->assertEquals('asteroid', $deuteriumAlert['object']['type'] ?? null, 'object-detection alert exposes the object type');
+        $test->assertEquals(['deuterium'], $deuteriumAlert['object']['resourceTypes'] ?? null, 'object-detection alert exposes deuterium resources');
+        $test->assert(str_contains((string) ($deuteriumAlert['message'] ?? ''), 'deut'), 'object-detection alert stores the detection message');
+        $test->assert(!str_contains(json_encode($deuteriumAlert, JSON_THROW_ON_ERROR), $createdProbe->currentSector->toKey()), 'object-detection alert response does not expose absolute sector keys');
+    }
+    $legacyDamageWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $missionHeaders);
+    $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
+    $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, '/api/probe/alerts'), 'alerts page uses the generic persistent-alert endpoint');
+
+    $lowFuelCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-deuterium-asteroid-alerts-for-low-fuel.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --universe-path=' . escapeshellarg($universePath)
+        . ' --amount=7'
+        . ' 10';
+    exec($lowFuelCommand . ' 2>&1', $lowFuelOutput, $lowFuelStatus);
+    $lowFuelText = implode("\n", $lowFuelOutput);
+    $test->assertEquals(0, $lowFuelStatus, 'low-fuel deuterium asteroid CLI exits successfully');
+    $test->assert(str_contains($lowFuelText, 'processed: 1'), 'low-fuel CLI calls the per-player script for matching players');
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 
     $storageRepairSession = $auth->createSessionForPlayer($player);
     $storageRepairHeaders = ['Authorization' => 'Bearer ' . $storageRepairSession['token']];
