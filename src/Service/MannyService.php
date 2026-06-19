@@ -54,6 +54,7 @@ final class MannyService
         private readonly ProbeStorageService $storage,
         private readonly array $config = [],
         ?WaypointBookmarkService $bookmarks = null,
+        private readonly ?MissionService $missions = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
     }
@@ -1803,6 +1804,14 @@ final class MannyService
         );
 
         $sector->addPlanetDroppedContainer($object);
+        $this->missions?->handleReturnToSpaceProgramMaterialDrop(
+            $probe,
+            $sector,
+            $targetObjectId,
+            (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
+            $object->getId(),
+            is_array($snapshot['resources'] ?? null) ? $snapshot['resources'] : [],
+        );
         $this->sectors->saveSector($sector);
 
         $this->clearTask($manny, [
