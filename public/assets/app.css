@@ -430,6 +430,17 @@ button:disabled {
     color: var(--cold);
 }
 
+.site-footer .footer-link-external {
+    color: #f0d38a;
+    text-decoration-style: dotted;
+    text-underline-offset: 4px;
+}
+
+.site-footer .footer-link-external:hover,
+.site-footer .footer-link-external:focus-visible {
+    color: #ffe8a8;
+}
+
 .stats-page {
     max-width: 980px;
 }

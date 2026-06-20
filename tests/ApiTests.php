@@ -213,9 +213,9 @@ $footerRoute = FrontRouteFactory::getRoute([
 ob_start();
 $footerRoute->handle('GET', '/', null, 'en');
 $footerHtml = (string) ob_get_clean();
-$test->assert(str_contains($footerHtml, '<a href="/">Accueil</a>'), 'route footer links are still rendered');
+$test->assert(str_contains($footerHtml, '<a class="footer-link" href="/">Accueil</a>'), 'route footer links are still rendered');
 $test->assert(
-    str_contains($footerHtml, '<a href="https://ko-fi.com/neumannprobe" rel="noopener noreferrer" target="_blank">Tip the developer</a>'),
+    str_contains($footerHtml, '<a class="footer-link footer-link-external" href="https://ko-fi.com/neumannprobe" rel="noopener noreferrer" target="_blank">Tip the developer</a>'),
     'additional footer links are loaded from local config and rendered as external links'
 );
 

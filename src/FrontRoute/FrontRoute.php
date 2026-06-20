@@ -111,6 +111,7 @@ class FrontRoute{
             $tpl->addSubBlock((new TplBlock('footerlinks'))->addVars([
                 'title' => self::e($menuLinkItem->getTitle()),
                 'href' => self::e($menuLinkItem->getHref()),
+                'class' => $menuLinkItem->isExternal() ? 'footer-link footer-link-external' : 'footer-link',
                 'external' => $menuLinkItem->isExternal() ? ' rel="noopener noreferrer" target="_blank"' : '',
             ]));
         }
