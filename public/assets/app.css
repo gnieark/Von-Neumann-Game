@@ -1371,6 +1371,30 @@ button.account-menu-item {
     color: rgba(172, 217, 161, .68) !important;
 }
 
+.visited-sector-details {
+    display: grid;
+    gap: 8px;
+}
+
+.visited-sector-details summary {
+    cursor: pointer;
+    color: #ffcf55;
+    font-weight: 800;
+}
+
+.visited-sector-object {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid rgba(99, 150, 115, .22);
+    background: rgba(1, 4, 2, .42);
+}
+
+.visited-history-more {
+    justify-self: center;
+    margin-top: 4px;
+}
+
 .button-link {
     display: inline-flex;
     align-items: center;

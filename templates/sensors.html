@@ -30,4 +30,16 @@
         <p id="neighbor-scan-status" class="sector-neighbor-status" aria-live="polite" hidden></p>
         <div id="neighbor-sector-grid" class="neighbor-sector-grid" aria-live="polite"></div>
     </section>
+    <hr class="sector-scan-separator">
+    <section class="sector-scan-section sector-visited-history">
+        <div class="sector-neighbor-heading">
+            <h3>{{t.sectorVisitedHistoryTitle}}</h3>
+            <button id="visited-history-toggle" type="button" aria-expanded="false" aria-controls="visited-sector-history-panel">{{t.view}}</button>
+        </div>
+        <div id="visited-sector-history-panel" hidden>
+            <p id="visited-history-status" class="sector-neighbor-status" aria-live="polite" hidden></p>
+            <div id="visited-sector-grid" class="neighbor-sector-grid" aria-live="polite"></div>
+            <button id="visited-history-more" class="button-link visited-history-more" type="button" hidden>{{t.viewMore}}</button>
+        </div>
+    </section>
 </article>
