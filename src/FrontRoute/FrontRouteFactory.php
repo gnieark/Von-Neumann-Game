@@ -1,6 +1,7 @@
 <?php
 namespace VonNeumannGame\FrontRoute;
 
+use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\FrontRoute\FrontRoute;
 use VonNeumannGame\FrontRoute\FrontRoutei18n;
 use VonNeumannGame\FrontRoute\MenuLinkItem;
@@ -13,8 +14,10 @@ class FrontRouteFactory{
     */
   
 
-    static public function getRoute(array $availableRoutes, string $method, string $routePath, ?string $bearer, string $language): FrontRoute
+    static public function getRoute(array $availableRoutes, string $method, string $routePath, ?string $bearer, string $language, ?string $projectRoot = null): FrontRoute
     {
+        $projectRoot ??= dirname(__DIR__, 2);
+
         foreach($availableRoutes as $route){
             if(in_array($method, $route['methods']) && preg_match($route['uriPattern'], $routePath)){
                 $routeClass = $route['routeClass'];
@@ -24,7 +27,7 @@ class FrontRouteFactory{
                 }
 
                 $frontRoute = new $routeClass();
-                self::addMenuItems($frontRoute, $availableRoutes, $route);
+                self::addMenuItems($frontRoute, $availableRoutes, $route, $projectRoot);
 
                 return $frontRoute;
             }
@@ -35,12 +38,12 @@ class FrontRouteFactory{
 
         // Si aucune route ne correspond, on retourne une route 404
         $frontRoute = new FrontRoute404();
-        self::addMenuItems($frontRoute, $availableRoutes, null);
+        self::addMenuItems($frontRoute, $availableRoutes, null, $projectRoot);
 
         return $frontRoute;
     }
 
-    private static function addMenuItems(FrontRoute $frontRoute, array $availableRoutes, ?array $activeRoute): void
+    private static function addMenuItems(FrontRoute $frontRoute, array $availableRoutes, ?array $activeRoute, string $projectRoot): void
     {
         //Add menus items
         foreach($availableRoutes as $route){
@@ -65,6 +68,43 @@ class FrontRouteFactory{
 
             }
         }
+
+        foreach (self::additionalFooterMenuItems($projectRoot) as $menuItem) {
+            $frontRoute->addFooterMenuItem($menuItem);
+        }
+    }
+
+    /**
+     * @return array<MenuLinkItem>
+     */
+    private static function additionalFooterMenuItems(string $projectRoot): array
+    {
+        $config = (new JsonConfigLoader($projectRoot))->load('additionalsfooterlinks');
+        $links = isset($config['links']) && is_array($config['links']) ? $config['links'] : $config;
+        $menuItems = [];
+
+        foreach ($links as $link) {
+            if (!is_array($link)) {
+                continue;
+            }
+
+            $title = $link['label'] ?? $link['title'] ?? $link['name'] ?? null;
+            $href = $link['url'] ?? $link['href'] ?? $link['linkUri'] ?? null;
+            if (!is_string($title) || trim($title) === '' || !is_string($href) || trim($href) === '') {
+                continue;
+            }
+
+            $href = trim($href);
+            if (!str_starts_with($href, '/') && filter_var($href, FILTER_VALIDATE_URL) === false) {
+                continue;
+            }
+
+            $type = $link['type'] ?? null;
+            $external = $type === 'external' || (filter_var($href, FILTER_VALIDATE_URL) !== false && !str_starts_with($href, '/'));
+            $menuItems[] = new MenuLinkItem(trim($title), $href, false, $external);
+        }
+
+        return $menuItems;
     }
 
 

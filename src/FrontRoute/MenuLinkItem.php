@@ -5,12 +5,14 @@ class MenuLinkItem {
     private string $title;
     private string $href;
     private bool $active;
+    private bool $external;
 
-    public function __construct(string $title, string $href, bool $active = false)
+    public function __construct(string $title, string $href, bool $active = false, bool $external = false)
     {
         $this->title = $title;
         $this->href = $href;
         $this->active = $active;
+        $this->external = $external;
     }
     public function getTitle(): string
     {
@@ -24,5 +26,9 @@ class MenuLinkItem {
     {        
         return $this->active;
     }   
+    public function isExternal(): bool
+    {
+        return $this->external;
+    }
 
 }

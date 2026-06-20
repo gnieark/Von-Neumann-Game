@@ -106,10 +106,12 @@ class FrontRoute{
         ]);
         $tpl->addPrefixedVars('t', $translator->allEscaped());
         $this->addLanguageOptions($tpl, $translator);
+
         foreach($this->footerMenuItems as $menuLinkItem){
             $tpl->addSubBlock((new TplBlock('footerlinks'))->addVars([
-                'title' => $menuLinkItem->getTitle(),
-                'href' => $menuLinkItem->getHref(),
+                'title' => self::e($menuLinkItem->getTitle()),
+                'href' => self::e($menuLinkItem->getHref()),
+                'external' => $menuLinkItem->isExternal() ? ' rel="noopener noreferrer" target="_blank"' : '',
             ]));
         }
 

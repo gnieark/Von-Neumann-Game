@@ -18,6 +18,8 @@ use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Forum\ForumRepository;
+use VonNeumannGame\FrontRoute\FrontRoute;
+use VonNeumannGame\FrontRoute\FrontRouteFactory;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\MissionRepository;
@@ -133,6 +135,14 @@ function fakeIdToken(array $payload): string
     return $encode(['alg' => 'none']) . '.' . $encode($payload) . '.signature';
 }
 
+class TestFooterFrontRoute extends FrontRoute
+{
+    public function getContent(string $method, string $routePath, ?string $bearer, string $language): string
+    {
+        return '<p>Test route</p>';
+    }
+}
+
 $test = new TestRunner();
 $root = dirname(__DIR__);
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_api_tests_' . bin2hex(random_bytes(4));
@@ -181,6 +191,33 @@ $test->assertEquals(['local'], $loadedGameplayConfig['listValues'] ?? null, 'loc
 $configuredSteelBar = CraftingRecipeCatalog::find('steel_bar', $loadedGameplayConfig['crafting'] ?? []);
 $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafting recipes consume gameplay config overrides');
 $test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
+
+file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks.json', json_encode([], JSON_THROW_ON_ERROR));
+file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks-local.json', json_encode([
+    [
+        'label' => 'Tip the developer',
+        'url' => 'https://ko-fi.com/neumannprobe',
+        'type' => 'external',
+    ],
+], JSON_THROW_ON_ERROR));
+$footerRoute = FrontRouteFactory::getRoute([
+    [
+        'name' => 'Accueil',
+        'methods' => ['GET'],
+        'uriPattern' => '/^\/$/',
+        'routeClass' => '\\TestFooterFrontRoute',
+        'linkUri' => '/',
+        'displayOnFooter' => true,
+    ],
+], 'GET', '/', null, 'en', $tmp);
+ob_start();
+$footerRoute->handle('GET', '/', null, 'en');
+$footerHtml = (string) ob_get_clean();
+$test->assert(str_contains($footerHtml, '<a href="/">Accueil</a>'), 'route footer links are still rendered');
+$test->assert(
+    str_contains($footerHtml, '<a href="https://ko-fi.com/neumannprobe" rel="noopener noreferrer" target="_blank">Tip the developer</a>'),
+    'additional footer links are loaded from local config and rendered as external links'
+);
 
 $oauthConfigPath = $tmp . DIRECTORY_SEPARATOR . 'oauth.json';
 file_put_contents($oauthConfigPath, json_encode([
