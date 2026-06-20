@@ -128,6 +128,30 @@ function removeDirectory(string $directory): void
     rmdir($directory);
 }
 
+/**
+ * @param array<string, float> $resources
+ */
+function setProbeTestStoredResources(
+    ProbeStorageService $storage,
+    StorageContainerRepository $storageContainers,
+    NeumannProbeRepository $probes,
+    NeumannProbe $probe,
+    array $resources,
+): NeumannProbe {
+    $storage->ensureProbeStorage($probe);
+    $storageContainers->clearResourcesForProbe($probe->id);
+    $probe = $probes->findById($probe->id) ?? $probe;
+    $probe->metalsStock = 0.0;
+    $probe->iceStock = 0.0;
+    $probe->organicCompoundsStock = 0.0;
+    $probes->save($probe);
+    foreach ($resources as $type => $amount) {
+        $storage->addResource($probe, (string) $type, (float) $amount);
+    }
+
+    return $probes->findById($probe->id) ?? $probe;
+}
+
 function fakeIdToken(array $payload): string
 {
     $encode = static fn(array $data): string => rtrim(strtr(base64_encode(json_encode($data, JSON_THROW_ON_ERROR)), '+/', '-_'), '=');
@@ -1102,7 +1126,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
             'z' => $craftProbeEntity->currentSector->getZ(),
         ]);
     }
-    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.54 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, ['metals' => 0.54]);
     $rawContainerCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'additional_container',
     ], JSON_THROW_ON_ERROR));
@@ -1153,6 +1177,19 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(200, $storageRules->status, 'PATCH /api/probe/storage-containers/{id}/rules updates routing rules');
     $test->assertEquals(['metals'], $storageRules->body['container']['rules']['priority'] ?? null, 'storage priority rule is persisted');
 
+    $staleProbeBeforeStorageRace = $probes->findById($craftProbeEntity->id);
+    $freshProbeForStorageRace = $probes->findById($craftProbeEntity->id);
+    if ($staleProbeBeforeStorageRace !== null && $freshProbeForStorageRace !== null) {
+        setProbeTestStoredResources($storage, $storageContainers, $probes, $freshProbeForStorageRace, []);
+        $staleProbeBeforeStorageRace = $probes->findById($craftProbeEntity->id) ?? $staleProbeBeforeStorageRace;
+        $freshProbeForStorageRace = $probes->findById($craftProbeEntity->id) ?? $freshProbeForStorageRace;
+        $storage->addResource($freshProbeForStorageRace, 'metals', 0.1);
+        $storage->addResource($staleProbeBeforeStorageRace, 'ice', 0.1);
+        $test->assertEquals(0.1, $storage->resourceStock($freshProbeForStorageRace, 'metals'), 'stale probe storage refresh keeps resources added by another request');
+        $test->assertEquals(0.1, $storage->resourceStock($freshProbeForStorageRace, 'ice'), 'stale probe storage refresh adds its own resource without rebuilding from old totals');
+        $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
+    }
+
     $mannyComponentSeeds = [
         [ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, 6],
         [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006, 12],
@@ -1184,7 +1221,8 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     }
     $test->assertEquals($mannyCountBeforeCraft + 1, count($mannies->findByProbeId($craftProbeEntity->id)), 'completed Manny craft creates exactly one Manny after duplicate stale refreshes');
 
-    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100, metals_stock = 0.2, ice_stock = 0.09, organic_compounds_stock = 0.11 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, ['metals' => 0.2, 'ice' => 0.09, 'carbon_compounds' => 0.11]);
     $directAtomicMannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'integrated_circuit',
     ], JSON_THROW_ON_ERROR));
@@ -1228,7 +1266,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(1, count($integratedCircuits), 'completed integrated-circuit craft adds a circuit item');
     $test->assertEquals(0.001, $integratedCircuits[0]['containerSpace'] ?? null, 'integrated circuit item occupies a tiny storage space');
 
-    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.15 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, ['metals' => 0.15]);
     $rawLinearActuatorCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'linear_actuator',
     ], JSON_THROW_ON_ERROR));
@@ -1248,7 +1286,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ));
     $test->assertEquals(1, count($linearActuators), 'completed linear-actuator craft adds a linear actuator item');
 
-    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.02 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, ['metals' => 0.02]);
     $steelBarCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'steel_bar',
     ], JSON_THROW_ON_ERROR));
@@ -1386,9 +1424,11 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         ));
         $test->assertEquals($mannyCountBeforeCraft + 1, count($craftedMannyItems), 'crafted Manny appears in probe inventory');
 
+        setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
         $storageContainers->setResourceAmount($coreStorageContainer->id, 'metals', 0.2);
         $storageContainers->setResourceAmount($additionalStorageContainerEntity->id, 'metals', 0.3);
-        $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.5 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+        $craftProbeEntity = $probes->findById($craftProbeEntity->id) ?? $craftProbeEntity;
+        $storage->ensureProbeStorage($craftProbeEntity);
         $jettisonContainerMetals = $kernel->handle('POST', '/api/probe/inventory/probe-' . $craftProbeEntity->id . '-stock-metals/jettison', $craftHeaders, json_encode([
             'amount' => 0.1,
             'containerId' => $additionalStorageContainer['id'] ?? '',
@@ -1398,8 +1438,10 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $test->assertEquals(0.2, $storageContainers->resourceAmounts($additionalStorageContainerEntity->id)['metals'] ?? null, 'container-targeted jettison consumes the selected container stock');
         $test->assertEquals(0.4, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'container-targeted jettison syncs the global resource total');
 
+        setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
         $storageContainers->setResourceAmount($additionalStorageContainerEntity->id, 'carbon_compounds', 0.3);
-        $pdo->prepare('UPDATE neumann_probes SET organic_compounds_stock = 0.3 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+        $craftProbeEntity = $probes->findById($craftProbeEntity->id) ?? $craftProbeEntity;
+        $storage->ensureProbeStorage($craftProbeEntity);
         $jettisonContainerCarbonCompounds = $kernel->handle('POST', '/api/probe/inventory/probe-' . $craftProbeEntity->id . '-stock-carbon-compounds/jettison', $craftHeaders, json_encode([
             'amount' => 0.1,
             'containerId' => $additionalStorageContainer['id'] ?? '',
@@ -1426,7 +1468,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
     if ($detachContainer !== null) {
         $storageContainers->updateRules($detachContainer, ['metals'], ['ice'], ['manny']);
         $storageContainers->setResourceAmount($detachContainer->id, 'metals', 0.2);
-        $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.2 WHERE id = :id')->execute(['id' => $detachProbe->id]);
+        $storage->ensureProbeStorage($detachProbe);
         $storedBar = $items->create($detachProbe->id, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01, ['test' => 'detached'], $detachContainer->id);
 
         $detachCore = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/detach-storage-container', $detachHeaders, json_encode([
@@ -1625,7 +1667,7 @@ if ($damageWarningProbe !== null) {
     $warningContainer = $storageContainers->findByUidForProbe($damageWarningProbe->id, $warningContainerId);
     if ($warningContainer !== null) {
         $storageContainers->setResourceAmount($warningContainer->id, 'metals', 0.2);
-        $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.2 WHERE id = :id')->execute(['id' => $damageWarningProbe->id]);
+        $storage->ensureProbeStorage($damageWarningProbe);
     }
 
     $markDamageWarningRead = $kernel->handle('PATCH', '/api/probe/damage-warnings/' . $warningId, $damageWarningHeaders, json_encode([], JSON_THROW_ON_ERROR));
@@ -2157,7 +2199,8 @@ $duplicateManny = $kernel->handle('PATCH', '/api/probe/mannies/' . rawurlencode(
 $test->assertEquals(409, $duplicateManny->status, 'Manny names must remain unique per probe');
 
 if ($createdProbe !== null) {
-    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 95, metals_stock = 0.05 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 95 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.05]);
     $repairManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 2], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $repairManny->status, 'POST /api/probe/mannies/{id}/repair starts a real-time repair task');
     $test->assertEquals('repair', $repairManny->body['manny']['currentTask'] ?? null, 'repair task is exposed on Manny');
@@ -2349,7 +2392,8 @@ if ($createdProbe !== null) {
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'quick recalled Manny returns to the probe after its shortened return');
 
-    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 96, metals_stock = 0.2 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 96 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.2]);
     $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 1], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $cancelRepair->status, 'fourth Manny can start a repair before cancellation');
     $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/recall', $headers, json_encode([], JSON_THROW_ON_ERROR));
@@ -2426,7 +2470,13 @@ if ($createdProbe !== null) {
     $fourthRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $fourthRow->execute(['uid' => $fourthMannyId]);
     $fourthMannyDbId = (int) $fourthRow->fetchColumn();
-    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.55, ice_stock = 0, organic_compounds_stock = 0 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $storageContainers->clearResourcesForProbe($createdProbe->id);
+    $createdCoreContainer = $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core');
+    if ($createdCoreContainer !== null) {
+        $storageContainers->setResourceAmount($createdCoreContainer->id, 'metals', 0.55);
+    }
+    $createdProbe = $probes->findById($createdProbe->id) ?? $createdProbe;
+    $storage->ensureProbeStorage($createdProbe);
     $pdo->prepare(
         'UPDATE mannies
          SET location_type = :location_type,
@@ -2465,7 +2515,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->locationType, 'freeing storage lets a waiting Manny enter the probe');
     $test->assertEquals(null, $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->currentTask, 'Manny waiting for storage returns to idle after docking');
 
-    $pdo->prepare('UPDATE neumann_probes SET metals_stock = 0.45 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.45]);
     $steelBarIds = [];
     for ($index = 0; $index < 7; $index++) {
         $steelBarIds[] = $items->create(

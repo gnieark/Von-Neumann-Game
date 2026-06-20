@@ -34,6 +34,7 @@ final class ProbeStorageService
 
     public function ensureProbeStorage(NeumannProbe $probe): void
     {
+        $existingContainers = $this->containers->findByProbeId($probe->id);
         $core = $this->containers->ensureCoreContainer($probe);
         foreach ($this->items->findByProbeId($probe->id) as $item) {
             if ($item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
@@ -45,7 +46,12 @@ final class ProbeStorageService
         $this->assignUnplacedItems($probe, $core, $knownContainerIds);
         $this->assignUnplacedMannies($probe, $core, $knownContainerIds);
         if ($this->resourceRowsDifferFromProbeTotals($probe)) {
-            $this->migrateLegacyProbe($probe);
+            if ($existingContainers === []) {
+                $this->migrateLegacyProbe($probe);
+                return;
+            }
+
+            $this->syncLegacyResourceTotals($probe);
         }
     }
 

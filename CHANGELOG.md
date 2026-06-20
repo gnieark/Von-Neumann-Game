@@ -24,6 +24,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Debug : `scripts/force-inhabited-planet.php` genere maintenant un id opaque et stable par secteur pour ses planetes forcees, et retire l'ancien objet debug du meme secteur lorsqu'il est relance.
 - Debug : `scripts/teleport-probe.php` finalise désormais les téléportations via `ProbeMovementService`, afin de déclencher les effets d'arrivée comme les scénarios de premier contact.
 - Scénarios : observer un secteur courant contenant une planète habitée lance désormais le premier contact manquant, même si l'arrivée normale a été contournée par un outil de debug.
+- Stockage : les synchronisations d'inventaire ne reconstruisent plus les ressources des containers depuis des totaux historiques potentiellement périmés, ce qui pouvait effacer des matériaux lors de requêtes concurrentes de minage ou de craft.
 - Interface : la carte de l'imprimante atomique dans `Mannys & imprimante` utilise maintenant le libelle traduit en anglais.
 - Interface : les rafraîchissements automatiques de la page Inventaires ne réinitialisent plus les règles de stockage en cours de modification.
 - Interface : la page `/movement` propose désormais par défaut les coordonnées courantes de la sonde et garde le bouton de saut désactivé tant qu'une autre destination valide n'est pas saisie; les destinations ouvertes depuis `Sensors and radars` > `Prepare jump` restent préremplies.
