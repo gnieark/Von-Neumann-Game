@@ -393,7 +393,7 @@ $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
-$missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService);
+$missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService);
@@ -1821,6 +1821,43 @@ if ($intelligentLifeProbe !== null) {
                 $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Merci pour votre aide.'), 'material drop thanks message thanks the player');
                 $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Métaux : 4.5 ECE'), 'material drop thanks message reports remaining metals');
                 $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Composés carbonés : 0.6 ECE'), 'material drop thanks message reports remaining carbon compounds');
+
+                $secondLifePlayer = $auth->registerPlayerWithPassword('second-life-alert', 'secret', 'Second Life Alert', 'Second life probe');
+                $secondLifeProbe = $probes->findByPlayerId($secondLifePlayer->id);
+                $secondLifeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'second-life-alert', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+                $secondLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($secondLifeSession->body['token'] ?? '')];
+                if ($secondLifeProbe !== null) {
+                    $pdo->prepare(
+                        "UPDATE neumann_probes
+                         SET sector_x = :x, sector_y = :y, sector_z = :z, status = 'idle', current_task = NULL, entered_current_sector_at = :now, updated_at = :now
+                         WHERE id = :id"
+                    )->execute([
+                        'id' => $secondLifeProbe->id,
+                        'x' => $intelligentLifeTarget->getX(),
+                        'y' => $intelligentLifeTarget->getY(),
+                        'z' => $intelligentLifeTarget->getZ(),
+                        'now' => gmdate('c'),
+                    ]);
+                    $visitedSectors->markVisited($secondLifePlayer, $intelligentLifeTarget);
+                    $secondLifeSector = $kernel->handle('GET', '/api/probe/sector', $secondLifeHeaders);
+                    $test->assertEquals(200, $secondLifeSector->status, 'second probe can observe the inhabited sector');
+                    $secondFirstContactMessages = $kernel->handle('GET', '/api/probe/messages', $secondLifeHeaders);
+                    $test->assertEquals('- -- --- ----- -------', $secondFirstContactMessages->body['messages'][0]['body'] ?? null, 'second probe receives the same first-contact prime-count signal');
+                    $secondFirstContactReply = $kernel->handle('POST', '/api/probe/messages', $secondLifeHeaders, json_encode([
+                        'recipient' => [
+                            'type' => 'planet',
+                            'id' => 'life-alert-planet',
+                        ],
+                        'body' => '-----------',
+                    ], JSON_THROW_ON_ERROR));
+                    $test->assertEquals(201, $secondFirstContactReply->status, 'second probe can pass the prime-sequence test');
+                    $secondMessagesAfterReply = $kernel->handle('GET', '/api/probe/messages', $secondLifeHeaders);
+                    $secondPlanetScenarioReply = $secondMessagesAfterReply->body['messages'][0] ?? null;
+                    $test->assert(is_string($secondPlanetScenarioReply['body'] ?? null) && str_contains((string) $secondPlanetScenarioReply['body'], 'Nous sommes les habitants de ce monde.'), 'second probe receives the same return-to-space resource request');
+                    $test->assert(is_string($secondPlanetScenarioReply['body'] ?? null) && str_contains((string) $secondPlanetScenarioReply['body'], 'La sonde Life probe a aussi accepté d\'aider.'), 'second probe resource request names the already helping probe');
+                    $test->assert(is_string($secondPlanetScenarioReply['body'] ?? null) && str_contains((string) $secondPlanetScenarioReply['body'], 'Métaux : 4.5 ECE'), 'second probe resource request reports remaining metals');
+                    $test->assert(is_string($secondPlanetScenarioReply['body'] ?? null) && str_contains((string) $secondPlanetScenarioReply['body'], 'Composés carbonés : 0.6 ECE'), 'second probe resource request reports remaining carbon compounds');
+                }
             }
         }
 

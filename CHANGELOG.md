@@ -14,6 +14,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Debug : ajout de `scripts/force-inhabited-planet.php` pour injecter en CLI une planete habitee dans un secteur donne.
 - API v42 : le premier contact `return_to_space_program` demande maintenant 5 ECE de métaux et 1 ECE de composés carbonés, puis comptabilise les matériaux largués par container sur la planète avec le joueur donateur.
 - Scénario : chaque largage de matériaux demandé par `return_to_space_program` déclenche un message de remerciement planétaire indiquant les matériaux restant à envoyer.
+- Scénario : une autre sonde qui réussit le test des nombres premiers du programme de retour à l'espace reçoit l'état des sondes déjà engagées et des ressources restantes.
 - Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 - Stats : ajout du podium des découvreurs de mondes habités par une espèce intelligente sur `/stats`.
 

@@ -11,6 +11,7 @@ use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\MissionRepository;
+use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
@@ -41,6 +42,7 @@ final class MissionService
         private readonly array $gameplayConfig = [],
         private readonly string $worldSeed = 'default-world',
         private readonly ?SectorService $sectors = null,
+        private readonly ?NeumannProbeRepository $probes = null,
     ) {}
 
     /**
@@ -295,8 +297,126 @@ final class MissionService
             null,
             $probe->id,
             new SectorCoordinates((int) $sectorData['x'], (int) $sectorData['y'], (int) $sectorData['z']),
-            self::RETURN_TO_SPACE_PLANET_REPLY,
+            $this->returnToSpacePlanetReplyBody($probe, $mission),
         );
+    }
+
+    private function returnToSpacePlanetReplyBody(NeumannProbe $probe, Mission $mission): string
+    {
+        $helperNames = $this->acceptedReturnToSpaceHelperProbeNames($probe, $mission);
+        if ($helperNames === []) {
+            return self::RETURN_TO_SPACE_PLANET_REPLY;
+        }
+
+        return self::RETURN_TO_SPACE_PLANET_REPLY
+            . "\n\n"
+            . $this->acceptedHelpersSentence($helperNames)
+            . "\n\n"
+            . $this->remainingMaterialsSentence($mission);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function acceptedReturnToSpaceHelperProbeNames(NeumannProbe $probe, Mission $mission): array
+    {
+        if ($this->probes === null) {
+            return [];
+        }
+        $planetId = (string) ($mission->metadata['planetId'] ?? '');
+        if ($planetId === '') {
+            return [];
+        }
+
+        $names = [];
+        foreach ($this->missions->findByType(self::FIRST_CONTACT_MISSION_TYPE, [Mission::STATUS_ACTIVE, Mission::STATUS_COMPLETED]) as $candidate) {
+            if ($candidate->probeId === $probe->id) {
+                continue;
+            }
+            if (($candidate->metadata['scenario'] ?? null) !== self::SCENARIO_RETURN_TO_SPACE_PROGRAM) {
+                continue;
+            }
+            if (($candidate->metadata['planetId'] ?? null) !== $planetId) {
+                continue;
+            }
+            if (!$this->returnToSpaceResourceRequestStarted($candidate)) {
+                continue;
+            }
+
+            $helperProbe = $this->probes->findById($candidate->probeId);
+            if ($helperProbe === null || $helperProbe->name === '') {
+                continue;
+            }
+            $names[$helperProbe->id] = $helperProbe->name;
+        }
+
+        return array_values($names);
+    }
+
+    /**
+     * @param list<string> $names
+     */
+    private function acceptedHelpersSentence(array $names): string
+    {
+        if (count($names) === 1) {
+            return 'La sonde ' . $names[0] . ' a aussi accepté d\'aider.';
+        }
+
+        return 'Les sondes ' . $this->formatFrenchList($names) . ' ont aussi accepté d\'aider.';
+    }
+
+    /**
+     * @param list<string> $values
+     */
+    private function formatFrenchList(array $values): string
+    {
+        if (count($values) <= 1) {
+            return $values[0] ?? '';
+        }
+        $last = array_pop($values);
+
+        return implode(', ', $values) . ' et ' . $last;
+    }
+
+    private function remainingMaterialsSentence(Mission $mission): string
+    {
+        $remaining = $this->remainingReturnToSpaceMaterials($mission);
+
+        return "Ressources restantes à envoyer :\nMétaux : "
+            . $this->formatEceAmount((float) ($remaining[ResourceComposition::METALS] ?? 0.0))
+            . " ECE\nComposés carbonés : "
+            . $this->formatEceAmount((float) ($remaining[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0))
+            . ' ECE';
+    }
+
+    /**
+     * @return array<string, float>
+     */
+    private function remainingReturnToSpaceMaterials(Mission $mission): array
+    {
+        $planetId = (string) ($mission->metadata['planetId'] ?? '');
+        $sectorData = is_array($mission->metadata['sector'] ?? null) ? $mission->metadata['sector'] : null;
+        if ($this->sectors !== null && $planetId !== '' && $sectorData !== null && isset($sectorData['x'], $sectorData['y'], $sectorData['z'])) {
+            $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $sectorData['x'], (int) $sectorData['y'], (int) $sectorData['z']));
+            $counter = $sector->returnToSpaceProgramMaterialCounterForPlanet($planetId);
+            if (is_array($counter['remaining'] ?? null)) {
+                return $this->normalizedReturnToSpaceRemaining($counter['remaining']);
+            }
+        }
+
+        return $this->normalizedReturnToSpaceRemaining(self::RETURN_TO_SPACE_MATERIAL_REQUIREMENTS);
+    }
+
+    /**
+     * @param array<string, mixed> $remaining
+     * @return array<string, float>
+     */
+    private function normalizedReturnToSpaceRemaining(array $remaining): array
+    {
+        return [
+            ResourceComposition::METALS => round(max(0.0, (float) ($remaining[ResourceComposition::METALS] ?? 0.0)), 4),
+            ResourceComposition::CARBON_COMPOUNDS => round(max(0.0, (float) ($remaining[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0)), 4),
+        ];
     }
 
     private function initializeReturnToSpaceMaterialCounter(Mission $mission): void
