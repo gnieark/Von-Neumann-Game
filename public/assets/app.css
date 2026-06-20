@@ -2929,6 +2929,17 @@ button.account-menu-item {
     grid-template-columns: repeat(3, minmax(86px, 1fr)) minmax(150px, auto);
 }
 
+.movement-risk-warning {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 8px 10px;
+    border-left: 2px solid rgba(255, 207, 85, .58);
+    background: rgba(31, 21, 6, .42);
+    color: #d8bd78;
+    font-size: .82rem;
+    line-height: 1.45;
+}
+
 .coordinate-form::before,
 .action-panel::before {
     content: "";

@@ -92,6 +92,64 @@
         state.syncedDefaultTarget = true;
     }
 
+    function movementDistance(target) {
+        const destination = relativeCoordinates(target);
+        const origin = relativeCoordinates(state.currentProbeSectorRelative);
+        if (destination === null || origin === null) {
+            return null;
+        }
+
+        return Math.max(
+            Math.abs(destination.x - origin.x),
+            Math.abs(destination.y - origin.y),
+            Math.abs(destination.z - origin.z)
+        );
+    }
+
+    function destructionWarningConfig() {
+        const form = document.getElementById("move-form");
+        const warningDistance = Number.parseInt(form?.dataset.destructionWarningDistance || "3", 10);
+        const riskPercent = Number.parseFloat(form?.dataset.destructionWarningRiskPercent || "5");
+
+        return {
+            "distance": Number.isFinite(warningDistance) && warningDistance > 0 ? warningDistance : 3,
+            "riskPercent": Number.isFinite(riskPercent) && riskPercent >= 0 ? riskPercent : 5,
+        };
+    }
+
+    function formatRiskPercent(value) {
+        return new Intl.NumberFormat(document.documentElement.lang || undefined, {
+            "maximumFractionDigits": 2,
+        }).format(value);
+    }
+
+    function renderMovementRiskWarning() {
+        const node = document.getElementById("movement-risk-warning");
+        if (!node) {
+            return;
+        }
+
+        const target = moveFormTarget();
+        const distance = movementDistance(target);
+        const config = destructionWarningConfig();
+        if (!window.VNG.validRelativeCoordinates(target) || distance === null || distance < config.distance) {
+            node.hidden = true;
+            node.textContent = "";
+            return;
+        }
+
+        node.textContent = distance === config.distance
+            ? window.VNG.formatText(
+                tr("movementDestructionRiskKnown", "From {distance} sectors away, celestial objects that may cross the probe trajectory can no longer be reliably anticipated. For this route, the probe destruction risk is {riskPercent}%."),
+                {"distance": config.distance, "riskPercent": formatRiskPercent(config.riskPercent)}
+            )
+            : window.VNG.formatText(
+                tr("movementDestructionRiskElevated", "From {distance} sectors away, celestial objects that may cross the probe trajectory can no longer be reliably anticipated. For this route, the probe destruction risk becomes non-negligible."),
+                {"distance": config.distance}
+            );
+        node.hidden = false;
+    }
+
     function checklistValue(ok) {
         return "<span class=\"checklist-value " + (ok === true ? "ok" : "warn") + "\">"
             + window.VNG.escapeHtml(ok === null ? "-" : (ok ? tr("checklistYes", "Yes") : tr("checklistNo", "No")))
@@ -143,6 +201,7 @@
             control.title = button.title;
             control.setAttribute("aria-disabled", button.disabled ? "true" : "false");
         }
+        renderMovementRiskWarning();
     }
 
     function manniesOutsideProbeInCurrentSector(mannies) {

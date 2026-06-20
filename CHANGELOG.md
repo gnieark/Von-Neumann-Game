@@ -27,6 +27,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Interface : la carte de l'imprimante atomique dans `Mannys & imprimante` utilise maintenant le libelle traduit en anglais.
 - Interface : les rafraîchissements automatiques de la page Inventaires ne réinitialisent plus les règles de stockage en cours de modification.
 - Interface : la page `/movement` propose désormais par défaut les coordonnées courantes de la sonde et garde le bouton de saut désactivé tant qu'une autre destination valide n'est pas saisie; les destinations ouvertes depuis `Sensors and radars` > `Prepare jump` restent préremplies.
+- Interface : la page `/movement` affiche un avertissement discret lorsqu'une destination atteint la distance où un risque de destruction en croisière apparaît.
 
 ## 2026-06-17
 

@@ -1,6 +1,8 @@
 <?php
 namespace VonNeumannGame\FrontRoute;
 
+use VonNeumannGame\Config\Config;
+use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\View\TplBlock;
 
@@ -22,12 +24,20 @@ class FrontRouteMovement extends FrontRoute{
         $projectRoot = dirname(__DIR__, 2);
         $translator = new Translator(Translator::normalize($language));
         $coordinates = $this->coordinatesFromRoutePath($routePath);
+        $movementConfig = Config::getArray((new JsonConfigLoader($projectRoot))->load('gameplay'), 'movement');
+        $destructionWarningDistance = Config::int($movementConfig, 'destructionSafeDistance', 2) + 1;
+        $destructionRisks = Config::getArray($movementConfig, 'destructionRiskByDistance', ['3' => 0.05]);
+        $destructionRisk = is_numeric($destructionRisks[(string) $destructionWarningDistance] ?? null)
+            ? (float) $destructionRisks[(string) $destructionWarningDistance]
+            : (float) ($destructionRisks['default'] ?? 0.05);
         $tpl = new TplBlock();
         $tpl->addPrefixedVars('t', $translator->allEscaped());
         $tpl->addVars([
             'initialX' => self::e((string) ($coordinates['x'] ?? 0)),
             'initialY' => self::e((string) ($coordinates['y'] ?? 0)),
             'initialZ' => self::e((string) ($coordinates['z'] ?? 0)),
+            'destructionWarningDistance' => self::e((string) $destructionWarningDistance),
+            'destructionWarningRiskPercent' => self::e((string) round(max(0.0, min(1.0, $destructionRisk)) * 100, 2)),
         ]);
 
         return $tpl->applyTplFile($projectRoot . '/templates/movement.html');
