@@ -6,8 +6,11 @@
     const state = {
         currentMannies: [],
         currentProbeSectorRelative: null,
+        hasExplicitRouteTarget: /^\/movement\/-?\d+\/-?\d+\/-?\d+$/.test(window.location.pathname),
         probeAlreadyMoving: false,
         probeDeuteriumSufficient: false,
+        syncedDefaultTarget: false,
+        userEditedTarget: false,
     };
 
     let i18n = {};
@@ -66,6 +69,29 @@
         };
     }
 
+    function syncMoveFormTarget(target) {
+        const form = document.getElementById("move-form");
+        const relative = relativeCoordinates(target);
+        if (!form || relative === null) {
+            return;
+        }
+
+        ["x", "y", "z"].forEach((field) => {
+            if (form.elements[field]) {
+                form.elements[field].value = String(relative[field]);
+            }
+        });
+    }
+
+    function syncDefaultTargetFromCurrentSector() {
+        if (state.hasExplicitRouteTarget || state.syncedDefaultTarget || state.userEditedTarget || state.currentProbeSectorRelative === null) {
+            return;
+        }
+
+        syncMoveFormTarget(state.currentProbeSectorRelative);
+        state.syncedDefaultTarget = true;
+    }
+
     function checklistValue(ok) {
         return "<span class=\"checklist-value " + (ok === true ? "ok" : "warn") + "\">"
             + window.VNG.escapeHtml(ok === null ? "-" : (ok ? tr("checklistYes", "Yes") : tr("checklistNo", "No")))
@@ -98,20 +124,23 @@
             return;
         }
 
-        const targetInvalid = !window.VNG.validRelativeCoordinates(moveFormTarget());
+        const target = moveFormTarget();
+        const targetInvalid = !window.VNG.validRelativeCoordinates(target);
+        const targetIsCurrent = !targetInvalid && sameRelativeCoordinates(target, state.currentProbeSectorRelative);
         const blockedByFuel = !state.probeDeuteriumSufficient;
         const invalidMessage = tr("invalidCoordinates", "Invalid relative coordinates: x + y + z must be even.");
         const alreadyMovingMessage = tr("probeAlreadyMoving", "The probe is already moving between sectors.");
         const fuelMessage = tr("insufficientFuelForJump", "Insufficient deuterium to initiate a jump.");
+        const currentSectorMessage = tr("currentSectorDestination", "Choose a different sector to initiate a jump.");
 
-        button.disabled = state.probeAlreadyMoving || blockedByFuel || targetInvalid;
+        button.disabled = state.probeAlreadyMoving || blockedByFuel || targetInvalid || targetIsCurrent;
         button.title = state.probeAlreadyMoving
             ? alreadyMovingMessage
-            : (blockedByFuel ? fuelMessage : (targetInvalid ? invalidMessage : ""));
+            : (blockedByFuel ? fuelMessage : (targetInvalid ? invalidMessage : (targetIsCurrent ? currentSectorMessage : "")));
         button.setAttribute("aria-disabled", button.disabled ? "true" : "false");
         if (control) {
-            control.classList.toggle("disabled", targetInvalid);
-            control.title = targetInvalid ? invalidMessage : "";
+            control.classList.toggle("disabled", button.disabled);
+            control.title = button.title;
             control.setAttribute("aria-disabled", button.disabled ? "true" : "false");
         }
     }
@@ -136,6 +165,7 @@
         state.currentProbeSectorRelative = sector ? relativeCoordinates(sector) : null;
         state.probeAlreadyMoving = Boolean(movement && ["preparing", "accelerating", "cruising", "decelerating"].includes(movement.phase || movement.status));
         state.probeDeuteriumSufficient = Number(probe && probe.fuel ? probe.fuel.deuterium : 0) > 0.0001;
+        syncDefaultTargetFromCurrentSector();
 
         return data;
     }
@@ -219,6 +249,11 @@
             applyMoveButtonState();
             return;
         }
+        if (sameRelativeCoordinates(target, state.currentProbeSectorRelative)) {
+            setText("action-status", tr("currentSectorDestination", "Choose a different sector to initiate a jump."));
+            applyMoveButtonState();
+            return;
+        }
         if (!await confirmJumpWithMannies()) {
             setText("action-status", tr("movementCancelled", "Movement cancelled."));
             return;
@@ -240,7 +275,10 @@
 
     function bindPage() {
         document.getElementById("move-form")?.addEventListener("submit", submitMovement);
-        document.getElementById("move-form")?.addEventListener("input", applyMoveButtonState);
+        document.getElementById("move-form")?.addEventListener("input", () => {
+            state.userEditedTarget = true;
+            applyMoveButtonState();
+        });
         document.getElementById("jump-control")?.addEventListener("click", () => {
             if (state.probeAlreadyMoving) {
                 setText("action-status", tr("probeAlreadyMoving", "The probe is already moving between sectors."));
@@ -252,6 +290,10 @@
             }
             if (!window.VNG.validRelativeCoordinates(moveFormTarget())) {
                 setText("action-status", tr("invalidCoordinates", "Invalid relative coordinates: x + y + z must be even."));
+                return;
+            }
+            if (sameRelativeCoordinates(moveFormTarget(), state.currentProbeSectorRelative)) {
+                setText("action-status", tr("currentSectorDestination", "Choose a different sector to initiate a jump."));
             }
         });
         document.querySelector("[data-refresh=\"movement\"]")?.addEventListener("click", refreshMovementState);

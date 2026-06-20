@@ -26,6 +26,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Scénarios : observer un secteur courant contenant une planète habitée lance désormais le premier contact manquant, même si l'arrivée normale a été contournée par un outil de debug.
 - Interface : la carte de l'imprimante atomique dans `Mannys & imprimante` utilise maintenant le libelle traduit en anglais.
 - Interface : les rafraîchissements automatiques de la page Inventaires ne réinitialisent plus les règles de stockage en cours de modification.
+- Interface : la page `/movement` propose désormais par défaut les coordonnées courantes de la sonde et garde le bouton de saut désactivé tant qu'une autre destination valide n'est pas saisie; les destinations ouvertes depuis `Sensors and radars` > `Prepare jump` restent préremplies.
 
 ## 2026-06-17
 
