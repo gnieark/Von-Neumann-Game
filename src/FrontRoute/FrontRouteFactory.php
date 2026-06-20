@@ -45,6 +45,12 @@ class FrontRouteFactory{
 
     private static function addMenuItems(FrontRoute $frontRoute, array $availableRoutes, ?array $activeRoute, string $projectRoot): void
     {
+
+        //custom footer menu items from config
+        foreach (self::additionalFooterMenuItems($projectRoot) as $menuItem) {
+            $frontRoute->addFooterMenuItem($menuItem);
+        }
+
         //Add menus items
         foreach($availableRoutes as $route){
 
@@ -69,9 +75,7 @@ class FrontRouteFactory{
             }
         }
 
-        foreach (self::additionalFooterMenuItems($projectRoot) as $menuItem) {
-            $frontRoute->addFooterMenuItem($menuItem);
-        }
+
     }
 
     /**
