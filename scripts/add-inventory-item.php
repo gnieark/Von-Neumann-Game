@@ -11,6 +11,7 @@ use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Service\ProbeStorageService;
+use VonNeumannGame\Domain\ResourceComposition;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -49,11 +50,27 @@ function addInventoryItemRun(array $argv): int
     $objectName = $options['object'] ?? throw new InvalidArgumentException('Missing object name.');
     $quantity = $options['quantity'] ?? throw new InvalidArgumentException('Missing quantity.');
     $playerId = $options['playerId'] ?? throw new InvalidArgumentException('Missing player id.');
-    $definition = addInventoryItemResolveDefinition($objectName, $craftingConfig);
-    $output = is_array($definition['output'] ?? null) ? $definition['output'] : [];
-    $type = (string) ($output['type'] ?? $definition['id'] ?? '');
-    if ($type === '') {
-        throw new RuntimeException('Resolved object has no output type.');
+    // Allow mineable resources (metals, ice, carbon_compounds, deuterium)
+    $isResource = false;
+    try {
+        $resourceTypes = ResourceComposition::normalizeSelection($objectName);
+        $resourceType = $resourceTypes[0] ?? null;
+        if ($resourceType !== null) {
+            $isResource = true;
+            $definition = ['id' => $resourceType, 'name' => $resourceType];
+            $type = $resourceType;
+        }
+    } catch (InvalidArgumentException) {
+        $isResource = false;
+    }
+
+    if (!$isResource) {
+        $definition = addInventoryItemResolveDefinition($objectName, $craftingConfig);
+        $output = is_array($definition['output'] ?? null) ? $definition['output'] : [];
+        $type = (string) ($output['type'] ?? $definition['id'] ?? '');
+        if ($type === '') {
+            throw new RuntimeException('Resolved object has no output type.');
+        }
     }
 
     $pdo = $factory->pdo($options['databaseConfig'], initializeSchema: true);
@@ -71,6 +88,7 @@ function addInventoryItemRun(array $argv): int
 
     $createdItemUids = [];
     $createdMannyUids = [];
+    $addedResource = null;
     $pdo->beginTransaction();
     try {
         if ($type === 'manny') {
@@ -85,6 +103,14 @@ function addInventoryItemRun(array $argv): int
                 ];
                 $mannies->save($manny);
                 $createdMannyUids[] = $manny->uid;
+            }
+        } elseif ($isResource) {
+            // Add resource amounts (quantity is used as amount)
+            $amount = (float) $quantity;
+            $accepted = $storage->addResource($probe, $type, $amount);
+            $addedResource = $accepted;
+            if ($accepted <= 0.0) {
+                throw new RuntimeException('Insufficient probe cargo capacity for this resource.');
             }
         } else {
             $metadata = [
@@ -121,9 +147,16 @@ function addInventoryItemRun(array $argv): int
         throw $e;
     }
 
-    echo ($options['dryRun'] ? '[dry-run] Would add' : 'Added')
-        . " {$quantity} x " . (string) ($definition['name'] ?? $type)
-        . " ({$type}) to player #{$player->id} ({$player->username}), probe #{$probe->id}.\n";
+    if ($isResource) {
+        $displayAmount = $addedResource !== null ? $addedResource : $quantity;
+        echo ($options['dryRun'] ? '[dry-run] Would add' : 'Added')
+            . " {$displayAmount} x " . (string) ($definition['name'] ?? $type)
+            . " ({$type}) to player #{$player->id} ({$player->username}), probe #{$probe->id}.\n";
+    } else {
+        echo ($options['dryRun'] ? '[dry-run] Would add' : 'Added')
+            . " {$quantity} x " . (string) ($definition['name'] ?? $type)
+            . " ({$type}) to player #{$player->id} ({$player->username}), probe #{$probe->id}.\n";
+    }
     if ($createdItemUids !== []) {
         echo '- item uids: ' . implode(', ', $createdItemUids) . "\n";
     }
