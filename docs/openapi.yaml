@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '42'
+  version: '43'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 42
+                apiVersion: 43
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2031,6 +2031,38 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Manny is outside the probe current sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/drop-manny-cargo:
+    post:
+      summary: Drop a waiting Manny cargo and retry docking
+      description: >
+        Immediately discards the cargo of a Manny currently waiting outside for
+        storage space, then retries docking without that cargo. Resource cargo is
+        lost. Recoverable cargo objects, such as a salvaged Manny, drifting item,
+        or detached storage container, are restored to the current sector as
+        drifting/recoverable objects.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      responses:
+        '202':
+          description: Cargo dropped and Manny state refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is not waiting for storage space or is outside the current sector
           content:
             application/json:
               schema:

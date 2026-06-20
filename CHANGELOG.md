@@ -13,7 +13,9 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v37 : les arrivees dans un secteur jamais visite contenant une planete habitee peuvent declencher un scenario de premier contact pondere par `gameplay.intelligentLife.scenarios`; le premier scenario implemente, `return_to_space_program`, cree une mission `Premier contact` et un message planetaire en nombres premiers.
 - Debug : ajout de `scripts/force-inhabited-planet.php` pour injecter en CLI une planete habitee dans un secteur donne.
 - API v42 : le premier contact `return_to_space_program` demande maintenant 5 ECE de métaux et 1 ECE de composés carbonés, puis comptabilise les matériaux largués par container sur la planète avec le joueur donateur.
+- API v43 : ajout de `POST /api/probe/mannies/{mannyId}/drop-manny-cargo` pour larguer immédiatement la cargaison d’une Manny en attente de place et retenter son retour à bord.
 - Scénario : chaque largage de matériaux demandé par `return_to_space_program` déclenche un message de remerciement planétaire indiquant les matériaux restant à envoyer.
+- Interface : dans `/mannies`, une Manny `waiting_for_space` propose de rentrer sans sa cargaison.
 - Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 - Stats : ajout du podium des découvreurs de mondes habités par une espèce intelligente sur `/stats`.
 

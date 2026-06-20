@@ -427,7 +427,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(42, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(43, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2473,20 +2473,25 @@ if ($createdProbe !== null) {
     $storageContainers->clearResourcesForProbe($createdProbe->id);
     $createdCoreContainer = $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core');
     if ($createdCoreContainer !== null) {
-        $storageContainers->setResourceAmount($createdCoreContainer->id, 'metals', 0.55);
+        $storageContainers->setResourceAmount($createdCoreContainer->id, 'metals', 0.45);
     }
     $createdProbe = $probes->findById($createdProbe->id) ?? $createdProbe;
     $storage->ensureProbeStorage($createdProbe);
     $pdo->prepare(
         'UPDATE mannies
-         SET location_type = :location_type,
+         SET storage_container_id = NULL,
+             location_type = :location_type,
              sector_x = :sector_x,
              sector_y = :sector_y,
              sector_z = :sector_z,
              current_task = :current_task,
              task_started_at = :started,
              task_ends_at = :ended,
-             task_payload_json = :payload
+             task_payload_json = :payload,
+             cargo_deuterium = 0,
+             cargo_metals = 0.45,
+             cargo_ice = 0,
+             cargo_organic_compounds = 0
          WHERE id = :id'
     )->execute([
         'id' => $fourthMannyDbId,
@@ -2506,6 +2511,53 @@ if ($createdProbe !== null) {
     ))[0] ?? null;
     $test->assertEquals('waiting_for_space', $waitingFourth['currentTask'] ?? null, 'returning Manny waits outside when the probe has no storage slot');
     $test->assertEquals('sector', $waitingFourth['location']['type'] ?? null, 'waiting Manny remains in the sector');
+
+    $dropMannyCargo = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/drop-manny-cargo', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $dropMannyCargo->status, 'POST /api/probe/mannies/{id}/drop-manny-cargo accepts a waiting Manny cargo drop');
+    $test->assertEquals('probe', $dropMannyCargo->body['manny']['location']['type'] ?? null, 'dropping cargo lets a waiting Manny retry docking immediately');
+    $test->assertEquals(null, $dropMannyCargo->body['manny']['currentTask'] ?? null, 'Manny is idle after dropping cargo and docking');
+    $test->assertEquals(0.0, $dropMannyCargo->body['manny']['cargo']['metals'] ?? null, 'dropped Manny cargo is cleared');
+    $test->assertEquals(0.45, $probes->findByPlayerId($player->id)?->metalsStock, 'dropped Manny cargo is not transferred into probe storage');
+
+    $storageContainers->clearResourcesForProbe($createdProbe->id);
+    if ($createdCoreContainer !== null) {
+        $storageContainers->setResourceAmount($createdCoreContainer->id, 'metals', 0.55);
+    }
+    $createdProbe = $probes->findById($createdProbe->id) ?? $createdProbe;
+    $storage->ensureProbeStorage($createdProbe);
+    $pdo->prepare(
+        'UPDATE mannies
+         SET storage_container_id = NULL,
+             location_type = :location_type,
+             sector_x = :sector_x,
+             sector_y = :sector_y,
+             sector_z = :sector_z,
+             current_task = :current_task,
+             task_started_at = :started,
+             task_ends_at = :ended,
+             task_payload_json = :payload,
+             cargo_deuterium = 0,
+             cargo_metals = 0,
+             cargo_ice = 0,
+             cargo_organic_compounds = 0
+         WHERE id = :id'
+    )->execute([
+        'id' => $fourthMannyDbId,
+        'location_type' => 'sector',
+        'sector_x' => $createdProbe->currentSector->getX(),
+        'sector_y' => $createdProbe->currentSector->getY(),
+        'sector_z' => $createdProbe->currentSector->getZ(),
+        'current_task' => 'returning',
+        'started' => gmdate('c', time() - 1800),
+        'ended' => gmdate('c', time() - 1),
+        'payload' => json_encode(['reason' => 'test_return'], JSON_THROW_ON_ERROR),
+    ]);
+    $waitingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $waitingFourth = array_values(array_filter(
+        $waitingMannies->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $fourthMannyId,
+    ))[0] ?? null;
+    $test->assertEquals('waiting_for_space', $waitingFourth['currentTask'] ?? null, 'returning Manny can still wait outside when only its storage slot is missing');
 
     $jettisonMetals = $kernel->handle('POST', '/api/probe/inventory/probe-' . $createdProbe->id . '-stock-metals/jettison', $headers, json_encode([
         'amount' => 0.05,
@@ -2612,6 +2664,50 @@ if ($createdProbe !== null) {
     ))[0] ?? null;
     $test->assertEquals(null, $salvageActor['currentTask'] ?? null, 'salvage actor returns to idle after successful recovery');
     $test->assertEquals('success', $salvageActor['task']['result'] ?? null, 'successful salvage records its result');
+
+    $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.45]);
+    $pdo->prepare(
+        'UPDATE mannies
+         SET storage_container_id = NULL,
+             location_type = :location_type,
+             sector_x = :sector_x,
+             sector_y = :sector_y,
+             sector_z = :sector_z,
+             current_task = :current_task,
+             task_started_at = :started,
+             task_ends_at = NULL,
+             task_payload_json = :payload,
+             cargo_deuterium = 0,
+             cargo_metals = 0,
+             cargo_ice = 0,
+             cargo_organic_compounds = 0
+         WHERE uid = :uid'
+    )->execute([
+        'uid' => $firstMannyId,
+        'location_type' => 'sector',
+        'sector_x' => $createdProbe->currentSector->getX(),
+        'sector_y' => $createdProbe->currentSector->getY(),
+        'sector_z' => $createdProbe->currentSector->getZ(),
+        'current_task' => 'waiting_for_space',
+        'started' => gmdate('c'),
+        'payload' => json_encode([
+            'reason' => 'salvage_return',
+            'waitingFor' => 'storage_space',
+            'salvaged' => [
+                'type' => 'manny',
+                'id' => $fourthMannyId,
+                'name' => $recoveredManny?->name,
+            ],
+        ], JSON_THROW_ON_ERROR),
+    ]);
+    $dropSalvagedMannyCargo = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/drop-manny-cargo', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $dropSalvagedMannyCargo->status, 'dropping a salvaged Manny cargo is accepted');
+    $test->assertEquals('probe', $dropSalvagedMannyCargo->body['manny']['location']['type'] ?? null, 'salvage actor retries docking after dropping Manny cargo');
+    $droppedRecoveredManny = $mannies->findByUid($fourthMannyId);
+    $test->assertEquals(null, $droppedRecoveredManny?->probeId, 'dropped salvaged Manny becomes unowned again');
+    $sectorAfterDroppedMannyCargo = $sectorRepository->load($createdProbe->currentSector);
+    $droppedMannyCargoObject = $sectorAfterDroppedMannyCargo->findObjectById(SectorManny::objectIdForUid($fourthMannyId));
+    $test->assertEquals(SectorManny::STATE_ABANDONED, $droppedMannyCargoObject?->toArray()['state'] ?? null, 'dropped salvaged Manny is restored as an abandoned sector object');
 
     $raceManny = $mannies->createForProbe($createdProbe->id, 'race-manny');
     $raceManny->probeId = null;

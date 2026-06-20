@@ -733,6 +733,42 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
+    public function dropMannyCargo(NeumannProbe $probe, string $uid): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->requiredManny($probe, $uid);
+        $this->ensureMannyInRange($manny, $probe);
+        if ($manny->currentTask !== Manny::TASK_WAITING_FOR_SPACE) {
+            throw new MannyActionException(409, 'manny_not_waiting_for_space', 'The Manny is not waiting for storage space.');
+        }
+
+        $droppedCargo = $this->dropWaitingMannyCargo($manny);
+        $resultPayload = [
+            'lastTask' => 'drop_manny_cargo',
+            'result' => 'success',
+            'droppedCargo' => $droppedCargo,
+        ];
+        $this->clearMannyCargo($manny);
+        $manny->taskPayload = $resultPayload;
+
+        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+            $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe'] + $resultPayload);
+            $this->probes->save($probe);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+
+        $this->removeMannyFromSector($manny);
+        $manny->locationType = Manny::LOCATION_PROBE;
+        $manny->sector = null;
+        $this->clearTask($manny, $resultPayload);
+        $this->probes->save($probe);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
     public function jettisonMannyFromProbe(NeumannProbe $probe, string $uid): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
@@ -2204,6 +2240,116 @@ final class MannyService
             $sector->addObject($container);
         }
         $this->sectors->saveSector($sector);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function dropWaitingMannyCargo(Manny $manny): array
+    {
+        $dropped = [];
+        $resourceCargo = $this->mannyResourceCargo($manny);
+        if ($resourceCargo !== []) {
+            $dropped[] = [
+                'type' => 'resources',
+                'resources' => $resourceCargo,
+            ];
+        }
+
+        $reservedItem = $this->reservedSalvageItemPayload($manny);
+        if ($reservedItem !== null) {
+            $this->restoreReservedSalvageItem($manny);
+            $dropped[] = [
+                'type' => 'drifting_item',
+                'objectId' => $reservedItem['objectId'],
+                'itemType' => $reservedItem['type'],
+                'name' => $reservedItem['name'],
+                'quantity' => $reservedItem['quantity'],
+                'containerSpace' => $reservedItem['containerSpace'],
+                'capacityUnit' => $reservedItem['capacityUnit'],
+            ];
+        }
+
+        $reservedDetachedContainer = $this->reservedDetachedContainerPayload($manny);
+        if ($reservedDetachedContainer !== null) {
+            $this->restoreReservedDetachedContainer($manny);
+            $dropped[] = [
+                'type' => 'detached_storage_container',
+                'objectId' => $reservedDetachedContainer['objectId'],
+                'mode' => $reservedDetachedContainer['mode'],
+                'capacity' => $reservedDetachedContainer['capacity'],
+                'capacityUnit' => $reservedDetachedContainer['capacityUnit'],
+                'targetObjectId' => $reservedDetachedContainer['targetObjectId'],
+            ];
+        }
+
+        $salvagedManny = $this->restoreSalvagedMannyCargo($manny);
+        if ($salvagedManny !== null) {
+            $dropped[] = $salvagedManny;
+        }
+
+        return $dropped;
+    }
+
+    /**
+     * @return array<string, float>
+     */
+    private function mannyResourceCargo(Manny $manny): array
+    {
+        $resources = [
+            ResourceComposition::DEUTERIUM => $manny->cargoDeuterium,
+            ResourceComposition::METALS => $manny->cargoMetals,
+            ResourceComposition::ICE => $manny->cargoIce,
+            ResourceComposition::CARBON_COMPOUNDS => $manny->cargoOrganicCompounds,
+        ];
+
+        return array_filter(
+            array_map(static fn(float $amount): float => round(max(0.0, $amount), 4), $resources),
+            static fn(float $amount): bool => $amount > 0.0001,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function restoreSalvagedMannyCargo(Manny $manny): ?array
+    {
+        $salvaged = $manny->taskPayload['salvaged'] ?? null;
+        if (!is_array($salvaged) || ($salvaged['type'] ?? null) !== 'manny' || !is_string($salvaged['id'] ?? null) || $manny->sector === null) {
+            return null;
+        }
+
+        $recovered = $this->mannies->findByUid($salvaged['id']);
+        if ($recovered === null || $recovered->id === $manny->id || $recovered->sector === null || !$recovered->sector->equals($manny->sector)) {
+            return null;
+        }
+
+        $recovered->probeId = null;
+        $recovered->storageContainerId = null;
+        $recovered->locationType = Manny::LOCATION_SECTOR;
+        $recovered->sector = $manny->sector;
+        $this->clearTask($recovered);
+        $this->mannies->save($recovered);
+
+        $sector = $this->sectors->getOrCreateSector($manny->sector);
+        $object = new SectorManny(
+            SectorManny::objectIdForUid($recovered->uid),
+            $recovered->name,
+            $recovered->uid,
+            SectorManny::STATE_ABANDONED,
+            $this->mannyCargoArray($recovered),
+            'Manny abandoned after its carrier dropped cargo.',
+        );
+        if (!$sector->replaceObject($object)) {
+            $sector->addObject($object);
+        }
+        $this->sectors->saveSector($sector);
+
+        return [
+            'type' => 'manny',
+            'id' => $recovered->uid,
+            'name' => $recovered->name,
+        ];
     }
 
     private function restoreConsumedDropKit(NeumannProbe $probe, Manny $manny): void

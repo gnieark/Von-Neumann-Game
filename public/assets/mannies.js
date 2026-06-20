@@ -1002,6 +1002,13 @@
                 + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(tr("cancelCrafting", "Cancel crafting")) + "</button>"
                 + "</section>";
         }
+        if (manny.currentTask === "waiting_for_space") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("waitingForSpace", "Waiting for space")) + "</h4>"
+                + "<p>" + escaped(tr("waitingForSpaceCargoHint", "The Manny is waiting outside until the probe can accept its cargo and storage slot.")) + "</p>"
+                + "<button class=\"manny-drop-cargo-button\" type=\"button\">" + escaped(tr("dropMannyCargo", "Bring Manny back without cargo")) + "</button>"
+                + "</section>";
+        }
         if (manny.currentTask === "salvage") {
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("salvageInProgress", "Recovery in progress")) + "</h4>"
@@ -2159,6 +2166,27 @@
                 settingsButton.setAttribute("aria-expanded", willOpen ? "true" : "false");
                 if (willOpen) {
                     renameForm.querySelector("input[name=\"name\"]")?.focus();
+                }
+                return;
+            }
+
+            const dropCargoButton = event.target.closest(".manny-drop-cargo-button");
+            if (dropCargoButton) {
+                const card = dropCargoButton.closest(".manny-card");
+                const mannyId = card && card.dataset.mannyId;
+                if (!mannyId) {
+                    return;
+                }
+                setStatus(tr("orderSent", "Order transmitted..."));
+                try {
+                    await window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/drop-manny-cargo", {
+                        "method": "POST",
+                        "body": JSON.stringify({}),
+                    });
+                    setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
+                    await refreshManniesPage();
+                } catch (error) {
+                    setStatus(error.message || tr("requestDenied", "Request denied"));
                 }
                 return;
             }
