@@ -545,6 +545,27 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($userinfosText, 'Inventory'), 'userinfos CLI reports inventory state');
     $test->assert(str_contains($userinfosText, 'Visited sectors'), 'userinfos CLI reports visited sector history');
 
+    $cliSectorUniverse = $tmp . DIRECTORY_SEPARATOR . 'cli-sector-universe';
+    $cliSectorRepository = new SectorFileRepository($cliSectorUniverse);
+    $cliSectorCoordinates = new SectorCoordinates(4, 0, 0);
+    $cliSectorRepository->save(new SectorContent($cliSectorCoordinates, source: 'cli-test'));
+    $sectorJsonCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/sector-json.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' 4 0 0';
+    exec($sectorJsonCommand . ' 2>&1', $sectorJsonOutput, $sectorJsonStatus);
+    $sectorJsonText = implode("\n", $sectorJsonOutput);
+    $test->assertEquals(0, $sectorJsonStatus, 'sector-json CLI exits successfully for an existing sector');
+    $test->assertEquals(['x' => 4, 'y' => 0, 'z' => 0], json_decode($sectorJsonText, true, 512, JSON_THROW_ON_ERROR)['coordinates'] ?? null, 'sector-json CLI prints the sector JSON');
+    $sectorJsonPathCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/sector-json.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --path-only'
+        . ' --sector=4,0,0';
+    exec($sectorJsonPathCommand . ' 2>&1', $sectorJsonPathOutput, $sectorJsonPathStatus);
+    $test->assertEquals(0, $sectorJsonPathStatus, 'sector-json CLI path-only exits successfully');
+    $test->assertEquals($cliSectorRepository->getPath($cliSectorCoordinates), $sectorJsonPathOutput[0] ?? null, 'sector-json CLI path-only prints the resolved sector path');
+
     $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
     if ($cliInventoryProbe !== null) {
