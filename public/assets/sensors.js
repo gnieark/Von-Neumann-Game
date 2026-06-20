@@ -11,6 +11,14 @@
     let currentScanTarget = null;
     let neighborScanRunId = 0;
     let neighborScanInProgress = false;
+    const visitedHistoryState = {
+        expanded: false,
+        loaded: false,
+        loading: false,
+        renderedCount: 0,
+        sectors: [],
+    };
+    const VISITED_HISTORY_PAGE_SIZE = 9;
 
     function withVng(callback) {
         if (window.VNG) {
@@ -150,6 +158,22 @@
         if (node) {
             node.textContent = value;
         }
+    }
+
+    function formatDate(value) {
+        if (!value) {
+            return "-";
+        }
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return String(value);
+        }
+
+        return new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
+            "dateStyle": "short",
+            "timeStyle": "short",
+        }).format(date);
     }
 
     function relativeCoordinates(value) {
@@ -875,6 +899,171 @@
         }
     }
 
+    function setVisitedHistoryStatus(message) {
+        const node = document.getElementById("visited-history-status");
+        if (!node) {
+            return;
+        }
+
+        node.textContent = message;
+        node.hidden = message === "";
+    }
+
+    function sectorObjectSummaryItems(sector) {
+        const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
+        const displayObjects = objects.concat(sectorBookmarkObjects(sector), sectorProbeObjects(sector));
+        if (displayObjects.length === 0) {
+            return "<p>" + window.VNG.escapeHtml(tr("sectorSummaryEmpty", "Empty sector.")) + "</p>";
+        }
+
+        return displayObjects.map((object) => {
+            const danger = object.dangerLevel || "unknown";
+
+            return "<article class=\"visited-sector-object\">"
+                + "<div class=\"sector-object-heading\"><span>" + window.VNG.escapeHtml(objectTypeLabel(object.type || "unknown")) + "</span><b>" + window.VNG.escapeHtml(dangerLevelLabel(danger)) + "</b></div>"
+                + "<p>" + window.VNG.escapeHtml(observationSummaryLabel(object.summary || "")) + "</p>"
+                + objectDetailHtml(object)
+                + "</article>";
+        }).join("");
+    }
+
+    function visitedSectorTileHtml(entry, sector, error) {
+        const target = relativeCoordinates(entry && entry.relativeCoordinates);
+        const coordinates = window.VNG.coordinate(target);
+        const summary = error ? scanErrorMessage(error) : sectorSummary(sector);
+        const visitDate = formatDate(entry && (entry.lastVisitedAt || entry.firstVisitedAt));
+        const visitCount = Number(entry && entry.visitCount);
+        const details = error
+            ? ""
+            : "<details class=\"visited-sector-details\">"
+                + "<summary>" + window.VNG.escapeHtml(tr("sectorVisitedDetails", "Detailed scan")) + "</summary>"
+                + sectorObjectSummaryItems(sector)
+            + "</details>";
+
+        return "<article class=\"neighbor-sector-tile visited-sector-tile\">"
+            + "<h4>" + window.VNG.escapeHtml(coordinates) + "</h4>"
+            + "<p class=\"neighbor-sector-context\">" + window.VNG.escapeHtml(window.VNG.formatText(
+                tr("sectorVisitedLastVisit", "Last visited: {date}"),
+                {"date": visitDate}
+            )) + "</p>"
+            + (Number.isFinite(visitCount) && visitCount > 1
+                ? "<p class=\"neighbor-sector-context\">" + window.VNG.escapeHtml(window.VNG.formatText(
+                    tr("sectorVisitedCount", "{count} visits"),
+                    {"count": visitCount}
+                )) + "</p>"
+                : "")
+            + "<p>" + window.VNG.escapeHtml(summary) + "</p>"
+            + details
+            + "</article>";
+    }
+
+    function appendVisitedSectorTile(entry, sector, error) {
+        const grid = document.getElementById("visited-sector-grid");
+        if (!grid) {
+            return;
+        }
+
+        const holder = document.createElement("div");
+        holder.innerHTML = visitedSectorTileHtml(entry, sector, error);
+        const tile = holder.firstElementChild;
+        if (tile) {
+            grid.appendChild(tile);
+        }
+    }
+
+    function updateVisitedHistoryMoreButton() {
+        const button = document.getElementById("visited-history-more");
+        if (!button) {
+            return;
+        }
+
+        button.hidden = !visitedHistoryState.expanded || visitedHistoryState.renderedCount >= visitedHistoryState.sectors.length;
+        button.disabled = visitedHistoryState.loading;
+        button.setAttribute("aria-disabled", button.disabled ? "true" : "false");
+    }
+
+    async function fetchVisitedSectors() {
+        const data = await window.VNG.apiJson("/api/probe/visited-sectors", {"method": "GET"});
+        return (Array.isArray(data.visitedSectors) ? data.visitedSectors : []).filter((entry) => (
+            !sameRelativeCoordinates(entry && entry.relativeCoordinates, currentProbeSectorRelative)
+        ));
+    }
+
+    async function renderNextVisitedHistoryPage() {
+        if (visitedHistoryState.loading) {
+            return;
+        }
+
+        visitedHistoryState.loading = true;
+        updateVisitedHistoryMoreButton();
+        try {
+            if (!visitedHistoryState.loaded) {
+                setVisitedHistoryStatus(tr("loading", "Loading..."));
+                if (currentProbeSectorRelative === null) {
+                    await fetchProbeSectorRelative();
+                }
+                visitedHistoryState.sectors = await fetchVisitedSectors();
+                visitedHistoryState.loaded = true;
+                visitedHistoryState.renderedCount = 0;
+                const grid = document.getElementById("visited-sector-grid");
+                if (grid) {
+                    grid.innerHTML = "";
+                }
+            }
+
+            const nextSectors = visitedHistoryState.sectors.slice(
+                visitedHistoryState.renderedCount,
+                visitedHistoryState.renderedCount + VISITED_HISTORY_PAGE_SIZE
+            );
+            if (nextSectors.length === 0) {
+                setVisitedHistoryStatus(visitedHistoryState.sectors.length === 0 ? tr("sectorVisitedHistoryEmpty", "No sector visited yet.") : "");
+                return;
+            }
+
+            for (const entry of nextSectors) {
+                const target = relativeCoordinates(entry && entry.relativeCoordinates);
+                let sector = null;
+                let error = null;
+                if (target === null) {
+                    error = new Error(tr("sectorNeighborScanFailed", "Scan unavailable for this sector."));
+                } else {
+                    try {
+                        sector = await fetchSectorScan(target);
+                    } catch (caught) {
+                        error = caught instanceof Error ? caught : new Error(tr("sectorNeighborScanFailed", "Scan unavailable for this sector."));
+                    }
+                }
+
+                appendVisitedSectorTile(entry, sector, error);
+                visitedHistoryState.renderedCount += 1;
+            }
+
+            setVisitedHistoryStatus("");
+        } catch (error) {
+            setVisitedHistoryStatus(scanErrorMessage(error));
+        } finally {
+            visitedHistoryState.loading = false;
+            updateVisitedHistoryMoreButton();
+        }
+    }
+
+    async function toggleVisitedHistory() {
+        const button = document.getElementById("visited-history-toggle");
+        const panel = document.getElementById("visited-sector-history-panel");
+        if (!button || !panel) {
+            return;
+        }
+
+        visitedHistoryState.expanded = button.getAttribute("aria-expanded") !== "true";
+        button.setAttribute("aria-expanded", visitedHistoryState.expanded ? "true" : "false");
+        button.textContent = visitedHistoryState.expanded ? tr("hide", "Hide") : tr("view", "View");
+        panel.hidden = !visitedHistoryState.expanded;
+        updateVisitedHistoryMoreButton();
+        if (visitedHistoryState.expanded && !visitedHistoryState.loaded) {
+            await renderNextVisitedHistoryPage();
+        }
+    }
+
     async function fetchProbeSectorRelative() {
         const data = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
         currentProbeSectorRelative = relativeCoordinates(data.sector && data.sector.relativeCoordinates);
@@ -1045,6 +1234,8 @@
             loadCurrentSector();
         });
         document.getElementById("neighbor-scan-button")?.addEventListener("click", scanNeighborSectors);
+        document.getElementById("visited-history-toggle")?.addEventListener("click", toggleVisitedHistory);
+        document.getElementById("visited-history-more")?.addEventListener("click", renderNextVisitedHistoryPage);
     }
 
     document.addEventListener("DOMContentLoaded", () => {
