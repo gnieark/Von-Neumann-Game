@@ -2319,9 +2319,23 @@ button.account-menu-item {
 }
 
 .manny-accordion-task {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: baseline;
     color: #ffd65a;
     font-size: .88rem;
+    line-height: 1.25;
     text-shadow: 0 0 4px rgba(255, 214, 90, .22);
+}
+
+.manny-accordion-task-progress,
+.manny-accordion-task-resources {
+    color: #dce7e8;
+}
+
+.manny-accordion-task-resources {
+    overflow-wrap: anywhere;
 }
 
 .manny-accordion-panel {

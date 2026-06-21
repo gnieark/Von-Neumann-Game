@@ -931,6 +931,41 @@
             + "</span>";
     }
 
+    function miningResourceSummary(manny) {
+        const payload = manny && manny.task ? manny.task : {};
+        const resources = selectedResourceLabels(payload.resourceTypes || payload.resourceType);
+
+        return resources || "";
+    }
+
+    function mannyAccordionTaskText(manny, taskName) {
+        if (!manny || manny.currentTask === null) {
+            return taskName;
+        }
+
+        const parts = [taskName, progressText(manny)];
+        if (manny.currentTask === "mining") {
+            const resources = miningResourceSummary(manny);
+            if (resources) {
+                parts.push(resources);
+            }
+        }
+
+        return parts.join(" - ");
+    }
+
+    function mannyAccordionTaskHtml(manny, taskName, observedAt) {
+        if (!manny || manny.currentTask === null) {
+            return escaped(taskName);
+        }
+
+        const resources = manny.currentTask === "mining" ? miningResourceSummary(manny) : "";
+
+        return "<span class=\"manny-accordion-task-status\">" + escaped(taskName) + "</span>"
+            + "<span class=\"manny-accordion-task-progress\">" + progressValueHtml(manny, observedAt) + "</span>"
+            + (resources ? "<span class=\"manny-accordion-task-resources\">" + escaped(resources) + "</span>" : "");
+    }
+
     function miningTaskTarget(payload) {
         if (payload && payload.target) {
             return payload.target;
@@ -1563,7 +1598,8 @@
                 : (manny.currentTask ? taskLabel(manny.currentTask) : tr("mannyInactive", "Inactive"));
             const panelId = "manny-panel-" + mannyId.replace(/[^a-zA-Z0-9_-]/g, "-");
             const expanded = openMannyIds.has(mannyId);
-            const buttonTitle = (manny.name || mannyId) + " - " + taskName;
+            const buttonTaskTitle = tooFar ? taskName : mannyAccordionTaskText(manny, taskName);
+            const buttonTitle = (manny.name || mannyId) + " - " + buttonTaskTitle;
             const progressAttributes = busy && !tooFar ? progressDataAttributes(manny, observedAt) : "";
             const rackStatusClass = mannyRackStatusClass(manny, tooFar);
             const panelContent = tooFar
@@ -1588,7 +1624,7 @@
                 + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
                 + "<span class=\"manny-accordion-title\">"
                 + "<b>" + escaped(manny.name || mannyId) + "</b>"
-                + "<span class=\"manny-accordion-task\">" + escaped(taskName) + "</span>"
+                + "<span class=\"manny-accordion-task\">" + (tooFar ? escaped(taskName) : mannyAccordionTaskHtml(manny, taskName, observedAt)) + "</span>"
                 + "</span>"
                 + "</button>"
                 + "<div id=\"" + escaped(panelId) + "\" class=\"manny-accordion-panel\"" + (expanded ? "" : " hidden") + ">"
