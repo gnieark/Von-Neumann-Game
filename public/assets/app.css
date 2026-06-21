@@ -2599,6 +2599,7 @@ button.account-menu-item {
 
 .inventory-filter-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: end;
     gap: 8px;
     margin-top: 12px;
@@ -2623,6 +2624,7 @@ button.account-menu-item {
 .inventory-container-rename-form {
     display: flex;
     align-items: end;
+    flex: 0 0 100%;
     gap: 8px;
     min-width: min(420px, 100%);
 }

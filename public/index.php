@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260621-storage-container-rename-form';
+const ASSET_VERSION = '20260621-inventory-rename-form-layout';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
