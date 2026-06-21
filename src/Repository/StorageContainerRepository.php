@@ -184,6 +184,22 @@ final class StorageContainerRepository
         return $this->findByUidForProbe($container->probeId, $container->uid) ?? $container;
     }
 
+    public function rename(StorageContainer $container, string $label): StorageContainer
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE storage_containers
+             SET label = :label, updated_at = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id' => $container->id,
+            'label' => $label,
+            'updated_at' => gmdate('c'),
+        ]);
+
+        return $this->findByUidForProbe($container->probeId, $container->uid) ?? $container;
+    }
+
     /**
      * @param array<string> $priority
      * @param array<string> $exclusion

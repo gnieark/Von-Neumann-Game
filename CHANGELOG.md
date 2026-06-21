@@ -14,7 +14,9 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Debug : ajout de `scripts/force-inhabited-planet.php` pour injecter en CLI une planete habitee dans un secteur donne.
 - API v42 : le premier contact `return_to_space_program` demande maintenant 5 ECE de métaux et 1 ECE de composés carbonés, puis comptabilise les matériaux largués par container sur la planète avec le joueur donateur.
 - API v43 : ajout de `POST /api/probe/mannies/{mannyId}/drop-manny-cargo` pour larguer immédiatement la cargaison d’une Manny en attente de place et retenter son retour à bord.
+- API v44 : ajout de `PATCH /api/probe/storage-containers/{containerId}` pour renommer un container de stockage via son champ `label`.
 - Scénario : chaque largage de matériaux demandé par `return_to_space_program` déclenche un message de remerciement planétaire indiquant les matériaux restant à envoyer.
+- Interface : dans `/inventories`, le filtre par container propose une action de renommage quand un container précis est sélectionné.
 - Interface : dans `/mannies`, une Manny `waiting_for_space` propose de rentrer sans sa cargaison.
 - Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 - Stats : ajout du podium des découvreurs de mondes habités par une espèce intelligente sur `/stats`.

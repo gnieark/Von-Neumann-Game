@@ -145,6 +145,15 @@
         return state.inventoryContainerFilter || "all";
     }
 
+    function selectedInventoryContainer(inventory) {
+        const id = selectedContainerId();
+        if (id === "all") {
+            return null;
+        }
+
+        return inventoryContainers(inventory).find((container) => container.id === id) || null;
+    }
+
     function itemContainer(item) {
         return item && item.container ? item.container : null;
     }
@@ -229,12 +238,14 @@
         return {
             "move": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14\"></path><path d=\"m13 6 6 6-6 6\"></path><path d=\"M5 5v14\"></path></svg>",
             "jettison": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M10 11 4 5\"></path><path d=\"m5 10-1-5 5 1\"></path><path d=\"M14 13l6 6\"></path><path d=\"m19 14 1 5-5-1\"></path><path d=\"m14 11 6-6\"></path><path d=\"m19 10 1-5-5 1\"></path><path d=\"M10 13l-6 6\"></path><path d=\"m5 14-1 5 5-1\"></path></svg>",
+            "settings": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z\"></path><path d=\"M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2.1 2.1 0 0 1-2.97 2.97l-.04-.04a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.09 1.65V21.3a2.1 2.1 0 0 1-4.2 0v-.06a1.8 1.8 0 0 0-1.09-1.65 1.8 1.8 0 0 0-1.98.36l-.04.04a2.1 2.1 0 0 1-2.97-2.97l.04-.04A1.8 1.8 0 0 0 3.84 15a1.8 1.8 0 0 0-1.65-1.09H2.1a2.1 2.1 0 0 1 0-4.2h.09a1.8 1.8 0 0 0 1.65-1.09 1.8 1.8 0 0 0-.36-1.98l-.04-.04a2.1 2.1 0 0 1 2.97-2.97l.04.04a1.8 1.8 0 0 0 1.98.36 1.8 1.8 0 0 0 1.09-1.65V2.1a2.1 2.1 0 0 1 4.2 0v.28a1.8 1.8 0 0 0 1.09 1.65 1.8 1.8 0 0 0 1.98-.36l.04-.04A2.1 2.1 0 0 1 19.8 6.6l-.04.04a1.8 1.8 0 0 0-.36 1.98 1.8 1.8 0 0 0 1.65 1.09h.85a2.1 2.1 0 0 1 0 4.2h-.85A1.8 1.8 0 0 0 19.4 15Z\"></path></svg>",
         }[name] || "";
     }
 
-    function iconButton(className, label, icon, disabled, visibleLabel) {
+    function iconButton(className, label, icon, disabled, visibleLabel, attributes) {
         return "<button class=\"inventory-icon-button " + className + "\" type=\"button\" title=\"" + window.VNG.escapeHtml(label) + "\" aria-label=\"" + window.VNG.escapeHtml(label) + "\""
             + (disabled ? " disabled aria-disabled=\"true\"" : "")
+            + (attributes ? " " + attributes : "")
             + ">" + lineIcon(icon) + "<span class=\"inventory-icon-label\">" + window.VNG.escapeHtml(visibleLabel || label) + "</span></button>";
     }
 
@@ -500,15 +511,31 @@
             + "<div class=\"inventory-filter-row\">"
             + "<label>" + window.VNG.escapeHtml(tr("inventoryContainerFilter", "Inventory view"))
             + "<select id=\"inventory-container-filter\">" + filterOptions.join("") + "</select></label>"
+            + iconButton(
+                "inventory-container-rename-button",
+                tr("renameStorageContainer", "Rename container"),
+                "settings",
+                false,
+                tr("renameStorageContainer", "Rename container"),
+                selectedContainerId() === "all" ? "hidden" : "",
+            )
+            + "<form class=\"inventory-container-rename-form\" hidden>"
+            + "<label><span>" + window.VNG.escapeHtml(tr("renameStorageContainerPrompt", "New container name")) + "</span>"
+            + "<input name=\"label\" maxlength=\"80\" required></label>"
+            + "<button type=\"submit\">" + window.VNG.escapeHtml(tr("renameStorageContainer", "Rename container")) + "</button>"
+            + "<button class=\"inventory-container-rename-cancel\" type=\"button\">" + window.VNG.escapeHtml(tr("forumCancelEdit", "Cancel")) + "</button>"
+            + "</form>"
             + "</div>";
 
         const select = node.querySelector("#inventory-container-filter");
         if (select) {
             select.addEventListener("change", () => {
                 state.inventoryContainerFilter = select.value || "all";
+                syncStorageContainerRenameControls();
                 renderInventory(state.currentInventory, {"preserveStorageRules": true});
             });
         }
+        syncStorageContainerRenameControls();
         node.querySelectorAll(".storage-rules-form").forEach((form) => syncStorageRuleForm(form));
         node.querySelectorAll(".storage-rule-select").forEach((selectNode) => {
             selectNode.addEventListener("focus", markStorageRulesTouched);
@@ -1004,8 +1031,100 @@
         }
     }
 
+    function syncStorageContainerRenameControls() {
+        const node = document.getElementById("storage-rules-panel");
+        const button = node ? node.querySelector(".inventory-container-rename-button") : null;
+        const form = node ? node.querySelector(".inventory-container-rename-form") : null;
+        const hasSelectedContainer = selectedContainerId() !== "all";
+        if (button) {
+            button.hidden = !hasSelectedContainer;
+        }
+        if (!hasSelectedContainer && form) {
+            form.hidden = true;
+            form.reset();
+        }
+    }
+
+    function storageContainerRenameDefaultLabel() {
+        const container = selectedInventoryContainer(state.currentInventory);
+        if (container) {
+            return containerLabel(container);
+        }
+        const select = document.getElementById("inventory-container-filter");
+        if (select instanceof HTMLSelectElement) {
+            return select.selectedOptions[0]?.textContent || selectedContainerId();
+        }
+
+        return selectedContainerId();
+    }
+
+    function toggleStorageContainerRenameForm() {
+        const form = document.querySelector(".inventory-container-rename-form");
+        if (!form || selectedContainerId() === "all") {
+            syncStorageContainerRenameControls();
+            return;
+        }
+
+        const willOpen = form.hidden;
+        form.hidden = !willOpen;
+        if (willOpen) {
+            const input = form.querySelector("input[name=\"label\"]");
+            if (input instanceof HTMLInputElement) {
+                input.value = storageContainerRenameDefaultLabel();
+                input.focus();
+                input.select();
+            }
+        }
+    }
+
+    async function renameSelectedStorageContainer(form) {
+        const containerId = selectedContainerId();
+        if (!containerId || containerId === "all") {
+            return;
+        }
+        const formData = new FormData(form);
+        const label = String(formData.get("label") || "");
+        const trimmedLabel = label.trim();
+        if (trimmedLabel === "") {
+            setText("inventory-status", tr("storageContainerLabelRequired", "Container name cannot be empty."));
+            return;
+        }
+
+        await runApiOrder(
+            "inventory-status",
+            tr("orderSent", "Order transmitted..."),
+            () => window.VNG.apiJson("/api/probe/storage-containers/" + encodeURIComponent(containerId), {
+                "method": "PATCH",
+                "body": JSON.stringify({"label": trimmedLabel}),
+            }),
+            async (data) => {
+                setText("inventory-status", tr("storageContainerRenamed", "Storage container renamed."));
+                form.hidden = true;
+                if (data.inventory) {
+                    renderInventory(data.inventory);
+                }
+                await refreshInventoryPage();
+            }
+        );
+    }
+
     async function handleInventoryClick(event) {
         if (!(event.target instanceof Element)) {
+            return;
+        }
+
+        const renameContainerButton = event.target.closest(".inventory-container-rename-button");
+        if (renameContainerButton) {
+            toggleStorageContainerRenameForm();
+            return;
+        }
+
+        if (event.target.closest(".inventory-container-rename-cancel")) {
+            const form = event.target.closest(".inventory-container-rename-form");
+            if (form) {
+                form.hidden = true;
+                form.reset();
+            }
             return;
         }
 
@@ -1048,6 +1167,12 @@
 
     async function handleInventorySubmit(event) {
         if (!(event.target instanceof Element)) {
+            return;
+        }
+
+        if (event.target.classList.contains("inventory-container-rename-form")) {
+            event.preventDefault();
+            await renameSelectedStorageContainer(event.target);
             return;
         }
 

@@ -2598,6 +2598,9 @@ button.account-menu-item {
 }
 
 .inventory-filter-row {
+    display: flex;
+    align-items: end;
+    gap: 8px;
     margin-top: 12px;
 }
 
@@ -2605,6 +2608,42 @@ button.account-menu-item {
 .storage-rule-fields label {
     display: grid;
     gap: 5px;
+}
+
+.inventory-filter-row label {
+    min-width: min(260px, 100%);
+}
+
+.inventory-container-rename-button {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+}
+
+.inventory-container-rename-form {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+    min-width: min(420px, 100%);
+}
+
+.inventory-container-rename-form[hidden] {
+    display: none;
+}
+
+.inventory-container-rename-form label {
+    min-width: min(220px, 100%);
+}
+
+.inventory-container-rename-form input {
+    min-height: 32px;
+    padding-block: 5px;
+}
+
+.inventory-container-rename-form button {
+    min-height: 32px;
+    padding-inline: 10px;
+    white-space: nowrap;
 }
 
 .storage-container-list {
@@ -2834,6 +2873,10 @@ button.account-menu-item {
         inset 0 1px 0 rgba(255,255,255,.22),
         inset 0 -1px 0 rgba(0,0,0,.66),
         0 1px 0 rgba(0,0,0,.7);
+}
+
+.inventory-icon-button[hidden] {
+    display: none;
 }
 
 .inventory-icon-button::before {
@@ -3200,6 +3243,16 @@ button.account-menu-item {
 
     .inventory-icon-button {
         flex: 1;
+    }
+
+    .inventory-filter-row .inventory-container-rename-button {
+        flex: 0 0 32px;
+    }
+
+    .inventory-container-rename-form {
+        flex-basis: 100%;
+        align-items: stretch;
+        flex-direction: column;
     }
 
     .inventory-move-form,

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '43'
+  version: '44'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 43
+                apiVersion: 44
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -648,6 +648,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StorageContainerInventoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Rename a storage container
+      parameters:
+        - $ref: '#/components/parameters/StorageContainerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StorageContainerRenameRequest'
+            example:
+              label: Soute metaux
+      responses:
+        '200':
+          description: Storage container renamed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageContainerRenameResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2941,6 +2966,24 @@ components:
           items:
             type: string
           description: Item/resource types never automatically routed here.
+    StorageContainerRenameRequest:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: New player-facing label for the storage container.
+          example: Soute metaux
+    StorageContainerRenameResponse:
+      type: object
+      required: [container, inventory]
+      properties:
+        container:
+          $ref: '#/components/schemas/StorageContainer'
+        inventory:
+          $ref: '#/components/schemas/ProbeInventory'
     StorageContainerRulesResponse:
       type: object
       required: [container, inventory]

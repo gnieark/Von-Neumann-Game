@@ -265,6 +265,8 @@ $loginTemplate = file_get_contents($root . '/templates/loginview.html');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
+$inventoriesScript = file_get_contents($root . '/public/assets/inventories.js');
+$appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oauth-remember"'), 'OAuth login view exposes the remember-me checkbox');
@@ -275,6 +277,11 @@ $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasEx
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
+$test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"/api/probe/storage-containers/" + encodeURIComponent(containerId)'), 'inventories JS renames containers through the storage-container PATCH endpoint');
+$test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-button[hidden]'), 'inventories CSS keeps hidden icon buttons hidden after icon button display rules');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVisitedSectors'), 'sensors JS can load visited-sector history');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
@@ -427,7 +434,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(43, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(44, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1169,6 +1176,16 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         static fn(array $container): bool => ($container['kind'] ?? null) === 'container',
     ))[0] ?? null;
     $test->assert(is_string($additionalStorageContainer['id'] ?? null), 'additional storage container has a stable public id');
+    $renamedStorageContainer = $kernel->handle('PATCH', '/api/probe/storage-containers/' . rawurlencode((string) ($additionalStorageContainer['id'] ?? 'missing')), $craftHeaders, json_encode([
+        'label' => 'Soute metaux',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $renamedStorageContainer->status, 'PATCH /api/probe/storage-containers/{id} renames a storage container');
+    $test->assertEquals('Soute metaux', $renamedStorageContainer->body['container']['label'] ?? null, 'renamed storage container response exposes the new label');
+    $test->assertEquals('Soute metaux', $storageContainers->findByUidForProbe($craftProbeEntity->id, (string) ($additionalStorageContainer['id'] ?? 'missing'))?->label, 'storage container label is persisted');
+    $emptyStorageContainerLabel = $kernel->handle('PATCH', '/api/probe/storage-containers/' . rawurlencode((string) ($additionalStorageContainer['id'] ?? 'missing')), $craftHeaders, json_encode([
+        'label' => '   ',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(400, $emptyStorageContainerLabel->status, 'PATCH /api/probe/storage-containers/{id} rejects empty labels');
     $storageRules = $kernel->handle('PATCH', '/api/probe/storage-containers/' . rawurlencode((string) ($additionalStorageContainer['id'] ?? 'missing')) . '/rules', $craftHeaders, json_encode([
         'priority' => ['metals'],
         'exclusion' => ['ice'],

@@ -44,7 +44,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 43;
+    public const API_VERSION = 44;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -83,7 +83,14 @@ final class ApiKernel
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainerRulesResponse($player, rawurldecode($matches[1]), $body));
             }
             if (preg_match('#^/api/probe/storage-containers/([^/]+)$#', $routePath, $matches) === 1) {
-                return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainerResponse($player, rawurldecode($matches[1])));
+                return $this->protectedRoute(
+                    $method,
+                    ['GET', 'PATCH'],
+                    $headers,
+                    fn(Player $player): ApiResponse => $method === 'PATCH'
+                        ? $this->probeStorageContainerRenameResponse($player, rawurldecode($matches[1]), $body)
+                        : $this->probeStorageContainerResponse($player, rawurldecode($matches[1])),
+                );
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-asteroid|recover-storage-container|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
@@ -712,6 +719,21 @@ final class ApiKernel
         $this->movements->ensureProbeOperational($probe);
 
         return new ApiResponse(200, $this->storage->containerInventory($probe, $containerId));
+    }
+
+    private function probeStorageContainerRenameResponse(Player $player, string $containerId, ?string $body): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data) || !isset($data['label']) || !is_string($data['label'])) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a storage container label.');
+        }
+
+        return new ApiResponse(200, [
+            'container' => $this->storage->renameContainer($probe, $containerId, $data['label']),
+            'inventory' => $this->inventoryForProbe($probe)->toArray(),
+        ]);
     }
 
     private function probeStorageContainerRulesResponse(Player $player, string $containerId, ?string $body): ApiResponse

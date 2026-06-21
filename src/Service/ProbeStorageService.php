@@ -268,6 +268,25 @@ final class ProbeStorageService
         return $container->toArray((float) ($used[$container->id] ?? 0.0));
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function renameContainer(NeumannProbe $probe, string $containerUid, string $label): array
+    {
+        $this->ensureProbeStorage($probe);
+        $container = $this->containers->findByUidForProbe($probe->id, $containerUid)
+            ?? throw new MannyActionException(404, 'storage_container_not_found', 'Storage container not found.');
+        $label = trim($label);
+        if ($label === '' || strlen($label) > 80) {
+            throw new MannyActionException(400, 'bad_request', 'Storage container label must contain 1 to 80 characters.');
+        }
+
+        $container = $this->containers->rename($container, $label);
+        $used = $this->usedCapacityByContainer($probe, [$container], $this->mannies->findByProbeId($probe->id), $this->items->findByProbeId($probe->id));
+
+        return $container->toArray((float) ($used[$container->id] ?? 0.0));
+    }
+
     public function addResource(NeumannProbe $probe, string $type, float $amount): float
     {
         $type = $this->normalizeResourceType($type);
