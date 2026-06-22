@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 44
+                apiVersion: 45
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1611,6 +1611,7 @@ paths:
               objectId: mine-rock
               resources: [metals, ice, carbon_compounds]
               targetAmount: 0.05
+              targetContainerId: detached-container-container-itm_extra
       responses:
         '202':
           description: Mining task accepted
@@ -3843,6 +3844,18 @@ components:
           minimum: 0
           exclusiveMinimum: true
           description: Amount to mine in equivalent earth containers. Manny cargo capacity is 0.05 per trip.
+        targetContainerId:
+          type: string
+          description: >
+            Optional detached storage container object id in the current sector.
+            When omitted, mined resources are delivered to the probe. When it
+            targets a visible drifting container or a hidden container on
+            another asteroid, normal mining travel time still applies. When it
+            targets a hidden container on the asteroid being mined, travel time
+            is deducted and only extraction time remains. If the container has
+            less free capacity than targetAmount, the task is capped to its
+            free capacity. Detached storage containers cannot receive
+            deuterium, which remains reserved for the probe external tank.
     MannyCraftRequest:
       type: object
       required: [recipe]
@@ -3984,6 +3997,44 @@ components:
           description: Normalized split applied to the selected resourceTypes for this order.
         target:
           $ref: '#/components/schemas/MiningTarget'
+        requestedTargetAmount:
+          type: number
+          minimum: 0
+          description: Present when targetAmount was capped by the target detached container free capacity.
+        miningTravelSeconds:
+          type: integer
+          minimum: 0
+          description: Travel time applied to each outbound or return leg for this mining task; 0 when mining directly into a hidden container on the mined asteroid.
+        targetContainer:
+          type: object
+          description: Present when mined resources are delivered to a detached storage container instead of the probe.
+          required: [id, type, mode, capacity, capacityUnit, travelDeducted]
+          properties:
+            id:
+              type: string
+            type:
+              type: string
+              enum: [detached_container]
+            name:
+              type: string
+              nullable: true
+            mode:
+              type: string
+              enum: [drifting, hidden_on_asteroid]
+            targetObjectId:
+              type: string
+              nullable: true
+            capacity:
+              type: number
+              minimum: 0
+            capacityUnit:
+              type: string
+              enum: [earth_container_equivalent]
+            travelDeducted:
+              type: boolean
+        targetContainerFull:
+          type: boolean
+          description: Present when the task stopped because the target detached container became full.
         artificialObjectDetected:
           $ref: '#/components/schemas/ArtificialObjectDetection'
     Manny:

@@ -15,9 +15,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v42 : le premier contact `return_to_space_program` demande maintenant 5 ECE de métaux et 1 ECE de composés carbonés, puis comptabilise les matériaux largués par container sur la planète avec le joueur donateur.
 - API v43 : ajout de `POST /api/probe/mannies/{mannyId}/drop-manny-cargo` pour larguer immédiatement la cargaison d’une Manny en attente de place et retenter son retour à bord.
 - API v44 : ajout de `PATCH /api/probe/storage-containers/{containerId}` pour renommer un container de stockage via son champ `label`.
+- API v45 : `POST /api/probe/mannies/{mannyId}/mine` accepte `targetContainerId` pour déposer les ressources minées dans un container détaché visible ou caché sur astéroïde.
 - Scénario : chaque largage de matériaux demandé par `return_to_space_program` déclenche un message de remerciement planétaire indiquant les matériaux restant à envoyer.
 - Interface : dans `/inventories`, le filtre par container propose une action de renommage quand un container précis est sélectionné.
 - Interface : dans `/mannies`, une Manny `waiting_for_space` propose de rentrer sans sa cargaison.
+- Interface : dans `/mannies`, le formulaire de minage peut envoyer les ressources vers un container détaché visible ou détecté sur l’astéroïde ciblé.
 - Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 - Stats : ajout du podium des découvreurs de mondes habités par une espèce intelligente sur `/stats`.
 

@@ -91,6 +91,28 @@ final class SectorDetachedContainer extends UniverseObject
         return $this->payload;
     }
 
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function withPayload(array $payload): self
+    {
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->mode,
+            $this->ownerProbeId,
+            $this->ownerPlayerId,
+            $this->originProbeId,
+            $this->targetObjectId,
+            $this->capacity,
+            $this->capacityUnit,
+            $this->createdAt,
+            $payload,
+            $this->getDescription(),
+            $this->getWaypointBookmarks(),
+        );
+    }
+
     public function toArray(): array
     {
         return parent::toArray() + [

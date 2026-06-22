@@ -125,6 +125,17 @@ final class SectorContent
         return null;
     }
 
+    public function findDetachedContainerById(string $id): ?SectorDetachedContainer
+    {
+        foreach ([...$this->detachedContainers, ...$this->hiddenDetachedContainers] as $container) {
+            if ($container->getId() === $id) {
+                return $container;
+            }
+        }
+
+        return null;
+    }
+
     public function addObject(UniverseObject $object): void
     {
         if ($object instanceof SectorDetachedContainer) {
@@ -267,6 +278,29 @@ final class SectorContent
 
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    public function replaceDetachedContainer(SectorDetachedContainer $replacement): bool
+    {
+        foreach ($this->detachedContainers as $index => $container) {
+            if ($container->getId() === $replacement->getId()) {
+                $this->detachedContainers[$index] = $replacement;
+                $this->touch();
+
+                return true;
+            }
+        }
+
+        foreach ($this->hiddenDetachedContainers as $index => $container) {
+            if ($container->getId() === $replacement->getId()) {
+                $this->hiddenDetachedContainers[$index] = $replacement;
+                $this->touch();
+
+                return true;
             }
         }
 

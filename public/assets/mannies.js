@@ -406,6 +406,7 @@
                 "name": object.name || object.id,
                 "source": object.mode === "hidden_on_asteroid" ? "asteroid" : "drifting",
                 "hidden": object.mode === "hidden_on_asteroid",
+                "targetObjectId": object.targetObjectId || null,
             }));
 
         state.currentMannies.forEach((manny) => {
@@ -416,11 +417,54 @@
                     "name": tr("detectedDetachedContainer", "Detected detached container"),
                     "source": "asteroid",
                     "hidden": true,
+                    "targetObjectId": manny && manny.task ? manny.task.objectId || null : null,
                 });
             }
         });
 
         return targets;
+    }
+
+    function miningStorageTargets(target) {
+        if (!target || !target.id) {
+            return [];
+        }
+
+        return detectedDetachedContainerTargets().filter((container) => (
+            container
+            && container.id
+            && (
+                container.source === "drifting"
+                || (
+                    container.hidden
+                    && container.targetObjectId
+                    && container.targetObjectId === target.id
+                )
+            )
+        ));
+    }
+
+    function miningStorageTargetLabel(target) {
+        const name = target && (target.name || target.id) ? (target.name || target.id) : tr("detachedContainerObject", "Detached container");
+        const suffix = target && target.hidden
+            ? tr("hiddenOnAsteroid", "hidden on asteroid")
+            : tr("detachModeDrifting", "Leave drifting");
+
+        return name + " - " + suffix;
+    }
+
+    function miningStorageTargetOptions(target, selected) {
+        const containers = miningStorageTargets(target);
+        const defaultOption = "<option value=\"\">" + escaped(tr("mineStoreOnProbe", "Probe and linked containers")) + "</option>";
+        if (containers.length === 0) {
+            return defaultOption;
+        }
+
+        return defaultOption + containers.map((container) => (
+            "<option value=\"" + escaped(container.id) + "\"" + (container.id === selected ? " selected" : "") + ">"
+            + escaped(miningStorageTargetLabel(container))
+            + "</option>"
+        )).join("");
     }
 
     function detachedContainerRecoveryTargetLabel(target) {
@@ -1200,12 +1244,14 @@
     function renderMineForm() {
         const mineTarget = state.currentMannyMineTargets[0] || null;
         const mineAmountMax = mineTargetMaxAmount(mineTarget, resourceTypesForTarget(mineTarget));
+        const mineStorageTargets = miningStorageTargets(mineTarget);
 
         return "<form class=\"manny-mine-form manny-form\">"
             + "<label>" + escaped(tr("mineTarget", "Object")) + "<select class=\"manny-mine-target\" name=\"objectId\">" + mineTargetOptions("") + "</select></label>"
             + "<label>" + escaped(tr("mineResourcesSelection", "Select resources to extract")) + "<select class=\"manny-mine-resources\" name=\"resources\" multiple size=\"4\">"
             + mineResourceOptions(mineTarget, [])
             + "</select></label>"
+            + "<label class=\"manny-mine-storage-label\"" + (mineStorageTargets.length > 0 ? "" : " hidden") + ">" + escaped(tr("mineStoreOn", "Store in")) + "<select class=\"manny-mine-storage-target\" name=\"targetContainerId\">" + miningStorageTargetOptions(mineTarget, "") + "</select></label>"
             + "<label class=\"manny-mine-amount-label\"><span class=\"manny-mine-amount-text\">" + escaped(miningAmountLabel(mineAmountMax)) + "</span><input name=\"targetAmount\" type=\"number\" min=\"0.01\" max=\"" + escaped(String(mineAmountMax)) + "\" step=\"0.01\" value=\"" + escaped(mineAmountMax >= 0.01 ? "0.01" : "0") + "\"></label>"
             + "<button class=\"manny-mine-button\" type=\"submit\"" + (mineTarget ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("mine", "Mine")) + "</button>"
             + "<p class=\"manny-mine-hint\">" + escaped(tr("mannyMiningHint", "A Manny can carry 0.05 ECE (Earth container equivalent). If you ask it to mine more, it will make round trips between the mined object and the probe.")) + "</p>"
@@ -1641,6 +1687,7 @@
         window.VNG.restoreDisclosureIds(node, openActionPanels, ".manny-action-accordion-trigger[aria-controls]");
         restoreCraftRecipeSelections(node, craftRecipeSelections);
         scheduleProgressUpdates();
+        updateMannyMineForms();
         updateMannyCraftForms();
         updatePrinterCraftForms();
         updateMannyBookmarkForms();
@@ -1648,6 +1695,10 @@
         updateMannyDetachStorageContainerForms();
         updateMannyDropStorageContainerForms();
         updateMannyRecoverStorageContainerForms();
+    }
+
+    function updateMannyMineForms() {
+        document.querySelectorAll(".manny-mine-form").forEach(updateMannyMineFormState);
     }
 
     function updateMannyMineFormState(form) {
@@ -1659,6 +1710,8 @@
         const resourceSelect = form.querySelector(".manny-mine-resources");
         const amountInput = form.querySelector("input[name=\"targetAmount\"]");
         const amountText = form.querySelector(".manny-mine-amount-text");
+        const storageLabel = form.querySelector(".manny-mine-storage-label");
+        const storageSelect = form.querySelector(".manny-mine-storage-target");
         const mineButton = form.querySelector(".manny-mine-button");
         if (!targetSelect || !resourceSelect) {
             return;
@@ -1669,6 +1722,19 @@
             .filter((option) => !option.disabled)
             .map((option) => option.value);
         const maxAmount = mineTargetMaxAmount(target, selectedResources);
+        const selectedStorage = storageSelect ? storageSelect.value : "";
+        const storageTargets = miningStorageTargets(target);
+        const externalStorageDisabled = selectedResources.includes("deuterium");
+        if (storageSelect) {
+            storageSelect.innerHTML = miningStorageTargetOptions(target, selectedStorage);
+            if (!storageTargets.some((container) => container.id === storageSelect.value) || externalStorageDisabled) {
+                storageSelect.value = "";
+            }
+            storageSelect.disabled = storageTargets.length === 0 || externalStorageDisabled;
+        }
+        if (storageLabel) {
+            storageLabel.hidden = storageTargets.length === 0;
+        }
         if (amountText) {
             amountText.textContent = miningAmountLabel(maxAmount);
         }
@@ -1966,14 +2032,19 @@
                 setStatus(tr("noMiningResourceSelected", "Select at least one available resource."));
                 return null;
             }
+            const body = {
+                "objectId": formData.get("objectId"),
+                resources,
+                "targetAmount": Number.parseFloat(formData.get("targetAmount")),
+            };
+            const targetContainerId = String(formData.get("targetContainerId") || "");
+            if (targetContainerId !== "") {
+                body.targetContainerId = targetContainerId;
+            }
 
             return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/mine", {
                 "method": "POST",
-                "body": JSON.stringify({
-                    "objectId": formData.get("objectId"),
-                    resources,
-                    "targetAmount": Number.parseFloat(formData.get("targetAmount")),
-                }),
+                "body": JSON.stringify(body),
             });
         }
         if (form.classList.contains("manny-salvage-form")) {
@@ -2159,6 +2230,9 @@
                 updateMannyResourceOptions(event.target.closest(".manny-mine-form"));
             }
             if (event.target.classList.contains("manny-mine-resources")) {
+                updateMannyMineFormState(event.target.closest(".manny-mine-form"));
+            }
+            if (event.target.classList.contains("manny-mine-storage-target")) {
                 updateMannyMineFormState(event.target.closest(".manny-mine-form"));
             }
             if (event.target.classList.contains("manny-inspect-asteroid-target")) {
