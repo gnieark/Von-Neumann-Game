@@ -453,6 +453,25 @@
         return name + " - " + suffix;
     }
 
+    function miningTaskTargetContainerDetail(payload) {
+        const container = payload && payload.targetContainer && typeof payload.targetContainer === "object"
+            ? payload.targetContainer
+            : null;
+        if (!container || !container.id) {
+            return "";
+        }
+
+        const name = container.name || container.id;
+        const mode = container.mode === "hidden_on_asteroid"
+            ? tr("detachedContainerHiddenOnAsteroid", "hidden on asteroid")
+            : tr("detachedContainerDrifting", "drifting");
+
+        return "<p>" + escaped(window.VNG.formatText(tr("miningTargetContainerDetail", "Storage: {container} ({mode})."), {
+            "container": name,
+            "mode": mode,
+        })) + "</p>";
+    }
+
     function miningStorageTargetOptions(target, selected) {
         const containers = miningStorageTargets(target);
         const defaultOption = "<option value=\"\">" + escaped(tr("mineStoreOnProbe", "Probe and linked containers")) + "</option>";
@@ -913,7 +932,97 @@
         document.querySelectorAll(".manny-craft-form, .printer-craft-form").forEach(updateCraftForm);
     }
 
-    function currentCraftRecipeSelections(node) {
+    function selectValues(select) {
+        if (!select) {
+            return [];
+        }
+
+        return Array.from(select.selectedOptions).map((option) => option.value);
+    }
+
+    function setSelectValue(select, value) {
+        if (!select || value === undefined || value === null || value === "") {
+            return;
+        }
+        if (Array.from(select.options).some((option) => option.value === value)) {
+            select.value = value;
+        }
+    }
+
+    function setSelectValues(select, values) {
+        if (!select || !Array.isArray(values) || values.length === 0) {
+            return;
+        }
+
+        const allowed = new Set(values);
+        Array.from(select.options).forEach((option) => {
+            option.selected = allowed.has(option.value);
+        });
+    }
+
+    function inputValue(form, selector) {
+        const input = form ? form.querySelector(selector) : null;
+        return input ? input.value : "";
+    }
+
+    function actionFormState(form) {
+        if (!form) {
+            return null;
+        }
+        if (form.classList.contains("manny-mine-form")) {
+            return {
+                "type": "mine",
+                "objectId": inputValue(form, "[name=\"objectId\"]"),
+                "resources": selectValues(form.querySelector(".manny-mine-resources")),
+                "targetAmount": inputValue(form, "[name=\"targetAmount\"]"),
+                "targetContainerId": inputValue(form, "[name=\"targetContainerId\"]"),
+            };
+        }
+        if (form.classList.contains("manny-repair-form")) {
+            return {"type": "repair", "integrityPercent": inputValue(form, "[name=\"integrityPercent\"]")};
+        }
+        if (form.classList.contains("manny-rename-form")) {
+            return {
+                "type": "rename",
+                "name": inputValue(form, "[name=\"name\"]"),
+                "open": !form.hidden,
+            };
+        }
+        if (form.classList.contains("manny-salvage-form")) {
+            return {"type": "salvage", "objectId": inputValue(form, "[name=\"objectId\"]")};
+        }
+        if (form.classList.contains("manny-inspect-asteroid-form")) {
+            return {"type": "inspect", "objectId": inputValue(form, "[name=\"objectId\"]")};
+        }
+        if (form.classList.contains("manny-detach-storage-container-form")) {
+            return {
+                "type": "detach",
+                "containerId": inputValue(form, "[name=\"containerId\"]"),
+                "mode": inputValue(form, "[name=\"mode\"]"),
+                "objectId": inputValue(form, "[name=\"objectId\"]"),
+            };
+        }
+        if (form.classList.contains("manny-drop-storage-container-form")) {
+            return {
+                "type": "drop",
+                "containerId": inputValue(form, "[name=\"containerId\"]"),
+                "planetId": inputValue(form, "[name=\"planetId\"]"),
+            };
+        }
+        if (form.classList.contains("manny-recover-storage-container-form")) {
+            return {"type": "recover", "objectId": inputValue(form, "[name=\"objectId\"]")};
+        }
+        if (form.classList.contains("manny-bookmark-form")) {
+            return {"type": "bookmark", "objectId": inputValue(form, "[name=\"objectId\"]")};
+        }
+        if (form.classList.contains("manny-craft-form")) {
+            return {"type": "craft", "recipe": inputValue(form, "[name=\"recipe\"]")};
+        }
+
+        return null;
+    }
+
+    function currentActionFormSelections(node) {
         const selections = {
             "mannies": new Map(),
             "printer": "",
@@ -923,26 +1032,113 @@
             selections.printer = printerSelect.value;
         }
         node.querySelectorAll(".manny-card[data-manny-id]").forEach((card) => {
-            const select = card.querySelector(".manny-craft-form .manny-craft-recipe");
-            if (select && card.dataset.mannyId) {
-                selections.mannies.set(card.dataset.mannyId, select.value);
+            const states = [];
+            card.querySelectorAll(".manny-form").forEach((form) => {
+                const state = actionFormState(form);
+                if (state !== null) {
+                    states.push(state);
+                }
+            });
+            if (states.length > 0 && card.dataset.mannyId) {
+                selections.mannies.set(card.dataset.mannyId, states);
             }
         });
 
         return selections;
     }
 
-    function restoreCraftRecipeSelections(node, selections) {
+    function restoreMineFormState(form, saved) {
+        if (!form || !saved) {
+            return;
+        }
+
+        const targetSelect = form.querySelector(".manny-mine-target");
+        const resourceSelect = form.querySelector(".manny-mine-resources");
+        const amountInput = form.querySelector("[name=\"targetAmount\"]");
+        const storageSelect = form.querySelector(".manny-mine-storage-target");
+        setSelectValue(targetSelect, saved.objectId);
+        updateMannyResourceOptions(form);
+        setSelectValues(resourceSelect, saved.resources);
+        if (amountInput && saved.targetAmount !== "") {
+            amountInput.value = saved.targetAmount;
+        }
+        updateMannyMineFormState(form);
+        setSelectValue(storageSelect, saved.targetContainerId);
+        updateMannyMineFormState(form);
+    }
+
+    function restoreActionFormState(card, saved) {
+        if (!card || !saved) {
+            return;
+        }
+        if (saved.type === "mine") {
+            restoreMineFormState(card.querySelector(".manny-mine-form"), saved);
+            return;
+        }
+        if (saved.type === "repair") {
+            const input = card.querySelector(".manny-repair-form [name=\"integrityPercent\"]");
+            if (input && saved.integrityPercent !== "") {
+                input.value = saved.integrityPercent;
+            }
+            return;
+        }
+        if (saved.type === "rename") {
+            const form = card.querySelector(".manny-rename-form");
+            const input = form ? form.querySelector("[name=\"name\"]") : null;
+            const button = card.querySelector(".manny-settings-button");
+            if (input) {
+                input.value = saved.name || "";
+            }
+            if (form) {
+                form.hidden = !saved.open;
+            }
+            if (button) {
+                button.setAttribute("aria-expanded", saved.open ? "true" : "false");
+            }
+            return;
+        }
+        if (saved.type === "salvage") {
+            setSelectValue(card.querySelector(".manny-salvage-target"), saved.objectId);
+            return;
+        }
+        if (saved.type === "inspect") {
+            setSelectValue(card.querySelector(".manny-inspect-asteroid-target"), saved.objectId);
+            return;
+        }
+        if (saved.type === "detach") {
+            setSelectValue(card.querySelector(".manny-detach-container"), saved.containerId);
+            setSelectValue(card.querySelector(".manny-detach-storage-mode"), saved.mode);
+            updateMannyDetachStorageContainerForms();
+            setSelectValue(card.querySelector(".manny-detach-asteroid-target"), saved.objectId);
+            updateMannyDetachStorageContainerForms();
+            return;
+        }
+        if (saved.type === "drop") {
+            setSelectValue(card.querySelector(".manny-drop-container"), saved.containerId);
+            setSelectValue(card.querySelector(".manny-drop-planet-target"), saved.planetId);
+            return;
+        }
+        if (saved.type === "recover") {
+            setSelectValue(card.querySelector(".manny-recover-storage-container-target"), saved.objectId);
+            return;
+        }
+        if (saved.type === "bookmark") {
+            setSelectValue(card.querySelector(".manny-bookmark-target"), saved.objectId);
+            return;
+        }
+        if (saved.type === "craft") {
+            setSelectValue(card.querySelector(".manny-craft-form .manny-craft-recipe"), saved.recipe);
+        }
+    }
+
+    function restoreActionFormSelections(node, selections) {
         const printerSelect = node.querySelector(".printer-card .printer-craft-form .manny-craft-recipe");
         if (printerSelect && selections.printer && craftingRecipeById(selections.printer, "atomic_3d_printer")) {
             printerSelect.value = selections.printer;
         }
         node.querySelectorAll(".manny-card[data-manny-id]").forEach((card) => {
-            const selected = selections.mannies.get(card.dataset.mannyId);
-            const select = card.querySelector(".manny-craft-form .manny-craft-recipe");
-            if (select && selected && craftingRecipeById(selected, "manny")) {
-                select.value = selected;
-            }
+            const savedStates = selections.mannies.get(card.dataset.mannyId) || [];
+            savedStates.forEach((saved) => restoreActionFormState(card, saved));
         });
     }
 
@@ -1018,22 +1214,6 @@
         return state.currentMannyMineTargets.find((target) => target.id === (payload && payload.objectId)) || null;
     }
 
-    function artificialObjectDetectionHtml(payload) {
-        const detection = artificialObjectDetection(payload);
-        if (!detection || detection.type !== "detached_storage_container") {
-            return "";
-        }
-
-        const objectId = detection.objectId || "";
-        return "<div class=\"manny-detection-alert\">"
-            + "<p>" + escaped(tr("artificialObjectDetected", "Artificial object detected: detached storage container.")) + "</p>"
-            + (objectId
-                ? "<p><code>" + escaped(objectId) + "</code></p>"
-                    + "<p>" + escaped(tr("recoverDetectedContainerHint", "Assign an idle Manny to recover it from the recovery task list.")) + "</p>"
-                : "")
-            + "</div>";
-    }
-
     function renderMannyTaskPanel(manny, observedAt) {
         const payload = manny.task || {};
         const progress = progressValueHtml(manny, observedAt);
@@ -1055,8 +1235,8 @@
                     "resources": selectedResourceLabels(payload.resourceTypes || payload.resourceType),
                     "target": miningTargetDetails(miningTaskTarget(payload)),
                 })) + "</p>"
+                + miningTaskTargetContainerDetail(payload)
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
-                + artificialObjectDetectionHtml(payload)
                 + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(tr("recall", "Recall")) + "</button>"
                 + "</section>";
         }
@@ -1095,7 +1275,6 @@
                     "target": salvageTargetLabel(payload.target || {}),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
-                + artificialObjectDetectionHtml(payload)
                 + "</section>";
         }
         if (manny.currentTask === "installing_waypoint_bookmark") {
@@ -1138,7 +1317,6 @@
                     "target": bookmarkTargetLabel(payload.target || {}),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
-                + artificialObjectDetectionHtml(payload)
                 + "</section>";
         }
 
@@ -1617,7 +1795,7 @@
 
         updateLiveProgressValues();
         endTimes.forEach((endAt) => {
-            completionTimers.push(window.setTimeout(refreshManniesPage, Math.max(0, endAt - Date.now()) + REFRESH_CUSHION_MS));
+            completionTimers.push(window.setTimeout(() => refreshManniesPage(false), Math.max(0, endAt - Date.now()) + REFRESH_CUSHION_MS));
         });
     }
 
@@ -1632,7 +1810,7 @@
             .map((button) => button.closest(".manny-card") && button.closest(".manny-card").dataset.mannyId)
             .filter(Boolean));
         const printerExpanded = node.querySelector(".printer-card .manny-accordion-trigger[aria-expanded=\"true\"]") !== null;
-        const craftRecipeSelections = currentCraftRecipeSelections(node);
+        const actionFormSelections = currentActionFormSelections(node);
         const mannyItems = Array.isArray(mannies) ? mannies : [];
         const observedAt = Date.now();
 
@@ -1686,7 +1864,7 @@
 
         node.innerHTML = renderAtomicPrinterCard(observedAt, printerExpanded) + mannyHtml + emptyHtml;
         window.VNG.restoreDisclosureIds(node, openActionPanels, ".manny-action-accordion-trigger[aria-controls]");
-        restoreCraftRecipeSelections(node, craftRecipeSelections);
+        restoreActionFormSelections(node, actionFormSelections);
         scheduleProgressUpdates();
         updateMannyMineForms();
         updateMannyCraftForms();
@@ -1961,10 +2139,19 @@
             refreshTimer = null;
         }
         const delay = window.VNG.nextRefreshDelay(payload || {}, DEFAULT_REFRESH_MS, MIN_REFRESH_MS, REFRESH_CUSHION_MS);
-        refreshTimer = window.setTimeout(refreshManniesPage, delay);
+        refreshTimer = window.setTimeout(() => refreshManniesPage(false), delay);
     }
 
-    async function refreshManniesPage() {
+    function mannyFormInteractionActive() {
+        const active = document.activeElement;
+        return active instanceof HTMLElement && active.closest("#manny-list .manny-form") !== null;
+    }
+
+    async function refreshManniesPage(force) {
+        if (!force && mannyFormInteractionActive()) {
+            scheduleRefresh({});
+            return;
+        }
         if (loadInProgress) {
             return;
         }
@@ -2203,7 +2390,7 @@
             return;
         }
 
-        document.querySelector("[data-refresh=\"mannies\"]")?.addEventListener("click", refreshManniesPage);
+        document.querySelector("[data-refresh=\"mannies\"]")?.addEventListener("click", () => refreshManniesPage(true));
 
         mannyList.addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -2220,7 +2407,7 @@
                     return;
                 }
                 setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
-                await refreshManniesPage();
+                await refreshManniesPage(true);
             } catch (error) {
                 setStatus(error.message || tr("requestDenied", "Request denied"));
             }
@@ -2295,7 +2482,7 @@
                         "body": JSON.stringify({}),
                     });
                     setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
-                    await refreshManniesPage();
+                    await refreshManniesPage(true);
                 } catch (error) {
                     setStatus(error.message || tr("requestDenied", "Request denied"));
                 }
@@ -2320,7 +2507,7 @@
                     "body": JSON.stringify({}),
                 });
                 setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
-                await refreshManniesPage();
+                await refreshManniesPage(true);
             } catch (error) {
                 setStatus(error.message || tr("requestDenied", "Request denied"));
             }
@@ -2334,6 +2521,6 @@
 
         i18n = await window.VNG.loadI18n();
         bindEvents();
-        refreshManniesPage();
+        refreshManniesPage(true);
     });
 })();

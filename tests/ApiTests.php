@@ -285,6 +285,11 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.targetContainerId = targetContainerId'), 'mannies JS sends targetContainerId for external mining storage');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detection.targetObjectId'), 'mannies JS uses explicit hidden-container asteroid targets when provided');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'currentActionFormSelections'), 'mannies JS preserves action form values across list refreshes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyFormInteractionActive'), 'mannies JS defers automatic refresh while a Manny form is active');
+$test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'recoverDetectedContainerHint'), 'mannies JS does not render hidden-container detection alerts inside Manny cards');
+$test->assert(is_string($appCss) && !str_contains($appCss, 'manny-detection-alert'), 'mannies CSS no longer includes the removed in-card detection alert');
 $test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-button[hidden]'), 'inventories CSS keeps hidden icon buttons hidden after icon button display rules');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVisitedSectors'), 'sensors JS can load visited-sector history');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
@@ -1549,6 +1554,15 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(202, $mineDriftingContainer->status, 'Manny mining can target a drifting detached container');
         $test->assertEquals($detachedObjectId, $mineDriftingContainer->body['manny']['task']['targetContainer']['id'] ?? null, 'mining task exposes its target detached container id');
         $test->assertEquals(900, $mineDriftingContainer->body['manny']['task']['miningTravelSeconds'] ?? null, 'drifting target container mining keeps normal travel time');
+        $activeDriftingTargetContainerMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $activeDriftingTargetContainerManny = array_values(array_filter(
+            $activeDriftingTargetContainerMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $activeDriftingTargetContainerTask = is_array($activeDriftingTargetContainerManny) && is_array($activeDriftingTargetContainerManny['task'] ?? null) ? $activeDriftingTargetContainerManny['task'] : [];
+        $test->assertEquals($detachedObjectId, $activeDriftingTargetContainerTask['targetContainer']['id'] ?? null, 'GET /api/probe/mannies exposes the drifting mining target container id');
+        $test->assertEquals('drifting', $activeDriftingTargetContainerTask['targetContainer']['mode'] ?? null, 'GET /api/probe/mannies exposes the drifting mining target container mode');
+        $test->assertEquals(false, $activeDriftingTargetContainerTask['targetContainer']['travelDeducted'] ?? null, 'GET /api/probe/mannies exposes normal travel for drifting target containers');
         $detachSecondRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
         $detachSecondRow->execute(['uid' => $detachSecondMannyId]);
         $detachSecondMannyDbId = (int) $detachSecondRow->fetchColumn();
@@ -1660,6 +1674,16 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals($hiddenDetachedObjectId, $mineHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'mining an asteroid with a hidden container reports an artificial object id');
         $test->assertEquals(0, $mineHidden->body['manny']['task']['miningTravelSeconds'] ?? null, 'mining into a hidden container on the target asteroid deducts travel time');
         $test->assert(!str_contains(json_encode($mineHidden->body['manny']['task']['artificialObjectDetected'] ?? [], JSON_THROW_ON_ERROR), 'resources'), 'hidden-container mining detection does not expose contents');
+        $activeHiddenTargetContainerMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $activeHiddenTargetContainerManny = array_values(array_filter(
+            $activeHiddenTargetContainerMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $activeHiddenTargetContainerTask = is_array($activeHiddenTargetContainerManny) && is_array($activeHiddenTargetContainerManny['task'] ?? null) ? $activeHiddenTargetContainerManny['task'] : [];
+        $test->assertEquals($hiddenDetachedObjectId, $activeHiddenTargetContainerTask['targetContainer']['id'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target container id');
+        $test->assertEquals('hidden_on_asteroid', $activeHiddenTargetContainerTask['targetContainer']['mode'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target container mode');
+        $test->assertEquals('cache-rock', $activeHiddenTargetContainerTask['targetContainer']['targetObjectId'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target asteroid id');
+        $test->assertEquals(true, $activeHiddenTargetContainerTask['targetContainer']['travelDeducted'] ?? null, 'GET /api/probe/mannies exposes same-asteroid travel deduction for hidden target containers');
         $hiddenMineRow = $pdo->prepare('SELECT task_started_at, task_ends_at FROM mannies WHERE uid = :uid');
         $hiddenMineRow->execute(['uid' => $detachSecondMannyId]);
         $hiddenMineTiming = $hiddenMineRow->fetch(PDO::FETCH_ASSOC) ?: [];
