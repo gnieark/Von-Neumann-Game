@@ -417,7 +417,7 @@
                     "name": tr("detectedDetachedContainer", "Detected detached container"),
                     "source": "asteroid",
                     "hidden": true,
-                    "targetObjectId": manny && manny.task ? manny.task.objectId || null : null,
+                    "targetObjectId": detection.targetObjectId || (manny && manny.task ? manny.task.targetObjectId || manny.task.objectId || null : null),
                 });
             }
         });
@@ -1095,6 +1095,7 @@
                     "target": salvageTargetLabel(payload.target || {}),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + artificialObjectDetectionHtml(payload)
                 + "</section>";
         }
         if (manny.currentTask === "installing_waypoint_bookmark") {

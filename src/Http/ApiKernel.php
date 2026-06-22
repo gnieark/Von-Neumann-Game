@@ -44,7 +44,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 45;
+    public const API_VERSION = 47;
 
     public function __construct(
         private readonly AuthService $auth,

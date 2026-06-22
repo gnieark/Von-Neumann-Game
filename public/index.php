@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260622-manny-mining-target-container';
+const ASSET_VERSION = '20260622-hidden-container-discovery';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);

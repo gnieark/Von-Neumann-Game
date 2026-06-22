@@ -187,7 +187,7 @@ final class MannyService
             $this->ensureAsteroidHasResources($availableAmounts, $resourceProfile, $targetAmount);
         }
         $artificialObjectDetected = $target instanceof Asteroid
-            ? $this->hiddenDetachedContainerDetection($sector, $target->getId())
+            ? $this->hiddenDetachedContainerDetection($sector, $target->getId(), $probe->playerId)
             : null;
         $probeIncomingResources = $targetContainer === null ? $this->resourceAmountsForTotal($targetAmount, $resourceProfile) : [];
         if (!$this->storage->canStoreIncoming($probe, $probeIncomingResources, [['type' => 'manny', 'space' => $this->mannyContainerSpace()]])) {
@@ -417,7 +417,9 @@ final class MannyService
             'durationSeconds' => $durationSeconds,
             'snapshot' => $snapshot,
             'target' => $target instanceof Asteroid ? $this->bookmarkTargetArray($target) : null,
-        ];
+        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
+            ? ['artificialObjectDetected' => $this->hiddenDetachedContainerDetectionPayload($detachedObjectId, (string) $objectId)]
+            : []);
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
@@ -487,7 +489,7 @@ final class MannyService
         }
 
         $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        $detection = $this->hiddenDetachedContainerDetection($sector, $objectId);
+        $detection = $this->hiddenDetachedContainerDetection($sector, $objectId, $probe->playerId);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $durationSeconds = $this->miningTravelSeconds() * 2;
         $manny->locationType = Manny::LOCATION_SECTOR;
@@ -1826,6 +1828,8 @@ final class MannyService
             $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
                 ? 'Detached storage container hidden on an asteroid.'
                 : 'Detached storage container drifting in open space.',
+            [],
+            $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID ? [(int) ($snapshot['ownerPlayerId'] ?? $probe->playerId)] : [],
         );
 
         if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
@@ -1844,7 +1848,9 @@ final class MannyService
             'mode' => $mode,
             'targetObjectId' => $targetObjectId,
             'detachedContainer' => $this->detachedContainerPublicArray($object),
-        ]);
+        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
+            ? ['artificialObjectDetected' => $this->hiddenDetachedContainerDetectionPayload($object->getId(), $targetObjectId)]
+            : []));
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -1914,7 +1920,7 @@ final class MannyService
         }
 
         $sector = $this->sectors->getOrCreateSector($manny->sector ?? $probe->currentSector);
-        $detection = $this->hiddenDetachedContainerDetection($sector, (string) ($manny->taskPayload['objectId'] ?? ''));
+        $detection = $this->hiddenDetachedContainerDetection($sector, (string) ($manny->taskPayload['objectId'] ?? ''), $probe->playerId);
         $result = [
             'lastTask' => Manny::TASK_INSPECTING_ASTEROID,
             'result' => 'success',
@@ -2088,17 +2094,33 @@ final class MannyService
     /**
      * @return array<string, mixed>|null
      */
-    private function hiddenDetachedContainerDetection(SectorContent $sector, string $objectId): ?array
+    private function hiddenDetachedContainerDetection(SectorContent $sector, string $objectId, ?int $discoveringPlayerId = null): ?array
     {
         $hidden = $sector->hiddenDetachedContainersForObject($objectId);
         if ($hidden === []) {
             return null;
         }
 
+        $container = $hidden[0];
+        if ($discoveringPlayerId !== null && !$container->isDiscoveredByPlayer($discoveringPlayerId)) {
+            $container = $container->withDiscoveredByPlayer($discoveringPlayerId);
+            $sector->replaceDetachedContainer($container);
+            $this->sectors->saveSector($sector);
+        }
+
+        return $this->hiddenDetachedContainerDetectionPayload($container->getId(), $objectId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function hiddenDetachedContainerDetectionPayload(string $objectId, ?string $targetObjectId): array
+    {
         return [
             'type' => 'detached_storage_container',
             'detection' => SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
-            'objectId' => $hidden[0]->getId(),
+            'objectId' => $objectId,
+            'targetObjectId' => $targetObjectId,
         ];
     }
 

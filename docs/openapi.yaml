@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 45
+                apiVersion: 47
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1779,7 +1779,9 @@ paths:
         The container, its stored resources/items, and routing rules are
         removed from the probe inventory when the order is accepted. On
         completion it becomes either a visible drifting detached container or a
-        hidden container attached to an asteroid.
+        hidden container attached to an asteroid. Hidden-asteroid detaches
+        expose artificialObjectDetected in the Manny task/result so clients can
+        immediately reference the hidden detached container id.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -3944,6 +3946,10 @@ components:
         objectId:
           type: string
           description: Recoverable detached container id when detection yields one.
+        targetObjectId:
+          type: string
+          nullable: true
+          description: Asteroid id that holds the hidden detached container when known.
     MannyMiningTask:
       type: object
       required: [objectId, resourceType, resourceTypes, targetAmount, depositedAmount, depositedResources, extractedAmount, extractedResources, availableResources, resourceComposition, resourceProfile, target]
@@ -4297,10 +4303,11 @@ components:
         mode:
           type: string
           enum: [drifting, hidden_on_asteroid]
-          description: Present only for detached containers. Hidden containers are not included in normal observations.
+          description: Present only for detached containers. Hidden containers are included only for players who have discovered them.
         targetObjectId:
           type: string
-          description: Present only for detached containers that are attached to another sector object.
+          nullable: true
+          description: Present for detached containers, null unless the container is attached to another sector object.
         capacity:
           type: number
           description: Storage capacity for detached container objects.

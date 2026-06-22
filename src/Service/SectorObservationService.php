@@ -68,7 +68,7 @@ final class SectorObservationService
                 $distance,
                 SectorKnowledgeLevel::Detailed,
                 1.0,
-                ['objects' => $this->detailedObjects($content, $current, $relative)],
+                ['objects' => $this->detailedObjects($content, $current, $relative, $player->id)],
                 $scan,
             );
         }
@@ -250,6 +250,7 @@ final class SectorObservationService
 
         if ($object instanceof SectorDetachedContainer) {
             $data['mode'] = $object->getMode();
+            $data['targetObjectId'] = $object->getTargetObjectId();
             $data['capacity'] = $object->getCapacity();
             $data['capacityUnit'] = $object->getCapacityUnit();
             $data['salvageable'] = true;
@@ -265,7 +266,7 @@ final class SectorObservationService
     /**
      * @return array<array<string, mixed>>
      */
-    private function detailedObjects(SectorContent $content, bool $isCurrentSector, array $relativeCoordinates): array
+    private function detailedObjects(SectorContent $content, bool $isCurrentSector, array $relativeCoordinates, int $playerId): array
     {
         $objects = [];
         foreach ($content->getObjects() as $object) {
@@ -274,6 +275,13 @@ final class SectorObservationService
             }
 
             $objects[] = $this->detailedObject($object, $content->getCoordinates(), $relativeCoordinates);
+        }
+        foreach ($content->getHiddenDetachedContainers() as $container) {
+            if (!$container->isDiscoveredByPlayer($playerId)) {
+                continue;
+            }
+
+            $objects[] = $this->detailedObject($container, $content->getCoordinates(), $relativeCoordinates);
         }
 
         return $objects;
