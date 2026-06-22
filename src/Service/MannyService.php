@@ -130,7 +130,7 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
-    public function startMining(NeumannProbe $probe, string $uid, string $objectId, string|array $resourceTypes, float $targetAmount): Manny
+    public function startMining(NeumannProbe $probe, string $uid, string $objectId, string|array $resourceTypes, float $targetAmount, ?string $targetContainerId = null): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
@@ -148,7 +148,8 @@ final class MannyService
             throw new MannyActionException(400, 'bad_request', 'Mining target amount must be greater than zero.');
         }
 
-        $target = $this->findObjectInCurrentSector($probe, $objectId);
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $target = $sector->findObjectById($objectId);
         if ($target === null || !$this->isMineableObject($target)) {
             throw new MannyActionException(422, 'invalid_mining_target', 'This object cannot be mined by a Manny.');
         }
@@ -165,18 +166,31 @@ final class MannyService
             throw new MannyActionException(422, 'resource_unavailable', 'The requested resource is not present on this object.');
         }
 
+        $targetContainer = null;
+        $miningTravelSeconds = $this->miningTravelSeconds();
+        $requestedTargetAmount = $targetAmount;
+        if ($targetContainerId !== null) {
+            $targetContainer = $this->miningTargetContainer($sector, $targetContainerId, $objectId);
+            if (in_array(ResourceComposition::DEUTERIUM, $selectedResources, true)) {
+                throw new MannyActionException(422, 'invalid_storage_container', 'Detached storage containers cannot receive deuterium.');
+            }
+            $targetContainerFreeCapacity = $this->detachedContainerFreeCapacity($targetContainer['container']);
+            if ($targetContainerFreeCapacity <= 0.0001) {
+                throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Target detached container is full.');
+            }
+            $targetAmount = round(min($targetAmount, $targetContainerFreeCapacity), 4);
+            $miningTravelSeconds = $targetContainer['sameAsteroid'] ? 0 : $miningTravelSeconds;
+        }
+
         $resourceProfile = ResourceComposition::profileForSelection($composition, $selectedResources);
         if ($target instanceof Asteroid && $availableAmounts !== null) {
             $this->ensureAsteroidHasResources($availableAmounts, $resourceProfile, $targetAmount);
         }
         $artificialObjectDetected = $target instanceof Asteroid
-            ? $this->hiddenDetachedContainerDetection($this->sectors->getOrCreateSector($probe->currentSector), $target->getId())
+            ? $this->hiddenDetachedContainerDetection($sector, $target->getId(), $probe->playerId)
             : null;
-        if (!$this->storage->canStoreIncoming(
-            $probe,
-            $this->resourceAmountsForTotal($targetAmount, $resourceProfile),
-            [['type' => 'manny', 'space' => $this->mannyContainerSpace()]],
-        )) {
+        $probeIncomingResources = $targetContainer === null ? $this->resourceAmountsForTotal($targetAmount, $resourceProfile) : [];
+        if (!$this->storage->canStoreIncoming($probe, $probeIncomingResources, [['type' => 'manny', 'space' => $this->mannyContainerSpace()]])) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this mining target.');
         }
 
@@ -185,7 +199,7 @@ final class MannyService
         $manny->sector = $probe->currentSector;
         $manny->currentTask = Manny::TASK_MINING;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $this->miningDurationSeconds($targetAmount) . ' seconds')->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $this->miningDurationSeconds($targetAmount, $miningTravelSeconds) . ' seconds')->format('c');
         $manny->taskPayload = [
             'objectId' => $objectId,
             'resourceType' => $selectedResources[0],
@@ -199,7 +213,11 @@ final class MannyService
             'resourceComposition' => $composition,
             'resourceProfile' => $resourceProfile,
             'target' => $this->miningTargetArray($target),
-        ] + ($artificialObjectDetected !== null ? ['artificialObjectDetected' => $artificialObjectDetected] : []);
+            'miningTravelSeconds' => $miningTravelSeconds,
+        ]
+            + ($requestedTargetAmount > $targetAmount ? ['requestedTargetAmount' => $requestedTargetAmount] : [])
+            + ($targetContainer !== null ? ['targetContainer' => $this->miningTargetContainerPayload($targetContainer['container'], $targetContainer['sameAsteroid'])] : [])
+            + ($artificialObjectDetected !== null ? ['artificialObjectDetected' => $artificialObjectDetected] : []);
         $manny->cargoDeuterium = 0.0;
         $manny->cargoMetals = 0.0;
         $manny->cargoIce = 0.0;
@@ -399,7 +417,9 @@ final class MannyService
             'durationSeconds' => $durationSeconds,
             'snapshot' => $snapshot,
             'target' => $target instanceof Asteroid ? $this->bookmarkTargetArray($target) : null,
-        ];
+        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
+            ? ['artificialObjectDetected' => $this->hiddenDetachedContainerDetectionPayload($detachedObjectId, (string) $objectId)]
+            : []);
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
@@ -469,7 +489,7 @@ final class MannyService
         }
 
         $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        $detection = $this->hiddenDetachedContainerDetection($sector, $objectId);
+        $detection = $this->hiddenDetachedContainerDetection($sector, $objectId, $probe->playerId);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $durationSeconds = $this->miningTravelSeconds() * 2;
         $manny->locationType = Manny::LOCATION_SECTOR;
@@ -1508,8 +1528,9 @@ final class MannyService
 
         $elapsed = max(0, $now->getTimestamp() - (new \DateTimeImmutable($manny->taskStartedAt))->getTimestamp());
         $targetAmount = (float) ($manny->taskPayload['targetAmount'] ?? 0);
-        $progress = $this->miningProgress($targetAmount, $elapsed);
+        $progress = $this->miningProgress($targetAmount, $elapsed, $this->miningTaskTravelSeconds($manny));
         $resourceProfile = $this->miningResourceProfile($manny);
+        $targetContainerId = $this->miningTaskTargetContainerId($manny);
         $plannedExtracted = round(min($targetAmount, (float) $progress['deliveredAmount'] + (float) $progress['cargoAmount']), 4);
         $extracted = round((float) ($manny->taskPayload['extractedAmount'] ?? 0), 4);
         if ($plannedExtracted > $extracted) {
@@ -1528,7 +1549,14 @@ final class MannyService
         $delivered = $complete ? $deposited : round(min((float) $progress['deliveredAmount'], $extracted), 4);
         if ($delivered > $deposited) {
             $deliveryAmount = round($delivered - $deposited, 4);
-            if (!$this->canAcceptMiningDelivery($probe, $resourceProfile, $deliveryAmount, false)) {
+            if ($targetContainerId !== null) {
+                $acceptedDelivery = $this->transferMiningResourcesToDetachedContainer($manny, $resourceProfile, $deliveryAmount);
+                $delivered = round($deposited + $acceptedDelivery, 4);
+                if ($acceptedDelivery + 0.00001 < $deliveryAmount) {
+                    $complete = true;
+                    $manny->taskPayload['targetContainerFull'] = true;
+                }
+            } elseif (!$this->canAcceptMiningDelivery($probe, $resourceProfile, $deliveryAmount, false)) {
                 $this->setMannyCargoProfile($manny, $resourceProfile, $deliveryAmount);
                 $this->waitForStorageSpace($manny, [
                     'reason' => 'cargo_delivery',
@@ -1541,7 +1569,9 @@ final class MannyService
                 return $this->mannies->findById($manny->id) ?? $manny;
             }
 
-            $this->transferMiningResourcesToProbe($probe, $resourceProfile, $deliveryAmount);
+            if ($targetContainerId === null) {
+                $this->transferMiningResourcesToProbe($probe, $resourceProfile, $deliveryAmount);
+            }
             $manny->taskPayload['depositedAmount'] = $delivered;
             $manny->taskPayload['depositedResources'] = $this->resourceAmountsForTotal((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
         }
@@ -1553,7 +1583,16 @@ final class MannyService
 
         if ($complete) {
             $remaining = round((float) ($manny->taskPayload['extractedAmount'] ?? 0) - (float) ($manny->taskPayload['depositedAmount'] ?? 0), 4);
-            if (!$this->canAcceptMiningDelivery($probe, $resourceProfile, $remaining, true)) {
+            if ($targetContainerId !== null) {
+                $acceptedRemaining = $this->transferMiningResourcesToDetachedContainer($manny, $resourceProfile, $remaining);
+                if ($acceptedRemaining > 0.0) {
+                    $manny->taskPayload['depositedAmount'] = round((float) ($manny->taskPayload['depositedAmount'] ?? 0) + $acceptedRemaining, 4);
+                    $manny->taskPayload['depositedResources'] = $this->resourceAmountsForTotal((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
+                }
+                if ($acceptedRemaining + 0.00001 < $remaining) {
+                    $manny->taskPayload['targetContainerFull'] = true;
+                }
+            } elseif (!$this->canAcceptMiningDelivery($probe, $resourceProfile, $remaining, true)) {
                 $this->setMannyCargoProfile($manny, $resourceProfile, $remaining);
                 $this->waitForStorageSpace($manny, [
                     'reason' => 'return_to_probe',
@@ -1565,12 +1604,20 @@ final class MannyService
 
                 return $this->mannies->findById($manny->id) ?? $manny;
             }
-            if ($remaining > 0) {
+            if ($targetContainerId === null && $remaining > 0) {
                 $this->transferMiningResourcesToProbe($probe, $resourceProfile, $remaining);
                 $manny->taskPayload['depositedAmount'] = round((float) ($manny->taskPayload['depositedAmount'] ?? 0) + $remaining, 4);
                 $manny->taskPayload['depositedResources'] = $this->resourceAmountsForTotal((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
             }
             $this->clearMannyCargo($manny);
+            if (!$manny->isInSameSectorAs($probe)) {
+                $this->clearTask($manny);
+                $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
+                $this->probes->save($probe);
+                $this->mannies->save($manny);
+
+                return $this->mannies->findById($manny->id) ?? $manny;
+            }
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
                 $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
                 $this->probes->save($probe);
@@ -1781,6 +1828,8 @@ final class MannyService
             $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
                 ? 'Detached storage container hidden on an asteroid.'
                 : 'Detached storage container drifting in open space.',
+            [],
+            $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID ? [(int) ($snapshot['ownerPlayerId'] ?? $probe->playerId)] : [],
         );
 
         if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
@@ -1799,7 +1848,9 @@ final class MannyService
             'mode' => $mode,
             'targetObjectId' => $targetObjectId,
             'detachedContainer' => $this->detachedContainerPublicArray($object),
-        ]);
+        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
+            ? ['artificialObjectDetected' => $this->hiddenDetachedContainerDetectionPayload($object->getId(), $targetObjectId)]
+            : []));
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -1869,7 +1920,7 @@ final class MannyService
         }
 
         $sector = $this->sectors->getOrCreateSector($manny->sector ?? $probe->currentSector);
-        $detection = $this->hiddenDetachedContainerDetection($sector, (string) ($manny->taskPayload['objectId'] ?? ''));
+        $detection = $this->hiddenDetachedContainerDetection($sector, (string) ($manny->taskPayload['objectId'] ?? ''), $probe->playerId);
         $result = [
             'lastTask' => Manny::TASK_INSPECTING_ASTEROID,
             'result' => 'success',
@@ -2043,17 +2094,33 @@ final class MannyService
     /**
      * @return array<string, mixed>|null
      */
-    private function hiddenDetachedContainerDetection(SectorContent $sector, string $objectId): ?array
+    private function hiddenDetachedContainerDetection(SectorContent $sector, string $objectId, ?int $discoveringPlayerId = null): ?array
     {
         $hidden = $sector->hiddenDetachedContainersForObject($objectId);
         if ($hidden === []) {
             return null;
         }
 
+        $container = $hidden[0];
+        if ($discoveringPlayerId !== null && !$container->isDiscoveredByPlayer($discoveringPlayerId)) {
+            $container = $container->withDiscoveredByPlayer($discoveringPlayerId);
+            $sector->replaceDetachedContainer($container);
+            $this->sectors->saveSector($sector);
+        }
+
+        return $this->hiddenDetachedContainerDetectionPayload($container->getId(), $objectId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function hiddenDetachedContainerDetectionPayload(string $objectId, ?string $targetObjectId): array
+    {
         return [
             'type' => 'detached_storage_container',
             'detection' => SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
-            'objectId' => $hidden[0]->getId(),
+            'objectId' => $objectId,
+            'targetObjectId' => $targetObjectId,
         ];
     }
 
@@ -2624,15 +2691,77 @@ final class MannyService
         return $target;
     }
 
-    private function miningDurationSeconds(float $targetAmount): int
+    /**
+     * @return array{container:SectorDetachedContainer, sameAsteroid:bool}
+     */
+    private function miningTargetContainer(SectorContent $sector, string $containerId, string $objectId): array
+    {
+        $container = $sector->findDetachedContainerById($containerId)
+            ?? throw new MannyActionException(404, 'detached_container_not_found', 'Detached storage container not found.');
+        if (!in_array($container->getMode(), [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID], true)) {
+            throw new MannyActionException(422, 'invalid_storage_container', 'This detached container cannot receive mined resources.');
+        }
+
+        return [
+            'container' => $container,
+            'sameAsteroid' => $container->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
+                && $container->getTargetObjectId() === $objectId,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function miningTargetContainerPayload(SectorDetachedContainer $container, bool $sameAsteroid): array
+    {
+        return [
+            'id' => $container->getId(),
+            'type' => $container->getType()->value,
+            'name' => $container->getName(),
+            'mode' => $container->getMode(),
+            'targetObjectId' => $container->getTargetObjectId(),
+            'capacity' => $container->getCapacity(),
+            'capacityUnit' => $container->getCapacityUnit(),
+            'travelDeducted' => $sameAsteroid,
+        ];
+    }
+
+    private function detachedContainerFreeCapacity(SectorDetachedContainer $container): float
+    {
+        return round(max(0.0, $container->getCapacity() - $this->detachedContainerUsedCapacity($container)), 4);
+    }
+
+    private function detachedContainerUsedCapacity(SectorDetachedContainer $container): float
+    {
+        $payload = $container->getPayload();
+        $used = 0.0;
+        $resources = is_array($payload['resources'] ?? null) ? $payload['resources'] : [];
+        foreach ($resources as $amount) {
+            if (is_numeric($amount)) {
+                $used += max(0.0, (float) $amount);
+            }
+        }
+
+        $items = is_array($payload['items'] ?? null) ? $payload['items'] : [];
+        foreach ($items as $item) {
+            if (is_array($item) && is_numeric($item['containerSpace'] ?? null)) {
+                $used += max(0.0, (float) $item['containerSpace']);
+            }
+        }
+
+        return round($used, 4);
+    }
+
+    private function miningDurationSeconds(float $targetAmount, ?int $travelSeconds = null): int
     {
         $remaining = round($targetAmount, 4);
         $duration = 0;
+        $travelSeconds ??= $this->miningTravelSeconds();
         while ($remaining > 0.0001) {
             $tripAmount = min($this->mannyCargoCapacity(), $remaining);
-            $duration += $this->miningTravelSeconds();
+            $duration += $travelSeconds;
             $duration += (int) ceil($tripAmount / $this->miningAmountPerTick()) * $this->miningTickSeconds();
-            $duration += $this->miningTravelSeconds();
+            $duration += $travelSeconds;
             $remaining = round($remaining - $tripAmount, 4);
         }
 
@@ -2651,15 +2780,16 @@ final class MannyService
         return $elapsedSeconds < $defaultDuration ? $elapsedSeconds : $defaultDuration;
     }
 
-    private function miningProgress(float $targetAmount, int $elapsedSeconds): array
+    private function miningProgress(float $targetAmount, int $elapsedSeconds, ?int $travelSeconds = null): array
     {
         $remaining = round($targetAmount, 4);
         $cursor = 0;
         $delivered = 0.0;
         $tripIndex = 1;
+        $travelSeconds ??= $this->miningTravelSeconds();
         while ($remaining > 0.0001) {
             $tripAmount = min($this->mannyCargoCapacity(), $remaining);
-            $outboundEnd = $cursor + $this->miningTravelSeconds();
+            $outboundEnd = $cursor + $travelSeconds;
             if ($elapsedSeconds < $outboundEnd) {
                 return ['phase' => 'outbound', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => 0.0];
             }
@@ -2673,7 +2803,7 @@ final class MannyService
                 return ['phase' => 'mining', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => round($cargo, 4)];
             }
 
-            $returnEnd = $miningEnd + $this->miningTravelSeconds();
+            $returnEnd = $miningEnd + $travelSeconds;
             if ($elapsedSeconds < $returnEnd) {
                 return ['phase' => 'returning', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => round($tripAmount, 4)];
             }
@@ -2820,6 +2950,47 @@ final class MannyService
         }
     }
 
+    /**
+     * @param array<string, float> $profile
+     */
+    private function transferMiningResourcesToDetachedContainer(Manny $manny, array $profile, float $amount): float
+    {
+        $amount = round(max(0.0, $amount), 4);
+        $targetContainerId = $this->miningTaskTargetContainerId($manny);
+        if ($amount <= 0.0 || $targetContainerId === null || $manny->sector === null) {
+            return 0.0;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($manny->sector);
+        $container = $sector->findDetachedContainerById($targetContainerId);
+        if ($container === null) {
+            $manny->taskPayload['targetContainerMissing'] = true;
+            return 0.0;
+        }
+
+        $accepted = round(min($amount, $this->detachedContainerFreeCapacity($container)), 4);
+        if ($accepted <= 0.0) {
+            $manny->taskPayload['targetContainerFull'] = true;
+            return 0.0;
+        }
+
+        $payload = $container->getPayload();
+        $resources = is_array($payload['resources'] ?? null) ? $payload['resources'] : [];
+        foreach ($this->resourceAmountsForTotal($accepted, $profile) as $type => $resourceAmount) {
+            if ($resourceAmount <= 0.0) {
+                continue;
+            }
+            $resources[$type] = round(max(0.0, (float) ($resources[$type] ?? 0.0)) + $resourceAmount, 4);
+        }
+        $payload['resources'] = $resources;
+
+        if ($sector->replaceDetachedContainer($container->withPayload($payload))) {
+            $this->sectors->saveSector($sector);
+        }
+
+        return $accepted;
+    }
+
     private function freeCargoCapacity(NeumannProbe $probe): float
     {
         return $this->storage->freeCargoCapacity($probe);
@@ -2870,6 +3041,27 @@ final class MannyService
         $legacyProfile[$resourceType] = 1.0;
 
         return $legacyProfile;
+    }
+
+    private function miningTaskTravelSeconds(Manny $manny): int
+    {
+        if (isset($manny->taskPayload['miningTravelSeconds']) && is_numeric($manny->taskPayload['miningTravelSeconds'])) {
+            return max(0, (int) $manny->taskPayload['miningTravelSeconds']);
+        }
+
+        return $this->miningTravelSeconds();
+    }
+
+    private function miningTaskTargetContainerId(Manny $manny): ?string
+    {
+        $targetContainer = $manny->taskPayload['targetContainer'] ?? null;
+        if (!is_array($targetContainer) || !isset($targetContainer['id']) || !is_string($targetContainer['id'])) {
+            return null;
+        }
+
+        $id = trim($targetContainer['id']);
+
+        return $id !== '' ? $id : null;
     }
 
     /**

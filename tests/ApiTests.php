@@ -266,6 +266,7 @@ $mainScript = file_get_contents($root . '/public/assets/main.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
 $inventoriesScript = file_get_contents($root . '/public/assets/inventories.js');
+$manniesScript = file_get_contents($root . '/public/assets/mannies.js');
 $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
@@ -281,6 +282,14 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"/api/probe/storage-containers/" + encodeURIComponent(containerId)'), 'inventories JS renames containers through the storage-container PATCH endpoint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.targetContainerId = targetContainerId'), 'mannies JS sends targetContainerId for external mining storage');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detection.targetObjectId'), 'mannies JS uses explicit hidden-container asteroid targets when provided');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'currentActionFormSelections'), 'mannies JS preserves action form values across list refreshes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyFormInteractionActive'), 'mannies JS defers automatic refresh while a Manny form is active');
+$test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'recoverDetectedContainerHint'), 'mannies JS does not render hidden-container detection alerts inside Manny cards');
+$test->assert(is_string($appCss) && !str_contains($appCss, 'manny-detection-alert'), 'mannies CSS no longer includes the removed in-card detection alert');
 $test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-button[hidden]'), 'inventories CSS keeps hidden icon buttons hidden after icon button display rules');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVisitedSectors'), 'sensors JS can load visited-sector history');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
@@ -434,7 +443,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(44, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(47, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1533,6 +1542,40 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(true, $observedDetached['salvageable'] ?? null, 'drifting detached containers are visible as salvageable sector objects');
         $test->assert(!array_key_exists('payload', $observedDetached ?? []), 'sector observation does not expose detached container contents');
 
+        $driftingMineSector = $sectorRepository->load($detachProbe->currentSector);
+        $driftingMineSector->addObject(new Asteroid('drifting-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001));
+        $sectorRepository->save($driftingMineSector);
+        $mineDriftingContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
+            'objectId' => 'drifting-mine-rock',
+            'resource' => 'metals',
+            'targetAmount' => 0.01,
+            'targetContainerId' => $detachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $mineDriftingContainer->status, 'Manny mining can target a drifting detached container');
+        $test->assertEquals($detachedObjectId, $mineDriftingContainer->body['manny']['task']['targetContainer']['id'] ?? null, 'mining task exposes its target detached container id');
+        $test->assertEquals(900, $mineDriftingContainer->body['manny']['task']['miningTravelSeconds'] ?? null, 'drifting target container mining keeps normal travel time');
+        $activeDriftingTargetContainerMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $activeDriftingTargetContainerManny = array_values(array_filter(
+            $activeDriftingTargetContainerMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $activeDriftingTargetContainerTask = is_array($activeDriftingTargetContainerManny) && is_array($activeDriftingTargetContainerManny['task'] ?? null) ? $activeDriftingTargetContainerManny['task'] : [];
+        $test->assertEquals($detachedObjectId, $activeDriftingTargetContainerTask['targetContainer']['id'] ?? null, 'GET /api/probe/mannies exposes the drifting mining target container id');
+        $test->assertEquals('drifting', $activeDriftingTargetContainerTask['targetContainer']['mode'] ?? null, 'GET /api/probe/mannies exposes the drifting mining target container mode');
+        $test->assertEquals(false, $activeDriftingTargetContainerTask['targetContainer']['travelDeducted'] ?? null, 'GET /api/probe/mannies exposes normal travel for drifting target containers');
+        $detachSecondRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+        $detachSecondRow->execute(['uid' => $detachSecondMannyId]);
+        $detachSecondMannyDbId = (int) $detachSecondRow->fetchColumn();
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $detachSecondMannyDbId,
+            'started' => gmdate('c', time() - 2200),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $driftingMinedContainer = $sectorRepository->load($detachProbe->currentSector)->findObjectById($detachedObjectId);
+        $test->assertEquals(0.21, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a drifting detached container updates its stored resources');
+        $test->assertEquals(0.0, $probes->findByPlayerId($detachPlayer->id)?->metalsStock, 'mining into a detached container does not add mined resources to the probe inventory');
+
         $recoverDrifting = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/salvage', $detachHeaders, json_encode([
             'objectId' => $detachedObjectId,
         ], JSON_THROW_ON_ERROR));
@@ -1544,7 +1587,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $restoredContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredContainer !== null, 'recovering a detached container restores its storage container id');
-        $test->assertEquals(0.2, $restoredContainer !== null ? ($storageContainers->resourceAmounts($restoredContainer->id)['metals'] ?? null) : null, 'recovering a detached container restores its resources');
+        $test->assertEquals(0.21, $restoredContainer !== null ? ($storageContainers->resourceAmounts($restoredContainer->id)['metals'] ?? null) : null, 'recovering a detached container restores its resources');
         $test->assertEquals($restoredContainer?->id, $items->findByUidForProbe($detachProbe->id, $storedBar->uid)?->storageContainerId, 'recovering a detached container restores stored items inside it');
         $test->assertEquals(['metals'], $restoredContainer?->priorityFilter ?? null, 'recovering a detached container restores routing rules');
 
@@ -1559,27 +1602,102 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         ], JSON_THROW_ON_ERROR));
         $test->assertEquals(202, $detachHidden->status, 'Manny can start hiding an additional container on an asteroid');
         $hiddenDetachedObjectId = (string) ($detachHidden->body['manny']['task']['objectId'] ?? '');
+        $test->assertEquals($hiddenDetachedObjectId, $detachHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'hidden detach reports the detached container as a detected artificial object');
+        $test->assertEquals('cache-rock', $detachHidden->body['manny']['task']['artificialObjectDetected']['targetObjectId'] ?? null, 'hidden detach detection reports the asteroid target for immediate client reuse');
+        $test->assert(!str_contains(json_encode($detachHidden->body['manny']['task']['artificialObjectDetected'] ?? [], JSON_THROW_ON_ERROR), 'resources'), 'hidden detach detection does not expose container contents');
         $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
-        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $completedHiddenDetachList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $completedHiddenDetachManny = array_values(array_filter(
+            $completedHiddenDetachList->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachMannyId,
+        ))[0] ?? null;
+        $completedHiddenDetachTask = is_array($completedHiddenDetachManny) && is_array($completedHiddenDetachManny['task'] ?? null) ? $completedHiddenDetachManny['task'] : [];
+        $test->assertEquals($hiddenDetachedObjectId, $completedHiddenDetachTask['artificialObjectDetected']['objectId'] ?? null, 'completed hidden detach keeps the hidden container detection in the Manny result');
+        $test->assertEquals('cache-rock', $completedHiddenDetachTask['artificialObjectDetected']['targetObjectId'] ?? null, 'completed hidden detach keeps the asteroid target in the Manny result');
         $hiddenStoredSector = $sectorRepository->load($detachProbe->currentSector);
         $test->assertEquals(1, count($hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')), 'completed hidden detach persists the container on the asteroid');
+        $hiddenStoredContainer = $hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')[0] ?? null;
+        $test->assert($hiddenStoredContainer !== null && in_array($detachPlayer->id, $hiddenStoredContainer->getDiscoveredByPlayerIds(), true), 'completed hidden detach marks the owner player as a discoverer');
         $hiddenObservation = $kernel->handle('GET', '/api/probe/sector', $detachHeaders);
         $visibleHiddenContainers = array_values(array_filter(
             $hiddenObservation->body['sector']['objects'] ?? [],
-            static fn(array $object): bool => ($object['type'] ?? null) === 'detached_container',
+            static fn(array $object): bool => ($object['id'] ?? null) === $hiddenDetachedObjectId,
         ));
-        $test->assertEquals(0, count($visibleHiddenContainers), 'hidden detached containers do not appear in normal sector observation');
+        $test->assertEquals(1, count($visibleHiddenContainers), 'owner-discovered hidden detached containers appear in sector observation');
+        $test->assertEquals('hidden_on_asteroid', $visibleHiddenContainers[0]['mode'] ?? null, 'visible hidden detached container keeps its hidden mode');
+        $test->assertEquals('cache-rock', $visibleHiddenContainers[0]['targetObjectId'] ?? null, 'visible hidden detached container exposes its asteroid target');
+        $test->assert(!array_key_exists('payload', $visibleHiddenContainers[0] ?? []), 'visible hidden detached container observation does not expose contents');
+
+        $scoutPlayer = $auth->registerPlayerWithPassword('container-scout', 'secret', 'Container Scout', 'Scout test probe');
+        $scoutProbe = $probes->findByPlayerId($scoutPlayer->id);
+        if ($scoutProbe !== null) {
+            $pdo->prepare('UPDATE neumann_probes SET sector_x = :x, sector_y = :y, sector_z = :z, entered_current_sector_at = :entered WHERE id = :id')->execute([
+                'id' => $scoutProbe->id,
+                'x' => $detachProbe->currentSector->getX(),
+                'y' => $detachProbe->currentSector->getY(),
+                'z' => $detachProbe->currentSector->getZ(),
+                'entered' => gmdate('c', time() - 3600),
+            ]);
+            $scoutSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'container-scout', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+            $scoutHeaders = ['Authorization' => 'Bearer ' . (string) ($scoutSession->body['token'] ?? '')];
+            $scoutObservationBefore = $kernel->handle('GET', '/api/probe/sector', $scoutHeaders);
+            $scoutHiddenBefore = array_values(array_filter(
+                $scoutObservationBefore->body['sector']['objects'] ?? [],
+                static fn(array $object): bool => ($object['id'] ?? null) === $hiddenDetachedObjectId,
+            ));
+            $test->assertEquals(0, count($scoutHiddenBefore), 'undiscovered hidden detached containers stay hidden from other players');
+            $scoutMannies = $kernel->handle('GET', '/api/probe/mannies', $scoutHeaders);
+            $scoutMannyId = (string) ($scoutMannies->body['mannies'][0]['id'] ?? '');
+            $scoutInspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scoutMannyId) . '/inspect-asteroid', $scoutHeaders, json_encode([
+                'objectId' => 'cache-rock',
+            ], JSON_THROW_ON_ERROR));
+            $test->assertEquals($hiddenDetachedObjectId, $scoutInspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection by another player detects the hidden container');
+            $scoutDiscoveredContainer = $sectorRepository->load($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+            $test->assert($scoutDiscoveredContainer !== null && in_array($scoutPlayer->id, $scoutDiscoveredContainer->getDiscoveredByPlayerIds(), true), 'asteroid inspection records the discovering player');
+            $scoutObservationAfter = $kernel->handle('GET', '/api/probe/sector', $scoutHeaders);
+            $scoutHiddenAfter = array_values(array_filter(
+                $scoutObservationAfter->body['sector']['objects'] ?? [],
+                static fn(array $object): bool => ($object['id'] ?? null) === $hiddenDetachedObjectId,
+            ));
+            $test->assertEquals(1, count($scoutHiddenAfter), 'discovered hidden detached containers appear in sector observation for the discovering player');
+        }
 
         $mineHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
             'resource' => 'metals',
             'targetAmount' => 0.001,
+            'targetContainerId' => $hiddenDetachedObjectId,
         ], JSON_THROW_ON_ERROR));
         $test->assertEquals($hiddenDetachedObjectId, $mineHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'mining an asteroid with a hidden container reports an artificial object id');
+        $test->assertEquals(0, $mineHidden->body['manny']['task']['miningTravelSeconds'] ?? null, 'mining into a hidden container on the target asteroid deducts travel time');
         $test->assert(!str_contains(json_encode($mineHidden->body['manny']['task']['artificialObjectDetected'] ?? [], JSON_THROW_ON_ERROR), 'resources'), 'hidden-container mining detection does not expose contents');
+        $activeHiddenTargetContainerMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $activeHiddenTargetContainerManny = array_values(array_filter(
+            $activeHiddenTargetContainerMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $activeHiddenTargetContainerTask = is_array($activeHiddenTargetContainerManny) && is_array($activeHiddenTargetContainerManny['task'] ?? null) ? $activeHiddenTargetContainerManny['task'] : [];
+        $test->assertEquals($hiddenDetachedObjectId, $activeHiddenTargetContainerTask['targetContainer']['id'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target container id');
+        $test->assertEquals('hidden_on_asteroid', $activeHiddenTargetContainerTask['targetContainer']['mode'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target container mode');
+        $test->assertEquals('cache-rock', $activeHiddenTargetContainerTask['targetContainer']['targetObjectId'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target asteroid id');
+        $test->assertEquals(true, $activeHiddenTargetContainerTask['targetContainer']['travelDeducted'] ?? null, 'GET /api/probe/mannies exposes same-asteroid travel deduction for hidden target containers');
+        $hiddenMineRow = $pdo->prepare('SELECT task_started_at, task_ends_at FROM mannies WHERE uid = :uid');
+        $hiddenMineRow->execute(['uid' => $detachSecondMannyId]);
+        $hiddenMineTiming = $hiddenMineRow->fetch(PDO::FETCH_ASSOC) ?: [];
+        $hiddenMineDuration = (new DateTimeImmutable((string) ($hiddenMineTiming['task_ends_at'] ?? 'now')))->getTimestamp()
+            - (new DateTimeImmutable((string) ($hiddenMineTiming['task_started_at'] ?? 'now')))->getTimestamp();
+        $test->assertEquals(300, $hiddenMineDuration, 'hidden same-asteroid target container mining only takes extraction time');
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE uid = :uid')->execute([
+            'uid' => $detachSecondMannyId,
+            'started' => gmdate('c', time() - 400),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $hiddenMinedContainer = $sectorRepository->load($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $test->assertEquals(0.211, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a hidden same-asteroid container updates its stored resources');
 
         $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
@@ -1608,7 +1726,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $restoredHiddenContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
-        $test->assertEquals(0.2, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
+        $test->assertEquals(0.211, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
         $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
 
         $dropSector = new SectorContent($detachProbe->currentSector, [

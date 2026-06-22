@@ -2464,24 +2464,6 @@ button.account-menu-item {
     line-height: 1.5;
 }
 
-.manny-detection-alert {
-    display: grid;
-    gap: 6px;
-    padding: 10px 12px;
-    border: 1px solid #20ff84;
-    background: rgba(12, 255, 119, .14);
-    color: #d8ffe6;
-}
-
-.manny-detection-alert p {
-    color: inherit;
-}
-
-.manny-detection-alert code {
-    color: #eef9fb;
-    overflow-wrap: anywhere;
-}
-
 .manny-form select {
     width: 100%;
     min-height: 42px;

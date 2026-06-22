@@ -44,7 +44,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 44;
+    public const API_VERSION = 47;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -1389,7 +1389,12 @@ final class ApiKernel
                 return ApiResponse::error(400, 'bad_request', 'JSON body must contain resources or resource.');
             }
 
-            $manny = $this->mannies->startMining($probe, $uid, $data['objectId'], $resources, (float) $data['targetAmount']);
+            $targetContainerId = $data['targetContainerId'] ?? null;
+            if ($targetContainerId !== null && !is_string($targetContainerId)) {
+                return ApiResponse::error(400, 'bad_request', 'targetContainerId must be a string when provided.');
+            }
+
+            $manny = $this->mannies->startMining($probe, $uid, $data['objectId'], $resources, (float) $data['targetAmount'], $targetContainerId);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }

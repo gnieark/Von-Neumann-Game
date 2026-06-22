@@ -29,6 +29,7 @@ final class SectorDetachedContainer extends UniverseObject
         private readonly array $payload,
         ?string $description = null,
         array $waypointBookmarks = [],
+        private readonly array $discoveredByPlayerIds = [],
     ) {
         parent::__construct($id, $name, UniverseObjectType::DetachedContainer, 0.0, 0.0, $description, $waypointBookmarks);
     }
@@ -91,6 +92,69 @@ final class SectorDetachedContainer extends UniverseObject
         return $this->payload;
     }
 
+    /**
+     * @return array<int>
+     */
+    public function getDiscoveredByPlayerIds(): array
+    {
+        return array_values(array_unique(array_map(
+            static fn(mixed $id): int => max(0, (int) $id),
+            array_filter($this->discoveredByPlayerIds, static fn(mixed $id): bool => is_numeric($id) && (int) $id > 0),
+        )));
+    }
+
+    public function isDiscoveredByPlayer(int $playerId): bool
+    {
+        return in_array($playerId, $this->getDiscoveredByPlayerIds(), true);
+    }
+
+    public function withDiscoveredByPlayer(int $playerId): self
+    {
+        if ($playerId <= 0 || $this->isDiscoveredByPlayer($playerId)) {
+            return $this;
+        }
+
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->mode,
+            $this->ownerProbeId,
+            $this->ownerPlayerId,
+            $this->originProbeId,
+            $this->targetObjectId,
+            $this->capacity,
+            $this->capacityUnit,
+            $this->createdAt,
+            $this->payload,
+            $this->getDescription(),
+            $this->getWaypointBookmarks(),
+            [...$this->getDiscoveredByPlayerIds(), $playerId],
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function withPayload(array $payload): self
+    {
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->mode,
+            $this->ownerProbeId,
+            $this->ownerPlayerId,
+            $this->originProbeId,
+            $this->targetObjectId,
+            $this->capacity,
+            $this->capacityUnit,
+            $this->createdAt,
+            $payload,
+            $this->getDescription(),
+            $this->getWaypointBookmarks(),
+            $this->getDiscoveredByPlayerIds(),
+        );
+    }
+
     public function toArray(): array
     {
         return parent::toArray() + [
@@ -102,6 +166,7 @@ final class SectorDetachedContainer extends UniverseObject
             'capacity' => $this->capacity,
             'capacityUnit' => $this->capacityUnit,
             'createdAt' => $this->createdAt,
+            'discoveredByPlayerIds' => $this->getDiscoveredByPlayerIds(),
             'payload' => $this->payload,
         ];
     }
@@ -122,6 +187,24 @@ final class SectorDetachedContainer extends UniverseObject
             is_array($data['payload'] ?? null) ? $data['payload'] : [],
             $data['description'] ?? null,
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
+            self::discoveredByPlayerIdsFromArray($data),
         );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<int>
+     */
+    private static function discoveredByPlayerIdsFromArray(array $data): array
+    {
+        $ids = $data['discoveredByPlayerIds'] ?? $data['discovered_by_player_ids'] ?? $data['discovered_by'] ?? [];
+        if (!is_array($ids)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_map(
+            static fn(mixed $id): int => max(0, (int) $id),
+            array_filter($ids, static fn(mixed $id): bool => is_numeric($id) && (int) $id > 0),
+        )));
     }
 }
