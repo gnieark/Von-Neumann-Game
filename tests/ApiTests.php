@@ -1816,6 +1816,33 @@ if ($detachProbe !== null && $detachMannyId !== '') {
     }
 }
 
+$collisionRecoverPlayer = $auth->registerPlayerWithPassword('container-recover-collision', 'secret', 'Container Recover Collision', 'Collision probe');
+$collisionRecoverProbe = $probes->findByPlayerId($collisionRecoverPlayer->id);
+if ($collisionRecoverProbe !== null) {
+    $collisionContainerItem = $storage->addItem($collisionRecoverProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $collisionContainerId = 'container-' . $collisionContainerItem->uid;
+    $collisionContainer = $storageContainers->findByUidForProbe($collisionRecoverProbe->id, $collisionContainerId);
+    if ($collisionContainer !== null) {
+        $storageContainers->rename($collisionContainer, 'Recovered duplicate label');
+        $storageContainers->setResourceAmount($collisionContainer->id, 'ice', 0.123);
+        $collisionSnapshot = $storage->detachAdditionalContainerSnapshot($collisionRecoverProbe, $collisionContainerId, $collisionRecoverPlayer->id);
+        $replacementItem = $storage->addItem($collisionRecoverProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0], $collisionContainerItem->uid);
+        $replacementContainerId = 'container-' . $replacementItem->uid;
+        $test->assert($storageContainers->findByUidForProbe($collisionRecoverProbe->id, $replacementContainerId) !== null, 'replacement container reuses the detached container identifier');
+
+        $storage->restoreDetachedContainerSnapshot($collisionRecoverProbe, $collisionSnapshot);
+        $test->assert($storageContainers->findByUidForProbe($collisionRecoverProbe->id, $collisionContainerId) !== null, 'restoring with an identifier collision keeps the replacement container');
+        $collisionContainers = $storageContainers->findByProbeId($collisionRecoverProbe->id);
+        $restoredCollisionContainers = array_values(array_filter(
+            $collisionContainers,
+            static fn($container): bool => $container->uid !== $collisionContainerId && $container->label === 'Recovered duplicate label',
+        ));
+        $test->assertEquals(1, count($restoredCollisionContainers), 'restoring with an identifier collision creates a new technical container id');
+        $restoredCollisionContainer = $restoredCollisionContainers[0] ?? null;
+        $test->assertEquals(0.123, $restoredCollisionContainer !== null ? ($storageContainers->resourceAmounts($restoredCollisionContainer->id)['ice'] ?? null) : null, 'restoring with an identifier collision keeps detached resources');
+    }
+}
+
 $damageWarningPlayer = $auth->registerPlayerWithPassword('fragile-storage', 'secret', 'Fragile Storage', 'Fragile probe');
 $damageWarningProbe = $probes->findByPlayerId($damageWarningPlayer->id);
 $damageWarningSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'fragile-storage', 'password' => 'secret'], JSON_THROW_ON_ERROR));

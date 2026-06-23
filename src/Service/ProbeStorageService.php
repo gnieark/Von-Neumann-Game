@@ -554,18 +554,22 @@ final class ProbeStorageService
         $this->ensureProbeStorage($probe);
         $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
         $containerItemData = is_array($snapshot['containerItem'] ?? null) ? $snapshot['containerItem'] : [];
-        $containerUid = (string) ($snapshot['sourceContainerId'] ?? $containerData['id'] ?? '');
-        $itemUid = (string) ($containerItemData['uid'] ?? ($containerUid !== '' && str_starts_with($containerUid, 'container-') ? substr($containerUid, 10) : ''));
-        if ($containerUid === '' || $itemUid === '') {
+        $sourceContainerUid = (string) ($snapshot['sourceContainerId'] ?? $containerData['id'] ?? '');
+        $sourceItemUid = (string) ($containerItemData['uid'] ?? ($sourceContainerUid !== '' && str_starts_with($sourceContainerUid, 'container-') ? substr($sourceContainerUid, 10) : ''));
+        if ($sourceContainerUid === '' || $sourceItemUid === '') {
             throw new MannyActionException(422, 'detached_container_not_recoverable', 'Detached container data is incomplete.');
         }
-        if ($this->containers->findByUidForProbe($probe->id, $containerUid) !== null || $this->items->findByUidForProbe($probe->id, $itemUid) !== null) {
-            throw new MannyActionException(409, 'detached_container_not_recoverable', 'A storage container with this identifier already exists on the probe.');
+        $itemUid = null;
+        if (
+            $this->items->findByUidForProbe($probe->id, $sourceItemUid) === null
+            && $this->containers->findByUidForProbe($probe->id, 'container-' . $sourceItemUid) === null
+        ) {
+            $itemUid = $sourceItemUid;
         }
 
         $itemContainer = $this->placeUnit($probe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, (float) ($containerItemData['containerSpace'] ?? 0.0))
             ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity to attach this container.');
-        $this->items->create(
+        $restoredContainerItem = $this->items->create(
             $probe->id,
             ProbeItem::TYPE_ADDITIONAL_CONTAINER,
             (string) ($containerItemData['name'] ?? ProbeItem::ADDITIONAL_CONTAINER_NAME),
@@ -574,6 +578,7 @@ final class ProbeStorageService
             $itemContainer->id,
             $itemUid,
         );
+        $containerUid = 'container-' . $restoredContainerItem->uid;
 
         $rules = is_array($containerData['rules'] ?? null) ? $containerData['rules'] : [];
         $restoredContainer = $this->containers->createDetachedRestoredContainer(
