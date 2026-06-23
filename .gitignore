@@ -1,5 +1,5 @@
 AGENTS.md
-
+/config/database.json
 # Composer
 /vendor/
 
@@ -22,7 +22,6 @@ AGENTS.md
 /config/oauth.json
 /config/*-local.json
 /config/*.local.json
-/config/database.json
 
 # Logs and cache
 *.log
