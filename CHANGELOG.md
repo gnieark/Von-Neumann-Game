@@ -12,6 +12,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Fixed
 
 - Stockage : récupérer un container détaché ne bloque plus si un container reconstruit a repris le même identifiant technique; la récupération recrée alors un identifiant libre en conservant le contenu.
+- Interface : les vues Inventaires et Mannys affichent désormais le nom personnalisé du container interne de la sonde au lieu de le remplacer systématiquement par le libellé traduit par défaut.
 - Base de donnees : les index MariaDB des endpoints de messagerie utilisent des longueurs de préfixe compatibles avec la limite de clé InnoDB en `utf8mb4`.
 - Base de donnees : `players.username` utilise une collation binaire sous MariaDB, afin de conserver l'unicite sensible a la casse de la base SQLite pendant la migration.
 
