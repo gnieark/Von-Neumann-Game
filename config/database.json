@@ -1,4 +1,9 @@
 {
-  "driver": "sqlite",
-  "path": "var/database.sqlite"
+  "driver": "mysql",
+  "host": "mariadb2.lan2",
+  "port": 3306,
+  "database": "neumanndev",
+  "username": "nemanndev",
+  "password": "r5nkxBP9LV3Y",
+  "charset": "utf8mb4"
 }
