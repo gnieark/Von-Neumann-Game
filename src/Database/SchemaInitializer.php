@@ -28,13 +28,14 @@ final class SchemaInitializer
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+        $caseSensitiveText = $this->driver === 'mysql' ? 'VARCHAR(255) COLLATE utf8mb4_bin' : 'TEXT';
         $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
         $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
 
         return [
             "CREATE TABLE IF NOT EXISTS players (
                 id $id,
-                username $text NOT NULL UNIQUE,
+                username $caseSensitiveText NOT NULL UNIQUE,
                 display_name $nullableText,
                 password_hash $nullableText,
                 home_sector_x INTEGER NOT NULL DEFAULT 0,
@@ -399,6 +400,7 @@ final class SchemaInitializer
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
+            $this->ensureMysqlColumnCollation($pdo, 'players', 'username', 'utf8mb4_bin', 'VARCHAR(255) COLLATE utf8mb4_bin NOT NULL');
             $this->ensureMysqlColumn($pdo, 'forum_posts', 'first_message_id', 'INTEGER NULL AFTER pinned');
             $this->ensureMysqlColumn($pdo, 'forum_messages', 'edited_at', 'VARCHAR(255) NULL AFTER updated_at');
             $this->syncForumFirstMessages($pdo);
@@ -666,6 +668,17 @@ final class SchemaInitializer
         }
 
         $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+    }
+
+    private function ensureMysqlColumnCollation(PDO $pdo, string $table, string $column, string $collation, string $definition): void
+    {
+        $stmt = $pdo->query("SHOW FULL COLUMNS FROM $table WHERE Field = '$column'");
+        $row = $stmt !== false ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        if (is_array($row) && (string) ($row['Collation'] ?? '') === $collation) {
+            return;
+        }
+
+        $pdo->exec('ALTER TABLE ' . $table . ' MODIFY ' . $column . ' ' . $definition);
     }
 
     private function ensureSqliteProbeResourceStockColumns(PDO $pdo): void
