@@ -11,12 +11,14 @@ use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
+use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
@@ -475,7 +477,7 @@ $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
-$missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService);
+$missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService);
@@ -1814,6 +1816,33 @@ if ($detachProbe !== null && $detachMannyId !== '') {
     }
 }
 
+$collisionRecoverPlayer = $auth->registerPlayerWithPassword('container-recover-collision', 'secret', 'Container Recover Collision', 'Collision probe');
+$collisionRecoverProbe = $probes->findByPlayerId($collisionRecoverPlayer->id);
+if ($collisionRecoverProbe !== null) {
+    $collisionContainerItem = $storage->addItem($collisionRecoverProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $collisionContainerId = 'container-' . $collisionContainerItem->uid;
+    $collisionContainer = $storageContainers->findByUidForProbe($collisionRecoverProbe->id, $collisionContainerId);
+    if ($collisionContainer !== null) {
+        $storageContainers->rename($collisionContainer, 'Recovered duplicate label');
+        $storageContainers->setResourceAmount($collisionContainer->id, 'ice', 0.123);
+        $collisionSnapshot = $storage->detachAdditionalContainerSnapshot($collisionRecoverProbe, $collisionContainerId, $collisionRecoverPlayer->id);
+        $replacementItem = $storage->addItem($collisionRecoverProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0], $collisionContainerItem->uid);
+        $replacementContainerId = 'container-' . $replacementItem->uid;
+        $test->assert($storageContainers->findByUidForProbe($collisionRecoverProbe->id, $replacementContainerId) !== null, 'replacement container reuses the detached container identifier');
+
+        $storage->restoreDetachedContainerSnapshot($collisionRecoverProbe, $collisionSnapshot);
+        $test->assert($storageContainers->findByUidForProbe($collisionRecoverProbe->id, $collisionContainerId) !== null, 'restoring with an identifier collision keeps the replacement container');
+        $collisionContainers = $storageContainers->findByProbeId($collisionRecoverProbe->id);
+        $restoredCollisionContainers = array_values(array_filter(
+            $collisionContainers,
+            static fn($container): bool => $container->uid !== $collisionContainerId && $container->label === 'Recovered duplicate label',
+        ));
+        $test->assertEquals(1, count($restoredCollisionContainers), 'restoring with an identifier collision creates a new technical container id');
+        $restoredCollisionContainer = $restoredCollisionContainers[0] ?? null;
+        $test->assertEquals(0.123, $restoredCollisionContainer !== null ? ($storageContainers->resourceAmounts($restoredCollisionContainer->id)['ice'] ?? null) : null, 'restoring with an identifier collision keeps detached resources');
+    }
+}
+
 $damageWarningPlayer = $auth->registerPlayerWithPassword('fragile-storage', 'secret', 'Fragile Storage', 'Fragile probe');
 $damageWarningProbe = $probes->findByPlayerId($damageWarningPlayer->id);
 $damageWarningSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'fragile-storage', 'password' => 'secret'], JSON_THROW_ON_ERROR));
@@ -1896,7 +1925,7 @@ if ($teleportLifeProbe !== null) {
     $teleportLifeSector = $kernel->handle('GET', '/api/probe/sector', $teleportLifeHeaders);
     $test->assertEquals(200, $teleportLifeSector->status, 'GET /api/probe/sector succeeds after debug teleport into intelligent-life sector');
     $teleportLifeMessages = $kernel->handle('GET', '/api/probe/messages', $teleportLifeHeaders);
-    $test->assertEquals('- -- --- ----- -------', $teleportLifeMessages->body['messages'][0]['body'] ?? null, 'observing current intelligent-life sector creates missing first-contact message');
+    $test->assertEquals(MissionService::FIRST_CONTACT_SIGNAL, $teleportLifeMessages->body['messages'][0]['body'] ?? null, 'observing current intelligent-life sector creates missing first-contact message');
     $teleportLifeMissions = $kernel->handle('GET', '/api/probe/missions', $teleportLifeHeaders);
     $test->assertEquals('first_contact.return_to_space_program', $teleportLifeMissions->body['missions'][0]['type'] ?? null, 'observing current intelligent-life sector creates missing first-contact mission');
 }
@@ -1944,7 +1973,7 @@ if ($intelligentLifeProbe !== null) {
 
         $firstContactMessages = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
         $test->assertEquals(200, $firstContactMessages->status, 'GET /api/probe/messages exposes first-contact planet messages');
-        $test->assertEquals('- -- --- ----- -------', $firstContactMessages->body['messages'][0]['body'] ?? null, 'first-contact planet message contains the prime-count signal');
+        $test->assertEquals(MissionService::FIRST_CONTACT_SIGNAL, $firstContactMessages->body['messages'][0]['body'] ?? null, 'first-contact planet message contains the prime-count signal');
         $test->assertEquals('planet', $firstContactMessages->body['messages'][0]['sender']['type'] ?? null, 'first-contact message comes from the planet endpoint');
         $test->assertEquals('life-alert-planet', $firstContactMessages->body['messages'][0]['sender']['planetId'] ?? null, 'first-contact message exposes the sender planet id');
         $test->assertEquals('Monde habite', $firstContactMessages->body['messages'][0]['sender']['name'] ?? null, 'first-contact message hides absolute-coordinate debug planet names');
@@ -1964,7 +1993,7 @@ if ($intelligentLifeProbe !== null) {
         $test->assert(!array_key_exists('x', $firstContactMission['metadata']['sector'] ?? []), 'first-contact mission metadata does not expose absolute sector x');
         $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $firstContactMission['createdByEvent']['sector']['relative'] ?? null, 'first-contact mission event exposes relative sector coordinates');
         $test->assert(!str_contains(json_encode($firstContactMission, JSON_THROW_ON_ERROR), $intelligentLifeTarget->toKey()), 'first-contact mission response does not expose absolute sector keys');
-        $test->assert(is_string($firstContactMission['description'] ?? null) && str_contains((string) $firstContactMission['description'], '- -- --- ----- -------'), 'first-contact mission description includes the received signal');
+        $test->assert(is_string($firstContactMission['description'] ?? null) && str_contains((string) $firstContactMission['description'], MissionService::FIRST_CONTACT_SIGNAL), 'first-contact mission description includes the received signal');
         $test->assert(is_string($firstContactMission['description'] ?? null) && str_contains((string) $firstContactMission['description'], 'secteur relatif 2:0:0'), 'first-contact mission description uses relative sector coordinates');
         $test->assertEquals('pending', $firstContactMission['steps'][0]['status'] ?? null, 'first-contact reply step starts pending');
 
@@ -2040,6 +2069,112 @@ if ($intelligentLifeProbe !== null) {
                 $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Merci pour votre aide.'), 'material drop thanks message thanks the player');
                 $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Métaux : 4.5 ECE'), 'material drop thanks message reports remaining metals');
                 $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Composés carbonés : 0.6 ECE'), 'material drop thanks message reports remaining carbon compounds');
+
+                $fellowContributor = $auth->registerPlayerWithPassword('mission-fellow', 'secret', 'Fellow Visitor', 'Fellow probe');
+                $fellowContributorProbe = $probes->findByPlayerId($fellowContributor->id);
+                if ($fellowContributorProbe !== null) {
+                    $fellowContributorProbe->currentSector = $intelligentLifeTarget;
+                    $probes->save($fellowContributorProbe);
+                    $sectorWithFellowDonation = $sectorRepository->load($intelligentLifeTarget);
+                    $sectorWithFellowDonation->recordReturnToSpaceProgramMaterialDonation(
+                        'life-alert-planet',
+                        'Monde habite',
+                        [
+                            ResourceComposition::METALS => 5.0,
+                            ResourceComposition::CARBON_COMPOUNDS => 1.0,
+                        ],
+                        $fellowContributor->id,
+                        $fellowContributorProbe->id,
+                        'test-fellow-container',
+                        [
+                            ResourceComposition::METALS => 4.0,
+                            ResourceComposition::CARBON_COMPOUNDS => 0.5,
+                        ],
+                    );
+                    $sectorRepository->save($sectorWithFellowDonation);
+                }
+
+                $nonSolverContributor = $auth->registerPlayerWithPassword('mission-non-solver', 'secret', 'Non Solver', 'Non solver probe');
+                $nonSolverProbe = $probes->findByPlayerId($nonSolverContributor->id);
+                if ($nonSolverProbe !== null) {
+                    $nonSolverProbe->currentSector = $intelligentLifeTarget;
+                    $probes->save($nonSolverProbe);
+                    $sectorBeforeIgnoredDonation = $sectorRepository->load($intelligentLifeTarget);
+                    $ignoredDonation = $missionService->handleReturnToSpaceProgramMaterialDrop(
+                        $nonSolverProbe,
+                        $sectorBeforeIgnoredDonation,
+                        'life-alert-planet',
+                        $nonSolverContributor->id,
+                        'test-non-solver-container',
+                        [
+                            ResourceComposition::METALS => 5.0,
+                            ResourceComposition::CARBON_COMPOUNDS => 1.0,
+                        ],
+                    );
+                    $counterAfterIgnoredDonation = $sectorBeforeIgnoredDonation->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+                    $test->assertEquals(null, $ignoredDonation, 'first-contact material drops from players without the decoded mission are ignored');
+                    $test->assertEquals(4.5, (float) ($counterAfterIgnoredDonation['totals'][ResourceComposition::METALS] ?? -1), 'ignored first-contact drop does not change donated metals');
+                    $test->assertEquals(0.9, (float) ($counterAfterIgnoredDonation['totals'][ResourceComposition::CARBON_COMPOUNDS] ?? -1), 'ignored first-contact drop does not change donated carbon compounds');
+                }
+
+                $intelligentLifeProbeForFinalDrop = $probes->findByPlayerId($intelligentLifePlayer->id);
+                $finalDropContainerItem = $intelligentLifeProbeForFinalDrop !== null
+                    ? $storage->addItem($intelligentLifeProbeForFinalDrop, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0])
+                    : null;
+                $finalDropContainerUid = $finalDropContainerItem !== null ? 'container-' . $finalDropContainerItem->uid : '';
+                $finalDropContainer = $intelligentLifeProbeForFinalDrop !== null ? $storageContainers->findByUidForProbe($intelligentLifeProbeForFinalDrop->id, $finalDropContainerUid) : null;
+                if ($intelligentLifeProbeForFinalDrop !== null && $finalDropContainer !== null) {
+                    $storage->addItem($intelligentLifeProbeForFinalDrop, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT, ProbeItem::ATMOSPHERIC_DROP_KIT_NAME, 0.08);
+                    $storageContainers->setResourceAmount($finalDropContainer->id, ResourceComposition::METALS, 0.5);
+                    $storageContainers->setResourceAmount($finalDropContainer->id, ResourceComposition::CARBON_COMPOUNDS, 0.1);
+                    $intelligentLifeProbeForFinalDrop->metalsStock = 0.5;
+                    $intelligentLifeProbeForFinalDrop->organicCompoundsStock = 0.1;
+                    $probes->save($intelligentLifeProbeForFinalDrop);
+                    $finalDropManny = array_values(array_filter(
+                        $mannies->findByProbeId($intelligentLifeProbeForFinalDrop->id),
+                        static fn($manny): bool => $manny->isOnProbe() && $manny->currentTask === null,
+                    ))[0] ?? null;
+                    if ($finalDropManny !== null) {
+                        $finalDropAccepted = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($finalDropManny->uid) . '/drop-storage-container', $intelligentLifeHeaders, json_encode([
+                            'containerId' => $finalDropContainerUid,
+                            'planetId' => 'life-alert-planet',
+                        ], JSON_THROW_ON_ERROR));
+                        $test->assertEquals(202, $finalDropAccepted->status, 'final first-contact material drop starts through the Manny drop endpoint');
+                        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+                            'id' => $finalDropManny->id,
+                            'ended' => gmdate('c', time() - 1),
+                        ]);
+                        $kernel->handle('GET', '/api/probe/mannies', $intelligentLifeHeaders);
+
+                        $materialCounterAfterFinalDrop = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+                        $test->assertEquals(5.0, (float) ($materialCounterAfterFinalDrop['totals'][ResourceComposition::METALS] ?? -1), 'material drop counter reaches required metals');
+                        $test->assertEquals(1.0, (float) ($materialCounterAfterFinalDrop['totals'][ResourceComposition::CARBON_COMPOUNDS] ?? -1), 'material drop counter reaches required carbon compounds');
+                        $test->assertEquals(0.0, (float) ($materialCounterAfterFinalDrop['remaining'][ResourceComposition::METALS] ?? -1), 'material drop counter has no remaining metals');
+                        $test->assertEquals(0.0, (float) ($materialCounterAfterFinalDrop['remaining'][ResourceComposition::CARBON_COMPOUNDS] ?? -1), 'material drop counter has no remaining carbon compounds');
+                        $test->assert(isset($materialCounterAfterFinalDrop['completionMessageSentAt']), 'material drop counter records the final completion message delivery');
+
+                        $messagesAfterFinalDrop = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+                        $completionThanks = $messagesAfterFinalDrop->body['messages'][0] ?? null;
+                        $test->assertEquals('planet', $completionThanks['sender']['type'] ?? null, 'planet sends the final return-to-space completion message');
+                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Voyageur des étoiles,'), 'final return-to-space message starts with the requested salutation');
+                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Fellow Visitor'), 'final return-to-space message lists the other contributor');
+                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Revenez dans 48 heures.'), 'final return-to-space message announces the forty-eight-hour follow-up');
+                        $test->assert(!str_contains((string) ($completionThanks['body'] ?? ''), 'Ressources restantes à envoyer'), 'final return-to-space message replaces the partial remaining-resource thanks');
+
+                        if ($fellowContributorProbe !== null) {
+                            $fellowMessages = $messages->receivedByProbe($fellowContributorProbe->id);
+                            $fellowCompletionThanks = $fellowMessages[0] ?? null;
+                            $test->assert(is_string($fellowCompletionThanks?->body ?? null) && str_contains((string) $fellowCompletionThanks?->body, 'Voyageur des étoiles,'), 'planet also sends the final message to present contributor probes');
+                            $test->assert(is_string($fellowCompletionThanks?->body ?? null) && str_contains((string) $fellowCompletionThanks?->body, 'Life Alert'), 'present contributor message lists the triggering contributor');
+                        }
+
+                        $completedFirstContactMissions = array_values(array_filter(
+                            $missions->findForProbe($intelligentLifeProbeForFinalDrop->id, [Mission::STATUS_COMPLETED]),
+                            static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
+                        ));
+                        $test->assertEquals(1, count($completedFirstContactMissions), 'first-contact mission completes when the requested materials are fully delivered');
+                    }
+                }
             }
         }
 

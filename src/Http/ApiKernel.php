@@ -1699,7 +1699,7 @@ final class ApiKernel
         }
 
         $planetName = is_string($publicMetadata['planetName'] ?? null) ? $publicMetadata['planetName'] : 'Monde habite';
-        $signal = is_string($publicMetadata['initialSignal'] ?? null) ? $publicMetadata['initialSignal'] : '- -- --- ----- -------';
+        $signal = is_string($publicMetadata['initialSignal'] ?? null) ? $publicMetadata['initialSignal'] : MissionService::FIRST_CONTACT_SIGNAL;
         $relative = is_array($publicMetadata['sector']['relative'] ?? null) ? $publicMetadata['sector']['relative'] : null;
         $sector = $relative !== null
             ? 'secteur relatif ' . (int) ($relative['x'] ?? 0) . ':' . (int) ($relative['y'] ?? 0) . ':' . (int) ($relative['z'] ?? 0)

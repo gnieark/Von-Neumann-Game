@@ -7,9 +7,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Added
 
 - Ops : ajout de `scripts/migrate-sqlite-to-mysql.php` pour migrer la base SQLite active vers une base MySQL/MariaDB future, verrouiller la source pendant la copie et basculer `config/database.json` après succès.
+- Scénario : `return_to_space_program` envoie un message planétaire final quand les dons atteignent 5 ECE de métaux et 1 ECE de composés carbonés, avec diffusion aux contributeurs présents dans le secteur.
 
 ### Fixed
 
+- Stockage : récupérer un container détaché ne bloque plus si un container reconstruit a repris le même identifiant technique; la récupération recrée alors un identifiant libre en conservant le contenu.
 - Base de donnees : les index MariaDB des endpoints de messagerie utilisent des longueurs de préfixe compatibles avec la limite de clé InnoDB en `utf8mb4`.
 - Base de donnees : `players.username` utilise une collation binaire sous MariaDB, afin de conserver l'unicite sensible a la casse de la base SQLite pendant la migration.
 

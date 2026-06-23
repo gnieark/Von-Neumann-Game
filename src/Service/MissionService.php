@@ -11,6 +11,8 @@ use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\MissionRepository;
+use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
@@ -20,8 +22,8 @@ use VonNeumannGame\Sector\SectorService;
 final class MissionService
 {
     public const SCENARIO_RETURN_TO_SPACE_PROGRAM = 'return_to_space_program';
-    public const FIRST_CONTACT_SIGNAL = '- -- --- ----- -------';
-    public const FIRST_CONTACT_FULL_REPLY = '- -- --- ----- ------- -----------';
+    public const FIRST_CONTACT_SIGNAL = '-- --- ----- -------';
+    public const FIRST_CONTACT_FULL_REPLY = '-- --- ----- ------- -----------';
     public const FIRST_CONTACT_SHORT_REPLY = '-----------';
 
     private const FIRST_CONTACT_MISSION_TYPE = 'first_contact.return_to_space_program';
@@ -34,6 +36,7 @@ final class MissionService
         ResourceComposition::METALS => 5.0,
         ResourceComposition::CARBON_COMPOUNDS => 1.0,
     ];
+    private const RETURN_TO_SPACE_COMPLETION_MESSAGE_TEMPLATE = "Voyageur des étoiles,\n\n%s\n\nLes matériaux que vous nous avez transmis contiennent des éléments devenus rares ou impossibles à extraire avec nos moyens actuels. Nos ingénieurs ont déjà commencé à les intégrer dans la construction de nouvelles machines industrielles.\n\nCes équipements nous permettront d'exploiter à nouveau les gisements situés au fond de nos océans, là où subsistent encore les ressources nécessaires à un programme spatial. Depuis des générations, ces richesses étaient hors de notre portée.\n\nPour la première fois depuis plusieurs siècles, notre peuple envisage de reprendre le chemin des étoiles.\n\nLes travaux ne seront pas immédiats. La conception, la fabrication et le déploiement des premières installations demanderont du temps.\n\nRevenez dans 48 heures. Nous espérons alors être en mesure de vous montrer les premiers résultats de cette renaissance.\n\nAu nom de notre monde, recevez notre gratitude.";
 
     public function __construct(
         private readonly MissionRepository $missions,
@@ -41,6 +44,8 @@ final class MissionService
         private readonly array $gameplayConfig = [],
         private readonly string $worldSeed = 'default-world',
         private readonly ?SectorService $sectors = null,
+        private readonly ?NeumannProbeRepository $probes = null,
+        private readonly ?PlayerRepository $players = null,
     ) {}
 
     /**
@@ -239,11 +244,12 @@ final class MissionService
         }
 
         $mission = $this->activeReturnToSpaceMissionForPlanet($probe, $planetId);
+        if ($mission === null || !$this->returnToSpaceResourceRequestStarted($mission)) {
+            return null;
+        }
+
         $counter = $sector->returnToSpaceProgramMaterialCounterForPlanet($planetId);
         if ($counter === null) {
-            if ($mission === null || !$this->returnToSpaceResourceRequestStarted($mission)) {
-                return null;
-            }
             $counter = $sector->ensureReturnToSpaceProgramMaterialCounter(
                 $planetId,
                 is_string($mission->metadata['planetName'] ?? null) ? $mission->metadata['planetName'] : null,
@@ -268,7 +274,11 @@ final class MissionService
         if ($mission !== null) {
             $this->completeReturnToSpaceResourceStepsReachedByCounter($probe, $mission, $counter);
         }
-        $this->createReturnToSpaceMaterialDropThanks($probe, $planetId, $planetName, $sector->getCoordinates(), $counter);
+        if ($this->returnToSpaceRequirementsReached($counter)) {
+            $this->createReturnToSpaceCompletionMessages($probe, $sector, $planetId, $planetName, $counter);
+        } else {
+            $this->createReturnToSpaceMaterialDropThanks($probe, $planetId, $planetName, $sector->getCoordinates(), $counter);
+        }
 
         return $counter;
     }
@@ -426,6 +436,140 @@ final class MissionService
                 . $this->formatEceAmount((float) ($remaining[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0))
                 . ' ECE',
         );
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function returnToSpaceRequirementsReached(array $counter): bool
+    {
+        $remaining = is_array($counter['remaining'] ?? null) ? $counter['remaining'] : [];
+        foreach (self::RETURN_TO_SPACE_MATERIAL_REQUIREMENTS as $type => $_required) {
+            if (round(max(0.0, (float) ($remaining[$type] ?? 0.0)), 4) > 0.0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function createReturnToSpaceCompletionMessages(
+        NeumannProbe $probe,
+        SectorContent $sector,
+        string $planetId,
+        ?string $planetName,
+        array $counter,
+    ): void {
+        if ($this->messages === null || ($counter['completionMessageSentAt'] ?? null) !== null) {
+            return;
+        }
+
+        $contributorPlayerIds = $this->returnToSpaceContributorPlayerIds($counter);
+        if (!in_array($probe->playerId, $contributorPlayerIds, true)) {
+            $contributorPlayerIds[] = $probe->playerId;
+        }
+        $namesByPlayerId = $this->returnToSpaceContributorNames($contributorPlayerIds);
+        $presentRecipientProbes = $this->presentReturnToSpaceContributorProbes($probe, $sector->getCoordinates(), $contributorPlayerIds);
+
+        foreach ($presentRecipientProbes as $recipientProbe) {
+            $this->messages->createForEndpoints(
+                ProbeMessage::ENDPOINT_PLANET,
+                $planetId,
+                $planetName,
+                null,
+                ProbeMessage::ENDPOINT_PROBE,
+                (string) $recipientProbe->id,
+                null,
+                $recipientProbe->id,
+                $sector->getCoordinates(),
+                $this->returnToSpaceCompletionMessage($recipientProbe->playerId, $namesByPlayerId),
+            );
+        }
+
+        $sector->markReturnToSpaceProgramCompletionMessageSent($planetId);
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     * @return array<int>
+     */
+    private function returnToSpaceContributorPlayerIds(array $counter): array
+    {
+        $ids = [];
+        $donations = is_array($counter['donations'] ?? null) ? $counter['donations'] : [];
+        foreach ($donations as $donation) {
+            if (!is_array($donation) || !isset($donation['playerId'])) {
+                continue;
+            }
+            $ids[] = (int) $donation['playerId'];
+        }
+
+        return array_values(array_unique(array_filter($ids, static fn(int $id): bool => $id > 0)));
+    }
+
+    /**
+     * @param array<int> $playerIds
+     * @return array<int, string>
+     */
+    private function returnToSpaceContributorNames(array $playerIds): array
+    {
+        $names = [];
+        foreach ($playerIds as $playerId) {
+            $player = $this->players?->findById($playerId);
+            $name = $player !== null
+                ? trim((string) ($player->displayName ?? $player->username))
+                : '';
+            $names[$playerId] = $name !== '' ? $name : 'visiteur #' . $playerId;
+        }
+
+        return $names;
+    }
+
+    /**
+     * @param array<int> $contributorPlayerIds
+     * @return array<NeumannProbe>
+     */
+    private function presentReturnToSpaceContributorProbes(
+        NeumannProbe $triggerProbe,
+        SectorCoordinates $sector,
+        array $contributorPlayerIds,
+    ): array {
+        $present = [$triggerProbe->id => $triggerProbe];
+        if ($this->probes !== null) {
+            foreach ($this->probes->findBySector($sector) as $probe) {
+                if (!in_array($probe->playerId, $contributorPlayerIds, true)) {
+                    continue;
+                }
+                $present[$probe->id] = $probe;
+            }
+        }
+
+        ksort($present);
+
+        return array_values($present);
+    }
+
+    /**
+     * @param array<int, string> $namesByPlayerId
+     */
+    private function returnToSpaceCompletionMessage(int $recipientPlayerId, array $namesByPlayerId): string
+    {
+        $otherNames = [];
+        foreach ($namesByPlayerId as $playerId => $name) {
+            if ($playerId === $recipientPlayerId) {
+                continue;
+            }
+            $otherNames[] = $name;
+        }
+
+        $intro = $otherNames === []
+            ? 'Votre aide a dépassé nos espérances.'
+            : 'Votre aide, ainsi que celle d\'autres visiteurs (' . implode(', ', $otherNames) . '), a dépassé nos espérances.';
+
+        return sprintf(self::RETURN_TO_SPACE_COMPLETION_MESSAGE_TEMPLATE, $intro);
     }
 
     private function formatEceAmount(float $amount): string
