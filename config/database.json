@@ -1,4 +1,0 @@
-{
-  "driver": "sqlite",
-  "path": "var/database.sqlite"
-}
