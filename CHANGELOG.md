@@ -2,6 +2,16 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-23
+
+### Added
+
+- Ops : ajout de `scripts/migrate-sqlite-to-mysql.php` pour migrer la base SQLite active vers une base MySQL/MariaDB future, verrouiller la source pendant la copie et basculer `config/database.json` après succès.
+
+### Fixed
+
+- Base de donnees : les index MariaDB des endpoints de messagerie utilisent des longueurs de préfixe compatibles avec la limite de clé InnoDB en `utf8mb4`.
+
 ## 2026-06-18
 
 ### Added

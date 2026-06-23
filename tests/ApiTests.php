@@ -273,6 +273,7 @@ $statsScript = file_get_contents($root . '/public/assets/stats.js');
 $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
+$databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oauth-remember"'), 'OAuth login view exposes the remember-me checkbox');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
@@ -300,6 +301,12 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-butto
 $test->assert(is_string($appCss) && str_contains($appCss, '.stats-podium-rank[hidden]'), 'stats CSS keeps hidden ranking rows hidden after podium display rules');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVisitedSectors'), 'sensors JS can load visited-sector history');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
+$test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
+$test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
+$test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
+$test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database.json.old'), 'SQLite to MySQL migration script backs up the active database config');
+$schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.php');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),

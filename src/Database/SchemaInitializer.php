@@ -460,8 +460,8 @@ final class SchemaInitializer
         $pdo->exec('ALTER TABLE probe_messages MODIFY sender_probe_id INTEGER NULL');
         $pdo->exec('ALTER TABLE probe_messages MODIFY recipient_probe_id INTEGER NULL');
         $this->backfillProbeMessageEndpoints($pdo);
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type, recipient_id, status, created_at)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type, sender_id, created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type(32), recipient_id(191), status(32), created_at(32))');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type(32), sender_id(191), created_at(32))');
     }
 
     private function backfillProbeMessageEndpoints(PDO $pdo): void
