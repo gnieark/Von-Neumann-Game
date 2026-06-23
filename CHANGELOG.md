@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Added
 
 - Ops : ajout de `scripts/migrate-sqlite-to-mysql.php` pour migrer la base SQLite active vers une base MySQL/MariaDB future, verrouiller la source pendant la copie et basculer `config/database.json` après succès.
+- Scénario : `return_to_space_program` envoie un message planétaire final quand les dons atteignent 5 ECE de métaux et 1 ECE de composés carbonés, avec diffusion aux contributeurs présents dans le secteur.
 
 ### Fixed
 

@@ -207,6 +207,19 @@ final class SectorContent
         return is_array($counter) ? $counter : null;
     }
 
+    public function markReturnToSpaceProgramCompletionMessageSent(string $planetId): void
+    {
+        $counter = $this->returnToSpaceProgramMaterialDonations[$planetId] ?? null;
+        if (!is_array($counter)) {
+            return;
+        }
+
+        $counter['completionMessageSentAt'] = (string) ($counter['completionMessageSentAt'] ?? gmdate('c'));
+        $counter['updatedAt'] = gmdate('c');
+        $this->returnToSpaceProgramMaterialDonations[$planetId] = $counter;
+        $this->touch();
+    }
+
     /**
      * @param array<string, float|int> $requirements
      * @param array<string, float|int> $resources
