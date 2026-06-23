@@ -531,11 +531,25 @@ button:disabled {
     font-weight: 600;
 }
 
+.stats-podium-rank[hidden] {
+    display: none;
+}
+
 .stats-podium-empty {
     grid-column: 1 / -1;
     min-height: 0;
     color: var(--muted);
     line-height: 1.45;
+}
+
+.stats-podium-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
+}
+
+.stats-podium-more-button {
+    min-width: 140px;
 }
 
 .stats-grid {

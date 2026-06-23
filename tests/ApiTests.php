@@ -265,8 +265,11 @@ $loginTemplate = file_get_contents($root . '/templates/loginview.html');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
+$statsTemplate = file_get_contents($root . '/templates/stats.html');
+$statsRoute = file_get_contents($root . '/src/FrontRoute/FrontRouteStats.php');
 $inventoriesScript = file_get_contents($root . '/public/assets/inventories.js');
 $manniesScript = file_get_contents($root . '/public/assets/mannies.js');
+$statsScript = file_get_contents($root . '/public/assets/stats.js');
 $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
@@ -278,6 +281,9 @@ $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasEx
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'data-stats-podium-extra hidden'), 'stats route renders extra ranking rows as hidden by default');
+$test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
@@ -291,6 +297,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyFo
 $test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'recoverDetectedContainerHint'), 'mannies JS does not render hidden-container detection alerts inside Manny cards');
 $test->assert(is_string($appCss) && !str_contains($appCss, 'manny-detection-alert'), 'mannies CSS no longer includes the removed in-card detection alert');
 $test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-button[hidden]'), 'inventories CSS keeps hidden icon buttons hidden after icon button display rules');
+$test->assert(is_string($appCss) && str_contains($appCss, '.stats-podium-rank[hidden]'), 'stats CSS keeps hidden ranking rows hidden after podium display rules');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVisitedSectors'), 'sensors JS can load visited-sector history');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
@@ -335,6 +342,32 @@ $legacyEndpointIndexes = array_map(
 $test->assert(in_array('idx_probe_messages_recipient_endpoint', $legacyEndpointIndexes, true), 'legacy probe message schema creates endpoint recipient index after migration');
 $legacyMessage = $legacyMessagePdo->query('SELECT sender_type, sender_id, recipient_type, recipient_id FROM probe_messages')->fetch(PDO::FETCH_ASSOC);
 $test->assertEquals(['sender_type' => 'probe', 'sender_id' => '1', 'recipient_type' => 'probe', 'recipient_id' => '2'], $legacyMessage, 'legacy probe message migration backfills typed endpoints');
+
+$statsRankingDbPath = $tmp . DIRECTORY_SEPARATOR . 'stats-ranking.sqlite';
+$statsRankingFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $statsRankingDbPath), $root);
+$statsRankingPdo = $statsRankingFactory->create();
+$statsRankingFactory->initializeSchema($statsRankingPdo);
+$statsRankingPlayers = new PlayerRepository($statsRankingPdo);
+$statsRankingProbes = new NeumannProbeRepository($statsRankingPdo);
+$statsRankingVisitedSectors = new VisitedSectorRepository($statsRankingPdo);
+for ($ranking = 1; $ranking <= 10; $ranking++) {
+    $rankingPlayer = $statsRankingPlayers->createPlayer(
+        'stats-ranking-' . $ranking,
+        'Stats Ranking ' . $ranking,
+        null,
+        new SectorCoordinates(200 + ($ranking * 2), 0, 0),
+    );
+    $statsRankingProbes->createForPlayer($rankingPlayer->id, 'Stats Ranking Probe ' . $ranking, $rankingPlayer->homeSector);
+    for ($visit = 0; $visit <= 10 - $ranking; $visit++) {
+        $statsRankingVisitedSectors->markVisited($rankingPlayer, new SectorCoordinates(200 + ($ranking * 2), $visit * 2, 0));
+    }
+}
+$rankingStats = (new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe'))->collect();
+$topRankingProbes = $rankingStats['metrics']['topVisitedProbes'] ?? [];
+$test->assertEquals(9, count($topRankingProbes), 'public stats visited-sector ranking exposes the first nine rows');
+$test->assertEquals('Stats Ranking Probe 1', $topRankingProbes[0]['probeName'] ?? null, 'public stats top-nine ranking keeps the first-ranked probe first');
+$test->assertEquals('Stats Ranking Probe 9', $topRankingProbes[8]['probeName'] ?? null, 'public stats top-nine ranking keeps the ninth-ranked probe visible');
+$test->assert(!in_array('Stats Ranking Probe 10', array_column($topRankingProbes, 'probeName'), true), 'public stats top-nine ranking excludes the tenth row');
 
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();

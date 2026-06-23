@@ -24,6 +24,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Interface : dans `/mannies`, le formulaire de minage peut envoyer les ressources vers un container détaché visible ou détecté sur l’astéroïde ciblé.
 - Interface : ajout d’une vraie page 404 avec retour vers l’accueil, utilisée comme route frontend par défaut quand aucune route ne correspond.
 - Stats : ajout du podium des découvreurs de mondes habités par une espèce intelligente sur `/stats`.
+- Stats : les trois podiums de `/stats` proposent un bouton pour afficher les 9 premiers du classement.
 
 ### Fixed
 

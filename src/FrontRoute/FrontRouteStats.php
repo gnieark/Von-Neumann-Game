@@ -8,6 +8,8 @@ use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\View\TplBlock;
 
 class FrontRouteStats extends FrontRoute{
+    private const PODIUM_VISIBLE_ROWS = 3;
+
     public function getContent(string $method, string $routePath, ?string $bearer, string $language): string
     {
         $projectRoot = dirname(__DIR__, 2);
@@ -22,39 +24,51 @@ class FrontRouteStats extends FrontRoute{
         if ($podium === []) {
             $tpl->addSubBlock(new TplBlock('emptyPodium'));
         } else {
-            foreach ($podium as $probe) {
+            foreach ($podium as $index => $probe) {
                 $tpl->addSubBlock((new TplBlock('podiumProbe'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
                     'rank' => self::e($probe['rank']),
                     'name' => self::e($probe['name']),
                     'visitedSectors' => self::e($probe['visitedSectors']),
                     'visitedSectorsLabel' => self::e($probe['visitedSectorsLabel']),
                 ]));
             }
+            if (count($podium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('visitedPodiumMore'));
+            }
         }
         $intelligentLifePodium = $this->topIntelligentLifeDiscovererRows($stats['metrics'], $translator);
         if ($intelligentLifePodium === []) {
             $tpl->addSubBlock(new TplBlock('emptyIntelligentLifePodium'));
         } else {
-            foreach ($intelligentLifePodium as $player) {
+            foreach ($intelligentLifePodium as $index => $player) {
                 $tpl->addSubBlock((new TplBlock('intelligentLifeDiscoverer'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
                     'rank' => self::e($player['rank']),
                     'name' => self::e($player['name']),
                     'intelligentLifeWorlds' => self::e($player['intelligentLifeWorlds']),
                     'intelligentLifeWorldsLabel' => self::e($player['intelligentLifeWorldsLabel']),
                 ]));
             }
+            if (count($intelligentLifePodium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('intelligentLifePodiumMore'));
+            }
         }
         $waypointPodium = $this->topWaypointPlayerRows($stats['metrics'], $translator);
         if ($waypointPodium === []) {
             $tpl->addSubBlock(new TplBlock('emptyWaypointPodium'));
         } else {
-            foreach ($waypointPodium as $player) {
+            foreach ($waypointPodium as $index => $player) {
                 $tpl->addSubBlock((new TplBlock('waypointPlayer'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
                     'rank' => self::e($player['rank']),
                     'name' => self::e($player['name']),
                     'waypointBookmarks' => self::e($player['waypointBookmarks']),
                     'waypointBookmarksLabel' => self::e($player['waypointBookmarksLabel']),
                 ]));
+            }
+            if (count($waypointPodium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('waypointPodiumMore'));
             }
         }
         foreach ($this->metricRows($stats['metrics'], $translator) as $metric) {
@@ -79,6 +93,11 @@ class FrontRouteStats extends FrontRoute{
         $translator = new Translator(Translator::normalize($language));
 
         return self::e($translator->get('statsMetaDescription'));
+    }
+
+    public function getCustomJs(): string
+    {
+        return '<script src="/assets/stats.js?v=' . (defined('ASSET_VERSION') ? ASSET_VERSION : '') .'" defer></script>';
     }
 
     /**
@@ -242,6 +261,11 @@ class FrontRouteStats extends FrontRoute{
     private function formatNumber(mixed $value): string
     {
         return number_format(max(0, (int) $value), 0, ',', ' ');
+    }
+
+    private function podiumRowExtraAttributes(int $index): string
+    {
+        return $index >= self::PODIUM_VISIBLE_ROWS ? ' data-stats-podium-extra hidden' : '';
     }
 
     private function formatGeneratedAt(?string $value, Translator $translator): string

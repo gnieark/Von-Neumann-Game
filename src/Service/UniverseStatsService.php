@@ -15,6 +15,7 @@ final class UniverseStatsService
 {
     public const RESOURCE_TYPES = ResourceComposition::TYPES;
     private const HABITABLE_PLANET_THRESHOLD = 0.35;
+    private const PUBLIC_RANKING_LIMIT = 9;
 
     public function __construct(
         private readonly PDO $pdo,
@@ -109,7 +110,7 @@ final class UniverseStatsService
              WHERE neumann_probes.exclude_from_stats = 0
              GROUP BY neumann_probes.id, neumann_probes.name
              ORDER BY visited_count DESC, neumann_probes.name ASC, neumann_probes.id ASC
-             LIMIT 3'
+             LIMIT ' . self::PUBLIC_RANKING_LIMIT
         );
         $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -158,7 +159,7 @@ final class UniverseStatsService
 
         $rank = 1;
         $topPlayers = [];
-        foreach (array_slice($stats['players'], 0, 3) as $player) {
+        foreach (array_slice($stats['players'], 0, self::PUBLIC_RANKING_LIMIT) as $player) {
             $topPlayers[] = [
                 'rank' => $rank++,
                 'playerName' => $player['playerName'],
@@ -224,7 +225,7 @@ final class UniverseStatsService
 
         $rank = 1;
         $topDiscoverers = [];
-        foreach (array_slice($stats['players'], 0, 3) as $player) {
+        foreach (array_slice($stats['players'], 0, self::PUBLIC_RANKING_LIMIT) as $player) {
             $topDiscoverers[] = [
                 'rank' => $rank++,
                 'playerName' => $player['playerName'],

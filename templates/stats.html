@@ -13,7 +13,7 @@
         </div>
         <ol class="stats-podium-list">
             <!-- BEGIN podiumProbe -->
-            <li class="stats-podium-rank">
+            <li class="stats-podium-rank"{{podiumProbe.extraAttributes}}>
                 <span>{{podiumProbe.rank}}</span>
                 <strong>{{podiumProbe.name}}</strong>
                 <b>{{podiumProbe.visitedSectors}} {{podiumProbe.visitedSectorsLabel}}</b>
@@ -23,6 +23,11 @@
             <li class="stats-podium-empty">{{t.statsTopVisitedProbesEmpty}}</li>
             <!-- END emptyPodium -->
         </ol>
+        <!-- BEGIN visitedPodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END visitedPodiumMore -->
     </section>
     <section class="stats-podium" aria-labelledby="stats-intelligent-life-podium-title">
         <div class="stats-podium-heading">
@@ -31,7 +36,7 @@
         </div>
         <ol class="stats-podium-list">
             <!-- BEGIN intelligentLifeDiscoverer -->
-            <li class="stats-podium-rank">
+            <li class="stats-podium-rank"{{intelligentLifeDiscoverer.extraAttributes}}>
                 <span>{{intelligentLifeDiscoverer.rank}}</span>
                 <strong>{{intelligentLifeDiscoverer.name}}</strong>
                 <b>{{intelligentLifeDiscoverer.intelligentLifeWorlds}} {{intelligentLifeDiscoverer.intelligentLifeWorldsLabel}}</b>
@@ -41,6 +46,11 @@
             <li class="stats-podium-empty">{{t.statsTopIntelligentLifeDiscoverersEmpty}}</li>
             <!-- END emptyIntelligentLifePodium -->
         </ol>
+        <!-- BEGIN intelligentLifePodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END intelligentLifePodiumMore -->
     </section>
     <section class="stats-podium" aria-labelledby="stats-waypoint-podium-title">
         <div class="stats-podium-heading">
@@ -49,7 +59,7 @@
         </div>
         <ol class="stats-podium-list">
             <!-- BEGIN waypointPlayer -->
-            <li class="stats-podium-rank">
+            <li class="stats-podium-rank"{{waypointPlayer.extraAttributes}}>
                 <span>{{waypointPlayer.rank}}</span>
                 <strong>{{waypointPlayer.name}}</strong>
                 <b>{{waypointPlayer.waypointBookmarks}} {{waypointPlayer.waypointBookmarksLabel}}</b>
@@ -59,6 +69,11 @@
             <li class="stats-podium-empty">{{t.statsTopWaypointPlayersEmpty}}</li>
             <!-- END emptyWaypointPodium -->
         </ol>
+        <!-- BEGIN waypointPodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END waypointPodiumMore -->
     </section>
     <div class="stats-grid">
         <!-- BEGIN metric -->
