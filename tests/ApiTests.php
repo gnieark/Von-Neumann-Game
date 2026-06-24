@@ -300,7 +300,14 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detecti
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-manny-hash'), 'mannies JS exposes the Manny state hash on Manny cards');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'atomicPrinterStateHash'), 'mannies JS computes an atomic-printer state hash');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-printer-hash'), 'mannies JS exposes the atomic-printer state hash on the printer card');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'cursor.dataset.printerHash !== printerHash'), 'mannies JS rebuilds the atomic-printer card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"taskProgressPercent"'), 'mannies JS excludes live progress from Manny state hashes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'progressDataAttributes'), 'mannies JS annotates progress values for local ticking');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'updateLiveProgressValues'), 'mannies JS updates progress percentages without refreshing data');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remainingMinutesText'), 'mannies JS shows remaining task time next to progress percentages');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/ 60000'), 'mannies JS rounds remaining task time to minutes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'MANNY_REFRESH_MS = 5000'), 'mannies JS refreshes Manny data every five seconds');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scheduleMannyRefresh'), 'mannies JS schedules repeated Manny refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');

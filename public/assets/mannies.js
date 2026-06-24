@@ -1,9 +1,10 @@
 (function () {
     const MANNY_REFRESH_MS = 5000;
+    const PROGRESS_TICK_MS = 1000;
     const MINING_RESOURCE_TYPES = ["deuterium", "metals", "ice", "carbon_compounds"];
     const MANNY_MINING_AMOUNT_MAX = 0.55;
     const MANNY_HASH_FIELD = "mannyStateHash";
-    const MANNY_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
+    const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
 
     const state = {
         currentCraftingRecipes: [],
@@ -17,6 +18,7 @@
 
     let i18n = {};
     let refreshTimer = null;
+    let progressTickTimer = null;
     let loadInProgress = false;
     let loadRequestedWhileInProgress = false;
 
@@ -50,7 +52,7 @@
         }
         if (value !== null && typeof value === "object") {
             return "{" + Object.keys(value)
-                .filter((key) => !MANNY_HASH_IGNORED_FIELDS.has(key))
+                .filter((key) => !STATE_HASH_IGNORED_FIELDS.has(key))
                 .sort()
                 .map((key) => JSON.stringify(key) + ":" + stableHashPayload(value[key]))
                 .join(",") + "}";
@@ -971,14 +973,85 @@
         return resources.map(resourceTypeLabel).join(", ");
     }
 
+    function remainingMinutesText(endAt, now) {
+        if (!Number.isFinite(endAt)) {
+            return "";
+        }
+        const minutes = Math.max(0, Math.ceil((endAt - now) / 60000));
+
+        return window.VNG.numberValue(minutes) + " min";
+    }
+
+    function progressDisplayText(progress, endAt, now) {
+        const percent = window.VNG.numberValue(progress, "%");
+        const remaining = remainingMinutesText(endAt, now);
+
+        return remaining ? percent + " · " + remaining : percent;
+    }
+
     function progressText(manny) {
-        return window.VNG.numberValue(manny.taskProgressPercent, "%");
+        return progressDisplayText(
+            manny.taskProgressPercent,
+            Date.parse(manny.taskEstimatedEndTime || ""),
+            Date.now()
+        );
+    }
+
+    function progressDataAttributes(manny) {
+        const progress = Number(manny.taskProgressPercent);
+        const endAt = Date.parse(manny.taskEstimatedEndTime || "");
+        if (!manny.currentTask || !Number.isFinite(progress) || !Number.isFinite(endAt)) {
+            return "";
+        }
+
+        return "data-progress-start=\"" + escaped(Math.max(0, Math.min(100, progress))) + "\""
+            + " data-progress-observed-at=\"" + escaped(Date.now()) + "\""
+            + " data-progress-end-at=\"" + escaped(endAt) + "\"";
     }
 
     function progressValueHtml(manny) {
-        return "<span class=\"manny-task-progress-value\">"
+        const attributes = progressDataAttributes(manny);
+
+        return "<span class=\"manny-task-progress-value\"" + (attributes ? " " + attributes : "") + ">"
             + escaped(progressText(manny))
             + "</span>";
+    }
+
+    function clearProgressTick() {
+        if (progressTickTimer !== null) {
+            window.clearTimeout(progressTickTimer);
+            progressTickTimer = null;
+        }
+    }
+
+    function updateLiveProgressValues() {
+        const progressNodes = Array.from(document.querySelectorAll("#manny-list .manny-task-progress-value[data-progress-end-at]"));
+        const now = Date.now();
+        let hasPendingProgress = false;
+
+        progressNodes.forEach((node) => {
+            const startProgress = Number(node.dataset.progressStart);
+            const observedAt = Number(node.dataset.progressObservedAt);
+            const endAt = Number(node.dataset.progressEndAt);
+            if (!Number.isFinite(startProgress) || !Number.isFinite(observedAt) || !Number.isFinite(endAt)) {
+                return;
+            }
+
+            const remainingDuration = Math.max(1, endAt - observedAt);
+            const ratio = Math.max(0, Math.min(1, (now - observedAt) / remainingDuration));
+            const progress = Math.max(startProgress, Math.min(100, startProgress + ((100 - startProgress) * ratio)));
+            node.textContent = progressDisplayText(progress, endAt, now);
+            if (progress < 100 && now < endAt) {
+                hasPendingProgress = true;
+            }
+        });
+
+        progressTickTimer = hasPendingProgress ? window.setTimeout(updateLiveProgressValues, PROGRESS_TICK_MS) : null;
+    }
+
+    function scheduleProgressUpdates() {
+        clearProgressTick();
+        updateLiveProgressValues();
     }
 
     function miningResourceSummary(manny) {
@@ -1511,7 +1584,7 @@
             + "<div id=\"" + panelId + "\" class=\"manny-accordion-panel\"" + (expanded ? "" : " hidden") + ">"
             + "<div class=\"manny-metrics printer-metrics\">"
             + metric(tr("location", "Location"), locationTypeLabel("probe"))
-            + metric(tr("task", "Task"), busy ? progressText(assistant) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null)
+            + metric(tr("task", "Task"), busy ? progressText(assistant) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null, busy ? progressDataAttributes(assistant) : "")
             + metric(tr("assistantManny", "Assistant Manny"), assistant ? assistant.name : "-")
             + "</div>"
             + (busy ? renderAtomicPrinterTaskPanel(assistant) : renderAtomicPrinterCraftForm())
@@ -1590,7 +1663,7 @@
                 + "<div class=\"manny-metrics\">"
                 + metric(tr("location", "Location"), mannyLocation(manny))
                 + metric(tr("cargo", "Cargo"), mannyCargo(manny), "manny-cargo-value")
-                + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null)
+                + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null, busy ? progressDataAttributes(manny) : "")
                 + "</div>"
                 + "<form class=\"manny-rename-form manny-form\" hidden>"
                 + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
@@ -1707,6 +1780,7 @@
             updateMannyDropStorageContainerForms();
             updateMannyRecoverStorageContainerForms();
         }
+        scheduleProgressUpdates();
     }
 
     function updateMannyMineForms() {
