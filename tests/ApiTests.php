@@ -298,9 +298,12 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'contain
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.targetContainerId = targetContainerId'), 'mannies JS sends targetContainerId for external mining storage');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detection.targetObjectId'), 'mannies JS uses explicit hidden-container asteroid targets when provided');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'loadManniesPage'), 'mannies JS loads panel data when the page initializes');
-$test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'setTimeout'), 'mannies JS does not schedule automatic refreshes');
-$test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'refreshManniesPage'), 'mannies JS no longer reloads Manny data after initial page construction');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-manny-hash'), 'mannies JS exposes the Manny state hash on Manny cards');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"taskProgressPercent"'), 'mannies JS excludes live progress from Manny state hashes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'MANNY_REFRESH_MS = 5000'), 'mannies JS refreshes Manny data every five seconds');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scheduleMannyRefresh'), 'mannies JS schedules repeated Manny refreshes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesTemplate) && !str_contains($manniesTemplate, 'data-refresh="mannies"'), 'mannies view does not expose a manual refresh button');
 $test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'recoverDetectedContainerHint'), 'mannies JS does not render hidden-container detection alerts inside Manny cards');
 $test->assert(is_string($appCss) && !str_contains($appCss, 'manny-detection-alert'), 'mannies CSS no longer includes the removed in-card detection alert');

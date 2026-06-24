@@ -1,6 +1,9 @@
 (function () {
+    const MANNY_REFRESH_MS = 5000;
     const MINING_RESOURCE_TYPES = ["deuterium", "metals", "ice", "carbon_compounds"];
     const MANNY_MINING_AMOUNT_MAX = 0.55;
+    const MANNY_HASH_FIELD = "mannyStateHash";
+    const MANNY_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
 
     const state = {
         currentCraftingRecipes: [],
@@ -13,6 +16,8 @@
     };
 
     let i18n = {};
+    let refreshTimer = null;
+    let loadInProgress = false;
 
     function withVng(callback) {
         if (window.VNG) {
@@ -36,6 +41,38 @@
 
     function setStatus(value) {
         setText("manny-status", value);
+    }
+
+    function stableHashPayload(value) {
+        if (Array.isArray(value)) {
+            return "[" + value.map(stableHashPayload).join(",") + "]";
+        }
+        if (value !== null && typeof value === "object") {
+            return "{" + Object.keys(value)
+                .filter((key) => !MANNY_HASH_IGNORED_FIELDS.has(key))
+                .sort()
+                .map((key) => JSON.stringify(key) + ":" + stableHashPayload(value[key]))
+                .join(",") + "}";
+        }
+
+        return JSON.stringify(value);
+    }
+
+    function hashString(value) {
+        let hash = 0x811c9dc5;
+        for (let index = 0; index < value.length; index += 1) {
+            hash ^= value.charCodeAt(index);
+            hash = Math.imul(hash, 0x01000193);
+        }
+
+        return (hash >>> 0).toString(16).padStart(8, "0");
+    }
+
+    function withMannyStateHash(manny) {
+        const item = manny && typeof manny === "object" ? {...manny} : {};
+        item[MANNY_HASH_FIELD] = hashString(stableHashPayload(item));
+
+        return item;
     }
 
     function normalizeResourceType(type) {
@@ -1443,7 +1480,14 @@
             + "</section>";
     }
 
-    function renderAtomicPrinterCard(expanded) {
+    function atomicPrinterStateHash() {
+        return hashString(stableHashPayload({
+            "printer": atomicPrinterItem(),
+            "assistant": atomicPrinterAssistant(),
+        }));
+    }
+
+    function renderAtomicPrinterCard(expanded, printerHash) {
         const printer = atomicPrinterItem();
         if (!printer) {
             return "";
@@ -1456,7 +1500,7 @@
         const panelId = "atomic-printer-panel";
         const buttonTitle = printerName + " - " + taskName;
 
-        return "<article class=\"manny-card printer-card\" data-printer-id=\"atomic_3d_printer\"" + (assistant ? " data-assistant-manny-id=\"" + escaped(assistant.id) + "\"" : "") + ">"
+        return "<article class=\"manny-card printer-card\" data-printer-id=\"atomic_3d_printer\" data-printer-hash=\"" + escaped(printerHash || "") + "\"" + (assistant ? " data-assistant-manny-id=\"" + escaped(assistant.id) + "\"" : "") + ">"
             + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + panelId + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
             + "<span class=\"manny-accordion-title\">"
             + "<b>" + escaped(printerName) + "</b>"
@@ -1524,69 +1568,144 @@
         ].join("\n");
     }
 
+    function renderMannyCard(manny, expanded) {
+        const busy = manny.currentTask !== null;
+        const mannyId = String(manny.id || "");
+        const tooFar = mannyIsTooFar(manny);
+        const taskName = tooFar
+            ? tr("mannyTooFar", "Too far away")
+            : (manny.currentTask ? taskLabel(manny.currentTask) : tr("mannyInactive", "Inactive"));
+        const panelId = "manny-panel-" + mannyId.replace(/[^a-zA-Z0-9_-]/g, "-");
+        const buttonTaskTitle = tooFar ? taskName : mannyAccordionTaskText(manny, taskName);
+        const buttonTitle = (manny.name || mannyId) + " - " + buttonTaskTitle;
+        const rackStatusClass = mannyRackStatusClass(manny, tooFar);
+        const panelContent = tooFar
+            ? "<div class=\"manny-metrics\">"
+                + metric(tr("location", "Location"), mannyLocation(manny))
+                + "</div>"
+            : "<div class=\"manny-card-tools\">"
+                + "<button class=\"manny-settings-button icon-button\" type=\"button\" aria-expanded=\"false\" title=\"" + escaped(tr("mannySettings", "Manny settings")) + "\" aria-label=\"" + escaped(tr("mannySettings", "Manny settings")) + "\">&#9881;</button>"
+                + "</div>"
+                + "<div class=\"manny-metrics\">"
+                + metric(tr("location", "Location"), mannyLocation(manny))
+                + metric(tr("cargo", "Cargo"), mannyCargo(manny), "manny-cargo-value")
+                + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null)
+                + "</div>"
+                + "<form class=\"manny-rename-form manny-form\" hidden>"
+                + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
+                + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"
+                + "</form>"
+                + (busy ? renderMannyTaskPanel(manny) : renderMannyActionForms(panelId));
+
+        return "<article class=\"manny-card " + rackStatusClass + "\" data-manny-id=\"" + escaped(manny.id) + "\" data-manny-hash=\"" + escaped(manny[MANNY_HASH_FIELD] || "") + "\">"
+            + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
+            + "<span class=\"manny-accordion-title\">"
+            + "<b>" + escaped(manny.name || mannyId) + "</b>"
+            + "<span class=\"manny-accordion-task\">" + (tooFar ? escaped(taskName) : mannyAccordionTaskHtml(manny, taskName)) + "</span>"
+            + "</span>"
+            + "</button>"
+            + "<div id=\"" + escaped(panelId) + "\" class=\"manny-accordion-panel\"" + (expanded ? "" : " hidden") + ">"
+            + panelContent
+            + "</div>"
+            + "</article>";
+    }
+
+    function elementFromHtml(html) {
+        const template = document.createElement("template");
+        template.innerHTML = html.trim();
+
+        return template.content.firstElementChild;
+    }
+
     function renderMannyList(mannies) {
         const node = document.getElementById("manny-list");
         if (!node) {
             return;
         }
         const mannyItems = Array.isArray(mannies) ? mannies : [];
+        const existingCards = new Map(Array.from(node.querySelectorAll(".manny-card[data-manny-id]"))
+            .map((card) => [card.dataset.mannyId, card]));
+        let cursor = node.querySelector(".printer-card");
+        let changed = false;
 
-        const mannyHtml = mannyItems.map((manny) => {
-            const busy = manny.currentTask !== null;
+        const printerHash = atomicPrinterStateHash();
+        const printerHtml = renderAtomicPrinterCard(false, printerHash);
+        if (!printerHtml && cursor) {
+            cursor.remove();
+            cursor = null;
+            changed = true;
+        } else if (printerHtml && (!cursor || cursor.dataset.printerHash !== printerHash)) {
+            const expanded = cursor
+                ? cursor.querySelector(".manny-accordion-trigger")?.getAttribute("aria-expanded") === "true"
+                : false;
+            const printerCard = elementFromHtml(renderAtomicPrinterCard(expanded, printerHash));
+            if (cursor) {
+                cursor.replaceWith(printerCard);
+            } else {
+                node.insertBefore(printerCard, node.firstChild);
+            }
+            cursor = printerCard;
+            changed = true;
+        }
+
+        mannyItems.forEach((manny) => {
             const mannyId = String(manny.id || "");
-            const tooFar = mannyIsTooFar(manny);
-            const taskName = tooFar
-                ? tr("mannyTooFar", "Too far away")
-                : (manny.currentTask ? taskLabel(manny.currentTask) : tr("mannyInactive", "Inactive"));
-            const panelId = "manny-panel-" + mannyId.replace(/[^a-zA-Z0-9_-]/g, "-");
-            const expanded = false;
-            const buttonTaskTitle = tooFar ? taskName : mannyAccordionTaskText(manny, taskName);
-            const buttonTitle = (manny.name || mannyId) + " - " + buttonTaskTitle;
-            const rackStatusClass = mannyRackStatusClass(manny, tooFar);
-            const panelContent = tooFar
-                ? "<div class=\"manny-metrics\">"
-                    + metric(tr("location", "Location"), mannyLocation(manny))
-                    + "</div>"
-                : "<div class=\"manny-card-tools\">"
-                    + "<button class=\"manny-settings-button icon-button\" type=\"button\" aria-expanded=\"false\" title=\"" + escaped(tr("mannySettings", "Manny settings")) + "\" aria-label=\"" + escaped(tr("mannySettings", "Manny settings")) + "\">&#9881;</button>"
-                    + "</div>"
-                    + "<div class=\"manny-metrics\">"
-                    + metric(tr("location", "Location"), mannyLocation(manny))
-                    + metric(tr("cargo", "Cargo"), mannyCargo(manny), "manny-cargo-value")
-                    + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null)
-                    + "</div>"
-                    + "<form class=\"manny-rename-form manny-form\" hidden>"
-                    + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
-                    + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"
-                    + "</form>"
-                    + (busy ? renderMannyTaskPanel(manny) : renderMannyActionForms(panelId));
+            const mannyHash = String(manny[MANNY_HASH_FIELD] || "");
+            const existing = existingCards.get(mannyId) || null;
+            let card = existing;
 
-            return "<article class=\"manny-card " + rackStatusClass + "\" data-manny-id=\"" + escaped(manny.id) + "\">"
-                + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
-                + "<span class=\"manny-accordion-title\">"
-                + "<b>" + escaped(manny.name || mannyId) + "</b>"
-                + "<span class=\"manny-accordion-task\">" + (tooFar ? escaped(taskName) : mannyAccordionTaskHtml(manny, taskName)) + "</span>"
-                + "</span>"
-                + "</button>"
-                + "<div id=\"" + escaped(panelId) + "\" class=\"manny-accordion-panel\"" + (expanded ? "" : " hidden") + ">"
-                + panelContent
-                + "</div>"
-                + "</article>";
-        }).join("");
+            if (!card || card.dataset.mannyHash !== mannyHash) {
+                const expanded = card
+                    ? card.querySelector(".manny-accordion-trigger")?.getAttribute("aria-expanded") === "true"
+                    : false;
+                card = elementFromHtml(renderMannyCard(manny, expanded));
+                if (existing) {
+                    existing.replaceWith(card);
+                }
+                changed = true;
+            }
+
+            existingCards.delete(mannyId);
+            if (cursor) {
+                if (card.previousElementSibling !== cursor) {
+                    node.insertBefore(card, cursor.nextSibling);
+                    changed = true;
+                }
+            } else if (card !== node.firstElementChild) {
+                node.insertBefore(card, node.firstChild);
+                changed = true;
+            }
+            cursor = card;
+        });
+
+        existingCards.forEach((card) => {
+            card.remove();
+            changed = true;
+        });
 
         const emptyHtml = mannyItems.length === 0
-            ? "<p class=\"empty-state\">" + escaped(tr("noMannies", "No Manny is available.")) + "</p>"
+            ? "<p class=\"empty-state\" data-manny-empty=\"1\">" + escaped(tr("noMannies", "No Manny is available.")) + "</p>"
             : "";
+        const emptyNode = node.querySelector("[data-manny-empty]");
+        if (emptyHtml && !emptyNode) {
+            const emptyElement = elementFromHtml(emptyHtml);
+            node.appendChild(emptyElement);
+            changed = true;
+        } else if (!emptyHtml && emptyNode) {
+            emptyNode.remove();
+            changed = true;
+        }
 
-        node.innerHTML = renderAtomicPrinterCard(false) + mannyHtml + emptyHtml;
-        updateMannyMineForms();
-        updateMannyCraftForms();
-        updatePrinterCraftForms();
-        updateMannyBookmarkForms();
-        updateMannyInspectAsteroidForms();
-        updateMannyDetachStorageContainerForms();
-        updateMannyDropStorageContainerForms();
-        updateMannyRecoverStorageContainerForms();
+        if (changed) {
+            updateMannyMineForms();
+            updateMannyCraftForms();
+            updatePrinterCraftForms();
+            updateMannyBookmarkForms();
+            updateMannyInspectAsteroidForms();
+            updateMannyDetachStorageContainerForms();
+            updateMannyDropStorageContainerForms();
+            updateMannyRecoverStorageContainerForms();
+        }
     }
 
     function updateMannyMineForms() {
@@ -1846,7 +1965,23 @@
         });
     }
 
+    function scheduleMannyRefresh() {
+        if (refreshTimer !== null) {
+            window.clearTimeout(refreshTimer);
+        }
+        refreshTimer = window.setTimeout(loadManniesPage, MANNY_REFRESH_MS);
+    }
+
     async function loadManniesPage() {
+        if (loadInProgress) {
+            return;
+        }
+        loadInProgress = true;
+        if (refreshTimer !== null) {
+            window.clearTimeout(refreshTimer);
+            refreshTimer = null;
+        }
+
         try {
             const [probeData, mannyData, sectorData, recipeData] = await Promise.all([
                 window.VNG.apiJson("/api/probe", {"method": "GET"}),
@@ -1857,7 +1992,9 @@
             const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
             state.currentInventory = probe.inventory || (sectorData && sectorData.inventory) || null;
-            state.currentMannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
+            state.currentMannies = Array.isArray(mannyData && mannyData.mannies)
+                ? mannyData.mannies.map(withMannyStateHash)
+                : [];
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentCraftingRecipes = Array.isArray(recipeData && recipeData.recipes) ? recipeData.recipes : [];
@@ -1867,6 +2004,9 @@
         } catch (error) {
             renderMannyList([]);
             setStatus(error.message || tr("requestDenied", "Request denied"));
+        } finally {
+            loadInProgress = false;
+            scheduleMannyRefresh();
         }
     }
 

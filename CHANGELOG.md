@@ -6,7 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
-- Interface : `/mannies` charge les panneaux une seule fois a l'ouverture de la page et ne rafraichit plus automatiquement les informations ni apres une action.
+- Interface : `/mannies` rafraichit les informations des Mannys toutes les 5 secondes, sans reconstruire les cartes dont le hash d'etat n'a pas change.
 
 ## 2026-06-23
 
