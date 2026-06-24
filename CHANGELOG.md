@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-24
+
+### Changed
+
+- Interface : `/mannies` charge les panneaux une seule fois a l'ouverture de la page et ne rafraichit plus automatiquement les informations ni apres une action.
+
 ## 2026-06-23
 
 ### Added

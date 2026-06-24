@@ -1,7 +1,4 @@
 (function () {
-    const DEFAULT_REFRESH_MS = 15000;
-    const MIN_REFRESH_MS = 750;
-    const REFRESH_CUSHION_MS = 500;
     const MINING_RESOURCE_TYPES = ["deuterium", "metals", "ice", "carbon_compounds"];
     const MANNY_MINING_AMOUNT_MAX = 0.55;
 
@@ -16,10 +13,6 @@
     };
 
     let i18n = {};
-    let refreshTimer = null;
-    let progressTickTimer = null;
-    let completionTimers = [];
-    let loadInProgress = false;
 
     function withVng(callback) {
         if (window.VNG) {
@@ -935,216 +928,6 @@
         document.querySelectorAll(".manny-craft-form, .printer-craft-form").forEach(updateCraftForm);
     }
 
-    function selectValues(select) {
-        if (!select) {
-            return [];
-        }
-
-        return Array.from(select.selectedOptions).map((option) => option.value);
-    }
-
-    function setSelectValue(select, value) {
-        if (!select || value === undefined || value === null || value === "") {
-            return;
-        }
-        if (Array.from(select.options).some((option) => option.value === value)) {
-            select.value = value;
-        }
-    }
-
-    function setSelectValues(select, values) {
-        if (!select || !Array.isArray(values) || values.length === 0) {
-            return;
-        }
-
-        const allowed = new Set(values);
-        Array.from(select.options).forEach((option) => {
-            option.selected = allowed.has(option.value);
-        });
-    }
-
-    function inputValue(form, selector) {
-        const input = form ? form.querySelector(selector) : null;
-        return input ? input.value : "";
-    }
-
-    function actionFormState(form) {
-        if (!form) {
-            return null;
-        }
-        if (form.classList.contains("manny-mine-form")) {
-            return {
-                "type": "mine",
-                "objectId": inputValue(form, "[name=\"objectId\"]"),
-                "resources": selectValues(form.querySelector(".manny-mine-resources")),
-                "targetAmount": inputValue(form, "[name=\"targetAmount\"]"),
-                "targetContainerId": inputValue(form, "[name=\"targetContainerId\"]"),
-            };
-        }
-        if (form.classList.contains("manny-repair-form")) {
-            return {"type": "repair", "integrityPercent": inputValue(form, "[name=\"integrityPercent\"]")};
-        }
-        if (form.classList.contains("manny-rename-form")) {
-            return {
-                "type": "rename",
-                "name": inputValue(form, "[name=\"name\"]"),
-                "open": !form.hidden,
-            };
-        }
-        if (form.classList.contains("manny-salvage-form")) {
-            return {"type": "salvage", "objectId": inputValue(form, "[name=\"objectId\"]")};
-        }
-        if (form.classList.contains("manny-inspect-asteroid-form")) {
-            return {"type": "inspect", "objectId": inputValue(form, "[name=\"objectId\"]")};
-        }
-        if (form.classList.contains("manny-detach-storage-container-form")) {
-            return {
-                "type": "detach",
-                "containerId": inputValue(form, "[name=\"containerId\"]"),
-                "mode": inputValue(form, "[name=\"mode\"]"),
-                "objectId": inputValue(form, "[name=\"objectId\"]"),
-            };
-        }
-        if (form.classList.contains("manny-drop-storage-container-form")) {
-            return {
-                "type": "drop",
-                "containerId": inputValue(form, "[name=\"containerId\"]"),
-                "planetId": inputValue(form, "[name=\"planetId\"]"),
-            };
-        }
-        if (form.classList.contains("manny-recover-storage-container-form")) {
-            return {"type": "recover", "objectId": inputValue(form, "[name=\"objectId\"]")};
-        }
-        if (form.classList.contains("manny-bookmark-form")) {
-            return {"type": "bookmark", "objectId": inputValue(form, "[name=\"objectId\"]")};
-        }
-        if (form.classList.contains("manny-craft-form")) {
-            return {"type": "craft", "recipe": inputValue(form, "[name=\"recipe\"]")};
-        }
-
-        return null;
-    }
-
-    function currentActionFormSelections(node) {
-        const selections = {
-            "mannies": new Map(),
-            "printer": "",
-        };
-        const printerSelect = node.querySelector(".printer-card .printer-craft-form .manny-craft-recipe");
-        if (printerSelect) {
-            selections.printer = printerSelect.value;
-        }
-        node.querySelectorAll(".manny-card[data-manny-id]").forEach((card) => {
-            const states = [];
-            card.querySelectorAll(".manny-form").forEach((form) => {
-                const state = actionFormState(form);
-                if (state !== null) {
-                    states.push(state);
-                }
-            });
-            if (states.length > 0 && card.dataset.mannyId) {
-                selections.mannies.set(card.dataset.mannyId, states);
-            }
-        });
-
-        return selections;
-    }
-
-    function restoreMineFormState(form, saved) {
-        if (!form || !saved) {
-            return;
-        }
-
-        const targetSelect = form.querySelector(".manny-mine-target");
-        const resourceSelect = form.querySelector(".manny-mine-resources");
-        const amountInput = form.querySelector("[name=\"targetAmount\"]");
-        const storageSelect = form.querySelector(".manny-mine-storage-target");
-        setSelectValue(targetSelect, saved.objectId);
-        updateMannyResourceOptions(form);
-        setSelectValues(resourceSelect, saved.resources);
-        if (amountInput && saved.targetAmount !== "") {
-            amountInput.value = saved.targetAmount;
-        }
-        updateMannyMineFormState(form);
-        setSelectValue(storageSelect, saved.targetContainerId);
-        updateMannyMineFormState(form);
-    }
-
-    function restoreActionFormState(card, saved) {
-        if (!card || !saved) {
-            return;
-        }
-        if (saved.type === "mine") {
-            restoreMineFormState(card.querySelector(".manny-mine-form"), saved);
-            return;
-        }
-        if (saved.type === "repair") {
-            const input = card.querySelector(".manny-repair-form [name=\"integrityPercent\"]");
-            if (input && saved.integrityPercent !== "") {
-                input.value = saved.integrityPercent;
-            }
-            return;
-        }
-        if (saved.type === "rename") {
-            const form = card.querySelector(".manny-rename-form");
-            const input = form ? form.querySelector("[name=\"name\"]") : null;
-            const button = card.querySelector(".manny-settings-button");
-            if (input) {
-                input.value = saved.name || "";
-            }
-            if (form) {
-                form.hidden = !saved.open;
-            }
-            if (button) {
-                button.setAttribute("aria-expanded", saved.open ? "true" : "false");
-            }
-            return;
-        }
-        if (saved.type === "salvage") {
-            setSelectValue(card.querySelector(".manny-salvage-target"), saved.objectId);
-            return;
-        }
-        if (saved.type === "inspect") {
-            setSelectValue(card.querySelector(".manny-inspect-asteroid-target"), saved.objectId);
-            return;
-        }
-        if (saved.type === "detach") {
-            setSelectValue(card.querySelector(".manny-detach-container"), saved.containerId);
-            setSelectValue(card.querySelector(".manny-detach-storage-mode"), saved.mode);
-            updateMannyDetachStorageContainerForms();
-            setSelectValue(card.querySelector(".manny-detach-asteroid-target"), saved.objectId);
-            updateMannyDetachStorageContainerForms();
-            return;
-        }
-        if (saved.type === "drop") {
-            setSelectValue(card.querySelector(".manny-drop-container"), saved.containerId);
-            setSelectValue(card.querySelector(".manny-drop-planet-target"), saved.planetId);
-            return;
-        }
-        if (saved.type === "recover") {
-            setSelectValue(card.querySelector(".manny-recover-storage-container-target"), saved.objectId);
-            return;
-        }
-        if (saved.type === "bookmark") {
-            setSelectValue(card.querySelector(".manny-bookmark-target"), saved.objectId);
-            return;
-        }
-        if (saved.type === "craft") {
-            setSelectValue(card.querySelector(".manny-craft-form .manny-craft-recipe"), saved.recipe);
-        }
-    }
-
-    function restoreActionFormSelections(node, selections) {
-        const printerSelect = node.querySelector(".printer-card .printer-craft-form .manny-craft-recipe");
-        if (printerSelect && selections.printer && craftingRecipeById(selections.printer, "atomic_3d_printer")) {
-            printerSelect.value = selections.printer;
-        }
-        node.querySelectorAll(".manny-card[data-manny-id]").forEach((card) => {
-            const savedStates = selections.mannies.get(card.dataset.mannyId) || [];
-            savedStates.forEach((saved) => restoreActionFormState(card, saved));
-        });
-    }
-
     function selectedResourceLabels(types) {
         const resources = Array.isArray(types) ? types : (types ? [types] : []);
         return resources.map(resourceTypeLabel).join(", ");
@@ -1154,22 +937,8 @@
         return window.VNG.numberValue(manny.taskProgressPercent, "%");
     }
 
-    function progressDataAttributes(manny, observedAt) {
-        const progress = Number(manny.taskProgressPercent);
-        const endAt = Date.parse(manny.taskEstimatedEndTime || "");
-        if (!manny.currentTask || !Number.isFinite(progress) || !Number.isFinite(endAt)) {
-            return "";
-        }
-
-        return "data-progress-start=\"" + escaped(Math.max(0, Math.min(100, progress))) + "\""
-            + " data-progress-observed-at=\"" + escaped(observedAt) + "\""
-            + " data-progress-end-at=\"" + escaped(endAt) + "\"";
-    }
-
-    function progressValueHtml(manny, observedAt) {
-        const attributes = progressDataAttributes(manny, observedAt);
-
-        return "<span class=\"manny-task-progress-value\"" + (attributes ? " " + attributes : "") + ">"
+    function progressValueHtml(manny) {
+        return "<span class=\"manny-task-progress-value\">"
             + escaped(progressText(manny))
             + "</span>";
     }
@@ -1197,7 +966,7 @@
         return parts.join(" - ");
     }
 
-    function mannyAccordionTaskHtml(manny, taskName, observedAt) {
+    function mannyAccordionTaskHtml(manny, taskName) {
         if (!manny || manny.currentTask === null) {
             return escaped(taskName);
         }
@@ -1205,7 +974,7 @@
         const resources = manny.currentTask === "mining" ? miningResourceSummary(manny) : "";
 
         return "<span class=\"manny-accordion-task-status\">" + escaped(taskName) + "</span>"
-            + "<span class=\"manny-accordion-task-progress\">" + progressValueHtml(manny, observedAt) + "</span>"
+            + "<span class=\"manny-accordion-task-progress\">" + progressValueHtml(manny) + "</span>"
             + (resources ? "<span class=\"manny-accordion-task-resources\">" + escaped(resources) + "</span>" : "");
     }
 
@@ -1217,9 +986,9 @@
         return state.currentMannyMineTargets.find((target) => target.id === (payload && payload.objectId)) || null;
     }
 
-    function renderMannyTaskPanel(manny, observedAt) {
+    function renderMannyTaskPanel(manny) {
         const payload = manny.task || {};
-        const progress = progressValueHtml(manny, observedAt);
+        const progress = progressValueHtml(manny);
         if (manny.currentTask === "repair") {
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("repairInProgress", "Repair in progress")) + "</h4>"
@@ -1661,7 +1430,7 @@
             + "</form>";
     }
 
-    function renderAtomicPrinterTaskPanel(assistant, observedAt) {
+    function renderAtomicPrinterTaskPanel(assistant) {
         const payload = assistant && assistant.task ? assistant.task : {};
         return "<section class=\"manny-task-panel printer-task-panel\">"
             + "<h4>" + escaped(tr("atomicPrintingInProgress", "Atomic printing in progress")) + "</h4>"
@@ -1669,12 +1438,12 @@
                 "recipe": payload.recipeName || tr("integratedCircuit", "Integrated circuit"),
                 "manny": assistant ? assistant.name : tr("mannyObject", "Manny"),
             })) + "</p>"
-            + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + (assistant ? progressValueHtml(assistant, observedAt) : window.VNG.numberValue(0, "%")) + "</p>"
+            + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + (assistant ? progressValueHtml(assistant) : window.VNG.numberValue(0, "%")) + "</p>"
             + (assistant ? "<button class=\"printer-recall-button\" type=\"button\">" + escaped(tr("cancelCrafting", "Cancel crafting")) + "</button>" : "")
             + "</section>";
     }
 
-    function renderAtomicPrinterCard(observedAt, expanded) {
+    function renderAtomicPrinterCard(expanded) {
         const printer = atomicPrinterItem();
         if (!printer) {
             return "";
@@ -1697,10 +1466,10 @@
             + "<div id=\"" + panelId + "\" class=\"manny-accordion-panel\"" + (expanded ? "" : " hidden") + ">"
             + "<div class=\"manny-metrics printer-metrics\">"
             + metric(tr("location", "Location"), locationTypeLabel("probe"))
-            + metric(tr("task", "Task"), busy ? progressText(assistant) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null, busy ? progressDataAttributes(assistant, observedAt) : "")
+            + metric(tr("task", "Task"), busy ? progressText(assistant) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null)
             + metric(tr("assistantManny", "Assistant Manny"), assistant ? assistant.name : "-")
             + "</div>"
-            + (busy ? renderAtomicPrinterTaskPanel(assistant, observedAt) : renderAtomicPrinterCraftForm())
+            + (busy ? renderAtomicPrinterTaskPanel(assistant) : renderAtomicPrinterCraftForm())
             + "</div>"
             + "</article>";
     }
@@ -1755,67 +1524,12 @@
         ].join("\n");
     }
 
-    function clearProgressTimers() {
-        if (progressTickTimer !== null) {
-            window.clearTimeout(progressTickTimer);
-            progressTickTimer = null;
-        }
-        completionTimers.forEach((timer) => window.clearTimeout(timer));
-        completionTimers = [];
-    }
-
-    function updateLiveProgressValues() {
-        const progressNodes = Array.from(document.querySelectorAll("#manny-list .manny-task-progress-value[data-progress-end-at]"));
-        const now = Date.now();
-        let hasPendingProgress = false;
-        progressNodes.forEach((node) => {
-            const startProgress = Number(node.dataset.progressStart);
-            const observedAt = Number(node.dataset.progressObservedAt);
-            const endAt = Number(node.dataset.progressEndAt);
-            if (!Number.isFinite(startProgress) || !Number.isFinite(observedAt) || !Number.isFinite(endAt)) {
-                return;
-            }
-
-            const remainingDuration = Math.max(1, endAt - observedAt);
-            const ratio = Math.max(0, Math.min(1, (now - observedAt) / remainingDuration));
-            const progress = Math.max(startProgress, Math.min(100, startProgress + ((100 - startProgress) * ratio)));
-            node.textContent = window.VNG.numberValue(progress, "%");
-            if (progress < 100 && now < endAt) {
-                hasPendingProgress = true;
-            }
-        });
-
-        progressTickTimer = hasPendingProgress ? window.setTimeout(updateLiveProgressValues, 1000) : null;
-    }
-
-    function scheduleProgressUpdates() {
-        const endTimes = new Set(Array.from(document.querySelectorAll("#manny-list .manny-task-progress-value[data-progress-end-at]"))
-            .map((node) => Number(node.dataset.progressEndAt))
-            .filter((endAt) => Number.isFinite(endAt)));
-        if (endTimes.size === 0) {
-            return;
-        }
-
-        updateLiveProgressValues();
-        endTimes.forEach((endAt) => {
-            completionTimers.push(window.setTimeout(() => refreshManniesPage(false), Math.max(0, endAt - Date.now()) + REFRESH_CUSHION_MS));
-        });
-    }
-
     function renderMannyList(mannies) {
         const node = document.getElementById("manny-list");
         if (!node) {
             return;
         }
-        clearProgressTimers();
-        const openActionPanels = window.VNG.openDisclosureIds(node, ".manny-action-accordion-trigger[aria-expanded=\"true\"][aria-controls]");
-        const openMannyIds = new Set(Array.from(node.querySelectorAll(".manny-card[data-manny-id] .manny-accordion-trigger[aria-expanded=\"true\"]"))
-            .map((button) => button.closest(".manny-card") && button.closest(".manny-card").dataset.mannyId)
-            .filter(Boolean));
-        const printerExpanded = node.querySelector(".printer-card .manny-accordion-trigger[aria-expanded=\"true\"]") !== null;
-        const actionFormSelections = currentActionFormSelections(node);
         const mannyItems = Array.isArray(mannies) ? mannies : [];
-        const observedAt = Date.now();
 
         const mannyHtml = mannyItems.map((manny) => {
             const busy = manny.currentTask !== null;
@@ -1825,10 +1539,9 @@
                 ? tr("mannyTooFar", "Too far away")
                 : (manny.currentTask ? taskLabel(manny.currentTask) : tr("mannyInactive", "Inactive"));
             const panelId = "manny-panel-" + mannyId.replace(/[^a-zA-Z0-9_-]/g, "-");
-            const expanded = openMannyIds.has(mannyId);
+            const expanded = false;
             const buttonTaskTitle = tooFar ? taskName : mannyAccordionTaskText(manny, taskName);
             const buttonTitle = (manny.name || mannyId) + " - " + buttonTaskTitle;
-            const progressAttributes = busy && !tooFar ? progressDataAttributes(manny, observedAt) : "";
             const rackStatusClass = mannyRackStatusClass(manny, tooFar);
             const panelContent = tooFar
                 ? "<div class=\"manny-metrics\">"
@@ -1840,19 +1553,19 @@
                     + "<div class=\"manny-metrics\">"
                     + metric(tr("location", "Location"), mannyLocation(manny))
                     + metric(tr("cargo", "Cargo"), mannyCargo(manny), "manny-cargo-value")
-                    + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null, progressAttributes)
+                    + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null)
                     + "</div>"
                     + "<form class=\"manny-rename-form manny-form\" hidden>"
                     + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
                     + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"
                     + "</form>"
-                    + (busy ? renderMannyTaskPanel(manny, observedAt) : renderMannyActionForms(panelId));
+                    + (busy ? renderMannyTaskPanel(manny) : renderMannyActionForms(panelId));
 
             return "<article class=\"manny-card " + rackStatusClass + "\" data-manny-id=\"" + escaped(manny.id) + "\">"
                 + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
                 + "<span class=\"manny-accordion-title\">"
                 + "<b>" + escaped(manny.name || mannyId) + "</b>"
-                + "<span class=\"manny-accordion-task\">" + (tooFar ? escaped(taskName) : mannyAccordionTaskHtml(manny, taskName, observedAt)) + "</span>"
+                + "<span class=\"manny-accordion-task\">" + (tooFar ? escaped(taskName) : mannyAccordionTaskHtml(manny, taskName)) + "</span>"
                 + "</span>"
                 + "</button>"
                 + "<div id=\"" + escaped(panelId) + "\" class=\"manny-accordion-panel\"" + (expanded ? "" : " hidden") + ">"
@@ -1865,10 +1578,7 @@
             ? "<p class=\"empty-state\">" + escaped(tr("noMannies", "No Manny is available.")) + "</p>"
             : "";
 
-        node.innerHTML = renderAtomicPrinterCard(observedAt, printerExpanded) + mannyHtml + emptyHtml;
-        window.VNG.restoreDisclosureIds(node, openActionPanels, ".manny-action-accordion-trigger[aria-controls]");
-        restoreActionFormSelections(node, actionFormSelections);
-        scheduleProgressUpdates();
+        node.innerHTML = renderAtomicPrinterCard(false) + mannyHtml + emptyHtml;
         updateMannyMineForms();
         updateMannyCraftForms();
         updatePrinterCraftForms();
@@ -2136,34 +1846,7 @@
         });
     }
 
-    function scheduleRefresh(payload) {
-        if (refreshTimer) {
-            window.clearTimeout(refreshTimer);
-            refreshTimer = null;
-        }
-        const delay = window.VNG.nextRefreshDelay(payload || {}, DEFAULT_REFRESH_MS, MIN_REFRESH_MS, REFRESH_CUSHION_MS);
-        refreshTimer = window.setTimeout(() => refreshManniesPage(false), delay);
-    }
-
-    function mannyFormInteractionActive() {
-        const active = document.activeElement;
-        return active instanceof HTMLElement && active.closest("#manny-list .manny-form") !== null;
-    }
-
-    async function refreshManniesPage(force) {
-        if (!force && mannyFormInteractionActive()) {
-            scheduleRefresh({});
-            return;
-        }
-        if (loadInProgress) {
-            return;
-        }
-        loadInProgress = true;
-        if (refreshTimer) {
-            window.clearTimeout(refreshTimer);
-            refreshTimer = null;
-        }
-
+    async function loadManniesPage() {
         try {
             const [probeData, mannyData, sectorData, recipeData] = await Promise.all([
                 window.VNG.apiJson("/api/probe", {"method": "GET"}),
@@ -2181,17 +1864,9 @@
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);
             renderMannyList(state.currentMannies);
-            scheduleRefresh({
-                "probe": probe,
-                "mannies": state.currentMannies,
-                "sector": sector,
-            });
         } catch (error) {
             renderMannyList([]);
             setStatus(error.message || tr("requestDenied", "Request denied"));
-            scheduleRefresh({});
-        } finally {
-            loadInProgress = false;
         }
     }
 
@@ -2393,8 +2068,6 @@
             return;
         }
 
-        document.querySelector("[data-refresh=\"mannies\"]")?.addEventListener("click", () => refreshManniesPage(true));
-
         mannyList.addEventListener("submit", async (event) => {
             event.preventDefault();
             const card = event.target.closest(".manny-card");
@@ -2410,7 +2083,6 @@
                     return;
                 }
                 setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
-                await refreshManniesPage(true);
             } catch (error) {
                 setStatus(error.message || tr("requestDenied", "Request denied"));
             }
@@ -2485,7 +2157,6 @@
                         "body": JSON.stringify({}),
                     });
                     setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
-                    await refreshManniesPage(true);
                 } catch (error) {
                     setStatus(error.message || tr("requestDenied", "Request denied"));
                 }
@@ -2510,7 +2181,6 @@
                     "body": JSON.stringify({}),
                 });
                 setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
-                await refreshManniesPage(true);
             } catch (error) {
                 setStatus(error.message || tr("requestDenied", "Request denied"));
             }
@@ -2524,6 +2194,6 @@
 
         i18n = await window.VNG.loadI18n();
         bindEvents();
-        refreshManniesPage(true);
+        loadManniesPage();
     });
 })();
