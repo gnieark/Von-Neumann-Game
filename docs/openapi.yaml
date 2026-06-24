@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '44'
+  version: '49'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 47
+                apiVersion: 49
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2095,6 +2095,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/refill-deuterium-tank:
+    post:
+      summary: Start refilling the probe deuterium tank with a Manny
+      description: >
+        Starts a one-minute Manny task that fills the probe deuterium tank to
+        its configured maximum. The current sector must contain a deuterium
+        refuel station.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      responses:
+        '202':
+          description: Deuterium refill task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is busy, unavailable, or the probe tank is already full
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: No deuterium refuel station is available in the current sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sector:
     get:
       summary: Observe a sector by player-relative coordinates
@@ -2391,7 +2427,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -4059,7 +4095,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, returning, waiting_for_space, moving_stockage]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, returning, waiting_for_space, moving_stockage]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -4203,7 +4239,7 @@ components:
           description: Opaque object id. Clients must not parse coordinates from it.
         type:
           type: string
-          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container]
+          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container, deuterium_refuel_station]
         name:
           type: string
           nullable: true
@@ -4243,7 +4279,7 @@ components:
           $ref: '#/components/schemas/ResourceHintList'
         resourceTypes:
           type: array
-          description: Present on planets and asteroids; use these values in MannyMineRequest.resources.
+          description: Present on planets, asteroids, and deuterium refuel stations; use mineable object values in MannyMineRequest.resources.
           items:
             $ref: '#/components/schemas/MineableResourceType'
         resourceComposition:
@@ -4314,6 +4350,13 @@ components:
         capacityUnit:
           type: string
           enum: [earth_container_equivalent]
+        planetId:
+          type: string
+          description: Present only for deuterium refuel stations; id of the planet that placed the station in orbit.
+        planetName:
+          type: string
+          nullable: true
+          description: Present only for deuterium refuel stations; public name of the planet that placed the station.
     WaypointBookmarkTarget:
       type: object
       required: [id, type, name]

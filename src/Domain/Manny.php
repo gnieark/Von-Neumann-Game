@@ -23,6 +23,7 @@ final class Manny
     public const TASK_DETACHING_STORAGE_CONTAINER = 'detaching_storage_container';
     public const TASK_DROPPING_STORAGE_CONTAINER = 'dropping_storage_container';
     public const TASK_INSPECTING_ASTEROID = 'inspecting_asteroid';
+    public const TASK_REFILLING_DEUTERIUM_TANK = 'refilling_deuterium_tank';
     public const CARGO_CAPACITY = 0.05;
     public const CONTAINER_SPACE = 0.05;
 

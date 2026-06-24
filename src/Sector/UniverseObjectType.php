@@ -15,4 +15,5 @@ enum UniverseObjectType: string
     case Manny = 'manny';
     case DriftingItem = 'drifting_item';
     case DetachedContainer = 'detached_container';
+    case DeuteriumRefuelStation = 'deuterium_refuel_station';
 }

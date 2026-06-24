@@ -50,6 +50,7 @@
             "waypoint_bookmark": tr("waypointBookmark", "Waypoint bookmark"),
             "drifting_item": tr("driftingItemObject", "Drifting item"),
             "detached_container": tr("detachedContainerObject", "Detached container"),
+            "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
             "object": tr("object", "Object"),
             "unknown": tr("unknownObject", "Unknown object"),
         }[type] || type || tr("unknownObject", "Unknown object");
@@ -149,6 +150,7 @@
             "Waypoint bookmark detected in this sector.": tr("observationSummaryWaypointBookmark", "Waypoint bookmark detected in this sector."),
             "Detached storage container drifting in open space.": tr("observationSummaryDetachedContainerDrifting", "Detached storage container drifting in open space."),
             "Detached storage container hidden on an asteroid.": tr("observationSummaryDetachedContainerHidden", "Detached storage container hidden on an asteroid."),
+            "Deuterium refuel station detected in orbit.": tr("observationSummaryDeuteriumRefuelStation", "Deuterium refuel station detected in orbit."),
             "Unknown astronomical object.": tr("observationSummaryUnknown", "Unknown astronomical object."),
         }[value] || value;
     }
@@ -589,6 +591,28 @@
             + "</p>";
     }
 
+    function sectorDeuteriumStationHighlights(sector) {
+        const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
+
+        return objects
+            .filter((object) => object && object.type === "deuterium_refuel_station")
+            .map((object) => object.name || object.id || tr("deuteriumRefuelStationObject", "Deuterium refuel station"));
+    }
+
+    function sectorDeuteriumStationHighlightHtml(sector) {
+        const highlights = sectorDeuteriumStationHighlights(sector);
+        if (highlights.length === 0) {
+            return "";
+        }
+
+        return "<p class=\"sector-deuterium-station-highlight\">"
+            + window.VNG.escapeHtml(window.VNG.formatText(
+                tr("sectorDeuteriumRefuelStationAlert", "Deuterium refuel station detected: {objects}"),
+                {"objects": highlights.join(", ")}
+            ))
+            + "</p>";
+    }
+
     function sectorBookmarkObjects(sector) {
         return bookmarkedSectorObjects(sector).map((bookmarkTarget, index) => {
             const bookmarks = Array.isArray(bookmarkTarget.bookmarks) ? bookmarkTarget.bookmarks : [];
@@ -668,6 +692,12 @@
         if (object.type === "waypoint_bookmark") {
             return "<p>" + window.VNG.escapeHtml(tr("bookmarkTarget", "Target") + " " + (object.targetLabel || "-")) + "</p>"
                 + "<p>" + window.VNG.escapeHtml(tr("bookmarkName", "Name") + " " + (Array.isArray(object.bookmarkNames) && object.bookmarkNames.length > 0 ? object.bookmarkNames.join(", ") : (object.name || "-"))) + "</p>";
+        }
+        if (object.type === "deuterium_refuel_station") {
+            return "<p>" + window.VNG.escapeHtml(tr("resources", "Resources") + " " + resourceTypeLabel("deuterium")) + "</p>"
+                + (object.planetName || object.planetId
+                    ? "<p>" + window.VNG.escapeHtml(tr("planetObject", "Planet") + " " + (object.planetName || object.planetId)) + "</p>"
+                    : "");
         }
         if (object.type === "probe") {
             return "<p>" + window.VNG.escapeHtml(
@@ -979,6 +1009,7 @@
                 : "")
             + "<p>" + window.VNG.escapeHtml(summary) + "</p>"
             + (error ? "" : sectorWaypointBookmarkHighlightHtml(sector))
+            + (error ? "" : sectorDeuteriumStationHighlightHtml(sector))
             + details
             + "</article>";
     }

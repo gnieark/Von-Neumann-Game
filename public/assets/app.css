@@ -1391,6 +1391,12 @@ button.account-menu-item {
     text-shadow: 0 0 5px rgba(246, 214, 106, .28);
 }
 
+.neighbor-sector-tile .sector-deuterium-station-highlight {
+    color: #82e9ff;
+    font-weight: 700;
+    text-shadow: 0 0 5px rgba(130, 233, 255, .28);
+}
+
 .visited-sector-details {
     display: grid;
     gap: 8px;

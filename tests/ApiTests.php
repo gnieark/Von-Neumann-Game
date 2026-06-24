@@ -49,6 +49,7 @@ use VonNeumannGame\Service\UniverseStatsService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\OrbitDescriptor;
 use VonNeumannGame\Sector\OrbitingBody;
 use VonNeumannGame\Sector\Planet;
@@ -152,6 +153,24 @@ function setProbeTestStoredResources(
     }
 
     return $probes->findById($probe->id) ?? $probe;
+}
+
+/**
+ * @param array<string, string> $headers
+ * @param array<string, mixed> $body
+ */
+function assertForeignMannyEndpointReturnsNotFound(
+    TestRunner $test,
+    ApiKernel $kernel,
+    array $headers,
+    string $method,
+    string $path,
+    array $body,
+    string $label,
+): void {
+    $response = $kernel->handle($method, $path, $headers, json_encode($body, JSON_THROW_ON_ERROR));
+    $test->assertEquals(404, $response->status, $label . ' rejects a Manny owned by another player');
+    $test->assertEquals('manny_not_found', $response->body['error']['code'] ?? null, $label . ' hides foreign Manny ownership');
 }
 
 function fakeIdToken(array $payload): string
@@ -323,6 +342,11 @@ $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'vis
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorWaypointBookmarkHighlightHtml'), 'sensors JS highlights waypoint bookmarks in visited-sector tiles');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorObjectSummaryItems(sector, false)'), 'sensors JS keeps waypoint bookmark highlights out of the detailed visited-sector scan');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-waypoint-bookmark-highlight'), 'sensors CSS styles waypoint bookmark tile highlights');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorDeuteriumStationHighlightHtml'), 'sensors JS highlights deuterium refuel stations in visited-sector tiles');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuterium_refuel_station'), 'sensors JS recognizes deuterium refuel station objects');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/refill-deuterium-tank'), 'mannies JS can start a deuterium tank refill action');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -507,7 +531,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(47, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(49, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2036,9 +2060,9 @@ if ($intelligentLifeProbe !== null) {
         $firstContactMessagesAfterReply = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
         $planetScenarioReply = $firstContactMessagesAfterReply->body['messages'][0] ?? null;
         $test->assertEquals('planet', $planetScenarioReply['sender']['type'] ?? null, 'planet answers the valid prime-sequence reply');
-        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'Nous sommes les habitants de ce monde.'), 'planet reply introduces the inhabited world');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'We are the people of this world.'), 'planet reply introduces the inhabited world in English');
         $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], '5 ECE'), 'planet reply asks for five ECE of metals');
-        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'Composés carbonés: 1ECE'), 'planet reply asks for one ECE of carbon compounds');
+        $test->assert(is_string($planetScenarioReply['body'] ?? null) && str_contains((string) $planetScenarioReply['body'], 'Carbon compounds: 1 ECE'), 'planet reply asks for one ECE of carbon compounds');
         $firstContactAfterReply = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
         $firstContactMissionAfterReply = $firstContactAfterReply->body['missions'][0] ?? null;
         $test->assertEquals('active', $firstContactMissionAfterReply['status'] ?? null, 'first-contact mission remains active for its next scenario step');
@@ -2094,9 +2118,9 @@ if ($intelligentLifeProbe !== null) {
                 $messagesAfterMaterialDrop = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
                 $materialThanks = $messagesAfterMaterialDrop->body['messages'][0] ?? null;
                 $test->assertEquals('planet', $materialThanks['sender']['type'] ?? null, 'planet thanks the player after a material drop');
-                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Merci pour votre aide.'), 'material drop thanks message thanks the player');
-                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Métaux : 4.5 ECE'), 'material drop thanks message reports remaining metals');
-                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Composés carbonés : 0.6 ECE'), 'material drop thanks message reports remaining carbon compounds');
+                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Thank you for your help.'), 'material drop thanks message thanks the player in English');
+                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Metals: 4.5 ECE'), 'material drop thanks message reports remaining metals');
+                $test->assert(is_string($materialThanks['body'] ?? null) && str_contains((string) $materialThanks['body'], 'Carbon compounds: 0.6 ECE'), 'material drop thanks message reports remaining carbon compounds');
 
                 $fellowContributor = $auth->registerPlayerWithPassword('mission-fellow', 'secret', 'Fellow Visitor', 'Fellow probe');
                 $fellowContributorProbe = $probes->findByPlayerId($fellowContributor->id);
@@ -2179,28 +2203,98 @@ if ($intelligentLifeProbe !== null) {
                         $test->assertEquals(1.0, (float) ($materialCounterAfterFinalDrop['totals'][ResourceComposition::CARBON_COMPOUNDS] ?? -1), 'material drop counter reaches required carbon compounds');
                         $test->assertEquals(0.0, (float) ($materialCounterAfterFinalDrop['remaining'][ResourceComposition::METALS] ?? -1), 'material drop counter has no remaining metals');
                         $test->assertEquals(0.0, (float) ($materialCounterAfterFinalDrop['remaining'][ResourceComposition::CARBON_COMPOUNDS] ?? -1), 'material drop counter has no remaining carbon compounds');
-                        $test->assert(isset($materialCounterAfterFinalDrop['completionMessageSentAt']), 'material drop counter records the final completion message delivery');
+                        $test->assert(isset($materialCounterAfterFinalDrop['completionMessageSentAt']), 'material drop counter records the resource-completion message delivery');
+                        $test->assert(isset($materialCounterAfterFinalDrop['stationAvailableAt']), 'material drop counter records the later station availability time');
+                        $test->assert(!isset($materialCounterAfterFinalDrop['finalMessageSentAt']), 'material drop counter waits before the final station message');
 
                         $messagesAfterFinalDrop = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
                         $completionThanks = $messagesAfterFinalDrop->body['messages'][0] ?? null;
-                        $test->assertEquals('planet', $completionThanks['sender']['type'] ?? null, 'planet sends the final return-to-space completion message');
-                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Voyageur des étoiles,'), 'final return-to-space message starts with the requested salutation');
-                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Fellow Visitor'), 'final return-to-space message lists the other contributor');
-                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Revenez dans 48 heures.'), 'final return-to-space message announces the forty-eight-hour follow-up');
-                        $test->assert(!str_contains((string) ($completionThanks['body'] ?? ''), 'Ressources restantes à envoyer'), 'final return-to-space message replaces the partial remaining-resource thanks');
+                        $test->assertEquals('planet', $completionThanks['sender']['type'] ?? null, 'planet sends the return-to-space construction message');
+                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Star traveler,'), 'return-to-space construction message starts in English');
+                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Fellow Visitor'), 'return-to-space construction message lists the other contributor');
+                        $test->assert(is_string($completionThanks['body'] ?? null) && str_contains((string) $completionThanks['body'], 'Return in 48 hours.'), 'return-to-space construction message announces the forty-eight-hour follow-up');
+                        $test->assert(!str_contains((string) ($completionThanks['body'] ?? ''), 'Ressources restantes à envoyer'), 'return-to-space construction message replaces the partial remaining-resource thanks');
 
                         if ($fellowContributorProbe !== null) {
                             $fellowMessages = $messages->receivedByProbe($fellowContributorProbe->id);
                             $fellowCompletionThanks = $fellowMessages[0] ?? null;
-                            $test->assert(is_string($fellowCompletionThanks?->body ?? null) && str_contains((string) $fellowCompletionThanks?->body, 'Voyageur des étoiles,'), 'planet also sends the final message to present contributor probes');
+                            $test->assert(is_string($fellowCompletionThanks?->body ?? null) && str_contains((string) $fellowCompletionThanks?->body, 'Star traveler,'), 'planet also sends the construction message to present contributor probes');
                             $test->assert(is_string($fellowCompletionThanks?->body ?? null) && str_contains((string) $fellowCompletionThanks?->body, 'Life Alert'), 'present contributor message lists the triggering contributor');
                         }
+
+                        $activeFirstContactBeforeStation = $kernel->handle('GET', '/api/probe/missions', $intelligentLifeHeaders);
+                        $test->assertEquals('active', $activeFirstContactBeforeStation->body['missions'][0]['status'] ?? null, 'first-contact mission stays active until the station is ready');
+                        $test->assertEquals('pending', $activeFirstContactBeforeStation->body['missions'][0]['steps'][4]['status'] ?? null, 'first-contact mission waits for the deuterium station step');
 
                         $completedFirstContactMissions = array_values(array_filter(
                             $missions->findForProbe($intelligentLifeProbeForFinalDrop->id, [Mission::STATUS_COMPLETED]),
                             static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
                         ));
-                        $test->assertEquals(1, count($completedFirstContactMissions), 'first-contact mission completes when the requested materials are fully delivered');
+                        $test->assertEquals(0, count($completedFirstContactMissions), 'first-contact mission is not completed before the station is ready');
+
+                        $stationReadySector = $sectorRepository->load($intelligentLifeTarget);
+                        $stationReadySector->markReturnToSpaceProgramCompletionMessageSent('life-alert-planet', gmdate('c', time() - 1));
+                        $sectorRepository->save($stationReadySector);
+
+                        $stationReadyTrigger = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
+                            'recipient' => [
+                                'type' => 'planet',
+                                'id' => 'life-alert-planet',
+                            ],
+                            'body' => 'Are the orbital works ready?',
+                        ], JSON_THROW_ON_ERROR));
+                        $test->assertEquals(201, $stationReadyTrigger->status, 'POST /api/probe/messages can trigger station readiness when the probe is already in the sector');
+
+                        $stationReadyScan = $kernel->handle('GET', '/api/probe/sector', $intelligentLifeHeaders);
+                        $stationObjects = array_values(array_filter(
+                            $stationReadyScan->body['sector']['objects'] ?? [],
+                            static fn(array $object): bool => ($object['type'] ?? null) === 'deuterium_refuel_station',
+                        ));
+                        $test->assertEquals(1, count($stationObjects), 'return-to-space completion creates one deuterium refuel station in the sector');
+                        $test->assertEquals('life-alert-planet', $stationObjects[0]['planetId'] ?? null, 'deuterium refuel station records its source planet');
+                        $test->assertEquals(['deuterium'], $stationObjects[0]['resourceTypes'] ?? null, 'deuterium refuel station advertises deuterium as its resource');
+
+                        $stationVisitedScan = $kernel->handle('GET', '/api/sector?x=2&y=0&z=0', $intelligentLifeHeaders);
+                        $visitedStationObjects = array_values(array_filter(
+                            $stationVisitedScan->body['sector']['objects'] ?? [],
+                            static fn(array $object): bool => ($object['type'] ?? null) === 'deuterium_refuel_station',
+                        ));
+                        $test->assertEquals(1, count($visitedStationObjects), 'visited-sector detailed scan exposes the deuterium refuel station');
+
+                        $materialCounterAfterStation = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+                        $test->assert(isset($materialCounterAfterStation['finalMessageSentAt']), 'material counter records the final station message delivery');
+                        $test->assertEquals($stationObjects[0]['id'] ?? null, $materialCounterAfterStation['stationObjectId'] ?? null, 'material counter records the station object id');
+
+                        $messagesAfterStationReady = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+                        $stationReadyMessage = $messagesAfterStationReady->body['messages'][0] ?? null;
+                        $test->assert(is_string($stationReadyMessage['body'] ?? null) && str_contains((string) $stationReadyMessage['body'], 'Our people have reached space again.'), 'planet sends the final station-ready message after forty-eight hours');
+                        $test->assert(is_string($stationReadyMessage['body'] ?? null) && str_contains((string) $stationReadyMessage['body'], 'deuterium refuel station'), 'final station-ready message announces the station');
+
+                        $completedFirstContactMissions = array_values(array_filter(
+                            $missions->findForProbe($intelligentLifeProbeForFinalDrop->id, [Mission::STATUS_COMPLETED]),
+                            static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
+                        ));
+                        $test->assertEquals(1, count($completedFirstContactMissions), 'first-contact mission completes when the deuterium station is ready');
+                        if ($fellowContributorProbe !== null) {
+                            $fellowCompletedMissions = array_values(array_filter(
+                                $missions->findForProbe($fellowContributorProbe->id, [Mission::STATUS_COMPLETED]),
+                                static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
+                            ));
+                            $test->assertEquals(1, count($fellowCompletedMissions), 'first-contact mission success is persisted for a contributing player');
+                        }
+
+                        $friendshipMessage = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
+                            'recipient' => [
+                                'type' => 'planet',
+                                'id' => 'life-alert-planet',
+                            ],
+                            'body' => 'Thank you for the station.',
+                        ], JSON_THROW_ON_ERROR));
+                        $test->assertEquals(201, $friendshipMessage->status, 'POST /api/probe/messages accepts a message after return-to-space completion');
+                        $messagesAfterFriendship = $kernel->handle('GET', '/api/probe/messages', $intelligentLifeHeaders);
+                        $friendshipReply = $messagesAfterFriendship->body['messages'][0] ?? null;
+                        $test->assert(is_string($friendshipReply['body'] ?? null) && str_contains((string) $friendshipReply['body'], 'probes friends of this world'), 'planet replies after mission completion that probes are friends');
+                        $test->assert(is_string($friendshipReply['body'] ?? null) && str_contains((string) $friendshipReply['body'], 'deuterium refuel station'), 'planet replies after mission completion that deuterium is available');
                     }
                 }
             }
@@ -2218,7 +2312,7 @@ if ($intelligentLifeProbe !== null) {
         $planetScenarioReplies = array_values(array_filter(
             $messagesAfterDuplicateReply->body['messages'] ?? [],
             static fn(array $message): bool => is_string($message['body'] ?? null)
-                && str_contains((string) $message['body'], 'Nous sommes les habitants de ce monde.')
+                && str_contains((string) $message['body'], 'We are the people of this world.')
         ));
         $test->assertEquals(1, count($planetScenarioReplies), 'repeated prime-sequence replies do not duplicate the planet scenario response');
 
@@ -2532,6 +2626,33 @@ $test->assert(str_starts_with($firstMannyId, 'mny_'), 'Manny public API id is a 
 $test->assertEquals('manny-1', $mannyList->body['mannies'][0]['name'] ?? null, 'default Manny names are player-facing names');
 $test->assert(array_key_exists('taskEstimatedEndTime', $mannyList->body['mannies'][0] ?? []) && $mannyList->body['mannies'][0]['taskEstimatedEndTime'] === null, 'idle Manny exposes a null task estimated end time');
 
+$foreignMannyOwner = $auth->registerPlayerWithPassword('foreign-manny-owner', 'secret', 'Foreign Manny Owner', 'Foreign Manny probe');
+$foreignMannyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($foreignMannyOwner)['token']];
+$foreignMannyList = $kernel->handle('GET', '/api/probe/mannies', $foreignMannyHeaders);
+$test->assertEquals(200, $foreignMannyList->status, 'foreign Manny owner can list their Mannies');
+$foreignMannyId = (string) ($foreignMannyList->body['mannies'][0]['id'] ?? '');
+$test->assert($foreignMannyId !== '', 'foreign Manny test has a Manny id to probe');
+if ($foreignMannyId !== '') {
+    $foreignMannyPath = '/api/probe/mannies/' . rawurlencode($foreignMannyId);
+    foreach ([
+        ['PATCH', $foreignMannyPath, ['name' => 'stolen'], 'PATCH /api/probe/mannies/{id}'],
+        ['POST', $foreignMannyPath . '/repair', ['integrityPercent' => 1], 'POST /api/probe/mannies/{id}/repair'],
+        ['POST', $foreignMannyPath . '/mine', ['objectId' => 'mine-rock', 'resource' => 'metals', 'targetAmount' => 0.01], 'POST /api/probe/mannies/{id}/mine'],
+        ['POST', $foreignMannyPath . '/craft', ['recipe' => 'waypoint_bookmark'], 'POST /api/probe/mannies/{id}/craft'],
+        ['POST', $foreignMannyPath . '/salvage', ['objectId' => 'drifting-steel'], 'POST /api/probe/mannies/{id}/salvage'],
+        ['POST', $foreignMannyPath . '/install-bookmark', ['objectId' => 'mine-rock', 'name' => 'foreign bookmark'], 'POST /api/probe/mannies/{id}/install-bookmark'],
+        ['POST', $foreignMannyPath . '/detach-storage-container', ['containerId' => 'probe-core', 'mode' => 'drifting'], 'POST /api/probe/mannies/{id}/detach-storage-container'],
+        ['POST', $foreignMannyPath . '/drop-storage-container', ['containerId' => 'probe-core', 'planetId' => 'current-habitable-planet'], 'POST /api/probe/mannies/{id}/drop-storage-container'],
+        ['POST', $foreignMannyPath . '/drop-manny-cargo', [], 'POST /api/probe/mannies/{id}/drop-manny-cargo'],
+        ['POST', $foreignMannyPath . '/inspect-asteroid', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-asteroid'],
+        ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
+        ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],
+        ['POST', $foreignMannyPath . '/recall', [], 'POST /api/probe/mannies/{id}/recall'],
+    ] as [$method, $path, $body, $label]) {
+        assertForeignMannyEndpointReturnsNotFound($test, $kernel, $headers, $method, $path, $body, $label);
+    }
+}
+
 $renameManny = $kernel->handle('PATCH', '/api/probe/mannies/' . rawurlencode($firstMannyId), $headers, json_encode(['name' => 'atelier'], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $renameManny->status, 'PATCH /api/probe/mannies/{id} renames a Manny');
 $test->assertEquals('atelier', $renameManny->body['manny']['name'] ?? null, 'renamed Manny response exposes the new name');
@@ -2579,6 +2700,30 @@ if ($createdProbe !== null) {
     $test->assertEquals('solar_mass', $unitObjectsById['unit-star']['massUnit'] ?? null, 'star sector object exposes solar mass unit');
     $test->assertEquals('solar_radius', $unitObjectsById['unit-star']['radiusUnit'] ?? null, 'star sector object exposes solar radius unit');
     $test->assertEquals(0.72, $unitObjectsById['current-habitable-planet']['habitabilityScore'] ?? null, 'current-sector planet observations expose habitability score');
+
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 42 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $refillWithoutStation = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/refill-deuterium-tank', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $refillWithoutStation->status, 'Manny deuterium refill requires a refuel station in the current sector');
+    $test->assertEquals('deuterium_refuel_station_not_found', $refillWithoutStation->body['error']['code'] ?? null, 'missing deuterium station returns an explicit error');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+        new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
+        new Star('unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+        new Planet('current-habitable-planet', null, 'rocky', 1.0, 1.0, true, 0.72, ['silicates']),
+        new DeuteriumRefuelStation('unit-deuterium-station', 'Deuterium refuel station', 'current-habitable-planet', null, gmdate('c')),
+    ]));
+    $refillManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/refill-deuterium-tank', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $refillManny->status, 'POST /api/probe/mannies/{id}/refill-deuterium-tank starts a deuterium refill task');
+    $test->assertEquals('refilling_deuterium_tank', $refillManny->body['manny']['currentTask'] ?? null, 'deuterium refill task is exposed on Manny');
+    $test->assertEquals(60, $refillManny->body['manny']['task']['durationSeconds'] ?? null, 'deuterium refill task lasts one minute');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $repairMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $refillAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $test->assertEquals(null, $refillAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed deuterium refill clears the Manny task');
+    $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed deuterium refill fills the probe tank');
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);

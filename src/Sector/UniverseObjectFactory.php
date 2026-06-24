@@ -20,6 +20,7 @@ final class UniverseObjectFactory
             UniverseObjectType::Manny => SectorManny::fromArray($data),
             UniverseObjectType::DriftingItem => SectorDriftingItem::fromArray($data),
             UniverseObjectType::DetachedContainer => SectorDetachedContainer::fromArray($data),
+            UniverseObjectType::DeuteriumRefuelStation => DeuteriumRefuelStation::fromArray($data),
         };
     }
 }

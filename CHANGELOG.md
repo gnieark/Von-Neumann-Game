@@ -4,6 +4,13 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-06-24
 
+### Added
+
+- API v49 : ajout de `POST /api/probe/mannies/{mannyId}/refill-deuterium-tank`, une tache Manny d'une minute qui remplit le reservoir de deuterium de la sonde quand une station de recharge est presente dans le secteur courant.
+- API v48 : le scenario `return_to_space_program` attend maintenant 48 heures apres les dons de materiaux avant de faire apparaitre une station de recharge en deuterium dans les scans detailles du secteur; la reussite est persistee pour le joueur et les contributeurs.
+- Interface : `/mannies` propose l'action de recharge du reservoir de deuterium uniquement lorsqu'une station de recharge en deuterium est detectee dans le secteur courant.
+- Interface : `/sensors` met en exergue les stations de recharge en deuterium detectees dans les tuiles des secteurs deja visites, avant le scan detaille.
+
 ### Changed
 
 - Interface : `/mannies` rafraichit les informations des Mannys toutes les 5 secondes et apres validation d'une tache, sans reconstruire les cartes dont le hash d'etat n'a pas change; les pourcentages de progression et le temps restant a la minute defilent localement sans polling additionnel.

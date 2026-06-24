@@ -221,7 +221,18 @@ final class SectorContent
         return is_array($counter) ? $counter : null;
     }
 
-    public function markReturnToSpaceProgramCompletionMessageSent(string $planetId): void
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public function returnToSpaceProgramMaterialCounters(): array
+    {
+        return array_filter(
+            $this->returnToSpaceProgramMaterialDonations,
+            static fn(mixed $counter): bool => is_array($counter),
+        );
+    }
+
+    public function markReturnToSpaceProgramCompletionMessageSent(string $planetId, ?string $stationAvailableAt = null): void
     {
         $counter = $this->returnToSpaceProgramMaterialDonations[$planetId] ?? null;
         if (!is_array($counter)) {
@@ -229,6 +240,24 @@ final class SectorContent
         }
 
         $counter['completionMessageSentAt'] = (string) ($counter['completionMessageSentAt'] ?? gmdate('c'));
+        if ($stationAvailableAt !== null) {
+            $counter['stationAvailableAt'] = $stationAvailableAt;
+        }
+        $counter['updatedAt'] = gmdate('c');
+        $this->returnToSpaceProgramMaterialDonations[$planetId] = $counter;
+        $this->touch();
+    }
+
+    public function markReturnToSpaceProgramStationActivated(string $planetId, string $stationObjectId): void
+    {
+        $counter = $this->returnToSpaceProgramMaterialDonations[$planetId] ?? null;
+        if (!is_array($counter)) {
+            return;
+        }
+
+        $counter['stationActivatedAt'] = (string) ($counter['stationActivatedAt'] ?? gmdate('c'));
+        $counter['finalMessageSentAt'] = (string) ($counter['finalMessageSentAt'] ?? gmdate('c'));
+        $counter['stationObjectId'] = $stationObjectId;
         $counter['updatedAt'] = gmdate('c');
         $this->returnToSpaceProgramMaterialDonations[$planetId] = $counter;
         $this->touch();

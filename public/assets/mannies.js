@@ -73,7 +73,12 @@
 
     function withMannyStateHash(manny) {
         const item = manny && typeof manny === "object" ? {...manny} : {};
-        item[MANNY_HASH_FIELD] = hashString(stableHashPayload(item));
+        item[MANNY_HASH_FIELD] = hashString(stableHashPayload({
+            "manny": item,
+            "actions": {
+                "deuteriumRefuelStationAvailable": sectorHasDeuteriumRefuelStation(),
+            },
+        }));
 
         return item;
     }
@@ -130,6 +135,7 @@
             "detaching_storage_container": tr("detachingStorageContainer", "Detaching storage container"),
             "dropping_storage_container": tr("droppingStorageContainer", "Dropping storage container"),
             "inspecting_asteroid": tr("inspectingAsteroid", "Inspecting asteroid"),
+            "refilling_deuterium_tank": tr("refillingDeuteriumTank", "Refilling deuterium tank"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
         }[task] || task || tr("noTask", "None");
@@ -152,6 +158,7 @@
             "dust_cloud": tr("dustCloudObject", "Dust cloud"),
             "drifting_item": tr("driftingItemObject", "Drifting item"),
             "detached_container": tr("detachedContainerObject", "Detached container"),
+            "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
             "waypoint_bookmark": tr("waypointBookmark", "Waypoint bookmark"),
             "manny": tr("mannyObject", "Manny"),
             "probe": tr("tabProbe", "Probe"),
@@ -401,6 +408,10 @@
 
         state.currentSectorObjects.forEach(collect);
         return targets;
+    }
+
+    function sectorHasDeuteriumRefuelStation() {
+        return state.currentSectorObjects.some((object) => object && object.type === "deuterium_refuel_station");
     }
 
     function bookmarkTargetLabel(target) {
@@ -1202,6 +1213,13 @@
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
         }
+        if (manny.currentTask === "refilling_deuterium_tank") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("deuteriumRefillInProgress", "Deuterium refill in progress")) + "</h4>"
+                + "<p>" + escaped(tr("deuteriumRefillTaskDetail", "The Manny is topping up the probe deuterium tank.")) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "</section>";
+        }
 
         return "<section class=\"manny-task-panel\">"
             + "<h4>" + escaped(taskLabel(manny.currentTask)) + "</h4>"
@@ -1489,6 +1507,13 @@
             + "</form>";
     }
 
+    function renderDeuteriumRefillForm() {
+        return "<form class=\"manny-refill-deuterium-form manny-form\">"
+            + "<button class=\"manny-refill-deuterium-button\" type=\"submit\">" + escaped(tr("refillDeuteriumTank", "Refill deuterium tank")) + "</button>"
+            + "<p class=\"manny-refill-deuterium-hint\">" + escaped(tr("refillDeuteriumTankHint", "Requires a deuterium refuel station in the current sector. Duration: 1 minute.")) + "</p>"
+            + "</form>";
+    }
+
     function bookmarkTargetOptions(selected) {
         const targets = bookmarkTargets();
         if (targets.length === 0) {
@@ -1515,6 +1540,9 @@
             {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint-bookmark"), "render": renderBookmarkForm},
             {"id": "craft", "title": tr("craftingActionTitle", "Craft"), "render": renderCraftForm},
         ];
+        if (sectorHasDeuteriumRefuelStation()) {
+            actionForms.splice(1, 0, {"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
+        }
 
         return "<div class=\"manny-action-grid\">"
             + "<h4 class=\"manny-action-heading\">" + escaped(tr("assignMannyTask", "Assign a task to this Manny")) + "</h4>"
@@ -2069,10 +2097,10 @@
             const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
             state.currentInventory = probe.inventory || (sectorData && sectorData.inventory) || null;
+            state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentMannies = Array.isArray(mannyData && mannyData.mannies)
                 ? mannyData.mannies.map(withMannyStateHash)
                 : [];
-            state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentCraftingRecipes = Array.isArray(recipeData && recipeData.recipes) ? recipeData.recipes : [];
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
@@ -2144,6 +2172,17 @@
             return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/salvage", {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": formData.get("objectId")}),
+            });
+        }
+        if (form.classList.contains("manny-refill-deuterium-form")) {
+            if (!sectorHasDeuteriumRefuelStation()) {
+                setStatus(tr("noDeuteriumRefuelStation", "No deuterium refuel station is available in the current sector."));
+                return null;
+            }
+
+            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/refill-deuterium-tank", {
+                "method": "POST",
+                "body": JSON.stringify({}),
             });
         }
         if (form.classList.contains("manny-inspect-asteroid-form")) {

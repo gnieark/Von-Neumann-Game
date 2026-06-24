@@ -17,6 +17,7 @@ use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
+use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorDetachedContainer;
@@ -36,6 +37,7 @@ final class MannyService
     public const STORAGE_MOVE_SECONDS_PER_UNIT = 10;
     public const STORAGE_MOVE_ECE_STEP = 0.05;
     public const WAYPOINT_BOOKMARK_INSTALL_SECONDS = 10;
+    public const DEUTERIUM_TANK_REFILL_SECONDS = 60;
     public const MANNY_CARGO_CAPACITY = Manny::CARGO_CAPACITY;
     public const MANNY_CONTAINER_SPACE = Manny::CONTAINER_SPACE;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
@@ -588,6 +590,36 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
+    public function startDeuteriumTankRefill(NeumannProbe $probe, string $uid): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $this->missions?->completeReadyReturnToSpacePrograms($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to refill its deuterium tank.');
+        }
+        if (!$this->currentSectorHasDeuteriumRefuelStation($probe)) {
+            throw new MannyActionException(422, 'deuterium_refuel_station_not_found', 'No deuterium refuel station is available in the current sector.');
+        }
+        if ($probe->deuteriumStock >= $this->maxDeuteriumPercent() - 0.0001) {
+            throw new MannyActionException(409, 'probe_deuterium_full', 'The probe deuterium tank is already full.');
+        }
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manny->currentTask = Manny::TASK_REFILLING_DEUTERIUM_TANK;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . self::DEUTERIUM_TANK_REFILL_SECONDS . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'durationSeconds' => self::DEUTERIUM_TANK_REFILL_SECONDS,
+            'resourceType' => ResourceComposition::DEUTERIUM,
+        ];
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
@@ -871,6 +903,9 @@ final class MannyService
         }
         if ($manny->currentTask === Manny::TASK_INSPECTING_ASTEROID) {
             return $this->refreshInspectAsteroid($manny, $probe, $now);
+        }
+        if ($manny->currentTask === Manny::TASK_REFILLING_DEUTERIUM_TANK) {
+            return $this->refreshDeuteriumTankRefill($manny, $probe, $now);
         }
         if ($manny->currentTask === Manny::TASK_RETURNING) {
             return $this->refreshReturning($manny, $probe, $now);
@@ -1942,6 +1977,35 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function refreshDeuteriumTankRefill(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        $probe->deuteriumStock = $this->maxDeuteriumPercent();
+        $this->probes->save($probe);
+        $this->clearTask($manny, [
+            'lastTask' => Manny::TASK_REFILLING_DEUTERIUM_TANK,
+            'result' => 'success',
+            'resourceType' => ResourceComposition::DEUTERIUM,
+        ]);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function currentSectorHasDeuteriumRefuelStation(NeumannProbe $probe): bool
+    {
+        foreach ($this->sectors->getOrCreateSector($probe->currentSector)->getObjects() as $object) {
+            if ($object instanceof DeuteriumRefuelStation) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -3254,6 +3318,11 @@ final class MannyService
     private function maxIntegrityPercent(): float
     {
         return max(0.0001, Config::float($this->config, 'probe.maxIntegrityPercent', self::MAX_INTEGRITY_PERCENT));
+    }
+
+    private function maxDeuteriumPercent(): float
+    {
+        return max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
     }
 
     private function mannyCargoArray(Manny $manny): array

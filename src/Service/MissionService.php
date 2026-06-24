@@ -14,6 +14,7 @@ use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
+use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -31,12 +32,16 @@ final class MissionService
     private const FIRST_CONTACT_WAIT_STEP_UID = 'await_planetary_reply';
     private const FIRST_CONTACT_DELIVER_METALS_STEP_UID = 'deliver_required_metals';
     private const FIRST_CONTACT_DELIVER_CARBON_STEP_UID = 'deliver_required_carbon_compounds';
-    private const RETURN_TO_SPACE_PLANET_REPLY = "Nous sommes les habitants de ce monde.\n\nNotre civilisation a atteint l'espace il y a 312 de nos cycles orbitaux. Nous avons construit des stations orbitales, des satellites scientifiques et plusieurs missions vers les autres corps de notre système.\n\nCes activités ont cessé.\n\nLes ressources nécessaires à la construction de véhicules spatiaux sont aujourd'hui épuisées, dispersées ou devenues inaccessibles. Les débris accumulés en orbite rendent également les lancements dangereux.\n\nNos connaissances subsistent. Notre capacité industrielle subsiste. Nos besoins énergétiques sont couverts.\n\nNos réserves de métaux  sont insuffisantes.\nNos réserves de composants électroniques avancés sont insuffisantes.\n\nNous avons détecté votre capacité à déplacer de la matière entre les corps célestes.\n\nNous sollicitons votre assistance.\n\nRessources demandées :\n\nMétaux : <Conversion faite par le logiciel de traduction>5 ECE\nComposés carbonés: 1ECE\n\nRécompense: Nous disposons de quantités énormes de deuterium, nous placerons en orbite des cuves de deuterium chaque fois que vous en aurrez besoin une fois notre capacité spaciale relancée.";
+    private const FIRST_CONTACT_AWAIT_STATION_STEP_UID = 'await_deuterium_refuel_station';
+    private const RETURN_TO_SPACE_STATION_DELAY_SECONDS = 172800;
+    private const RETURN_TO_SPACE_PLANET_REPLY = "We are the people of this world.\n\nOur civilization reached space 312 of our orbital cycles ago. We built orbital stations, scientific satellites, and missions to the other bodies of our system.\n\nThose activities ended.\n\nThe materials required to build launch vehicles are now exhausted, dispersed, or beyond our reach. Debris accumulated in orbit also makes new launches dangerous.\n\nOur knowledge remains. Our industrial skill remains. Our energy needs are covered.\n\nOur reserves of metals are insufficient.\nOur reserves of advanced carbon compounds are insufficient.\n\nWe have detected your ability to move matter between celestial bodies.\n\nWe request your assistance.\n\nRequested resources:\n\nMetals: 5 ECE\nCarbon compounds: 1 ECE\n\nIn return, once our path to orbit is restored, we will place a deuterium refuel station in orbit. We have more deuterium than we can use, and any probe that helped us return to space will be welcome there.";
     private const RETURN_TO_SPACE_MATERIAL_REQUIREMENTS = [
         ResourceComposition::METALS => 5.0,
         ResourceComposition::CARBON_COMPOUNDS => 1.0,
     ];
-    private const RETURN_TO_SPACE_COMPLETION_MESSAGE_TEMPLATE = "Voyageur des étoiles,\n\n%s\n\nLes matériaux que vous nous avez transmis contiennent des éléments devenus rares ou impossibles à extraire avec nos moyens actuels. Nos ingénieurs ont déjà commencé à les intégrer dans la construction de nouvelles machines industrielles.\n\nCes équipements nous permettront d'exploiter à nouveau les gisements situés au fond de nos océans, là où subsistent encore les ressources nécessaires à un programme spatial. Depuis des générations, ces richesses étaient hors de notre portée.\n\nPour la première fois depuis plusieurs siècles, notre peuple envisage de reprendre le chemin des étoiles.\n\nLes travaux ne seront pas immédiats. La conception, la fabrication et le déploiement des premières installations demanderont du temps.\n\nRevenez dans 48 heures. Nous espérons alors être en mesure de vous montrer les premiers résultats de cette renaissance.\n\nAu nom de notre monde, recevez notre gratitude.";
+    private const RETURN_TO_SPACE_COMPLETION_MESSAGE_TEMPLATE = "Star traveler,\n\n%s\n\nThe materials you delivered contain elements that had become rare, unreachable, or impossible for us to refine with our present infrastructure. Our engineers have already begun integrating them into the first machines of our restored orbital industry.\n\nThese machines will let us reopen the deep-ocean deposits that still hold what our space program needs. For generations, those reserves were beyond our reach.\n\nFor the first time in centuries, our people can look upward with practical intent, not only memory.\n\nThe first orbital works will take time to assemble and test. Return in 48 hours. If our calculations hold, we will then be able to show you what your help has made possible.\n\nWith the gratitude of our world.";
+    private const RETURN_TO_SPACE_STATION_READY_MESSAGE_TEMPLATE = "Star traveler,\n\n%s\n\nThe first orbital launch was successful. Our people have reached space again.\n\nAs promised, we have placed a deuterium refuel station in stable orbit. Its reserves are marked for the probes that helped us restore our path to the sky. We have no action protocol to offer you yet, but the station is present, transmitting, and ready for the day your systems can use it.\n\nTo us, the probes are friends of this world. May this station keep your journeys alive.";
+    private const RETURN_TO_SPACE_FRIENDSHIP_REPLY = "Friend probe,\n\nThe sky is open to us again because of you and those who helped you. We consider the probes friends of this world.\n\nA deuterium refuel station is waiting in orbit. Its reserves are available to you whenever your systems are ready to use them.";
 
     public function __construct(
         private readonly MissionRepository $missions,
@@ -95,7 +100,15 @@ final class MissionService
 
     public function handlePlanetReply(NeumannProbe $probe, string $planetId, string $body): ?Mission
     {
+        $stationActivated = $this->completeReadyReturnToSpacePrograms($probe);
         if (!$this->isPrimeSignalReply($body)) {
+            if (!$stationActivated) {
+                $this->createReturnToSpaceFriendshipReplyIfReady($probe, $planetId);
+            }
+            return null;
+        }
+
+        if ($stationActivated) {
             return null;
         }
 
@@ -168,6 +181,36 @@ final class MissionService
         return $this->missions->markFailed($this->activeMissionForProbe($probe, $missionUid));
     }
 
+    public function completeReadyReturnToSpacePrograms(NeumannProbe $probe): bool
+    {
+        if ($this->sectors === null) {
+            return false;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $changed = false;
+        foreach ($sector->returnToSpaceProgramMaterialCounters() as $planetId => $counter) {
+            if (!$this->returnToSpaceStationCanActivate((string) $planetId, $counter)) {
+                continue;
+            }
+
+            $station = $this->returnToSpaceDeuteriumStation((string) $planetId, $counter);
+            if (!$sector->replaceObject($station)) {
+                $sector->addObject($station);
+            }
+            $this->createReturnToSpaceStationReadyMessages($probe, $sector, (string) $planetId, $counter);
+            $this->completeReturnToSpaceContributorMissions($probe, $sector, (string) $planetId, $counter);
+            $sector->markReturnToSpaceProgramStationActivated((string) $planetId, $station->getId());
+            $changed = true;
+        }
+
+        if ($changed) {
+            $this->sectors->saveSector($sector);
+        }
+
+        return $changed;
+    }
+
     private function progressReturnToSpaceProgramAfterPrimeReply(NeumannProbe $probe, Mission $mission): Mission
     {
         $replyStepUid = $this->firstContactReplyStepUid($mission);
@@ -224,6 +267,21 @@ final class MissionService
                 $carbonUid,
             );
         }
+
+        $stationUid = $this->firstContactStepUid($mission->uid, self::FIRST_CONTACT_AWAIT_STATION_STEP_UID);
+        if ($this->missions->findStepByUid($mission->id, $stationUid) === null) {
+            $this->missions->createStep(
+                $mission->id,
+                'Attendre la station de recharge',
+                'Revenir dans le secteur après le délai annoncé afin de confirmer la mise en orbite de la station de recharge en deutérium.',
+                [
+                    'delaySeconds' => self::RETURN_TO_SPACE_STATION_DELAY_SECONDS,
+                    'rewardObjectType' => 'deuterium_refuel_station',
+                ],
+                5,
+                $stationUid,
+            );
+        }
     }
 
     /**
@@ -272,6 +330,8 @@ final class MissionService
         );
 
         if ($mission !== null) {
+            $this->ensureReturnToSpaceResourceSteps($mission);
+            $mission = $this->missions->findByUidForProbe($probe->id, $mission->uid) ?? $mission;
             $this->completeReturnToSpaceResourceStepsReachedByCounter($probe, $mission, $counter);
         }
         if ($this->returnToSpaceRequirementsReached($counter)) {
@@ -430,9 +490,9 @@ final class MissionService
             null,
             $probe->id,
             $sector,
-            "Nous accusons réception de votre largage. Merci pour votre aide.\n\nRessources restantes à envoyer :\nMétaux : "
+            "We acknowledge receipt of your drop. Thank you for your help.\n\nResources still required:\nMetals: "
                 . $this->formatEceAmount((float) ($remaining[ResourceComposition::METALS] ?? 0.0))
-                . " ECE\nComposés carbonés : "
+                . " ECE\nCarbon compounds: "
                 . $this->formatEceAmount((float) ($remaining[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0))
                 . ' ECE',
         );
@@ -489,7 +549,10 @@ final class MissionService
             );
         }
 
-        $sector->markReturnToSpaceProgramCompletionMessageSent($planetId);
+        $sector->markReturnToSpaceProgramCompletionMessageSent(
+            $planetId,
+            gmdate('c', time() + self::RETURN_TO_SPACE_STATION_DELAY_SECONDS),
+        );
     }
 
     /**
@@ -522,7 +585,7 @@ final class MissionService
             $name = $player !== null
                 ? trim((string) ($player->displayName ?? $player->username))
                 : '';
-            $names[$playerId] = $name !== '' ? $name : 'visiteur #' . $playerId;
+            $names[$playerId] = $name !== '' ? $name : 'visitor #' . $playerId;
         }
 
         return $names;
@@ -570,6 +633,206 @@ final class MissionService
             : 'Votre aide, ainsi que celle d\'autres visiteurs (' . implode(', ', $otherNames) . '), a dépassé nos espérances.';
 
         return sprintf(self::RETURN_TO_SPACE_COMPLETION_MESSAGE_TEMPLATE, $intro);
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function returnToSpaceStationCanActivate(string $planetId, array $counter): bool
+    {
+        if ($planetId === '' || !$this->returnToSpaceRequirementsReached($counter)) {
+            return false;
+        }
+        if (($counter['completionMessageSentAt'] ?? null) === null || ($counter['finalMessageSentAt'] ?? null) !== null) {
+            return false;
+        }
+
+        $availableAt = (string) ($counter['stationAvailableAt'] ?? '');
+        if ($availableAt === '') {
+            return false;
+        }
+
+        try {
+            $available = new \DateTimeImmutable($availableAt);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $available <= new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function returnToSpaceDeuteriumStation(string $planetId, array $counter): DeuteriumRefuelStation
+    {
+        $planetName = is_string($counter['planetName'] ?? null) ? $counter['planetName'] : null;
+
+        return new DeuteriumRefuelStation(
+            DeuteriumRefuelStation::objectIdForPlanet($planetId),
+            'Deuterium refuel station',
+            $planetId,
+            $planetName,
+            gmdate('c'),
+            [
+                'missionType' => self::FIRST_CONTACT_MISSION_TYPE,
+                'scenario' => self::SCENARIO_RETURN_TO_SPACE_PROGRAM,
+                'planetId' => $planetId,
+                'planetName' => $planetName,
+            ],
+            'Orbital deuterium refuel station placed by a civilization restored to spaceflight.',
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function createReturnToSpaceStationReadyMessages(
+        NeumannProbe $probe,
+        SectorContent $sector,
+        string $planetId,
+        array $counter,
+    ): void {
+        if ($this->messages === null) {
+            return;
+        }
+
+        $contributorPlayerIds = $this->returnToSpaceContributorPlayerIds($counter);
+        if (!in_array($probe->playerId, $contributorPlayerIds, true)) {
+            $contributorPlayerIds[] = $probe->playerId;
+        }
+        $namesByPlayerId = $this->returnToSpaceContributorNames($contributorPlayerIds);
+        $presentRecipientProbes = $this->presentReturnToSpaceContributorProbes($probe, $sector->getCoordinates(), $contributorPlayerIds);
+        $planetName = is_string($counter['planetName'] ?? null) ? $counter['planetName'] : null;
+
+        foreach ($presentRecipientProbes as $recipientProbe) {
+            $this->messages->createForEndpoints(
+                ProbeMessage::ENDPOINT_PLANET,
+                $planetId,
+                $planetName,
+                null,
+                ProbeMessage::ENDPOINT_PROBE,
+                (string) $recipientProbe->id,
+                null,
+                $recipientProbe->id,
+                $sector->getCoordinates(),
+                $this->returnToSpaceStationReadyMessage($recipientProbe->playerId, $namesByPlayerId),
+            );
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $counter
+     */
+    private function completeReturnToSpaceContributorMissions(
+        NeumannProbe $triggerProbe,
+        SectorContent $sector,
+        string $planetId,
+        array $counter,
+    ): void {
+        $contributorPlayerIds = $this->returnToSpaceContributorPlayerIds($counter);
+        if (!in_array($triggerProbe->playerId, $contributorPlayerIds, true)) {
+            $contributorPlayerIds[] = $triggerProbe->playerId;
+        }
+
+        foreach ($contributorPlayerIds as $playerId) {
+            $probe = $playerId === $triggerProbe->playerId
+                ? $triggerProbe
+                : $this->probes?->findByPlayerId($playerId);
+            if (!$probe instanceof NeumannProbe) {
+                continue;
+            }
+
+            $missionUid = $this->returnToSpaceMissionUidForPlanet($probe, $sector->getCoordinates(), $planetId);
+            $mission = $this->missions->findByUidForProbe($probe->id, $missionUid);
+            if ($mission === null) {
+                $mission = $this->startMission(
+                    $probe,
+                    self::FIRST_CONTACT_MISSION_TYPE,
+                    'Programme de retour à l\'espace',
+                    'Cette sonde a contribué au retour orbital d\'une civilisation rencontrée dans un secteur exploré.',
+                    Mission::STEP_ORDER_FREE,
+                    [
+                        'scenario' => self::SCENARIO_RETURN_TO_SPACE_PROGRAM,
+                        'planetId' => $planetId,
+                        'planetName' => is_string($counter['planetName'] ?? null) ? $counter['planetName'] : null,
+                        'sector' => $sector->getCoordinates()->toArray(),
+                        'completedByContribution' => true,
+                    ],
+                    [
+                        'type' => 'return_to_space_program_completed',
+                        'planetId' => $planetId,
+                        'sector' => $sector->getCoordinates()->toArray(),
+                    ],
+                    [],
+                    $missionUid,
+                );
+            }
+
+            $this->completeReturnToSpaceMission($mission);
+        }
+    }
+
+    private function completeReturnToSpaceMission(Mission $mission): void
+    {
+        if ($mission->isTerminal()) {
+            return;
+        }
+
+        $stationStepUid = $this->firstContactStepUid($mission->uid, self::FIRST_CONTACT_AWAIT_STATION_STEP_UID);
+        $stationStep = $this->missions->findStepByUid($mission->id, $stationStepUid);
+        if ($stationStep !== null && $stationStep->status === MissionStep::STATUS_PENDING) {
+            $this->missions->markStepCompleted($stationStep);
+            $mission = $this->missions->findByUidForProbe($mission->probeId, $mission->uid) ?? $mission;
+        }
+
+        $this->missions->markCompleted($mission);
+    }
+
+    /**
+     * @param array<int, string> $namesByPlayerId
+     */
+    private function returnToSpaceStationReadyMessage(int $recipientPlayerId, array $namesByPlayerId): string
+    {
+        $otherNames = [];
+        foreach ($namesByPlayerId as $playerId => $name) {
+            if ($playerId === $recipientPlayerId) {
+                continue;
+            }
+            $otherNames[] = $name;
+        }
+
+        $intro = $otherNames === []
+            ? 'Your help carried us through the last impossible steps.'
+            : 'Your help, and the help of other visitors (' . implode(', ', $otherNames) . '), carried us through the last impossible steps.';
+
+        return sprintf(self::RETURN_TO_SPACE_STATION_READY_MESSAGE_TEMPLATE, $intro);
+    }
+
+    private function createReturnToSpaceFriendshipReplyIfReady(NeumannProbe $probe, string $planetId): void
+    {
+        if ($this->messages === null || $this->sectors === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $counter = $sector->returnToSpaceProgramMaterialCounterForPlanet($planetId);
+        if (!is_array($counter) || ($counter['finalMessageSentAt'] ?? null) === null) {
+            return;
+        }
+
+        $this->messages->createForEndpoints(
+            ProbeMessage::ENDPOINT_PLANET,
+            $planetId,
+            is_string($counter['planetName'] ?? null) ? $counter['planetName'] : null,
+            null,
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $probe->id,
+            null,
+            $probe->id,
+            $sector->getCoordinates(),
+            self::RETURN_TO_SPACE_FRIENDSHIP_REPLY,
+        );
     }
 
     private function formatEceAmount(float $amount): string
@@ -705,10 +968,15 @@ final class MissionService
 
     private function firstContactMissionUid(NeumannProbe $probe, SectorCoordinates $sector, Planet $planet): string
     {
+        return $this->returnToSpaceMissionUidForPlanet($probe, $sector, $planet->getId());
+    }
+
+    private function returnToSpaceMissionUidForPlanet(NeumannProbe $probe, SectorCoordinates $sector, string $planetId): string
+    {
         return 'mis_first_contact_' . substr(hash('sha256', implode('|', [
             $probe->id,
             $sector->toKey(),
-            $planet->getId(),
+            $planetId,
             self::SCENARIO_RETURN_TO_SPACE_PROGRAM,
         ])), 0, 20);
     }

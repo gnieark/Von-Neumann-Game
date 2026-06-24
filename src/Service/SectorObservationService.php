@@ -14,6 +14,7 @@ use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\DustCloud;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
@@ -254,6 +255,13 @@ final class SectorObservationService
             $data['capacity'] = $object->getCapacity();
             $data['capacityUnit'] = $object->getCapacityUnit();
             $data['salvageable'] = true;
+        }
+
+        if ($object instanceof DeuteriumRefuelStation) {
+            $data['planetId'] = $object->getPlanetId();
+            $data['planetName'] = $object->getPlanetName();
+            $data['resourceTypes'] = [ResourceComposition::DEUTERIUM];
+            $data['createdAt'] = $object->getCreatedAt();
         }
 
         if ($object->getWaypointBookmarks() !== []) {
@@ -614,6 +622,7 @@ final class SectorObservationService
                 $object->getQuantity(),
             ),
             $object instanceof SectorDetachedContainer => 'Detached storage container detected.',
+            $object instanceof DeuteriumRefuelStation => 'Deuterium refuel station detected in orbit.',
             default => 'Unknown astronomical object.',
         };
     }

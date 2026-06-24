@@ -44,7 +44,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 47;
+    public const API_VERSION = 49;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -92,7 +92,7 @@ final class ApiKernel
                         : $this->probeStorageContainerResponse($player, rawurldecode($matches[1])),
                 );
             }
-            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-asteroid|recover-storage-container|recall)$#', $routePath, $matches) === 1) {
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-asteroid|recover-storage-container|refill-deuterium-tank|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
@@ -680,6 +680,7 @@ final class ApiKernel
             ]);
         }
 
+        $this->missions->completeReadyReturnToSpacePrograms($probe);
         $observation = $this->observations->observe($player, $probe, $observableSector)->toArray();
         $observation['sensorMode'] = $sensorMode;
         $observation['dataFreshness'] = 'live';
@@ -1282,6 +1283,9 @@ final class ApiKernel
             ]);
         }
 
+        if ($target->equals($probe->currentSector)) {
+            $this->missions->completeReadyReturnToSpacePrograms($probe);
+        }
         $observation = $this->observations->observe($player, $probe, $target)->toArray();
         $observation['sensorMode'] = $sensorMode;
         $observation['dataFreshness'] = $sensorMode === 'blind' ? 'historical' : ($sensorMode === 'degraded' ? 'degraded_live' : 'live');
@@ -1469,6 +1473,12 @@ final class ApiKernel
 
         if ($action === 'drop-manny-cargo') {
             $manny = $this->mannies->dropMannyCargo($probe, $uid);
+
+            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
+        }
+
+        if ($action === 'refill-deuterium-tank') {
+            $manny = $this->mannies->startDeuteriumTankRefill($probe, $uid);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }
