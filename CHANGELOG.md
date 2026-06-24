@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-24
+
+### Changed
+
+- Interface : `/mannies` rafraichit les informations des Mannys toutes les 5 secondes et apres validation d'une tache, sans reconstruire les cartes dont le hash d'etat n'a pas change; les pourcentages de progression et le temps restant a la minute defilent localement sans polling additionnel.
+
 ## 2026-06-23
 
 ### Added
