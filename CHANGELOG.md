@@ -8,6 +8,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Interface : `/mannies` rafraichit les informations des Mannys toutes les 5 secondes et apres validation d'une tache, sans reconstruire les cartes dont le hash d'etat n'a pas change; les pourcentages de progression et le temps restant a la minute defilent localement sans polling additionnel.
 
+### Fixed
+
+- Stockage : les collections de containers détachés d'un secteur dedoublonnent les entrées par identifiant, y compris au chargement, pour éviter la multiplication des containers cachés sur astéroïde et leur remplissage en double par les Mannys.
+
 ## 2026-06-23
 
 ### Added

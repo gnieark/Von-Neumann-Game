@@ -20,7 +20,21 @@ final class SectorContent
         private array $hiddenDetachedContainers = [],
         private array $planetDroppedContainers = [],
         private array $returnToSpaceProgramMaterialDonations = [],
-    ) {}
+    ) {
+        $this->detachedContainers = [];
+        $this->hiddenDetachedContainers = [];
+        $this->planetDroppedContainers = [];
+
+        foreach ($detachedContainers as $container) {
+            $this->addDetachedContainerToCanonicalCollection($container);
+        }
+        foreach ($hiddenDetachedContainers as $container) {
+            $this->addDetachedContainerToCanonicalCollection($container);
+        }
+        foreach ($planetDroppedContainers as $container) {
+            $this->addDetachedContainerToCanonicalCollection($container);
+        }
+    }
 
     public function getCoordinates(): SectorCoordinates
     {
@@ -139,7 +153,7 @@ final class SectorContent
     public function addObject(UniverseObject $object): void
     {
         if ($object instanceof SectorDetachedContainer) {
-            $this->detachedContainers[] = $object;
+            $this->addDetachedContainerToCanonicalCollection($object);
             $this->touch();
             return;
         }
@@ -150,13 +164,13 @@ final class SectorContent
 
     public function addHiddenDetachedContainer(SectorDetachedContainer $container): void
     {
-        $this->hiddenDetachedContainers[] = $container;
+        $this->addDetachedContainerToCanonicalCollection($container);
         $this->touch();
     }
 
     public function addPlanetDroppedContainer(SectorDetachedContainer $container): void
     {
-        $this->planetDroppedContainers[] = $container;
+        $this->addDetachedContainerToCanonicalCollection($container);
         $this->touch();
     }
 
@@ -299,36 +313,24 @@ final class SectorContent
 
     public function replaceDetachedContainer(SectorDetachedContainer $replacement): bool
     {
-        foreach ($this->detachedContainers as $index => $container) {
-            if ($container->getId() === $replacement->getId()) {
-                $this->detachedContainers[$index] = $replacement;
-                $this->touch();
-
-                return true;
-            }
+        $removed = $this->removeDetachedContainerFromAllCollections($replacement->getId());
+        if ($removed === null) {
+            return false;
         }
 
-        foreach ($this->hiddenDetachedContainers as $index => $container) {
-            if ($container->getId() === $replacement->getId()) {
-                $this->hiddenDetachedContainers[$index] = $replacement;
-                $this->touch();
+        $this->addDetachedContainerToCanonicalCollection($replacement);
+        $this->touch();
 
-                return true;
-            }
-        }
-
-        return false;
+        return true;
     }
 
     public function removeObjectById(string $id): bool
     {
-        foreach ($this->detachedContainers as $index => $container) {
-            if ($container->getId() === $id) {
-                array_splice($this->detachedContainers, $index, 1);
-                $this->touch();
+        $removed = $this->removeDetachedContainerFrom($this->detachedContainers, $id);
+        if ($removed !== null) {
+            $this->touch();
 
-                return true;
-            }
+            return true;
         }
 
         foreach ($this->objects as $index => $object) {
@@ -356,15 +358,11 @@ final class SectorContent
 
     public function removeHiddenDetachedContainerById(string $id): ?SectorDetachedContainer
     {
-        foreach ($this->hiddenDetachedContainers as $index => $container) {
-            if ($container->getId() !== $id) {
-                continue;
-            }
-
-            array_splice($this->hiddenDetachedContainers, $index, 1);
+        $removed = $this->removeDetachedContainerFrom($this->hiddenDetachedContainers, $id);
+        if ($removed !== null) {
             $this->touch();
 
-            return $container;
+            return $removed;
         }
 
         return null;
@@ -489,6 +487,119 @@ final class SectorContent
             $system->getDescription(),
             $system->getWaypointBookmarks(),
         );
+    }
+
+    private function addDetachedContainerToCanonicalCollection(SectorDetachedContainer $container): void
+    {
+        foreach ($this->removeDetachedContainersFromAllCollections($container->getId()) as $existingContainer) {
+            $container = $this->mergeDetachedContainer($existingContainer, $container);
+        }
+
+        if ($container->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+            $this->hiddenDetachedContainers[] = $container;
+            return;
+        }
+
+        if ($container->getMode() === SectorDetachedContainer::MODE_DROPPED_ON_PLANET) {
+            $this->planetDroppedContainers[] = $container;
+            return;
+        }
+
+        $this->detachedContainers[] = $container;
+    }
+
+    private function removeDetachedContainerFromAllCollections(string $id): ?SectorDetachedContainer
+    {
+        return $this->removeDetachedContainersFromAllCollections($id)[0] ?? null;
+    }
+
+    /**
+     * @return array<SectorDetachedContainer>
+     */
+    private function removeDetachedContainersFromAllCollections(string $id): array
+    {
+        return [
+            ...$this->removeDetachedContainersFrom($this->detachedContainers, $id),
+            ...$this->removeDetachedContainersFrom($this->hiddenDetachedContainers, $id),
+            ...$this->removeDetachedContainersFrom($this->planetDroppedContainers, $id),
+        ];
+    }
+
+    /**
+     * @param array<SectorDetachedContainer> $containers
+     * @return array<SectorDetachedContainer>
+     */
+    private function removeDetachedContainersFrom(array &$containers, string $id): array
+    {
+        $removed = [];
+        $kept = [];
+        foreach ($containers as $container) {
+            if ($container->getId() === $id) {
+                $removed[] = $container;
+                continue;
+            }
+
+            $kept[] = $container;
+        }
+        $containers = $kept;
+
+        return $removed;
+    }
+
+    private function removeDetachedContainerFrom(array &$containers, string $id): ?SectorDetachedContainer
+    {
+        return $this->removeDetachedContainersFrom($containers, $id)[0] ?? null;
+    }
+
+    private function mergeDetachedContainer(SectorDetachedContainer $existing, SectorDetachedContainer $replacement): SectorDetachedContainer
+    {
+        return new SectorDetachedContainer(
+            $replacement->getId(),
+            $replacement->getName(),
+            $replacement->getMode(),
+            $replacement->getOwnerProbeId(),
+            $replacement->getOwnerPlayerId(),
+            $replacement->getOriginProbeId(),
+            $replacement->getTargetObjectId(),
+            $replacement->getCapacity(),
+            $replacement->getCapacityUnit(),
+            $replacement->getCreatedAt(),
+            $this->mergeDetachedContainerPayload($existing->getPayload(), $replacement->getPayload()),
+            $replacement->getDescription(),
+            $replacement->getWaypointBookmarks(),
+            array_values(array_unique([
+                ...$existing->getDiscoveredByPlayerIds(),
+                ...$replacement->getDiscoveredByPlayerIds(),
+            ])),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $existingPayload
+     * @param array<string, mixed> $replacementPayload
+     * @return array<string, mixed>
+     */
+    private function mergeDetachedContainerPayload(array $existingPayload, array $replacementPayload): array
+    {
+        $payload = $replacementPayload;
+        $existingResources = is_array($existingPayload['resources'] ?? null) ? $existingPayload['resources'] : [];
+        $replacementResources = is_array($replacementPayload['resources'] ?? null) ? $replacementPayload['resources'] : [];
+        $resources = $replacementResources;
+
+        foreach ($existingResources as $type => $amount) {
+            if (!is_numeric($amount)) {
+                continue;
+            }
+
+            $replacementAmount = is_numeric($replacementResources[$type] ?? null) ? (float) $replacementResources[$type] : 0.0;
+            $resources[(string) $type] = round(max((float) $amount, $replacementAmount), 4);
+        }
+
+        if ($resources !== []) {
+            $payload['resources'] = $resources;
+        }
+
+        return $payload;
     }
 
     private function touch(): void

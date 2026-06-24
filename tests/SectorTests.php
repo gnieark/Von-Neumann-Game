@@ -13,6 +13,7 @@ use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorSeedGenerator;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorContentGenerator;
+use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorManny;
@@ -515,6 +516,42 @@ $repository->save($mannySector);
 $loadedMannySector = $repository->load($coord000);
 $expectedLoadedMannySector = SectorContent::fromArray($mannySector->toArray(), 'loaded');
 $test->assertEquals($expectedLoadedMannySector->toArray(), $loadedMannySector->toArray(), 'sector storage preserves abandoned or forgotten Manny objects');
+
+$hiddenContainerA = new SectorDetachedContainer(
+    'detached-container-cache-a',
+    'Cache A',
+    SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
+    1,
+    1,
+    1,
+    'cache-rock',
+    1.0,
+    'kg',
+    '2026-01-01T00:00:00+00:00',
+    ['resources' => ['metals' => 0.3]],
+);
+$hiddenContainerB = $hiddenContainerA->withPayload(['resources' => ['metals' => 0.2]]);
+$duplicateHiddenSector = SectorContent::fromArray([
+    'coordinates' => $coord000->toArray(),
+    'objects' => [],
+    'hiddenDetachedContainers' => [
+        $hiddenContainerA->toArray(),
+        $hiddenContainerB->toArray(),
+    ],
+]);
+$test->assertCount(1, $duplicateHiddenSector->hiddenDetachedContainersForObject('cache-rock'), 'loading sector content deduplicates hidden detached containers by id');
+$test->assertEquals(0.3, $duplicateHiddenSector->findHiddenDetachedContainerById('detached-container-cache-a')?->toArray()['payload']['resources']['metals'] ?? null, 'deduplicated hidden detached containers preserve the highest stored resource amount');
+
+$hiddenContainerC = $hiddenContainerA->withPayload(['resources' => ['metals' => 0.35]]);
+$duplicateHiddenSector->addHiddenDetachedContainer($hiddenContainerC);
+$test->assertCount(1, $duplicateHiddenSector->hiddenDetachedContainersForObject('cache-rock'), 'adding the same hidden detached container id replaces the existing entry');
+$hiddenContainerD = $hiddenContainerA->withPayload(['resources' => ['metals' => 0.4]]);
+$test->assert($duplicateHiddenSector->replaceDetachedContainer($hiddenContainerD), 'replacing a hidden detached container succeeds');
+$test->assertCount(1, $duplicateHiddenSector->hiddenDetachedContainersForObject('cache-rock'), 'replacing a hidden detached container does not duplicate it');
+$test->assertEquals(0.4, $duplicateHiddenSector->findHiddenDetachedContainerById('detached-container-cache-a')?->toArray()['payload']['resources']['metals'] ?? null, 'replacing a hidden detached container updates its payload');
+$removedHiddenContainer = $duplicateHiddenSector->removeHiddenDetachedContainerById('detached-container-cache-a');
+$test->assert($removedHiddenContainer instanceof SectorDetachedContainer, 'removing a hidden detached container returns the removed object');
+$test->assertCount(0, $duplicateHiddenSector->hiddenDetachedContainersForObject('cache-rock'), 'removing a hidden detached container removes all duplicates for that id');
 
 $serviceBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_sector_service_tests_' . bin2hex(random_bytes(4));
 $serviceRepository = new SectorFileRepository($serviceBase);

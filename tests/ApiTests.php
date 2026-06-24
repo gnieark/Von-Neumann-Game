@@ -1682,6 +1682,12 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(1, count($hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')), 'completed hidden detach persists the container on the asteroid');
         $hiddenStoredContainer = $hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')[0] ?? null;
         $test->assert($hiddenStoredContainer !== null && in_array($detachPlayer->id, $hiddenStoredContainer->getDiscoveredByPlayerIds(), true), 'completed hidden detach marks the owner player as a discoverer');
+        if ($hiddenStoredContainer !== null) {
+            $hiddenStoredSector->addHiddenDetachedContainer($hiddenStoredContainer);
+            $sectorRepository->save($hiddenStoredSector);
+            $hiddenStoredSector = $sectorRepository->load($detachProbe->currentSector);
+            $test->assertEquals(1, count($hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')), 're-adding the same hidden detached container id does not duplicate it');
+        }
         $hiddenObservation = $kernel->handle('GET', '/api/probe/sector', $detachHeaders);
         $visibleHiddenContainers = array_values(array_filter(
             $hiddenObservation->body['sector']['objects'] ?? [],
@@ -1757,7 +1763,9 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'ended' => gmdate('c', time() - 1),
         ]);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
-        $hiddenMinedContainer = $sectorRepository->load($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $hiddenMinedSector = $sectorRepository->load($detachProbe->currentSector);
+        $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $test->assertEquals(1, count($hiddenMinedSector->hiddenDetachedContainersForObject('cache-rock')), 'mining into a hidden target container keeps a single persisted container entry');
         $test->assertEquals(0.211, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a hidden same-asteroid container updates its stored resources');
 
         $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
