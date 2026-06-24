@@ -18,6 +18,7 @@
     let i18n = {};
     let refreshTimer = null;
     let loadInProgress = false;
+    let loadRequestedWhileInProgress = false;
 
     function withVng(callback) {
         if (window.VNG) {
@@ -1974,9 +1975,11 @@
 
     async function loadManniesPage() {
         if (loadInProgress) {
+            loadRequestedWhileInProgress = true;
             return;
         }
         loadInProgress = true;
+        loadRequestedWhileInProgress = false;
         if (refreshTimer !== null) {
             window.clearTimeout(refreshTimer);
             refreshTimer = null;
@@ -2006,7 +2009,11 @@
             setStatus(error.message || tr("requestDenied", "Request denied"));
         } finally {
             loadInProgress = false;
-            scheduleMannyRefresh();
+            if (loadRequestedWhileInProgress) {
+                loadManniesPage();
+            } else {
+                scheduleMannyRefresh();
+            }
         }
     }
 
@@ -2191,6 +2198,10 @@
         return false;
     }
 
+    function isMannyTaskAssignmentForm(form) {
+        return form && form.classList.contains("manny-form") && !form.classList.contains("manny-rename-form");
+    }
+
     function toggleAccordion(button) {
         const targetId = button.getAttribute("aria-controls");
         const panel = targetId ? document.getElementById(targetId) : null;
@@ -2223,6 +2234,9 @@
                     return;
                 }
                 setStatus(tr("mannyOrderAccepted", "Manny order accepted."));
+                if (isMannyTaskAssignmentForm(event.target)) {
+                    await loadManniesPage();
+                }
             } catch (error) {
                 setStatus(error.message || tr("requestDenied", "Request denied"));
             }

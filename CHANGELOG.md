@@ -6,7 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
-- Interface : `/mannies` rafraichit les informations des Mannys toutes les 5 secondes, sans reconstruire les cartes dont le hash d'etat n'a pas change.
+- Interface : `/mannies` rafraichit les informations des Mannys toutes les 5 secondes et apres validation d'une tache, sans reconstruire les cartes dont le hash d'etat n'a pas change.
 
 ## 2026-06-23
 
