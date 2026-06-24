@@ -530,8 +530,7 @@
     }
 
     function bookmarkedSectorObjects(sector) {
-        const distance = Number(sector && sector.distance);
-        if (!Number.isFinite(distance) || distance !== 0 || !Array.isArray(sector && sector.objects)) {
+        if (!Array.isArray(sector && sector.objects)) {
             return [];
         }
 
@@ -562,6 +561,32 @@
         sector.objects.forEach(collect);
 
         return result;
+    }
+
+    function sectorWaypointBookmarkHighlights(sector) {
+        return bookmarkedSectorObjects(sector).map((bookmarkTarget) => {
+            const bookmarks = Array.isArray(bookmarkTarget.bookmarks) ? bookmarkTarget.bookmarks : [];
+            const bookmarkNames = bookmarks.map((bookmark) => bookmark && bookmark.name ? bookmark.name : "").filter(Boolean);
+            const label = bookmarkTarget.label || tr("unknownObject", "Unknown object");
+
+            return bookmarkNames.length > 0
+                ? label + " (" + bookmarkNames.join(", ") + ")"
+                : label;
+        });
+    }
+
+    function sectorWaypointBookmarkHighlightHtml(sector) {
+        const highlights = sectorWaypointBookmarkHighlights(sector);
+        if (highlights.length === 0) {
+            return "";
+        }
+
+        return "<p class=\"sector-waypoint-bookmark-highlight\">"
+            + window.VNG.escapeHtml(window.VNG.formatText(
+                tr("sectorWaypointBookmarkAlert", "Waypoint bookmark detected on object(s): {objects}"),
+                {"objects": highlights.join(", ")}
+            ))
+            + "</p>";
     }
 
     function sectorBookmarkObjects(sector) {
@@ -909,9 +934,9 @@
         node.hidden = message === "";
     }
 
-    function sectorObjectSummaryItems(sector) {
+    function sectorObjectSummaryItems(sector, includeWaypointBookmarkObjects = true) {
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
-        const displayObjects = objects.concat(sectorBookmarkObjects(sector), sectorProbeObjects(sector));
+        const displayObjects = objects.concat(includeWaypointBookmarkObjects ? sectorBookmarkObjects(sector) : [], sectorProbeObjects(sector));
         if (displayObjects.length === 0) {
             return "<p>" + window.VNG.escapeHtml(tr("sectorSummaryEmpty", "Empty sector.")) + "</p>";
         }
@@ -937,7 +962,7 @@
             ? ""
             : "<details class=\"visited-sector-details\">"
                 + "<summary>" + window.VNG.escapeHtml(tr("sectorVisitedDetails", "Detailed scan")) + "</summary>"
-                + sectorObjectSummaryItems(sector)
+                + sectorObjectSummaryItems(sector, false)
             + "</details>";
 
         return "<article class=\"neighbor-sector-tile visited-sector-tile\">"
@@ -953,6 +978,7 @@
                 )) + "</p>"
                 : "")
             + "<p>" + window.VNG.escapeHtml(summary) + "</p>"
+            + (error ? "" : sectorWaypointBookmarkHighlightHtml(sector))
             + details
             + "</article>";
     }

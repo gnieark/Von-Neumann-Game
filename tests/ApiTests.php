@@ -320,6 +320,9 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-butto
 $test->assert(is_string($appCss) && str_contains($appCss, '.stats-podium-rank[hidden]'), 'stats CSS keeps hidden ranking rows hidden after podium display rules');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVisitedSectors'), 'sensors JS can load visited-sector history');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorWaypointBookmarkHighlightHtml'), 'sensors JS highlights waypoint bookmarks in visited-sector tiles');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorObjectSummaryItems(sector, false)'), 'sensors JS keeps waypoint bookmark highlights out of the detailed visited-sector scan');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-waypoint-bookmark-highlight'), 'sensors CSS styles waypoint bookmark tile highlights');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

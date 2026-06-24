@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - Interface : `/mannies` rafraichit les informations des Mannys toutes les 5 secondes et apres validation d'une tache, sans reconstruire les cartes dont le hash d'etat n'a pas change; les pourcentages de progression et le temps restant a la minute defilent localement sans polling additionnel.
+- Interface : `/sensors` met en exergue les waypoint bookmarks detectes dans les tuiles des secteurs deja visites, avant le scan detaille.
 
 ### Fixed
 

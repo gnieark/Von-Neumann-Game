@@ -1385,6 +1385,12 @@ button.account-menu-item {
     color: rgba(172, 217, 161, .68) !important;
 }
 
+.neighbor-sector-tile .sector-waypoint-bookmark-highlight {
+    color: #f6d66a;
+    font-weight: 700;
+    text-shadow: 0 0 5px rgba(246, 214, 106, .28);
+}
+
 .visited-sector-details {
     display: grid;
     gap: 8px;
