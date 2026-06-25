@@ -332,7 +332,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'schedul
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'PROBE_INVENTORY_ACTIONS'), 'mannies JS tracks actions whose forms depend on probe inventory');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshProbeInventory'), 'mannies JS refreshes probe inventory lazily before rendering inventory-dependent forms');
-$test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'window.VNG.apiJson("/api/probe", {"method": "GET"}),'), 'mannies polling does not load the full probe inventory payload');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"printer": atomicPrinterItem() ? "available" : null'), 'mannies JS excludes atomic-printer inventory details from the card refresh hash');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'isMannyTaskAssignmentForm'), 'mannies JS can identify task assignment forms');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await loadManniesPage();'), 'mannies JS refreshes Manny cards immediately after a successful task assignment');
 $test->assert(is_string($manniesTemplate) && !str_contains($manniesTemplate, 'data-refresh="mannies"'), 'mannies view does not expose a manual refresh button');

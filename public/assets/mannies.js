@@ -2187,15 +2187,19 @@
         }
 
         try {
-            const [mannyData, sectorData] = await Promise.all([
+            const [probeData, mannyData, sectorData] = await Promise.all([
+                window.VNG.apiJson("/api/probe", {"method": "GET"}),
                 window.VNG.apiJson("/api/probe/mannies", {"method": "GET"}),
                 window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
             ]);
+            const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
+            state.currentInventory = probe.inventory || (sectorData && sectorData.inventory) || null;
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentMannies = Array.isArray(mannyData && mannyData.mannies)
                 ? mannyData.mannies.map(withMannyStateHash)
                 : [];
+            state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);
             renderMannyList(state.currentMannies);
