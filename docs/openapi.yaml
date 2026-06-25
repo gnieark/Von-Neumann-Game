@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '49'
+  version: '50'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 49
+                apiVersion: 50
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -4109,8 +4109,10 @@ components:
           description: >
             Current task payload. When currentTask is mining, this payload has
             the MannyMiningTask shape, including target.resourceAmounts for
-            asteroids and resourceProfile for the selected split. Idle Mannys
-            may expose an empty payload.
+            asteroids and resourceProfile for the selected split. Sensitive
+            internal task state such as detached-container reservation objects,
+            detached-container snapshots, and absolute target sectors is omitted
+            from public responses. Idle Mannys may expose an empty payload.
           anyOf:
             - $ref: '#/components/schemas/MannyMiningTask'
             - type: object

@@ -10,6 +10,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- API v50 : les payloads publics de taches Manny n'exposent plus les objets internes de reservation de container detache ni les secteurs cibles absolus.
 - Stockage : la récupération d'un container détaché est désormais idempotente, afin qu'un refresh concurrent ou répété ne recrée pas plusieurs containers portant le même libellé dans l'inventaire.
 
 ## 2026-06-24

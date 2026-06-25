@@ -942,12 +942,12 @@ final class MannyService
      */
     private function publicTaskPayload(Manny $manny): array
     {
-        if ($manny->currentTask !== Manny::TASK_DROPPING_STORAGE_CONTAINER) {
-            return $manny->taskPayload;
-        }
-
         $payload = $manny->taskPayload;
-        unset($payload['snapshot'], $payload['consumedKit']);
+        unset($payload['snapshot'], $payload['consumedKit'], $payload['targetSector']);
+
+        if (is_array($payload['reservedDetachedContainer'] ?? null)) {
+            unset($payload['reservedDetachedContainer']['object']);
+        }
 
         return $payload;
     }

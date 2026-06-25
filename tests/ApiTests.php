@@ -534,7 +534,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(49, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(50, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1671,11 +1671,29 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'objectId' => $detachedObjectId,
         ], JSON_THROW_ON_ERROR));
         $test->assertEquals(202, $recoverDrifting->status, 'existing salvage endpoint can recover a drifting detached container');
+        $recoverDriftingReserved = $recoverDrifting->body['manny']['task']['reservedDetachedContainer'] ?? [];
+        $test->assert(is_array($recoverDriftingReserved) && !array_key_exists('object', $recoverDriftingReserved), 'detached container salvage task does not expose its reserved sector object');
+        $activeRecoverDriftingList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $activeRecoverDriftingManny = array_values(array_filter(
+            $activeRecoverDriftingList->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachMannyId,
+        ))[0] ?? null;
+        $activeRecoverDriftingTask = is_array($activeRecoverDriftingManny) && is_array($activeRecoverDriftingManny['task'] ?? null) ? $activeRecoverDriftingManny['task'] : [];
+        $activeRecoverDriftingReserved = $activeRecoverDriftingTask['reservedDetachedContainer'] ?? [];
+        $test->assert(is_array($activeRecoverDriftingReserved) && !array_key_exists('object', $activeRecoverDriftingReserved), 'GET /api/probe/mannies does not expose the reserved detached container object');
+        $test->assert(!str_contains(json_encode($activeRecoverDriftingTask, JSON_THROW_ON_ERROR), '"sector"'), 'GET /api/probe/mannies detached container recovery task does not expose absolute sector coordinates');
         $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
-        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $completedRecoverDriftingList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $completedRecoverDriftingManny = array_values(array_filter(
+            $completedRecoverDriftingList->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachMannyId,
+        ))[0] ?? null;
+        $completedRecoverDriftingTask = is_array($completedRecoverDriftingManny) && is_array($completedRecoverDriftingManny['task'] ?? null) ? $completedRecoverDriftingManny['task'] : [];
+        $completedRecoverDriftingReserved = $completedRecoverDriftingTask['reservedDetachedContainer'] ?? [];
+        $test->assert(is_array($completedRecoverDriftingReserved) && !array_key_exists('object', $completedRecoverDriftingReserved), 'completed detached container recovery result does not expose the reserved sector object');
         $restoredContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredContainer !== null, 'recovering a detached container restores its storage container id');
         $test->assertEquals(0.21, $restoredContainer !== null ? ($storageContainers->resourceAmounts($restoredContainer->id)['metals'] ?? null) : null, 'recovering a detached container restores its resources');
@@ -2938,6 +2956,14 @@ if ($createdProbe !== null) {
     $test->assertEquals('installing_waypoint_bookmark', $installBookmark->body['manny']['currentTask'] ?? null, 'bookmark installation task is exposed on Manny');
     $test->assertEquals(10, $installBookmark->body['manny']['task']['durationSeconds'] ?? null, 'bookmark installation takes ten seconds');
     $test->assertEquals('Balise test', $installBookmark->body['manny']['task']['name'] ?? null, 'bookmark installation stores the requested label');
+    $test->assert(!array_key_exists('targetSector', $installBookmark->body['manny']['task'] ?? []), 'bookmark installation task does not expose absolute target sector coordinates');
+    $activeBookmarkMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $activeBookmarkManny = array_values(array_filter(
+        $activeBookmarkMannies->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $firstMannyId,
+    ))[0] ?? null;
+    $activeBookmarkTask = is_array($activeBookmarkManny) && is_array($activeBookmarkManny['task'] ?? null) ? $activeBookmarkManny['task'] : [];
+    $test->assert(!array_key_exists('targetSector', $activeBookmarkTask), 'GET /api/probe/mannies bookmark installation task does not expose absolute target sector coordinates');
     $bookmarkOrderProbe = $kernel->handle('GET', '/api/probe', $headers);
     $remainingBookmarks = array_values(array_filter(
         $bookmarkOrderProbe->body['probe']['inventory']['items'] ?? [],
