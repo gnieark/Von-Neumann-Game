@@ -21,6 +21,7 @@
     let progressTickTimer = null;
     let loadInProgress = false;
     let loadRequestedWhileInProgress = false;
+    let craftingRecipesLoadPromise = null;
 
     function withVng(callback) {
         if (window.VNG) {
@@ -29,6 +30,22 @@
         }
 
         window.addEventListener("VNGReady", () => callback(window.VNG), {"once": true});
+    }
+
+    function loadCraftingRecipesOnce() {
+        if (craftingRecipesLoadPromise === null) {
+            craftingRecipesLoadPromise = window.VNG.apiJson("/api/crafting-recipes", {"method": "GET"})
+                .then((recipeData) => {
+                    state.currentCraftingRecipes = Array.isArray(recipeData && recipeData.recipes)
+                        ? recipeData.recipes
+                        : [];
+                })
+                .catch(() => {
+                    state.currentCraftingRecipes = [];
+                });
+        }
+
+        return craftingRecipesLoadPromise;
     }
 
     function tr(key, fallback) {
@@ -2088,11 +2105,10 @@
         }
 
         try {
-            const [probeData, mannyData, sectorData, recipeData] = await Promise.all([
+            const [probeData, mannyData, sectorData] = await Promise.all([
                 window.VNG.apiJson("/api/probe", {"method": "GET"}),
                 window.VNG.apiJson("/api/probe/mannies", {"method": "GET"}),
                 window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
-                window.VNG.apiJson("/api/crafting-recipes", {"method": "GET"}).catch(() => ({"recipes": []})),
             ]);
             const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
@@ -2102,7 +2118,6 @@
                 ? mannyData.mannies.map(withMannyStateHash)
                 : [];
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
-            state.currentCraftingRecipes = Array.isArray(recipeData && recipeData.recipes) ? recipeData.recipes : [];
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);
             renderMannyList(state.currentMannies);
@@ -2460,6 +2475,7 @@
         }
 
         i18n = await window.VNG.loadI18n();
+        await loadCraftingRecipesOnce();
         bindEvents();
         loadManniesPage();
     });
