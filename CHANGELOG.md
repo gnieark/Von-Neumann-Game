@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-25
+
+### Changed
+
+- Interface : `/mannies` ne charge plus l'inventaire complet de la sonde pendant le polling; les formulaires dépendants de `probe.inventory` sont construits à l'ouverture de leur accordéon après rafraîchissement de `/api/probe`.
+
 ## 2026-06-24
 
 ### Added

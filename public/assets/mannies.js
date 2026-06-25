@@ -5,6 +5,7 @@
     const MANNY_MINING_AMOUNT_MAX = 0.55;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft"]);
 
     const state = {
         currentCraftingRecipes: [],
@@ -46,6 +47,15 @@
         }
 
         return craftingRecipesLoadPromise;
+    }
+
+    async function refreshProbeInventory() {
+        const probeData = await window.VNG.apiJson("/api/probe", {"method": "GET"});
+        const probe = probeData && probeData.probe ? probeData.probe : {};
+        state.currentInventory = probe.inventory || null;
+        state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
+
+        return state.currentInventory;
     }
 
     function tr(key, fallback) {
@@ -1244,13 +1254,18 @@
             + "</section>";
     }
 
-    function renderMannyActionAccordion(id, title, formHtml) {
+    function actionNeedsProbeInventory(actionId) {
+        return PROBE_INVENTORY_ACTIONS.has(actionId);
+    }
+
+    function renderMannyActionAccordion(id, title, actionId, formHtml) {
+        const lazy = actionNeedsProbeInventory(actionId);
         return "<section class=\"manny-action-section manny-action-accordion\">"
-            + "<button class=\"manny-action-accordion-trigger\" type=\"button\" aria-expanded=\"false\" aria-controls=\"" + escaped(id) + "\">"
+            + "<button class=\"manny-action-accordion-trigger\" type=\"button\" aria-expanded=\"false\" aria-controls=\"" + escaped(id) + "\" data-action-id=\"" + escaped(actionId) + "\">"
             + "<span>" + escaped(title) + "</span>"
             + "</button>"
-            + "<div id=\"" + escaped(id) + "\" class=\"manny-action-accordion-panel\" hidden>"
-            + formHtml
+            + "<div id=\"" + escaped(id) + "\" class=\"manny-action-accordion-panel\" data-action-id=\"" + escaped(actionId) + "\" data-lazy-inventory=\"" + (lazy ? "1" : "0") + "\" hidden>"
+            + (lazy ? "" : formHtml)
             + "</div>"
             + "</section>";
     }
@@ -1563,7 +1578,12 @@
 
         return "<div class=\"manny-action-grid\">"
             + "<h4 class=\"manny-action-heading\">" + escaped(tr("assignMannyTask", "Assign a task to this Manny")) + "</h4>"
-            + actionForms.map((action) => renderMannyActionAccordion(prefix + "-" + action.id, action.title, action.render())).join("")
+            + actionForms.map((action) => renderMannyActionAccordion(
+                prefix + "-" + action.id,
+                action.title,
+                action.id,
+                actionNeedsProbeInventory(action.id) ? "" : action.render()
+            )).join("")
             + "</div>";
     }
 
@@ -1586,6 +1606,16 @@
             + "</form>";
     }
 
+    function renderLazyActionForm(actionId) {
+        return {
+            "detach-storage": renderDetachStorageContainerForm,
+            "drop-storage": renderDropStorageContainerForm,
+            "bookmark": renderBookmarkForm,
+            "craft": renderCraftForm,
+            "atomic-printer-craft": renderAtomicPrinterCraftForm,
+        }[actionId]?.() || "";
+    }
+
     function renderAtomicPrinterTaskPanel(assistant) {
         const payload = assistant && assistant.task ? assistant.task : {};
         return "<section class=\"manny-task-panel printer-task-panel\">"
@@ -1601,22 +1631,25 @@
 
     function atomicPrinterStateHash() {
         return hashString(stableHashPayload({
-            "printer": atomicPrinterItem(),
+            "printer": atomicPrinterItem() ? "available" : null,
             "assistant": atomicPrinterAssistant(),
         }));
     }
 
     function renderAtomicPrinterCard(expanded, printerHash) {
         const printer = atomicPrinterItem();
-        if (!printer) {
+        const assistant = atomicPrinterAssistant();
+        if (!printer && !assistant) {
             return "";
         }
 
-        const assistant = atomicPrinterAssistant();
         const busy = assistant !== null;
-        const printerName = inventoryItemTypeLabel(printer.type, printer.name || tr("atomicPrinter", "Atomic printer"));
+        const printerName = printer
+            ? inventoryItemTypeLabel(printer.type, printer.name || tr("atomicPrinter", "Atomic printer"))
+            : tr("atomicPrinter", "Atomic printer");
         const taskName = busy ? taskLabel("atomic_printing") : tr("noTask", "None");
         const panelId = "atomic-printer-panel";
+        const actionPanelId = panelId + "-craft";
         const buttonTitle = printerName + " - " + taskName;
 
         return "<article class=\"manny-card printer-card\" data-printer-id=\"atomic_3d_printer\" data-printer-hash=\"" + escaped(printerHash || "") + "\"" + (assistant ? " data-assistant-manny-id=\"" + escaped(assistant.id) + "\"" : "") + ">"
@@ -1632,7 +1665,7 @@
             + metric(tr("task", "Task"), busy ? progressText(assistant) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null, busy ? progressDataAttributes(assistant) : "")
             + metric(tr("assistantManny", "Assistant Manny"), assistant ? assistant.name : "-")
             + "</div>"
-            + (busy ? renderAtomicPrinterTaskPanel(assistant) : renderAtomicPrinterCraftForm())
+            + (busy ? renderAtomicPrinterTaskPanel(assistant) : renderMannyActionAccordion(actionPanelId, tr("craftingActionTitle", "Craft"), "atomic-printer-craft", ""))
             + "</div>"
             + "</article>";
     }
@@ -1657,6 +1690,9 @@
     function mannyIsTooFar(manny) {
         if (!manny || !manny.location || manny.location.type !== "sector") {
             return false;
+        }
+        if (manny.currentTask === null && manny.canReceiveOrders === false) {
+            return true;
         }
 
         return state.currentProbeSectorRelative !== null
@@ -2085,6 +2121,52 @@
         });
     }
 
+    function updateActionForm(panel) {
+        if (!panel) {
+            return;
+        }
+
+        const form = panel.querySelector(".manny-form");
+        if (!form) {
+            return;
+        }
+        if (form.classList.contains("manny-craft-form")) {
+            updateCraftForm(form);
+        }
+        if (form.classList.contains("printer-craft-form")) {
+            updateCraftForm(form);
+            updatePrinterCraftForms();
+        }
+        if (form.classList.contains("manny-detach-storage-container-form")) {
+            updateMannyDetachStorageContainerForms();
+        }
+        if (form.classList.contains("manny-drop-storage-container-form")) {
+            updateMannyDropStorageContainerForms();
+        }
+        if (form.classList.contains("manny-bookmark-form")) {
+            updateMannyBookmarkForms();
+        }
+    }
+
+    async function openMannyActionAccordion(button, panel) {
+        if (panel && panel.dataset.lazyInventory === "1") {
+            panel.innerHTML = "";
+            button.disabled = true;
+            try {
+                await refreshProbeInventory();
+                panel.innerHTML = renderLazyActionForm(panel.dataset.actionId || "");
+                updateActionForm(panel);
+            } catch (error) {
+                setStatus(error.message || tr("requestDenied", "Request denied"));
+                return false;
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        return true;
+    }
+
     function scheduleMannyRefresh() {
         if (refreshTimer !== null) {
             window.clearTimeout(refreshTimer);
@@ -2105,19 +2187,15 @@
         }
 
         try {
-            const [probeData, mannyData, sectorData] = await Promise.all([
-                window.VNG.apiJson("/api/probe", {"method": "GET"}),
+            const [mannyData, sectorData] = await Promise.all([
                 window.VNG.apiJson("/api/probe/mannies", {"method": "GET"}),
                 window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
             ]);
-            const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
-            state.currentInventory = probe.inventory || (sectorData && sectorData.inventory) || null;
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentMannies = Array.isArray(mannyData && mannyData.mannies)
                 ? mannyData.mannies.map(withMannyStateHash)
                 : [];
-            state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);
             renderMannyList(state.currentMannies);
@@ -2405,6 +2483,15 @@
         mannyList.addEventListener("click", async (event) => {
             const accordionButton = event.target.closest(".manny-accordion-trigger, .manny-action-accordion-trigger");
             if (accordionButton) {
+                const targetId = accordionButton.getAttribute("aria-controls");
+                const panel = targetId ? document.getElementById(targetId) : null;
+                const willOpen = accordionButton.getAttribute("aria-expanded") !== "true";
+                if (willOpen && accordionButton.classList.contains("manny-action-accordion-trigger")) {
+                    const canOpen = await openMannyActionAccordion(accordionButton, panel);
+                    if (!canOpen) {
+                        return;
+                    }
+                }
                 toggleAccordion(accordionButton);
                 return;
             }
