@@ -559,6 +559,9 @@ final class ProbeStorageService
         if ($sourceContainerUid === '' || $sourceItemUid === '') {
             throw new MannyActionException(422, 'detached_container_not_recoverable', 'Detached container data is incomplete.');
         }
+        if ($this->detachedContainerSnapshotAlreadyRestored($probe, $sourceContainerUid, $containerData)) {
+            return;
+        }
         $itemUid = null;
         if (
             $this->items->findByUidForProbe($probe->id, $sourceItemUid) === null
@@ -574,7 +577,9 @@ final class ProbeStorageService
             ProbeItem::TYPE_ADDITIONAL_CONTAINER,
             (string) ($containerItemData['name'] ?? ProbeItem::ADDITIONAL_CONTAINER_NAME),
             round(max(0.0, (float) ($containerItemData['containerSpace'] ?? 0.0)), 4),
-            is_array($containerItemData['metadata'] ?? null) ? $containerItemData['metadata'] : [],
+            (is_array($containerItemData['metadata'] ?? null) ? $containerItemData['metadata'] : []) + [
+                'restoredDetachedContainerSourceUid' => $sourceContainerUid,
+            ],
             $itemContainer->id,
             $itemUid,
         );
@@ -621,6 +626,33 @@ final class ProbeStorageService
         }
 
         $this->syncLegacyResourceTotals($probe);
+    }
+
+    /**
+     * @param array<string, mixed> $containerData
+     */
+    private function detachedContainerSnapshotAlreadyRestored(NeumannProbe $probe, string $sourceContainerUid, array $containerData): bool
+    {
+        $expectedLabel = isset($containerData['label']) ? (string) $containerData['label'] : null;
+        foreach ($this->items->findByProbeId($probe->id) as $item) {
+            if ($item->type !== ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
+                continue;
+            }
+
+            $container = $this->containers->findByUidForProbe($probe->id, 'container-' . $item->uid);
+            if ($container === null) {
+                continue;
+            }
+
+            if (($item->metadata['restoredDetachedContainerSourceUid'] ?? null) === $sourceContainerUid) {
+                return true;
+            }
+            if ('container-' . $item->uid === $sourceContainerUid && $expectedLabel !== null && $container->label === $expectedLabel) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function placeMannyOnProbe(NeumannProbe $probe, Manny $manny): bool

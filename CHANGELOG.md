@@ -8,6 +8,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Interface : `/mannies` exclut les détails de `probe.inventory` des hashes de cartes pour éviter les reconstructions inutiles pendant le polling; les formulaires dépendants de l'inventaire sont construits à l'ouverture de leur accordéon après rafraîchissement de `/api/probe`.
 
+### Fixed
+
+- Stockage : la récupération d'un container détaché est désormais idempotente, afin qu'un refresh concurrent ou répété ne recrée pas plusieurs containers portant le même libellé dans l'inventaire.
+
 ## 2026-06-24
 
 ### Added

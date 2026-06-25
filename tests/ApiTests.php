@@ -1681,6 +1681,14 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(0.21, $restoredContainer !== null ? ($storageContainers->resourceAmounts($restoredContainer->id)['metals'] ?? null) : null, 'recovering a detached container restores its resources');
         $test->assertEquals($restoredContainer?->id, $items->findByUidForProbe($detachProbe->id, $storedBar->uid)?->storageContainerId, 'recovering a detached container restores stored items inside it');
         $test->assertEquals(['metals'], $restoredContainer?->priorityFilter ?? null, 'recovering a detached container restores routing rules');
+        if ($driftingMinedContainer !== null && $restoredContainer !== null) {
+            $storage->restoreDetachedContainerSnapshot($detachProbe, $driftingMinedContainer->toArray()['payload'] ?? []);
+            $sameLabelRestoredContainers = array_values(array_filter(
+                $storageContainers->findByProbeId($detachProbe->id),
+                static fn($container): bool => $container->label === $restoredContainer->label,
+            ));
+            $test->assertEquals(1, count($sameLabelRestoredContainers), 'replaying detached-container recovery does not duplicate the restored container label');
+        }
 
         $hiddenSector = new SectorContent($detachProbe->currentSector, [
             new Asteroid('cache-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
@@ -1895,6 +1903,12 @@ if ($collisionRecoverProbe !== null) {
         $test->assertEquals(1, count($restoredCollisionContainers), 'restoring with an identifier collision creates a new technical container id');
         $restoredCollisionContainer = $restoredCollisionContainers[0] ?? null;
         $test->assertEquals(0.123, $restoredCollisionContainer !== null ? ($storageContainers->resourceAmounts($restoredCollisionContainer->id)['ice'] ?? null) : null, 'restoring with an identifier collision keeps detached resources');
+        $storage->restoreDetachedContainerSnapshot($collisionRecoverProbe, $collisionSnapshot);
+        $restoredCollisionContainersAfterReplay = array_values(array_filter(
+            $storageContainers->findByProbeId($collisionRecoverProbe->id),
+            static fn($container): bool => $container->uid !== $collisionContainerId && $container->label === 'Recovered duplicate label',
+        ));
+        $test->assertEquals(1, count($restoredCollisionContainersAfterReplay), 'replaying a collision recovery does not duplicate the restored container label');
     }
 }
 

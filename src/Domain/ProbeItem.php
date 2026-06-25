@@ -54,6 +54,9 @@ final class ProbeItem
 
     public function inventoryItem(?array $container = null): ProbeInventoryItem
     {
+        $metadata = $this->metadata;
+        unset($metadata['restoredDetachedContainerSourceUid']);
+
         return new ProbeInventoryItem(
             $this->uid,
             $this->type,
@@ -63,7 +66,7 @@ final class ProbeItem
             0.0,
             null,
             null,
-            $this->metadata + [
+            $metadata + [
                 'createdAt' => $this->createdAt,
                 'updatedAt' => $this->updatedAt,
                 'movable' => true,
