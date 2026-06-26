@@ -16,6 +16,8 @@ use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\ScutNetwork;
+use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Domain\VisitedSector;
 use VonNeumannGame\Forum\ForumCategory;
 use VonNeumannGame\Forum\ForumMessage;
@@ -35,6 +37,7 @@ use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeReinstantiationException;
 use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
+use VonNeumannGame\Service\ScutNetworkService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
@@ -44,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 50;
+    public const API_VERSION = 51;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -60,6 +63,7 @@ final class ApiKernel
         private readonly ForumRepository $forum,
         private readonly MissionService $missions,
         private readonly ProbeReinstantiationService $reinstantiation,
+        private readonly ScutNetworkService $scut,
         private readonly array $gameplayConfig = [],
     ) {}
 
@@ -92,8 +96,11 @@ final class ApiKernel
                         : $this->probeStorageContainerResponse($player, rawurldecode($matches[1])),
                 );
             }
-            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-asteroid|recover-storage-container|refill-deuterium-tank|recall)$#', $routePath, $matches) === 1) {
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
+            }
+            if (preg_match('#^/api/probe/scut-network/(\d+)$#', $routePath, $matches) === 1) {
+                return $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeScutNetworkResponse($player, (int) $matches[1]));
             }
             if (preg_match('#^/api/probe/mannies/([^/]+)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['PATCH'], $headers, fn(Player $player): ApiResponse => $this->probeMannyRenameResponse($player, rawurldecode($matches[1]), $body));
@@ -686,6 +693,7 @@ final class ApiKernel
         $observation['dataFreshness'] = 'live';
         $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
         $observation = $this->withObservedProbePresence($observation, $probe, $observableSector);
+        $observation = $this->withScutSectorData($player, $observation, $observableSector, includeRelays: true);
 
         return new ApiResponse(200, [
             'sector' => $observation,
@@ -834,8 +842,8 @@ final class ApiKernel
                 return ApiResponse::error(404, 'not_found', 'Recipient probe not found.');
             }
             $recipientProbe = $this->movements->refreshProbeMovementState($recipientProbe);
-            if (!$recipientProbe->currentSector->equals($probe->currentSector)) {
-                return ApiResponse::error(422, 'probe_not_in_same_sector', 'Recipient probe must be in the same sector.');
+            if (!$this->scut->canSectorsCommunicate($probe->currentSector, $recipientProbe->currentSector)) {
+                return ApiResponse::error(422, 'probe_not_in_same_sector', 'Recipient probe must be in the same sector or inside the same SCUT network coverage.');
             }
 
             $message = $this->messages->createForEndpoints(
@@ -1292,6 +1300,8 @@ final class ApiKernel
         if ($movement === null && $target->equals($probe->currentSector)) {
             $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
         }
+        $includeRelays = ($observation['knowledgeLevel'] ?? null) === 'detailed' || (int) ($observation['distance'] ?? 999999) <= ScutRelay::RADIUS_SECTORS;
+        $observation = $this->withScutSectorData($player, $observation, $target, $includeRelays);
 
         return new ApiResponse(200, ['sector' => $observation]);
     }
@@ -1325,6 +1335,44 @@ final class ApiKernel
 
         return new ApiResponse(200, [
             'mannies' => array_map(fn($manny): array => $this->mannyArray($player, $probe, $manny), $mannies),
+        ]);
+    }
+
+    private function probeScutNetworkResponse(Player $player, int $networkId): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->ensureProbeOperational($probe);
+        $network = $this->scut->networkById($networkId);
+        if ($network === null) {
+            return ApiResponse::error(404, 'not_found', 'SCUT network not found.');
+        }
+        if (!$this->scut->networkCoversSector($network->id, $probe->currentSector)) {
+            return ApiResponse::error(403, 'forbidden', 'Probe must be inside this SCUT network coverage.');
+        }
+
+        $frame = new PlayerReferenceFrame($player->homeSector);
+        $relays = array_map(
+            fn(ScutRelay $relay): array => $this->scutRelayArray($player, $relay, includeSector: true),
+            $this->scut->relaysForNetwork($network->id),
+        );
+        $probes = array_map(
+            static fn(NeumannProbe $coveredProbe): array => [
+                'id' => $coveredProbe->id,
+                'name' => $coveredProbe->name,
+                'sector' => [
+                    'relative' => $frame->globalToRelative($coveredProbe->currentSector),
+                ],
+            ],
+            $this->scut->probesCoveredByNetwork($network->id),
+        );
+
+        return new ApiResponse(200, [
+            'network' => $this->scutNetworkArray($network) + [
+                'relayCount' => count($relays),
+                'coveredSectorCount' => count($network->coveredSectors),
+                'relays' => $relays,
+                'probes' => $probes,
+            ],
         ]);
     }
 
@@ -1483,6 +1531,28 @@ final class ApiKernel
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }
 
+        if ($action === 'turn-on-relay') {
+            $this->movements->ensureProbeOperational($probe);
+            if ($this->movements->activeMovementForProbe($probe) !== null) {
+                return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
+            }
+            $relayId = $data['relayId'] ?? $data['scutRelayId'] ?? null;
+            if (!is_int($relayId)) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain relayId as an integer.');
+            }
+            $networkName = $data['networkName'] ?? $data['name'] ?? null;
+            if ($networkName !== null && !is_string($networkName)) {
+                return ApiResponse::error(400, 'bad_request', 'networkName must be a string when provided.');
+            }
+
+            $manny = $this->mannies->startScutRelayTurnOn($probe, $uid, $relayId, $networkName);
+
+            return new ApiResponse(202, [
+                'manny' => $this->mannyArray($player, $probe, $manny),
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+            ]);
+        }
+
         if ($action === 'install-bookmark') {
             $this->movements->ensureProbeOperational($probe);
             if ($this->movements->activeMovementForProbe($probe) !== null) {
@@ -1519,6 +1589,76 @@ final class ApiKernel
         }
 
         return $observation;
+    }
+
+    private function withScutSectorData(Player $player, array $observation, SectorCoordinates $sector, bool $includeRelays): array
+    {
+        if ($includeRelays) {
+            $relays = $this->scut->relaysInSector($sector);
+            if ($relays !== []) {
+                $objects = is_array($observation['objects'] ?? null) ? $observation['objects'] : [];
+                foreach ($relays as $relay) {
+                    $objects[] = $this->scutRelayArray($player, $relay, includeSector: false);
+                }
+                $observation['objects'] = $objects;
+            }
+        }
+
+        $networks = $this->scut->networksCoveringSector($sector);
+        if ($networks !== []) {
+            $observation['scutNetworks'] = array_map(
+                fn(ScutNetwork $network): array => $this->scutNetworkReferenceArray($network),
+                $networks,
+            );
+        } elseif (($observation['knowledgeLevel'] ?? null) === 'detailed') {
+            $observation['scutNetworks'] = [];
+        }
+
+        return $observation;
+    }
+
+    private function scutRelayArray(Player $player, ScutRelay $relay, bool $includeSector): array
+    {
+        $network = $relay->networkId !== null ? $this->scut->networkById($relay->networkId) : null;
+        $payload = [
+            'id' => $relay->id,
+            'type' => 'scut_relay',
+            'name' => 'Relais SCUT',
+            'estimated' => false,
+            'summary' => $relay->isOn() ? 'Active long-range SCUT communication relay.' : 'Inactive long-range SCUT communication relay.',
+            'mass' => 0.0,
+            'radius' => 0.0,
+            'dangerLevel' => 'low',
+            'status' => $relay->status,
+            'createdByProbeId' => $relay->createdByProbeId,
+            'createdAt' => $relay->createdAt,
+            'activatedAt' => $relay->activatedAt,
+            'coverageRadiusSectors' => ScutRelay::RADIUS_SECTORS,
+            'network' => $network !== null ? $this->scutNetworkReferenceArray($network) : null,
+        ];
+        if ($includeSector) {
+            $payload['sector'] = [
+                'relative' => (new PlayerReferenceFrame($player->homeSector))->globalToRelative($relay->sector),
+            ];
+        }
+
+        return $payload;
+    }
+
+    private function scutNetworkReferenceArray(ScutNetwork $network): array
+    {
+        return [
+            'id' => $network->id,
+            'name' => $network->name,
+        ];
+    }
+
+    private function scutNetworkArray(ScutNetwork $network): array
+    {
+        return $this->scutNetworkReferenceArray($network) + [
+            'createdAt' => $network->createdAt,
+            'updatedAt' => $network->updatedAt,
+        ];
     }
 
     /**

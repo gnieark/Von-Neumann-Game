@@ -286,6 +286,31 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_events_due ON scheduled_events(status, run_at)",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_events_entity ON scheduled_events(entity_type, entity_id)",
+            "CREATE TABLE IF NOT EXISTS scut_networks (
+                id $id,
+                name $text NOT NULL,
+                covered_sectors_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL
+            )",
+            "CREATE TABLE IF NOT EXISTS scut_relays (
+                id $id,
+                created_by_probe_id INTEGER NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                status $text NOT NULL,
+                network_id INTEGER NULL,
+                covered_sectors_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                activated_at $nullableText,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(created_by_probe_id) REFERENCES neumann_probes(id),
+                FOREIGN KEY(network_id) REFERENCES scut_networks(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)",
+            "CREATE INDEX IF NOT EXISTS idx_scut_relays_status_sector ON scut_relays(status, sector_x, sector_y, sector_z)",
+            "CREATE INDEX IF NOT EXISTS idx_scut_relays_network ON scut_relays(network_id)",
             "CREATE TABLE IF NOT EXISTS visited_sectors (
                 id $id,
                 player_id INTEGER NOT NULL,
@@ -397,6 +422,7 @@ final class SchemaInitializer
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureProbeMessageSchema($pdo);
+            $this->ensureScutSchema($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
@@ -424,7 +450,45 @@ final class SchemaInitializer
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureProbeMessageSchema($pdo);
+            $this->ensureScutSchema($pdo);
         }
+    }
+
+    private function ensureScutSchema(PDO $pdo): void
+    {
+        $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS scut_networks (
+                id $id,
+                name $text NOT NULL,
+                covered_sectors_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL
+            )"
+        );
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS scut_relays (
+                id $id,
+                created_by_probe_id INTEGER NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                status $text NOT NULL,
+                network_id INTEGER NULL,
+                covered_sectors_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                activated_at $nullableText,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(created_by_probe_id) REFERENCES neumann_probes(id),
+                FOREIGN KEY(network_id) REFERENCES scut_networks(id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_status_sector ON scut_relays(status, sector_x, sector_y, sector_z)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_network ON scut_relays(network_id)');
     }
 
     private function ensureProbeMessageSchema(PDO $pdo): void

@@ -24,6 +24,8 @@ use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
+use VonNeumannGame\Repository\ScutNetworkRepository;
+use VonNeumannGame\Repository\ScutRelayRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
@@ -35,6 +37,7 @@ use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
+use VonNeumannGame\Service\ScutNetworkService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\SectorContentGenerator;
@@ -77,6 +80,9 @@ final class AppFactory
         $items = new ProbeItemRepository($pdo);
         $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
         $messages = new ProbeMessageRepository($pdo);
+        $scutRelays = new ScutRelayRepository($pdo);
+        $scutNetworks = new ScutNetworkRepository($pdo);
+        $scut = new ScutNetworkService($scutRelays, $scutNetworks, $probes);
         $missions = new MissionRepository($pdo);
         $damageWarnings = new ProbeDamageWarningRepository($pdo);
         $forum = new ForumRepository($pdo);
@@ -94,10 +100,10 @@ final class AppFactory
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $gameplayConfig);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService

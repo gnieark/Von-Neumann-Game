@@ -850,12 +850,13 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
     post:
-      summary: Send a message to a local probe or inhabited planet
+      summary: Send a message to a reachable probe or inhabited planet
       description: >
-        Creates an unread message from the current probe to a local recipient.
-        Probe recipients must currently be in the exact same sector as the
-        sender probe. Planet recipients must be inhabited planets in the
-        current sector. If the recipient type is omitted, `probe` is used.
+        Creates an unread message from the current probe to a recipient.
+        Probe recipients must be in the exact same sector as the sender probe,
+        or both probes must be inside coverage of the same active SCUT relay
+        network. Planet recipients must be inhabited planets in the current
+        sector. If the recipient type is omitted, `probe` is used.
       requestBody:
         required: true
         content:
@@ -881,11 +882,33 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Recipient is invalid or not in the current sector
+          description: Recipient is invalid or outside local/SCUT communication range
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/scut-network/{scutNetworkId}:
+    get:
+      summary: Inspect a SCUT relay network covering the current probe
+      parameters:
+        - $ref: '#/components/parameters/ScutNetworkId'
+      responses:
+        '200':
+          description: SCUT network details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScutNetworkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Probe is outside this network coverage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/messages/sent:
     get:
       summary: List messages sent by the current probe
@@ -2131,6 +2154,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/turn-on-relay:
+    post:
+      summary: Send a Manny to turn on a SCUT relay
+      description: >
+        Starts a five-minute Manny task that turns on an inactive SCUT relay in
+        the probe current sector. The task consumes one integrated_circuit from
+        the probe inventory. If the relay joins existing relay coverage, the
+        resulting network keeps the name of the largest existing network, with
+        oldest network as tie-breaker; otherwise networkName or "scut network"
+        is used.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyTurnOnRelayRequest'
+            example:
+              relayId: 12
+              networkName: Delta SCUT
+      responses:
+        '202':
+          description: SCUT relay turn-on task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable, probe moving, or relay already on
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Relay is not in the current sector or the probe lacks an integrated circuit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sector:
     get:
       summary: Observe a sector by player-relative coordinates
@@ -2339,6 +2414,14 @@ components:
         type: integer
         minimum: 1
       example: 12
+    ScutNetworkId:
+      name: scutNetworkId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 4
     DamageWarningId:
       name: damageWarningId
       in: path
@@ -2427,7 +2510,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -3856,6 +3939,19 @@ components:
           maximum: 100
           deprecated: true
           description: Legacy alias for integrityPercent.
+    MannyTurnOnRelayRequest:
+      type: object
+      required: [relayId]
+      properties:
+        relayId:
+          type: integer
+          minimum: 1
+          description: Id of an inactive SCUT relay in the probe current sector.
+        networkName:
+          type: string
+          nullable: true
+          maxLength: 255
+          description: Optional name for a newly isolated network. Ignored when the relay joins existing coverage.
     MannyMineRequest:
       type: object
       required: [objectId, targetAmount]
@@ -4168,6 +4264,100 @@ components:
           description: Detailed current or visited sector objects. Abandoned or forgotten Manny objects are included only when the observed sector is the probe current sector.
           items:
             $ref: '#/components/schemas/SectorObject'
+    ScutNetworkReference:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+    ScutRelay:
+      type: object
+      required: [id, type, name, status, sector, coverageRadiusSectors]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        type:
+          type: string
+          enum: [scut_relay]
+        name:
+          type: string
+        status:
+          type: string
+          enum: [off, on]
+        sector:
+          type: object
+          required: [relative]
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+        createdByProbeId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        activatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        coverageRadiusSectors:
+          type: integer
+          minimum: 0
+        network:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ScutNetworkReference'
+    ScutNetwork:
+      type: object
+      required: [id, name, createdAt, updatedAt, relayCount, coveredSectorCount, relays, probes]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        relayCount:
+          type: integer
+          minimum: 0
+        coveredSectorCount:
+          type: integer
+          minimum: 0
+        relays:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScutRelay'
+        probes:
+          type: array
+          items:
+            type: object
+            required: [id, name, sector]
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              sector:
+                type: object
+                required: [relative]
+                properties:
+                  relative:
+                    $ref: '#/components/schemas/Vector'
+    ScutNetworkResponse:
+      type: object
+      required: [network]
+      properties:
+        network:
+          $ref: '#/components/schemas/ScutNetwork'
     SectorObservation:
       type: object
       required: [relativeCoordinates, distance, knowledgeLevel, confidence, scan]
@@ -4193,6 +4383,11 @@ components:
           description: Other probes detected in the current sector. Present only on current-sector observations when at least one other probe is detected.
           items:
             $ref: '#/components/schemas/SectorProbePresence'
+        scutNetworks:
+          type: array
+          description: SCUT relay networks covering this sector, when known.
+          items:
+            $ref: '#/components/schemas/ScutNetworkReference'
         estimatedObjects:
           type: object
           additionalProperties: true
@@ -4241,7 +4436,7 @@ components:
           description: Opaque object id. Clients must not parse coordinates from it.
         type:
           type: string
-          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container, deuterium_refuel_station]
+          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container, deuterium_refuel_station, scut_relay]
         name:
           type: string
           nullable: true
@@ -4359,6 +4554,27 @@ components:
           type: string
           nullable: true
           description: Present only for deuterium refuel stations; public name of the planet that placed the station.
+        status:
+          type: string
+          enum: [off, on]
+          description: Present only for SCUT relay objects.
+        createdByProbeId:
+          type: integer
+          nullable: true
+          description: Present only for SCUT relay objects.
+        activatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present only for SCUT relay objects.
+        coverageRadiusSectors:
+          type: integer
+          description: Present only for SCUT relay objects.
+        network:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ScutNetworkReference'
+          description: Present only for SCUT relay objects.
     WaypointBookmarkTarget:
       type: object
       required: [id, type, name]

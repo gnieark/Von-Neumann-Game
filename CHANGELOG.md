@@ -4,6 +4,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-06-25
 
+### Added
+
+- API v51 : ajout des relais SCUT persistés en base, de l'action Manny `POST /api/probe/mannies/{mannyId}/turn-on-relay`, de `GET /api/probe/scut-network/{scutNetworkId}`, de la couverture `scutNetworks` dans les scans et de la messagerie entre sondes couvertes par un même réseau SCUT.
+- Debug : ajout de `scripts/create-scut-relay.php` pour créer un relais SCUT éteint dans un secteur absolu donné.
+
 ### Changed
 
 - Interface : `/mannies` exclut les détails de `probe.inventory` des hashes de cartes pour éviter les reconstructions inutiles pendant le polling; les formulaires dépendants de l'inventaire sont construits à l'ouverture de leur accordéon après rafraîchissement de `/api/probe`.

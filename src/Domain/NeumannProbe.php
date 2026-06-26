@@ -30,4 +30,9 @@ final class NeumannProbe
         public string $updatedAt,
         public bool $excludeFromStats,
     ) {}
+
+    public function addIntegrityPercent(float $percentageToAdd, float $maxIntegrityPercent): void
+    {
+        $this->integrityPercent = round(min($maxIntegrityPercent, $this->integrityPercent + $percentageToAdd), 2);
+    }
 }

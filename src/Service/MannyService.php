@@ -38,6 +38,7 @@ final class MannyService
     public const STORAGE_MOVE_ECE_STEP = 0.05;
     public const WAYPOINT_BOOKMARK_INSTALL_SECONDS = 10;
     public const DEUTERIUM_TANK_REFILL_SECONDS = 60;
+    public const SCUT_RELAY_TURN_ON_SECONDS = 300;
     public const MANNY_CARGO_CAPACITY = Manny::CARGO_CAPACITY;
     public const MANNY_CONTAINER_SPACE = Manny::CONTAINER_SPACE;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
@@ -57,6 +58,7 @@ final class MannyService
         private readonly array $config = [],
         ?WaypointBookmarkService $bookmarks = null,
         private readonly ?MissionService $missions = null,
+        private readonly ?ScutNetworkService $scut = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
     }
@@ -620,6 +622,52 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
+    public function startScutRelayTurnOn(NeumannProbe $probe, string $uid, int $relayId, ?string $networkName = null): Manny
+    {
+        if ($this->scut === null) {
+            throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
+        }
+
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to turn on a SCUT relay.');
+        }
+
+        $relay = $this->scut->relayById($relayId)
+            ?? throw new MannyActionException(404, 'scut_relay_not_found', 'SCUT relay not found.');
+        if (!$relay->sector->equals($probe->currentSector)) {
+            throw new MannyActionException(422, 'scut_relay_not_in_sector', 'SCUT relay must be in the current sector.');
+        }
+        if ($relay->isOn()) {
+            throw new MannyActionException(409, 'scut_relay_already_on', 'SCUT relay is already on.');
+        }
+
+        $circuit = $this->firstItemOfType($probe, ProbeItem::TYPE_INTEGRATED_CIRCUIT);
+        if ($circuit === null) {
+            throw new MannyActionException(422, 'missing_electronic_card', 'A SCUT relay requires one integrated circuit.');
+        }
+        $this->items->delete($circuit);
+
+        $durationSeconds = $this->scutRelayTurnOnSeconds();
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manny->currentTask = Manny::TASK_TURNING_ON_SCUT_RELAY;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'relayId' => $relay->id,
+            'networkName' => $networkName !== null ? trim($networkName) : null,
+            'durationSeconds' => $durationSeconds,
+            'consumedItem' => $this->consumedItemPayload($circuit),
+        ];
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
@@ -732,6 +780,16 @@ final class MannyService
         }
         if ($manny->currentTask === Manny::TASK_CRAFTING || $manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
             $this->refundCraftingCommitment($probe, $manny);
+            $this->clearTask($manny);
+            $this->mannies->save($manny);
+
+            return $this->requiredManny($probe, $uid);
+        }
+        if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
+            $consumedItem = is_array($manny->taskPayload['consumedItem'] ?? null) ? $manny->taskPayload['consumedItem'] : null;
+            if ($consumedItem !== null) {
+                $this->restoreConsumedItem($probe, $consumedItem);
+            }
             $this->clearTask($manny);
             $this->mannies->save($manny);
 
@@ -916,6 +974,9 @@ final class MannyService
         if ($manny->currentTask === Manny::TASK_MOVING_STORAGE) {
             return $this->refreshStorageMove($manny, $probe, $now);
         }
+        if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
+            return $this->refreshScutRelayTurnOn($manny, $probe, $now);
+        }
 
         return $manny;
     }
@@ -965,7 +1026,7 @@ final class MannyService
         }
 
         $integrityPercent = (float) ($manny->taskPayload['integrityPercent'] ?? 0);
-        $probe->integrityPercent = round(min($this->maxIntegrityPercent(), $probe->integrityPercent + $integrityPercent), 2);
+        $probe->addIntegrityPercent($integrityPercent, $this->maxIntegrityPercent());
         $this->probes->save($probe);
 
         $this->clearTask($manny);
@@ -1789,6 +1850,40 @@ final class MannyService
             ]);
         }
 
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    private function refreshScutRelayTurnOn(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+        if ($this->scut === null) {
+            throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
+        }
+
+        $relayId = (int) ($manny->taskPayload['relayId'] ?? 0);
+        $networkName = isset($manny->taskPayload['networkName']) && is_string($manny->taskPayload['networkName'])
+            ? $manny->taskPayload['networkName']
+            : null;
+        $result = [
+            'lastTask' => Manny::TASK_TURNING_ON_SCUT_RELAY,
+            'relayId' => $relayId,
+        ];
+
+        try {
+            $relay = $this->scut->turnOnRelay($relayId, $networkName);
+            $result['result'] = 'success';
+            $result['networkId'] = $relay->networkId;
+            $result['status'] = $relay->status;
+        } catch (MannyActionException $e) {
+            $result['result'] = 'failed';
+            $result['failureReason'] = $e->errorCode;
+        }
+
+        $this->clearTask($manny, $result);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -3293,6 +3388,11 @@ final class MannyService
     private function waypointBookmarkInstallSeconds(): int
     {
         return max(1, Config::int($this->config, 'manny.actions.waypointBookmarkInstallSeconds', self::WAYPOINT_BOOKMARK_INSTALL_SECONDS));
+    }
+
+    private function scutRelayTurnOnSeconds(): int
+    {
+        return max(1, Config::int($this->config, 'manny.actions.scutRelayTurnOnSeconds', self::SCUT_RELAY_TURN_ON_SECONDS));
     }
 
     private function storageMoveSecondsPerUnit(): int
