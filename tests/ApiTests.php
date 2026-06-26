@@ -361,6 +361,8 @@ $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT network coverage storage fits radius-10 sector lists');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT relay coverage storage fits radius-10 sector lists');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),
@@ -1901,6 +1903,29 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(1, count($hiddenMinedSector->hiddenDetachedContainersForObject('cache-rock')), 'mining into a hidden target container keeps a single persisted container entry');
         $test->assertEquals(0.211, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a hidden same-asteroid container updates its stored resources');
 
+        $staleHiddenMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
+            'objectId' => 'cache-rock',
+            'resource' => 'metals',
+            'targetAmount' => 0.02,
+            'targetContainerId' => $hiddenDetachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $staleHiddenMine->status, 'Manny mining starts a hidden-container stale-refresh regression task');
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE uid = :uid')->execute([
+            'uid' => $detachSecondMannyId,
+            'started' => gmdate('c', time() - 1000),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $staleHiddenMineA = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
+        $staleHiddenMineB = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
+        $staleHiddenProbe = $probes->findByPlayerId($detachPlayer->id);
+        if ($staleHiddenMineA !== null && $staleHiddenMineB !== null && $staleHiddenProbe !== null) {
+            $mannyService->refreshMannyState($staleHiddenMineA, $staleHiddenProbe);
+            $mannyService->refreshMannyState($staleHiddenMineB, $staleHiddenProbe);
+        }
+        $hiddenMinedSector = $sectorRepository->load($detachProbe->currentSector);
+        $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $test->assertEquals(0.231, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'duplicate stale mining refreshes do not deliver hidden-container mining twice');
+
         $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
         ], JSON_THROW_ON_ERROR));
@@ -1928,7 +1953,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $restoredHiddenContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
-        $test->assertEquals(0.211, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
+        $test->assertEquals(0.231, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
         $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
 
         $dropSector = new SectorContent($detachProbe->currentSector, [
@@ -2872,6 +2897,31 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.99, $depletedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'completed Manny mining subtracts the mined metals from the asteroid');
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('stale-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+    ]));
+    $staleMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'stale-mine-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.04,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $staleMine->status, 'Manny mining starts a stale-refresh regression task');
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $mineMannyDbId,
+        'started' => gmdate('c', time() - 4000),
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $staleMineA = $mannies->findById($mineMannyDbId);
+    $staleMineB = $mannies->findById($mineMannyDbId);
+    $staleMineProbe = $probes->findByPlayerId($player->id);
+    if ($staleMineA !== null && $staleMineB !== null && $staleMineProbe !== null) {
+        $mannyService->refreshMannyState($staleMineA, $staleMineProbe);
+        $mannyService->refreshMannyState($staleMineB, $staleMineProbe);
+    }
+    $test->assertEquals(0.08, $probes->findByPlayerId($player->id)?->metalsStock, 'duplicate stale mining refreshes do not deliver regular mining twice');
+    $staleMinedAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('stale-mine-rock');
+    $test->assertEquals(0.96, $staleMinedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'duplicate stale mining refreshes do not deplete regular mining twice');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('thin-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.005]),
     ]));
     $oversizedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -2920,7 +2970,7 @@ if ($createdProbe !== null) {
     ]);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $mixedProbe = $probes->findByPlayerId($player->id);
-    $test->assertEquals(0.05, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
+    $test->assertEquals(0.09, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
     $test->assertEquals(0.01, $mixedProbe?->iceStock, 'completed multi-resource mining transfers the ice share');
     $test->assertEquals(0.01, $mixedProbe?->organicCompoundsStock, 'completed multi-resource mining transfers the organic-compound share');
     $mixedSector = $sectorRepository->load($createdProbe->currentSector);

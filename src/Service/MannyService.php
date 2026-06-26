@@ -1618,6 +1618,49 @@ final class MannyService
 
     private function refreshMining(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
+        return $this->withMannyRefreshLock(
+            $manny,
+            $probe,
+            fn(Manny $lockedManny): Manny => $this->refreshMiningLocked($lockedManny, $probe, $now),
+        );
+    }
+
+    /**
+     * @param callable(Manny): Manny $callback
+     */
+    private function withMannyRefreshLock(Manny $manny, NeumannProbe $probe, callable $callback): Manny
+    {
+        $path = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR
+            . 'vng-manny-refresh-' . md5(__DIR__) . '-' . $manny->id . '.lock';
+        $handle = @fopen($path, 'c');
+        if ($handle === false) {
+            return $callback($manny);
+        }
+
+        $locked = false;
+        try {
+            $locked = flock($handle, LOCK_EX);
+            if (!$locked) {
+                return $callback($manny);
+            }
+
+            $fresh = $this->mannies->findById($manny->id) ?? $manny;
+            if ($fresh->currentTask !== Manny::TASK_MINING || !$fresh->isInSameSectorAs($probe)) {
+                return $fresh;
+            }
+
+            return $callback($fresh);
+        } finally {
+            if ($locked) {
+                flock($handle, LOCK_UN);
+            }
+            fclose($handle);
+        }
+    }
+
+    private function refreshMiningLocked(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
         if ($manny->taskStartedAt === null) {
             return $manny;
         }

@@ -29,6 +29,7 @@ final class SchemaInitializer
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
         $caseSensitiveText = $this->driver === 'mysql' ? 'VARCHAR(255) COLLATE utf8mb4_bin' : 'TEXT';
+        $largeText = $this->driver === 'mysql' ? 'MEDIUMTEXT' : 'TEXT';
         $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
         $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
 
@@ -289,7 +290,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS scut_networks (
                 id $id,
                 name $text NOT NULL,
-                covered_sectors_json TEXT NOT NULL,
+                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL
             )",
@@ -301,7 +302,7 @@ final class SchemaInitializer
                 sector_z INTEGER NOT NULL,
                 status $text NOT NULL,
                 network_id INTEGER NULL,
-                covered_sectors_json TEXT NOT NULL,
+                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
@@ -459,12 +460,13 @@ final class SchemaInitializer
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+        $largeText = $this->driver === 'mysql' ? 'MEDIUMTEXT' : 'TEXT';
 
         $pdo->exec(
             "CREATE TABLE IF NOT EXISTS scut_networks (
                 id $id,
                 name $text NOT NULL,
-                covered_sectors_json TEXT NOT NULL,
+                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL
             )"
@@ -478,7 +480,7 @@ final class SchemaInitializer
                 sector_z INTEGER NOT NULL,
                 status $text NOT NULL,
                 network_id INTEGER NULL,
-                covered_sectors_json TEXT NOT NULL,
+                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
@@ -486,6 +488,10 @@ final class SchemaInitializer
                 FOREIGN KEY(network_id) REFERENCES scut_networks(id)
             )"
         );
+        if ($this->driver === 'mysql') {
+            $pdo->exec('ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL');
+            $pdo->exec('ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL');
+        }
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_status_sector ON scut_relays(status, sector_x, sector_y, sector_z)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_network ON scut_relays(network_id)');
