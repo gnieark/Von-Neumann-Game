@@ -33,6 +33,8 @@ use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
+use VonNeumannGame\Repository\ScutNetworkRepository;
+use VonNeumannGame\Repository\ScutRelayRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
@@ -44,6 +46,7 @@ use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\SchedulerService;
+use VonNeumannGame\Service\ScutNetworkService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\UniverseStatsService;
 use VonNeumannGame\Service\WaypointBookmarkService;
@@ -358,6 +361,8 @@ $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT network coverage storage fits radius-10 sector lists');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT relay coverage storage fits radius-10 sector lists');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),
@@ -504,6 +509,18 @@ $missionStepSchemaColumns = array_map(
 );
 $test->assert(in_array('mission_id', $missionStepSchemaColumns, true), 'Mission step table links steps to missions');
 $test->assert(in_array('sort_order', $missionStepSchemaColumns, true), 'Mission step table stores step order');
+$scutRelaySchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(scut_relays)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('created_by_probe_id', $scutRelaySchemaColumns, true), 'SCUT relays store their creator probe id');
+$test->assert(in_array('covered_sectors_json', $scutRelaySchemaColumns, true), 'SCUT relays persist their covered sectors');
+$scutNetworkSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(scut_networks)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('name', $scutNetworkSchemaColumns, true), 'SCUT networks store their name');
+$test->assert(in_array('covered_sectors_json', $scutNetworkSchemaColumns, true), 'SCUT networks persist their covered sectors');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -511,6 +528,9 @@ $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
+$scutRelays = new ScutRelayRepository($pdo);
+$scutNetworks = new ScutNetworkRepository($pdo);
+$scut = new ScutNetworkService($scutRelays, $scutNetworks, $probes);
 $missions = new MissionRepository($pdo);
 $damageWarnings = new ProbeDamageWarningRepository($pdo);
 $forum = new ForumRepository($pdo);
@@ -527,14 +547,14 @@ $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(50, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(51, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1073,6 +1093,65 @@ $headers = ['Authorization' => 'Bearer ' . $token];
 $me = $kernel->handle('GET', '/api/me', $headers);
 $test->assertEquals(200, $me->status, 'valid token allows GET /api/me');
 $test->assertEquals('remi', $me->body['player']['username'] ?? null, 'GET /api/me returns the player');
+
+$scutPlayer = $auth->registerPlayerWithPassword('scut-sender', 'secret', 'SCUT Sender', 'SCUT sender probe');
+$scutSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'scut-sender', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$scutHeaders = ['Authorization' => 'Bearer ' . (string) ($scutSession->body['token'] ?? '')];
+$scutProbe = $probes->findByPlayerId($scutPlayer->id) ?? throw new RuntimeException('SCUT test probe missing.');
+$scutRelay = $scut->createOffRelay($scutProbe->currentSector, $scutProbe->id);
+$storage->addItem($scutProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
+$scutMannyId = (string) (($kernel->handle('GET', '/api/probe/mannies', $scutHeaders)->body['mannies'][0]['id'] ?? null) ?? '');
+$scutTurnOn = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/turn-on-relay', $scutHeaders, json_encode([
+    'relayId' => $scutRelay->id,
+    'networkName' => 'Delta SCUT',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(202, $scutTurnOn->status, 'Manny can start turning on a SCUT relay');
+$test->assertEquals('turning_on_scut_relay', $scutTurnOn->body['manny']['currentTask'] ?? null, 'SCUT relay task is exposed on Manny');
+$test->assertEquals(300, $scutTurnOn->body['manny']['task']['durationSeconds'] ?? null, 'SCUT relay turn-on takes five minutes');
+$scutCircuitStillStored = array_values(array_filter(
+    $items->findByProbeId($scutProbe->id),
+    static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_INTEGRATED_CIRCUIT,
+));
+$test->assertEquals(0, count($scutCircuitStillStored), 'SCUT relay turn-on consumes one integrated circuit');
+$scutManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT Manny task missing.');
+$scutManny->taskEndsAt = gmdate('c', time() - 5);
+$mannies->save($scutManny);
+$scutRefresh = $kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
+$test->assertEquals(200, $scutRefresh->status, 'SCUT Manny refresh completes due relay tasks');
+$scutRelay = $scutRelays->findById($scutRelay->id) ?? throw new RuntimeException('SCUT relay missing after activation.');
+$test->assertEquals('on', $scutRelay->status, 'SCUT relay is switched on after task completion');
+$scutNetworkId = (int) ($scutRelay->networkId ?? 0);
+$scutNetwork = $scutNetworks->findById($scutNetworkId);
+$test->assertEquals('Delta SCUT', $scutNetwork?->name, 'Isolated SCUT relay creates the requested network name');
+$test->assert(count($scutRelay->coveredSectors) > 1, 'SCUT relay persists covered sectors');
+$scutSector = $kernel->handle('GET', '/api/probe/sector', $scutHeaders);
+$test->assertEquals(200, $scutSector->status, 'Current sector scan succeeds after SCUT activation');
+$scutRelayObjects = array_values(array_filter(
+    $scutSector->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay',
+));
+$test->assertEquals(1, count($scutRelayObjects), 'Current sector exposes the SCUT relay as a sector object');
+$test->assertEquals($scutNetworkId, $scutSector->body['sector']['scutNetworks'][0]['id'] ?? null, 'Current sector exposes covering SCUT networks');
+
+$scutRemotePlayer = $auth->registerPlayerWithPassword('scut-remote', 'secret', 'SCUT Remote', 'SCUT remote probe');
+$scutRemoteProbe = $probes->findByPlayerId($scutRemotePlayer->id) ?? throw new RuntimeException('SCUT remote probe missing.');
+$scutRemoteProbe->currentSector = new SectorCoordinates(
+    $scutProbe->currentSector->getX() + 10,
+    $scutProbe->currentSector->getY(),
+    $scutProbe->currentSector->getZ(),
+);
+$scutRemoteProbe->enteredCurrentSectorAt = gmdate('c');
+$probes->save($scutRemoteProbe);
+$scutMessage = $kernel->handle('POST', '/api/probe/messages', $scutHeaders, json_encode([
+    'recipient' => ['type' => 'probe', 'id' => $scutRemoteProbe->id],
+    'body' => 'SCUT ping.',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $scutMessage->status, 'SCUT network lets probes communicate across covered sectors');
+$scutNetworkResponse = $kernel->handle('GET', '/api/probe/scut-network/' . $scutNetworkId, $scutHeaders);
+$test->assertEquals(200, $scutNetworkResponse->status, 'Covered probes can inspect a SCUT network');
+$test->assertEquals($scutNetworkId, $scutNetworkResponse->body['network']['id'] ?? null, 'SCUT network endpoint exposes the network id');
+$test->assertEquals(1, $scutNetworkResponse->body['network']['relayCount'] ?? null, 'SCUT network endpoint exposes relay count');
+$test->assert(count($scutNetworkResponse->body['network']['probes'] ?? []) >= 2, 'SCUT network endpoint lists probes in covered sectors');
 
 $forumUser = $auth->registerPlayerWithPassword('forum-user', 'secret', 'Forum User');
 $forumUserSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'forum-user', 'password' => 'secret'], JSON_THROW_ON_ERROR));
@@ -1824,6 +1903,29 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(1, count($hiddenMinedSector->hiddenDetachedContainersForObject('cache-rock')), 'mining into a hidden target container keeps a single persisted container entry');
         $test->assertEquals(0.211, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a hidden same-asteroid container updates its stored resources');
 
+        $staleHiddenMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
+            'objectId' => 'cache-rock',
+            'resource' => 'metals',
+            'targetAmount' => 0.02,
+            'targetContainerId' => $hiddenDetachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $staleHiddenMine->status, 'Manny mining starts a hidden-container stale-refresh regression task');
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE uid = :uid')->execute([
+            'uid' => $detachSecondMannyId,
+            'started' => gmdate('c', time() - 1000),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $staleHiddenMineA = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
+        $staleHiddenMineB = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
+        $staleHiddenProbe = $probes->findByPlayerId($detachPlayer->id);
+        if ($staleHiddenMineA !== null && $staleHiddenMineB !== null && $staleHiddenProbe !== null) {
+            $mannyService->refreshMannyState($staleHiddenMineA, $staleHiddenProbe);
+            $mannyService->refreshMannyState($staleHiddenMineB, $staleHiddenProbe);
+        }
+        $hiddenMinedSector = $sectorRepository->load($detachProbe->currentSector);
+        $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $test->assertEquals(0.231, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'duplicate stale mining refreshes do not deliver hidden-container mining twice');
+
         $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
         ], JSON_THROW_ON_ERROR));
@@ -1851,7 +1953,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $restoredHiddenContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
-        $test->assertEquals(0.211, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
+        $test->assertEquals(0.231, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
         $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
 
         $dropSector = new SectorContent($detachProbe->currentSector, [
@@ -2795,6 +2897,31 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.99, $depletedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'completed Manny mining subtracts the mined metals from the asteroid');
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('stale-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+    ]));
+    $staleMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'stale-mine-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.04,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $staleMine->status, 'Manny mining starts a stale-refresh regression task');
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $mineMannyDbId,
+        'started' => gmdate('c', time() - 4000),
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $staleMineA = $mannies->findById($mineMannyDbId);
+    $staleMineB = $mannies->findById($mineMannyDbId);
+    $staleMineProbe = $probes->findByPlayerId($player->id);
+    if ($staleMineA !== null && $staleMineB !== null && $staleMineProbe !== null) {
+        $mannyService->refreshMannyState($staleMineA, $staleMineProbe);
+        $mannyService->refreshMannyState($staleMineB, $staleMineProbe);
+    }
+    $test->assertEquals(0.08, $probes->findByPlayerId($player->id)?->metalsStock, 'duplicate stale mining refreshes do not deliver regular mining twice');
+    $staleMinedAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('stale-mine-rock');
+    $test->assertEquals(0.96, $staleMinedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'duplicate stale mining refreshes do not deplete regular mining twice');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('thin-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.005]),
     ]));
     $oversizedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -2843,7 +2970,7 @@ if ($createdProbe !== null) {
     ]);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $mixedProbe = $probes->findByPlayerId($player->id);
-    $test->assertEquals(0.05, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
+    $test->assertEquals(0.09, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
     $test->assertEquals(0.01, $mixedProbe?->iceStock, 'completed multi-resource mining transfers the ice share');
     $test->assertEquals(0.01, $mixedProbe?->organicCompoundsStock, 'completed multi-resource mining transfers the organic-compound share');
     $mixedSector = $sectorRepository->load($createdProbe->currentSector);

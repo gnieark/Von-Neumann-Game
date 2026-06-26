@@ -36,6 +36,7 @@
       "miningTickSeconds": 300,
       "salvageSeconds": 300,
       "waypointBookmarkInstallSeconds": 10,
+      "scutRelayTurnOnSeconds": 300,
       "storageMoveSecondsPerUnit": 10,
       "storageMoveEceStep": 0.05
     }

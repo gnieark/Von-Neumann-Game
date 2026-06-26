@@ -85,6 +85,43 @@ final class NeumannProbeRepository
         return array_map(fn(array $row): NeumannProbe => $this->hydrate($row), $stmt->fetchAll());
     }
 
+    /**
+     * @return array<NeumannProbe>
+     */
+    public function findWithinRange(SectorCoordinates $sector, int $radius, ?int $excludeId = null): array
+    {
+        $radius = max(0, $radius);
+        $sql = 'SELECT * FROM neumann_probes
+                WHERE sector_x BETWEEN :min_x AND :max_x
+                  AND sector_y BETWEEN :min_y AND :max_y
+                  AND sector_z BETWEEN :min_z AND :max_z';
+        $params = [
+            'min_x' => $sector->getX() - $radius,
+            'max_x' => $sector->getX() + $radius,
+            'min_y' => $sector->getY() - $radius,
+            'max_y' => $sector->getY() + $radius,
+            'min_z' => $sector->getZ() - $radius,
+            'max_z' => $sector->getZ() + $radius,
+        ];
+        if ($excludeId !== null) {
+            $sql .= ' AND id != :exclude_id';
+            $params['exclude_id'] = $excludeId;
+        }
+        $sql .= ' ORDER BY id ASC';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return array_values(array_filter(
+            array_map(fn(array $row): NeumannProbe => $this->hydrate($row), $stmt->fetchAll()),
+            static fn(NeumannProbe $probe): bool => max(
+                abs($probe->currentSector->getX() - $sector->getX()),
+                abs($probe->currentSector->getY() - $sector->getY()),
+                abs($probe->currentSector->getZ() - $sector->getZ()),
+            ) <= $radius,
+        ));
+    }
+
     public function save(NeumannProbe $probe): void
     {
         $probe->updatedAt = gmdate('c');
