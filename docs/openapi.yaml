@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '50'
+  version: '52'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 50
+                apiVersion: 52
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -161,6 +161,64 @@ paths:
                       type: integrated_circuit
                       name: Integrated circuit
                       containerSpace: 0.001
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: solar_panel
+                    name: Solar panel
+                    description: A foldable photovoltaic panel with printed conductors, crystal substrate, and a reinforced mounting plate.
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: micro_conductor
+                        quantity: 2
+                        unit: item
+                      - type: crystal_substrate
+                        quantity: 1
+                        unit: item
+                      - type: ceramic_insulator
+                        quantity: 1
+                        unit: item
+                      - type: steel_plate
+                        quantity: 1
+                        unit: item
+                      - type: metals
+                        quantity: 0.02
+                        unit: earth_container_equivalent
+                    durationSeconds: 1800
+                    output:
+                      type: solar_panel
+                      name: Solar panel
+                      containerSpace: 0.015
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: scut_relay
+                    name: SCUT relay
+                    description: A long-range SCUT communication relay module with its own solar power array, buffer batteries, control circuits, and deployable structure.
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: steel_plate
+                        quantity: 32
+                        unit: item
+                      - type: steel_bar
+                        quantity: 28
+                        unit: item
+                      - type: battery_pack
+                        quantity: 6
+                        unit: item
+                      - type: solar_panel
+                        quantity: 4
+                        unit: item
+                      - type: integrated_circuit
+                        quantity: 5
+                        unit: item
+                      - type: electric_motor
+                        quantity: 4
+                        unit: item
+                      - type: linear_actuator
+                        quantity: 2
+                        unit: item
+                    durationSeconds: 172800
+                    output:
+                      type: scut_relay
+                      name: SCUT relay
+                      containerSpace: 0.12
                       containerSpaceUnit: earth_container_equivalent
                   - id: manny
                     name: Manny
@@ -2584,7 +2642,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         description:
@@ -2612,7 +2670,7 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, thermal_protection_shell, parachute_pack, descent_guidance_module]
         quantity:
           type: number
           minimum: 0
@@ -2629,7 +2687,7 @@ components:
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         containerSpace:
@@ -3822,7 +3880,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
             amount:
               type: number
               description: Present for discarded resources and deuterium.
@@ -3861,7 +3919,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         containerSpace:
@@ -3893,7 +3951,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         currentTask:
@@ -3996,7 +4054,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
           description: >
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
@@ -4525,7 +4583,7 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         itemType:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
           description: Present only for drifting item stacks.
         quantity:
           type: integer

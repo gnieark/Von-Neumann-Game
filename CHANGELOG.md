@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-26
+
+### Added
+
+- API v52 : ajout des recettes craftables `solar_panel` et `scut_relay`; un relais SCUT complet demande environ 72 h de craft cumulé par une Manny et l'imprimante atomique, hors temps de minage.
+
 ## 2026-06-25
 
 ### Added

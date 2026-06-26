@@ -18,6 +18,8 @@ final class ProbeItem
     public const TYPE_ELECTRIC_MOTOR = 'electric_motor';
     public const TYPE_BATTERY_PACK = 'battery_pack';
     public const TYPE_LINEAR_ACTUATOR = 'linear_actuator';
+    public const TYPE_SOLAR_PANEL = 'solar_panel';
+    public const TYPE_SCUT_RELAY = 'scut_relay';
     public const TYPE_THERMAL_PROTECTION_SHELL = 'thermal_protection_shell';
     public const TYPE_PARACHUTE_PACK = 'parachute_pack';
     public const TYPE_DESCENT_GUIDANCE_MODULE = 'descent_guidance_module';
@@ -34,6 +36,8 @@ final class ProbeItem
     public const ELECTRIC_MOTOR_NAME = 'Electric motor';
     public const BATTERY_PACK_NAME = 'Battery pack';
     public const LINEAR_ACTUATOR_NAME = 'Linear actuator';
+    public const SOLAR_PANEL_NAME = 'Solar panel';
+    public const SCUT_RELAY_NAME = 'SCUT relay';
     public const THERMAL_PROTECTION_SHELL_NAME = 'Thermal protection shell';
     public const PARACHUTE_PACK_NAME = 'Parachute pack';
     public const DESCENT_GUIDANCE_MODULE_NAME = 'Descent guidance module';

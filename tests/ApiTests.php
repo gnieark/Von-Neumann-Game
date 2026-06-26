@@ -554,7 +554,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(51, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(52, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1278,6 +1278,27 @@ $test->assert(isset($recipesById['battery_pack']), 'crafting recipes expose batt
 $test->assertEquals('carbon_compounds', $recipesById['battery_pack']['ingredients'][2]['type'] ?? null, 'battery pack uses organic compounds');
 $test->assert(isset($recipesById['linear_actuator']), 'crafting recipes expose linear actuators');
 $test->assertEquals('electric_motor', $recipesById['linear_actuator']['ingredients'][2]['type'] ?? null, 'linear actuator requires an electric motor');
+$test->assert(isset($recipesById['solar_panel']), 'crafting recipes expose solar panels');
+$test->assertEquals(['manny'], $recipesById['solar_panel']['craftableBy'] ?? null, 'solar panels are assembled by Manny');
+$test->assertEquals('micro_conductor', $recipesById['solar_panel']['ingredients'][0]['type'] ?? null, 'solar panel requires micro conductors');
+$test->assertEquals(2, $recipesById['solar_panel']['ingredients'][0]['quantity'] ?? null, 'solar panel requires two micro conductors');
+$test->assertEquals(1800, $recipesById['solar_panel']['durationSeconds'] ?? null, 'solar panel assembly takes thirty real minutes');
+$test->assertEquals(0.015, $recipesById['solar_panel']['output']['containerSpace'] ?? null, 'solar panel occupies 0.015 containers');
+$test->assert(isset($recipesById['scut_relay']), 'crafting recipes expose SCUT relays');
+$test->assertEquals(['manny'], $recipesById['scut_relay']['craftableBy'] ?? null, 'SCUT relay is assembled by Manny');
+$scutRelayIngredients = [];
+foreach ($recipesById['scut_relay']['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $scutRelayIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(32, $scutRelayIngredients['steel_plate']['quantity'] ?? null, 'SCUT relay requires thirty-two steel plates');
+$test->assertEquals(28, $scutRelayIngredients['steel_bar']['quantity'] ?? null, 'SCUT relay requires twenty-eight steel bars');
+$test->assertEquals(6, $scutRelayIngredients['battery_pack']['quantity'] ?? null, 'SCUT relay requires six battery packs');
+$test->assertEquals(4, $scutRelayIngredients['solar_panel']['quantity'] ?? null, 'SCUT relay requires four solar panels');
+$test->assertEquals(5, $scutRelayIngredients['integrated_circuit']['quantity'] ?? null, 'SCUT relay requires five integrated circuits');
+$test->assertEquals(172800, $recipesById['scut_relay']['durationSeconds'] ?? null, 'prepared SCUT relay assembly takes forty-eight real hours');
+$test->assertEquals(0.12, $recipesById['scut_relay']['output']['containerSpace'] ?? null, 'SCUT relay occupies 0.12 containers');
 $test->assert(isset($recipesById['thermal_protection_shell']), 'crafting recipes expose thermal protection shells');
 $test->assertEquals('ceramic_insulator', $recipesById['thermal_protection_shell']['ingredients'][0]['type'] ?? null, 'thermal protection shells require ceramic insulators');
 $test->assert(isset($recipesById['parachute_pack']), 'crafting recipes expose parachute packs');
@@ -1385,6 +1406,40 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $test->assertEquals(0.1, $storage->resourceStock($freshProbeForStorageRace, 'ice'), 'stale probe storage refresh adds its own resource without rebuilding from old totals');
         $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
     }
+
+    for ($index = 0; $index < 6; $index++) {
+        $storage->addItem($craftProbeEntity, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    }
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, [
+        'metals' => 3.8,
+        'ice' => 0.81,
+        'carbon_compounds' => 1.07,
+    ]);
+    $rawScutRelayCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'scut_relay',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $rawScutRelayCraft->status, 'Manny can start a SCUT relay craft from raw resources');
+    $test->assertEquals(259200, $rawScutRelayCraft->body['manny']['task']['durationSeconds'] ?? null, 'raw SCUT relay craft takes seventy-two real hours');
+    $test->assertEquals(3.8, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['metals'] ?? null, 'raw SCUT relay craft commits its raw metal costs');
+    $test->assertEquals(0.81, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['ice'] ?? null, 'raw SCUT relay craft commits its raw ice costs');
+    $test->assertEquals(1.07, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'raw SCUT relay craft commits its raw organic-compound costs');
+    $test->assertEquals(0.97, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['deuterium'] ?? null, 'raw SCUT relay craft stays within one full deuterium tank');
+    $test->assertEquals(3.0, $probes->findByPlayerId($craftPlayer->id)?->deuteriumStock, 'raw SCUT relay craft consumes ninety-seven percent of the deuterium tank');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $scutRelayProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $scutRelayItems = array_values(array_filter(
+        $scutRelayProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === ProbeItem::TYPE_SCUT_RELAY,
+    ));
+    $test->assertEquals(1, count($scutRelayItems), 'completed SCUT relay craft adds one relay item');
+    $test->assertEquals(0.12, $scutRelayItems[0]['containerSpace'] ?? null, 'crafted SCUT relay item occupies 0.12 containers');
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
 
     $mannyComponentSeeds = [
         [ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, 6],
