@@ -967,6 +967,7 @@ $auth->createApiKeyForPlayer($deletePlayer);
 if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 2) {
     $deleteSentMessage = $messages->create($deleteProbe->id, $createdProbe->id, $deleteProbe->currentSector, 'Deleting sender ping');
     $deleteReceivedMessage = $messages->create($createdProbe->id, $deleteProbe->id, $deleteProbe->currentSector, 'Deleting recipient ping');
+    $deleteRelay = $scutRelays->create($deleteProbe->id, $deleteProbe->currentSector);
     $deleteMission = $missionService->startMission(
         $deleteProbe,
         'delete_test',
@@ -1013,6 +1014,7 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
     $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
+    $test->assertEquals(null, $scutRelays->findById($deleteRelay->id)?->createdByProbeId, 'account deletion keeps SCUT relays but clears the deleted probe creator');
     $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
     $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
     $detachedManny = $mannies->findByUid($outsideManny->uid);
@@ -3703,6 +3705,31 @@ if ($riskProbe !== null) {
         $test->assertEquals(409, $deadSector->status, 'dead probe cannot access current sector details');
         $test->assert(!str_contains(json_encode($destroyedProbe->body, JSON_THROW_ON_ERROR), 'sector_x'), 'dead probe response does not expose absolute coordinates');
 
+        $reassignmentMission = $missionService->startMission(
+            $riskProbe,
+            'reassignment_cleanup_test',
+            'Reassignment cleanup test',
+            steps: [
+                ['title' => 'Stale mission step'],
+            ],
+        );
+        $reassignmentWarning = $destroyedMovement !== null
+            ? $damageWarnings->createStorageContainerBreakWarning(
+                $riskProbe->id,
+                $destroyedMovement->id,
+                'acceleration_end',
+                gmdate('c'),
+                $riskProbe->currentSector,
+                'container-reassignment-test',
+                'Reassignment test container',
+                'reassignment-test-object',
+                20.0,
+                5,
+                'Reassignment cleanup warning.',
+            )
+            : null;
+        $reassignmentRelay = $scutRelays->create($riskProbe->id, $riskProbe->currentSector);
+
         $reassignedProbe = $kernel->handle('POST', '/api/probe/mind-snapshot/reassign', $riskHeaders, json_encode([], JSON_THROW_ON_ERROR));
         $test->assertEquals(200, $reassignedProbe->status, 'POST /api/probe/mind-snapshot/reassign reassigns a dead probe snapshot');
         $test->assertEquals(true, $reassignedProbe->body['reassigned'] ?? null, 'mind snapshot reassignment response confirms the reset');
@@ -3710,6 +3737,9 @@ if ($riskProbe !== null) {
         $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $reassignedProbe->body['probe']['sector']['relative'] ?? null, 'reassigned probe starts at a fresh relative origin');
         $test->assertEquals('idle', $reassignedProbe->body['probe']['status'] ?? null, 'reassigned probe is operational');
         $test->assert($probes->findById($riskProbe->id) === null, 'mind snapshot reassignment deletes the terminal probe');
+        $test->assert($missions->findByUidForProbe($riskProbe->id, $reassignmentMission->uid) === null, 'mind snapshot reassignment deletes terminal probe missions');
+        $test->assert($reassignmentWarning === null || $damageWarnings->findById($reassignmentWarning->id) === null, 'mind snapshot reassignment deletes terminal probe damage warnings before movements');
+        $test->assertEquals(null, $scutRelays->findById($reassignmentRelay->id)?->createdByProbeId, 'mind snapshot reassignment keeps SCUT relays but clears the terminal probe creator');
         $newRiskProbe = $probes->findByPlayerId($riskPlayer->id);
         $updatedRiskPlayer = $players->findById($riskPlayer->id);
         $test->assert($newRiskProbe !== null && $newRiskProbe->id !== $riskProbe->id, 'mind snapshot reassignment creates a fresh probe row');

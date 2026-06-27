@@ -15,6 +15,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- API : la restauration d'un snapshot d'esprit supprime maintenant les alertes de dégâts avant les mouvements, purge les missions de l'ancienne sonde et conserve les relais SCUT en retirant seulement leur référence à la sonde détruite, évitant un `internal_error` sur les sondes mortes avec historique riche.
 - API v50 : les payloads publics de taches Manny n'exposent plus les objets internes de reservation de container detache ni les secteurs cibles absolus.
 - Stockage : la récupération d'un container détaché est désormais idempotente, afin qu'un refresh concurrent ou répété ne recrée pas plusieurs containers portant le même libellé dans l'inventaire.
 
