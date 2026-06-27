@@ -127,8 +127,13 @@ final class ProbeReinstantiationService
              AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :probe_id)',
             ['entity_type' => 'probe_damage_warning', 'probe_id' => $probeId],
         );
-        $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute(
+            'DELETE FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE probe_id = :probe_id)',
+            ['probe_id' => $probeId],
+        );
+        $this->execute('DELETE FROM probe_missions WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM mannies WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM probe_messages WHERE sender_probe_id = :probe_id OR recipient_probe_id = :probe_id',
@@ -141,6 +146,10 @@ final class ProbeReinstantiationService
             ['probe_id' => $probeId],
         );
         $this->execute('DELETE FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute(
+            'UPDATE scut_relays SET created_by_probe_id = NULL, updated_at = :updated_at WHERE created_by_probe_id = :probe_id',
+            ['probe_id' => $probeId, 'updated_at' => gmdate('c')],
+        );
         $this->execute('DELETE FROM neumann_probes WHERE id = :probe_id', ['probe_id' => $probeId]);
     }
 
