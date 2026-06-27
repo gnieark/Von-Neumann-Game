@@ -4258,7 +4258,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, returning, waiting_for_space, moving_stockage]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, returning, waiting_for_space, moving_stockage]
         taskProgressPercent:
           type: number
           minimum: 0
