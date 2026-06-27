@@ -4,8 +4,11 @@
 
     const state = {
         "currentMessageFolder": "received",
+        "currentProbeId": null,
         "currentSectorProbes": [],
         "currentSectorObjects": [],
+        "currentSectorScutNetworks": [],
+        "scutNetworkProbes": [],
         "receivedMessages": [],
         "receivedMessagePagination": null,
         "sentMessages": [],
@@ -117,11 +120,47 @@
     }
 
     function messageRecipients() {
-        return sectorProbeRecipients().concat(sectorPlanetRecipients());
+        const recipients = sectorProbeRecipients().concat(sectorPlanetRecipients(), scutNetworkProbeRecipients());
+        const seen = new Set();
+
+        return recipients.filter((recipient) => {
+            const key = recipientOptionValue(recipient);
+            if (seen.has(key)) {
+                return false;
+            }
+            seen.add(key);
+            return true;
+        });
     }
 
     function recipientOptionValue(recipient) {
         return String(recipient.type || "probe") + ":" + String(recipient.id || "");
+    }
+
+    function scutNetworkProbeRecipients() {
+        return Array.isArray(state.scutNetworkProbes)
+            ? state.scutNetworkProbes
+                .filter((probe) => probe && probe.id && String(probe.id) !== String(state.currentProbeId || ""))
+                .map((probe) => ({
+                    "type": "probe",
+                    "id": String(probe.id),
+                    "name": probe.name || tr("unknownProbe", "Unknown probe"),
+                    "networkName": probe.networkName || "",
+                    "source": "scut",
+                }))
+            : [];
+    }
+
+    function recipientLabel(recipient) {
+        const name = recipient.name || recipient.id || tr("unknownProbe", "Unknown probe");
+        if (recipient && recipient.source === "scut" && recipient.networkName) {
+            return window.VNG.formatText(tr("scutNetworkRecipientLabel", "{probe} via SCUT network {network}"), {
+                "probe": name,
+                "network": recipient.networkName,
+            });
+        }
+
+        return name;
     }
 
     function endpointTypeLabel(type) {
@@ -142,7 +181,7 @@
         const previousValue = select.value;
         const recipients = messageRecipients();
         if (recipients.length === 0) {
-            select.innerHTML = "<option value=\"\">" + window.VNG.escapeHtml(tr("noMessageRecipients", "No other probe or inhabited planet detected in the sector.")) + "</option>";
+            select.innerHTML = "<option value=\"\">" + window.VNG.escapeHtml(tr("noMessageRecipients", "No other probe, inhabited planet, or SCUT network contact detected.")) + "</option>";
             select.disabled = true;
             if (submit) {
                 submit.disabled = true;
@@ -153,7 +192,7 @@
 
         select.innerHTML = recipients.map((recipient) => (
             "<option value=\"" + window.VNG.escapeHtml(recipientOptionValue(recipient)) + "\">"
-                + window.VNG.escapeHtml(endpointTypeLabel(recipient.type) + " - " + (recipient.name || recipient.id))
+                + window.VNG.escapeHtml(endpointTypeLabel(recipient.type) + " - " + recipientLabel(recipient))
             + "</option>"
         )).join("");
         if (previousValue && recipients.some((recipient) => recipientOptionValue(recipient) === previousValue)) {
@@ -333,14 +372,47 @@
 
     async function loadCurrentSector() {
         try {
-            const data = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
-            state.currentSectorProbes = Array.isArray(data && data.sector && data.sector.probes) ? data.sector.probes : [];
-            state.currentSectorObjects = Array.isArray(data && data.sector && data.sector.objects) ? data.sector.objects : [];
+            const [probeData, sectorData] = await Promise.all([
+                window.VNG.apiJson("/api/probe", {"method": "GET"}).catch(() => null),
+                window.VNG.apiJson("/api/probe/sector", {"method": "GET"}),
+            ]);
+            state.currentProbeId = probeData && probeData.probe && probeData.probe.id ? String(probeData.probe.id) : null;
+            state.currentSectorProbes = Array.isArray(sectorData && sectorData.sector && sectorData.sector.probes) ? sectorData.sector.probes : [];
+            state.currentSectorObjects = Array.isArray(sectorData && sectorData.sector && sectorData.sector.objects) ? sectorData.sector.objects : [];
+            state.currentSectorScutNetworks = Array.isArray(sectorData && sectorData.sector && sectorData.sector.scutNetworks) ? sectorData.sector.scutNetworks : [];
+            state.scutNetworkProbes = await loadScutNetworkProbes(state.currentSectorScutNetworks);
         } catch (error) {
+            state.currentProbeId = null;
             state.currentSectorProbes = [];
             state.currentSectorObjects = [];
+            state.currentSectorScutNetworks = [];
+            state.scutNetworkProbes = [];
         }
         renderMessageRecipients();
+    }
+
+    async function loadScutNetworkProbes(networks) {
+        if (!Array.isArray(networks) || networks.length === 0) {
+            return [];
+        }
+
+        const networkDetails = await Promise.all(networks
+            .filter((network) => network && network.id)
+            .map((network) => window.VNG.apiJson("/api/probe/scut-network/" + encodeURIComponent(network.id), {"method": "GET"})
+                .then((data) => data && data.network ? data.network : null)
+                .catch(() => null)));
+
+        return networkDetails.flatMap((network) => {
+            if (!network || !Array.isArray(network.probes)) {
+                return [];
+            }
+
+            return network.probes.map((probe) => ({
+                ...probe,
+                "networkId": network.id,
+                "networkName": network.name || "",
+            }));
+        });
     }
 
     function scheduleRefresh() {

@@ -349,6 +349,9 @@ final class MannyService
         if ($target === null || !$this->isSalvageableTarget($target)) {
             throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
         }
+        if ($target instanceof ScutRelay) {
+            $this->ensureScutRelayNotAlreadyBeingSalvaged($probe, $target, $manny->id);
+        }
 
         $reservedItem = $target instanceof SectorDriftingItem
             ? $this->reserveDriftingItemForSalvage($probe, $target)
@@ -2313,6 +2316,24 @@ final class MannyService
             || ($object instanceof SectorDriftingItem && $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0)
             || $object instanceof SectorDetachedContainer
             || ($object instanceof ScutRelay && !$object->isOn());
+    }
+
+    private function ensureScutRelayNotAlreadyBeingSalvaged(NeumannProbe $probe, ScutRelay $target, int $actorMannyId): void
+    {
+        $targetId = (string) $target->id;
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->id === $actorMannyId || $manny->currentTask !== Manny::TASK_SALVAGE) {
+                continue;
+            }
+
+            $payloadTarget = is_array($manny->taskPayload['target'] ?? null) ? $manny->taskPayload['target'] : [];
+            if (
+                (string) ($manny->taskPayload['objectId'] ?? '') === $targetId
+                && ($payloadTarget['type'] ?? null) === ProbeItem::TYPE_SCUT_RELAY
+            ) {
+                throw new MannyActionException(422, 'invalid_salvage_target', 'This SCUT relay is already being recovered.');
+            }
+        }
     }
 
     private function salvageTargetArray(UniverseObject|ScutRelay $object): array

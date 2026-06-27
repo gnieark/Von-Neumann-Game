@@ -6,9 +6,16 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v55 : les relais SCUT conservent l'id historique de leur sonde créatrice sans clé étrangère bloquante; les payloads de relais exposent `createdByProbeName`, avec le fallback `death probe` quand cet id ne correspond plus à une sonde existante.
+- Interface : `/messaging` propose aussi les sondes joignables via les réseaux SCUT couvrant le secteur courant.
 - Interface : `/mannies` propose l’action Manny d’activation d’un relais SCUT éteint, avec sélection du relais et nom de réseau facultatif, en vérifiant la présence d’un circuit intégré en stock.
 - API v54 : `POST /api/probe/inventory/{itemId}/jettison` déploie désormais un item `scut_relay` comme relais SCUT éteint dans le secteur courant, exposé comme récupérable par les Mannys.
 - API v53 : `POST /api/probe/mannies/{mannyId}/turn-on-relay` exige désormais une étoile dans le secteur courant (`scut_relay_requires_star`) et `POST /api/probe/mannies/{mannyId}/salvage` peut récupérer un relais SCUT éteint présent dans le secteur.
+
+### Fixed
+
+- Interface : un item `scut_relay` en inventaire peut de nouveau être jetisonné depuis la WebUI pour déployer un relais SCUT éteint dans le secteur.
+- Manny : deux Mannys ne peuvent plus démarrer simultanément la récupération du même relais SCUT éteint.
 
 ## 2026-06-26
 

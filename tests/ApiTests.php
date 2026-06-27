@@ -11,6 +11,7 @@ use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
@@ -293,6 +294,7 @@ $manniesTemplate = file_get_contents($root . '/templates/mannies.html');
 $statsTemplate = file_get_contents($root . '/templates/stats.html');
 $statsRoute = file_get_contents($root . '/src/FrontRoute/FrontRouteStats.php');
 $inventoriesScript = file_get_contents($root . '/public/assets/inventories.js');
+$messagingScript = file_get_contents($root . '/public/assets/messaging.js');
 $manniesScript = file_get_contents($root . '/public/assets/mannies.js');
 $statsScript = file_get_contents($root . '/public/assets/stats.js');
 $appCss = file_get_contents($root . '/public/assets/app.css');
@@ -343,6 +345,10 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'integra
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'inactiveScutRelayTargets()'), 'mannies JS detects inactive SCUT relay activation targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'networkName'), 'mannies JS renders the optional SCUT network name field');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'turning_on_scut_relay'), 'mannies JS displays SCUT relay activation tasks');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, 'String(probe.id) !== String(state.currentProbeId'), 'messaging JS excludes the current probe from SCUT network recipients');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, 'scutNetworkRecipientLabel'), 'messaging JS labels SCUT network recipients');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"printer": atomicPrinterItem() ? "available" : null'), 'mannies JS excludes atomic-printer inventory details from the card refresh hash');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'isMannyTaskAssignmentForm'), 'mannies JS can identify task assignment forms');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await loadManniesPage();'), 'mannies JS refreshes Manny cards immediately after a successful task assignment');
@@ -365,6 +371,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_r
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -375,6 +383,7 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT network coverage storage fits radius-10 sector lists');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT relay coverage storage fits radius-10 sector lists');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'FOREIGN KEY(created_by_probe_id)'), 'SCUT relay creator ids are stored without a probe foreign key');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),
@@ -527,6 +536,12 @@ $scutRelaySchemaColumns = array_map(
 );
 $test->assert(in_array('created_by_probe_id', $scutRelaySchemaColumns, true), 'SCUT relays store their creator probe id');
 $test->assert(in_array('covered_sectors_json', $scutRelaySchemaColumns, true), 'SCUT relays persist their covered sectors');
+$scutRelayForeignKeys = $pdo->query('PRAGMA foreign_key_list(scut_relays)')->fetchAll(PDO::FETCH_ASSOC);
+$scutRelayCreatorForeignKeys = array_values(array_filter(
+    $scutRelayForeignKeys,
+    static fn(array $row): bool => ($row['from'] ?? null) === 'created_by_probe_id' && ($row['table'] ?? null) === 'neumann_probes',
+));
+$test->assertEquals(0, count($scutRelayCreatorForeignKeys), 'SCUT relay creator ids do not block probe deletion');
 $scutNetworkSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(scut_networks)')->fetchAll(PDO::FETCH_ASSOC),
@@ -566,7 +581,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(54, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(55, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1026,7 +1041,7 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
     $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
-    $test->assertEquals(null, $scutRelays->findById($deleteRelay->id)?->createdByProbeId, 'account deletion keeps SCUT relays but clears the deleted probe creator');
+    $test->assertEquals($deleteProbe->id, $scutRelays->findById($deleteRelay->id)?->createdByProbeId, 'account deletion keeps SCUT relays with their historical creator id');
     $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
     $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
     $detachedManny = $mannies->findByUid($outsideManny->uid);
@@ -1157,13 +1172,35 @@ $scutRelayObjects = array_values(array_filter(
 ));
 $test->assertEquals(1, count($scutRelayObjects), 'Current sector exposes the SCUT relay as a sector object');
 $test->assertEquals((string) $scutRelay->id, $scutRelayObjects[0]['id'] ?? null, 'SCUT relay sector object exposes a string object id');
+$test->assertEquals($scutProbe->id, $scutRelayObjects[0]['createdByProbeId'] ?? null, 'SCUT relay sector object exposes its historical creator id');
+$test->assertEquals($scutProbe->name, $scutRelayObjects[0]['createdByProbeName'] ?? null, 'SCUT relay sector object resolves a living creator probe name');
 $test->assertEquals($scutNetworkId, $scutSector->body['sector']['scutNetworks'][0]['id'] ?? null, 'Current sector exposes covering SCUT networks');
+$orphanScutRelay = $scut->createOffRelay($scutProbe->currentSector, 987654321);
+$orphanScutSector = $kernel->handle('GET', '/api/probe/sector', $scutHeaders);
+$orphanScutRelayObjects = array_values(array_filter(
+    $orphanScutSector->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay' && ($object['id'] ?? null) === (string) $orphanScutRelay->id,
+));
+$test->assertEquals(1, count($orphanScutRelayObjects), 'SCUT relay sector object survives with an orphan creator id');
+$test->assertEquals(987654321, $orphanScutRelayObjects[0]['createdByProbeId'] ?? null, 'SCUT relay sector object keeps an orphan creator id');
+$test->assertEquals('death probe', $orphanScutRelayObjects[0]['createdByProbeName'] ?? null, 'SCUT relay sector object falls back to death probe for missing creators');
 $scutSalvageRelay = $scut->createOffRelay($scutProbe->currentSector, $scutProbe->id);
 $scutSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/salvage', $scutHeaders, json_encode([
     'objectId' => (string) $scutSalvageRelay->id,
 ], JSON_THROW_ON_ERROR));
 $test->assertEquals(202, $scutSalvage->status, 'Manny can start recovering an inactive SCUT relay from the sector');
 $test->assertEquals(ProbeItem::TYPE_SCUT_RELAY, $scutSalvage->body['manny']['task']['target']['type'] ?? null, 'inactive SCUT relay salvage target is exposed as a SCUT relay item');
+$secondScutSalvageManny = array_values(array_filter(
+    $mannies->findByProbeId($scutProbe->id),
+    static fn(Manny $manny): bool => $manny->uid !== $scutMannyId && $manny->isOnProbe() && $manny->currentTask === null,
+))[0] ?? null;
+if ($secondScutSalvageManny !== null) {
+    $duplicateScutSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondScutSalvageManny->uid) . '/salvage', $scutHeaders, json_encode([
+        'objectId' => (string) $scutSalvageRelay->id,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $duplicateScutSalvage->status, 'second Manny cannot recover the same inactive SCUT relay while salvage is pending');
+    $test->assertEquals('invalid_salvage_target', $duplicateScutSalvage->body['error']['code'] ?? null, 'duplicate SCUT relay salvage returns an explicit salvage-target error');
+}
 $scutSalvageManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT salvage Manny task missing.');
 $scutSalvageManny->taskEndsAt = gmdate('c', time() - 5);
 $mannies->save($scutSalvageManny);
@@ -3859,7 +3896,7 @@ if ($riskProbe !== null) {
         $test->assert($probes->findById($riskProbe->id) === null, 'mind snapshot reassignment deletes the terminal probe');
         $test->assert($missions->findByUidForProbe($riskProbe->id, $reassignmentMission->uid) === null, 'mind snapshot reassignment deletes terminal probe missions');
         $test->assert($reassignmentWarning === null || $damageWarnings->findById($reassignmentWarning->id) === null, 'mind snapshot reassignment deletes terminal probe damage warnings before movements');
-        $test->assertEquals(null, $scutRelays->findById($reassignmentRelay->id)?->createdByProbeId, 'mind snapshot reassignment keeps SCUT relays but clears the terminal probe creator');
+        $test->assertEquals($riskProbe->id, $scutRelays->findById($reassignmentRelay->id)?->createdByProbeId, 'mind snapshot reassignment keeps SCUT relays with their historical creator id');
         $newRiskProbe = $probes->findByPlayerId($riskPlayer->id);
         $updatedRiskPlayer = $players->findById($riskPlayer->id);
         $test->assert($newRiskProbe !== null && $newRiskProbe->id !== $riskProbe->id, 'mind snapshot reassignment creates a fresh probe row');

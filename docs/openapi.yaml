@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 54
+                apiVersion: 55
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -4364,6 +4364,10 @@ components:
         createdByProbeId:
           type: integer
           nullable: true
+        createdByProbeName:
+          type: string
+          nullable: true
+          description: Probe name when the creator still exists, "death probe" when createdByProbeId points to a deleted probe, null when no creator was recorded.
         createdAt:
           type: string
           format: date-time
@@ -4629,6 +4633,10 @@ components:
           type: integer
           nullable: true
           description: Present only for SCUT relay objects.
+        createdByProbeName:
+          type: string
+          nullable: true
+          description: Present only for SCUT relay objects; probe name when the creator still exists, "death probe" when createdByProbeId points to a deleted probe, null when no creator was recorded.
         activatedAt:
           type: string
           format: date-time

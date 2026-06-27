@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 54;
+    public const API_VERSION = 55;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -1620,6 +1620,7 @@ final class ApiKernel
     private function scutRelayArray(Player $player, ScutRelay $relay, bool $includeSector): array
     {
         $network = $relay->networkId !== null ? $this->scut->networkById($relay->networkId) : null;
+        $createdByProbeName = $this->scutRelayCreatorProbeName($relay);
         $payload = [
             'id' => $includeSector ? $relay->id : (string) $relay->id,
             'type' => 'scut_relay',
@@ -1631,6 +1632,7 @@ final class ApiKernel
             'dangerLevel' => 'low',
             'status' => $relay->status,
             'createdByProbeId' => $relay->createdByProbeId,
+            'createdByProbeName' => $createdByProbeName,
             'createdAt' => $relay->createdAt,
             'activatedAt' => $relay->activatedAt,
             'coverageRadiusSectors' => ScutRelay::RADIUS_SECTORS,
@@ -1643,6 +1645,15 @@ final class ApiKernel
         }
 
         return $payload;
+    }
+
+    private function scutRelayCreatorProbeName(ScutRelay $relay): ?string
+    {
+        if ($relay->createdByProbeId === null) {
+            return null;
+        }
+
+        return $this->probes->findById($relay->createdByProbeId)?->name ?? 'death probe';
     }
 
     private function scutNetworkReferenceArray(ScutNetwork $network): array

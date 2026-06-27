@@ -223,6 +223,7 @@
             "crystal_substrate",
             "dopant_matrix",
             "integrated_circuit",
+            "scut_relay",
             "electric_motor",
             "battery_pack",
             "linear_actuator",
