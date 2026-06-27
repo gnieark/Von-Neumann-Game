@@ -8,6 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Interface : ajout de la page `/scut` “SCUT Network”, avec LED de couverture dans le nav-panel, synthèse du réseau courant, sondes détectées et relais listés avec coordonnées relatives.
 - Statistiques publiques : ajout des podiums SCUT des activateurs de relais allumés et des réseaux les plus étendus, ainsi que du nombre de secteurs couverts par au moins un réseau SCUT.
+- API v57 : les endpoints de messages peuvent exposer `type: unknown` pour les émetteurs inconnus; `scripts/add-origin-anomaly-alerts.php` diffuse maintenant le message des plans SCUT après 60 s, puis une seconde alerte d’intégration des plans.
 - API v56 : ajout des alertes persistantes `anomaly_detected` et du script CLI `scripts/add-origin-anomaly-alerts.php`, qui injecte une alerte d’anomalie vers l’origine absolue pour chaque sonde avec une direction approximative relative à sa position courante.
 - API v55 : les relais SCUT conservent l'id historique de leur sonde créatrice sans clé étrangère bloquante; les payloads de relais exposent `createdByProbeName`, avec le fallback `death probe` quand cet id ne correspond plus à une sonde existante.
 - Interface : `/messaging` propose aussi les sondes joignables via les réseaux SCUT couvrant le secteur courant.

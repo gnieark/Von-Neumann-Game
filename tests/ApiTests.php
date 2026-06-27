@@ -335,6 +335,7 @@ $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutNetwor
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Secteurs couverts par au moins un réseau SCUT'"), 'French translations include the SCUT covered-sector metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Sectors covered by at least one SCUT network'"), 'English translations include the SCUT covered-sector metric');
 $test->assert(str_contains($openApi, 'anomaly_detected'), 'OpenAPI documents anomaly-detected alerts');
+$test->assert(str_contains($openApi, 'enum: [probe, planet, unknown]'), 'OpenAPI documents unknown message endpoints');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -663,7 +664,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(56, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(57, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -968,32 +969,61 @@ if ($createdProbe !== null) {
     );
     $anomalyCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-origin-anomaly-alerts.php')
-        . ' --database-config=' . escapeshellarg($userinfosDbConfig);
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --delay-seconds=0';
     exec($anomalyCommand . ' 2>&1', $anomalyOutput, $anomalyStatus);
     $anomalyText = implode("\n", $anomalyOutput);
     $test->assertEquals(0, $anomalyStatus, 'origin anomaly CLI exits successfully');
-    $test->assert(str_contains($anomalyText, 'alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one alert per probe');
+    $test->assert(str_contains($anomalyText, 'initial alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one initial alert per probe');
+    $test->assert(str_contains($anomalyText, 'messages created: ' . $anomalyProbeCount), 'origin anomaly CLI sends one SCUT plans message per probe');
+    $test->assert(str_contains($anomalyText, 'final alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one final alert per probe');
     $test->assertEquals(
-        $anomalyAlertCountBefore + $anomalyProbeCount,
+        $anomalyAlertCountBefore + ($anomalyProbeCount * 2),
         (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn(),
-        'origin anomaly CLI persists one anomaly alert per probe',
+        'origin anomaly CLI persists two anomaly alerts per probe',
+    );
+    $test->assertEquals(
+        $anomalyProbeCount,
+        (int) $pdo->query("SELECT COUNT(*) FROM probe_messages WHERE sender_type = 'unknown' AND sender_id = 'origin-anomaly-broadcast'")->fetchColumn(),
+        'origin anomaly CLI persists one unknown-sender message per probe',
     );
     $anomalyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($anomalyPlayer)['token']];
     $anomalyAlerts = $kernel->handle('GET', '/api/probe/alerts', $anomalyHeaders);
-    $anomalyAlert = null;
+    $initialAnomalyAlert = null;
+    $finalAnomalyAlert = null;
     foreach ($anomalyAlerts->body['alerts'] ?? [] as $alert) {
-        if (($alert['type'] ?? null) === 'anomaly_detected') {
-            $anomalyAlert = $alert;
+        if (($alert['type'] ?? null) !== 'anomaly_detected') {
+            continue;
+        }
+        if (str_starts_with((string) ($alert['message'] ?? ''), 'ANOMALY DETECTED')) {
+            $initialAnomalyAlert = $alert;
+        }
+        if (($alert['message'] ?? null) === 'The "SCUT RELAY" plans have been integrated.') {
+            $finalAnomalyAlert = $alert;
+        }
+    }
+    $test->assert($initialAnomalyAlert !== null, 'GET /api/probe/alerts exposes origin anomaly CLI initial alerts');
+    if ($initialAnomalyAlert !== null) {
+        $test->assertEquals('unread', $initialAnomalyAlert['status'] ?? null, 'origin anomaly alert starts unread');
+        $test->assert(str_contains((string) ($initialAnomalyAlert['message'] ?? ''), 'approximative direction -50 25 -15'), 'origin anomaly alert stores the approximate direction');
+        $test->assert(str_contains((string) ($initialAnomalyAlert['message'] ?? ''), 'Distance unknown.'), 'origin anomaly alert stores the requested distance wording');
+    }
+    $test->assert($finalAnomalyAlert !== null, 'GET /api/probe/alerts exposes SCUT plans integration alerts');
+    $anomalyMessages = $kernel->handle('GET', '/api/probe/messages', $anomalyHeaders);
+    $scutPlansMessage = null;
+    foreach ($anomalyMessages->body['messages'] ?? [] as $message) {
+        if (($message['sender']['type'] ?? null) === 'unknown') {
+            $scutPlansMessage = $message;
             break;
         }
     }
-    $test->assert($anomalyAlert !== null, 'GET /api/probe/alerts exposes origin anomaly CLI alerts');
-    if ($anomalyAlert !== null) {
-        $test->assertEquals('unread', $anomalyAlert['status'] ?? null, 'origin anomaly alert starts unread');
-        $test->assert(str_starts_with((string) ($anomalyAlert['message'] ?? ''), 'ANOMALY DETECTED'), 'origin anomaly alert stores the requested heading');
-        $test->assert(str_contains((string) ($anomalyAlert['message'] ?? ''), 'approximative direction -50 25 -15'), 'origin anomaly alert stores the approximate direction');
-        $test->assert(str_contains((string) ($anomalyAlert['message'] ?? ''), 'Distance unknown.'), 'origin anomaly alert stores the requested distance wording');
+    $test->assert($scutPlansMessage !== null, 'GET /api/probe/messages exposes unknown-sender SCUT plans messages');
+    if ($scutPlansMessage !== null) {
+        $test->assertEquals('Expéditeur inconnu', $scutPlansMessage['sender']['name'] ?? null, 'SCUT plans message exposes the requested unknown sender');
+        $test->assert(str_contains((string) ($scutPlansMessage['body'] ?? ''), 'Attached are the manufacturing specifications for a SCUT relay.'), 'SCUT plans message stores the requested relay specification text');
+        $test->assert(str_contains((string) ($scutPlansMessage['body'] ?? ''), 'Together...'), 'SCUT plans message keeps the requested line breaks in the body');
     }
+    $pdo->exec("DELETE FROM probe_messages WHERE sender_type = 'unknown' AND sender_id = 'origin-anomaly-broadcast'");
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 
     $storageRepairSession = $auth->createSessionForPlayer($player);

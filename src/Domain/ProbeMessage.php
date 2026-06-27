@@ -12,6 +12,7 @@ final class ProbeMessage
     public const STATUS_READ = 'read';
     public const ENDPOINT_PROBE = 'probe';
     public const ENDPOINT_PLANET = 'planet';
+    public const ENDPOINT_UNKNOWN = 'unknown';
 
     public function __construct(
         public readonly int $id,

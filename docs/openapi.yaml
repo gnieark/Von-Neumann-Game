@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '56'
+  version: '57'
 servers:
   - url: /
     description: Current host
@@ -3763,12 +3763,12 @@ components:
       properties:
         type:
           type: string
-          enum: [probe, planet]
+          enum: [probe, planet, unknown]
         id:
           oneOf:
             - type: integer
             - type: string
-          description: Numeric probe id for probe endpoints, opaque planet object id for planet endpoints. Planet ids must not be interpreted as coordinates.
+          description: Numeric probe id for probe endpoints, opaque planet object id for planet endpoints, or opaque sender id for unknown endpoints. Planet ids must not be interpreted as coordinates.
         probeId:
           type: integer
           description: Present when `type` is `probe`.
@@ -3777,7 +3777,7 @@ components:
           description: Present when `type` is `planet`.
         name:
           type: string
-          description: Public endpoint label. Planet endpoint names that would reveal absolute coordinates are replaced by a public label.
+          description: Public endpoint label. Planet endpoint names that would reveal absolute coordinates are replaced by a public label; unknown endpoints may use a generic sender label.
     ProbeInventory:
       type: object
       required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, containers, externalTanks]

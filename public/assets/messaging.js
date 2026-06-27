@@ -167,6 +167,9 @@
         if (type === "planet") {
             return tr("messageEndpointPlanet", "Planet");
         }
+        if (type === "unknown") {
+            return tr("messageEndpointUnknown", "Unknown");
+        }
 
         return tr("messageEndpointProbe", "Probe");
     }

@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 56;
+    public const API_VERSION = 57;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -1902,6 +1902,13 @@ final class ApiKernel
                 'id' => $publicId,
                 'probeId' => $publicId,
                 'name' => $probe?->name ?? $name ?? 'Probe #' . $publicId,
+            ];
+        }
+        if ($type === ProbeMessage::ENDPOINT_UNKNOWN) {
+            return [
+                'type' => ProbeMessage::ENDPOINT_UNKNOWN,
+                'id' => $id,
+                'name' => $name !== null && trim($name) !== '' ? $name : 'Unknown sender',
             ];
         }
 
