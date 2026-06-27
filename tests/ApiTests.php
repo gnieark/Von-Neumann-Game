@@ -306,6 +306,7 @@ $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
+$openApi = file_get_contents($root . '/docs/openapi.yaml');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oauth-remember"'), 'OAuth login view exposes the remember-me checkbox');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
@@ -333,6 +334,7 @@ $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutRelayA
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutNetworkCoverageRows'), 'stats route renders SCUT network coverage rows');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Secteurs couverts par au moins un réseau SCUT'"), 'French translations include the SCUT covered-sector metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Sectors covered by at least one SCUT network'"), 'English translations include the SCUT covered-sector metric');
+$test->assert(str_contains($openApi, 'anomaly_detected'), 'OpenAPI documents anomaly-detected alerts');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -661,7 +663,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(55, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(56, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -931,6 +933,7 @@ if ($createdProbe !== null) {
     $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, '/api/probe/alerts'), 'alerts page uses the generic persistent-alert endpoint');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'replace(/\\r?\\n/g, "<br>")'), 'alerts page renders message line breaks');
 
     $lowFuelCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-deuterium-asteroid-alerts-for-low-fuel.php')
@@ -942,6 +945,55 @@ if ($createdProbe !== null) {
     $lowFuelText = implode("\n", $lowFuelOutput);
     $test->assertEquals(0, $lowFuelStatus, 'low-fuel deuterium asteroid CLI exits successfully');
     $test->assert(str_contains($lowFuelText, 'processed: 1'), 'low-fuel CLI calls the per-player script for matching players');
+    $anomalyPlayer = $auth->registerPlayerWithPassword('origin-anomaly', 'secret', 'Origin Anomaly', 'Origin anomaly probe');
+    $anomalyProbe = $probes->findByPlayerId($anomalyPlayer->id);
+    $test->assert($anomalyProbe !== null, 'origin anomaly test probe is created');
+    if ($anomalyProbe !== null) {
+        $pdo->prepare('UPDATE neumann_probes SET sector_x = 20, sector_y = -10, sector_z = 6, exclude_from_stats = 1 WHERE id = :id')->execute(['id' => $anomalyProbe->id]);
+    }
+    $anomalyProbeCount = (int) $pdo->query('SELECT COUNT(*) FROM neumann_probes')->fetchColumn();
+    $anomalyAlertCountBefore = (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn();
+    $dryRunAnomalyCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-origin-anomaly-alerts.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --dry-run';
+    exec($dryRunAnomalyCommand . ' 2>&1', $dryRunAnomalyOutput, $dryRunAnomalyStatus);
+    $dryRunAnomalyText = implode("\n", $dryRunAnomalyOutput);
+    $test->assertEquals(0, $dryRunAnomalyStatus, 'origin anomaly CLI dry-run exits successfully');
+    $test->assert(str_contains($dryRunAnomalyText, 'direction: -50 25 -15'), 'origin anomaly CLI dry-run computes approximate origin direction');
+    $test->assertEquals(
+        $anomalyAlertCountBefore,
+        (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn(),
+        'origin anomaly CLI dry-run leaves alerts unchanged',
+    );
+    $anomalyCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-origin-anomaly-alerts.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig);
+    exec($anomalyCommand . ' 2>&1', $anomalyOutput, $anomalyStatus);
+    $anomalyText = implode("\n", $anomalyOutput);
+    $test->assertEquals(0, $anomalyStatus, 'origin anomaly CLI exits successfully');
+    $test->assert(str_contains($anomalyText, 'alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one alert per probe');
+    $test->assertEquals(
+        $anomalyAlertCountBefore + $anomalyProbeCount,
+        (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn(),
+        'origin anomaly CLI persists one anomaly alert per probe',
+    );
+    $anomalyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($anomalyPlayer)['token']];
+    $anomalyAlerts = $kernel->handle('GET', '/api/probe/alerts', $anomalyHeaders);
+    $anomalyAlert = null;
+    foreach ($anomalyAlerts->body['alerts'] ?? [] as $alert) {
+        if (($alert['type'] ?? null) === 'anomaly_detected') {
+            $anomalyAlert = $alert;
+            break;
+        }
+    }
+    $test->assert($anomalyAlert !== null, 'GET /api/probe/alerts exposes origin anomaly CLI alerts');
+    if ($anomalyAlert !== null) {
+        $test->assertEquals('unread', $anomalyAlert['status'] ?? null, 'origin anomaly alert starts unread');
+        $test->assert(str_starts_with((string) ($anomalyAlert['message'] ?? ''), 'ANOMALY DETECTED'), 'origin anomaly alert stores the requested heading');
+        $test->assert(str_contains((string) ($anomalyAlert['message'] ?? ''), 'approximative direction -50 25 -15'), 'origin anomaly alert stores the approximate direction');
+        $test->assert(str_contains((string) ($anomalyAlert['message'] ?? ''), 'Distance unknown.'), 'origin anomaly alert stores the requested distance wording');
+    }
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 
     $storageRepairSession = $auth->createSessionForPlayer($player);

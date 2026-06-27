@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '52'
+  version: '56'
 servers:
   - url: /
     description: Current host
@@ -1051,9 +1051,9 @@ paths:
       summary: List persistent probe alerts
       description: >
         Returns persistent alerts produced for the authenticated probe. Alerts
-        currently cover fragile external storage movement warnings and
-        intelligent-life detections when the probe arrives in a sector, plus
-        debug-injected sector object detections.
+        currently cover fragile external storage movement warnings,
+        intelligent-life detections when the probe arrives in a sector,
+        debug-injected sector object detections, and anomaly detections.
       responses:
         '200':
           description: Current and past alerts for the authenticated probe
@@ -1113,6 +1113,18 @@ paths:
                       resourceTypes: [deuterium]
                     createdAt: '2026-06-12T15:00:00+00:00'
                     updatedAt: '2026-06-12T15:00:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                  - id: 10
+                    type: anomaly_detected
+                    status: unread
+                    message: "ANOMALY DETECTED\n\nSensors report a coherent signal propagating through space.\n\nThe signal originates from the approximative direction -50 25 -15 relative to the current position. Distance unknown.\n\nAnalysis in progress."
+                    phase: detection
+                    scheduledAt: '2026-06-12T16:00:00+00:00'
+                    sector:
+                      relative: { x: 20, y: -10, z: 6 }
+                    createdAt: '2026-06-12T16:00:00+00:00'
+                    updatedAt: '2026-06-12T16:00:00+00:00'
                     readAt: null
                     resolvedAt: null
                 rules:
@@ -3639,7 +3651,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, anomaly_detected]
         status:
           type: string
           enum: [unread, read]

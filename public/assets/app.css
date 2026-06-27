@@ -1496,6 +1496,7 @@ button.account-menu-item {
     gap: 12px;
 }
 
+.sector-alert,
 .sector-bookmark-alert,
 .sector-probe-alert,
 .sector-detached-container-alert,
@@ -1521,6 +1522,7 @@ button.account-menu-item {
     display: none;
 }
 
+.sector-alert.acknowledged,
 .sector-bookmark-alert.acknowledged,
 .sector-probe-alert.acknowledged,
 .sector-detached-container-alert.acknowledged,

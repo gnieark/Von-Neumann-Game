@@ -139,6 +139,41 @@ final class ProbeDamageWarningRepository
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe object-detection alert creation failed.');
     }
 
+    public function createAnomalyDetectedAlert(
+        int $probeId,
+        int $movementId,
+        SectorCoordinates $sector,
+        string $message,
+    ): ProbeDamageWarning {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO probe_damage_warnings
+             (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, read_at, resolved_at, created_at, updated_at)
+             VALUES (:probe_id, :movement_id, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, :risk_percent, :additional_container_count, :message, NULL, NULL, :created_at, :updated_at)'
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'movement_id' => $movementId,
+            'type' => ProbeDamageWarning::TYPE_ANOMALY_DETECTED,
+            'status' => ProbeDamageWarning::STATUS_UNREAD,
+            'phase' => 'detection',
+            'scheduled_at' => $now,
+            'sector_x' => $sector->getX(),
+            'sector_y' => $sector->getY(),
+            'sector_z' => $sector->getZ(),
+            'container_id' => '',
+            'container_label' => '',
+            'object_id' => 'origin-anomaly-signal',
+            'risk_percent' => 0.0,
+            'additional_container_count' => 0,
+            'message' => $message,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe anomaly alert creation failed.');
+    }
+
     /**
      * @return array<ProbeDamageWarning>
      */
