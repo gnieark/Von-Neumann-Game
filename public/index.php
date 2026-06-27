@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260627-scut-network-messaging';
+const ASSET_VERSION = '20260627-scut-network-page';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -232,6 +232,16 @@ $availableroutes = [
         'routeClass' => 'FrontRouteMessaging',
         'displayOnMainMenu' => true,
         'displayOnFooter' => false,   
+    ],
+    "SCUT" => [
+        'name'  => 'SCUT Network',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/scut$#',
+        'linkUri' => '/scut',
+        'routeClass' => 'FrontRouteScut',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,
     ],
     "Alerts" => [
         'name'  => translatedRouteName($translator, 'tabAlerts'),

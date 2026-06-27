@@ -287,14 +287,18 @@ $test->assertEquals(
     'OAuth service extracts the OpenID subject without profile data'
 );
 $loginTemplate = file_get_contents($root . '/templates/loginview.html');
+$frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
 $manniesTemplate = file_get_contents($root . '/templates/mannies.html');
+$scutTemplate = file_get_contents($root . '/templates/scut.html');
 $statsTemplate = file_get_contents($root . '/templates/stats.html');
 $statsRoute = file_get_contents($root . '/src/FrontRoute/FrontRouteStats.php');
 $inventoriesScript = file_get_contents($root . '/public/assets/inventories.js');
 $messagingScript = file_get_contents($root . '/public/assets/messaging.js');
+$scutScript = file_get_contents($root . '/public/assets/scut.js');
+$scutRoute = file_get_contents($root . '/src/FrontRoute/FrontRouteScut.php');
 $manniesScript = file_get_contents($root . '/public/assets/mannies.js');
 $statsScript = file_get_contents($root . '/public/assets/stats.js');
 $appCss = file_get_contents($root . '/public/assets/app.css');
@@ -306,6 +310,15 @@ $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oau
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'url.searchParams.set("remember", "1")'), 'main JS sends remember=1 when OAuth remember-me is checked');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut$#'"), 'front routes expose the SCUT Network page');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT Network'"), 'SCUT Network route keeps the requested nav title');
+$test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js'), 'SCUT front route loads the SCUT page script');
+$test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
+$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/sector'), 'SCUT page reads current sector coverage');
+$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/scut-network/'), 'SCUT page reads existing network details');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigationScutCoverage'), 'main JS can set SCUT nav LED state');
+$test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');

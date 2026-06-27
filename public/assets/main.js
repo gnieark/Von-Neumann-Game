@@ -353,6 +353,12 @@ function setNavigationWarning(path, active, warning) {
     });
 }
 
+function setNavigationScutCoverage(active) {
+    navLinkNodes("/scut").forEach((node) => {
+        node.classList.toggle("scut-network-available", Boolean(active));
+    });
+}
+
 function sectorAlertStorageKey(type, sector, signature) {
     const relative = sector && sector.relativeCoordinates ? sector.relativeCoordinates : null;
     return [
@@ -518,8 +524,10 @@ async function syncNavigationWarnings() {
     if (sectorData) {
         const alerts = sectorAlerts(sectorData.sector || {}, messages);
         setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged) || unreadPersistentAlerts, unreadDamageWarnings);
+        setNavigationScutCoverage(Array.isArray(sectorData.sector && sectorData.sector.scutNetworks) && sectorData.sector.scutNetworks.length > 0);
     } else {
         setNavigationWarning("/alerts", unreadPersistentAlerts, unreadDamageWarnings);
+        setNavigationScutCoverage(false);
     }
 }
 
@@ -551,6 +559,7 @@ window.VNG = {
     renderMetrics,
     restoreDisclosureIds,
     sectorAlerts,
+    setNavigationScutCoverage,
     setNavigationWarning,
     startNavigationWarningSync,
     syncNavigationWarnings,
