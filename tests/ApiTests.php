@@ -311,8 +311,10 @@ $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oa
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'url.searchParams.set("remember", "1")'), 'main JS sends remember=1 when OAuth remember-me is checked');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut$#'"), 'front routes expose the SCUT Network page');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT Network'"), 'SCUT Network route keeps the requested nav title');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT'"), 'SCUT route keeps the requested short nav title');
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js'), 'SCUT front route loads the SCUT page script');
+$test->assert(is_string($scutRoute) && str_contains($scutRoute, 'Subspace Communications Universal Transceiver'), 'SCUT route uses the expanded page title');
+$test->assert(is_string($scutTemplate) && str_contains($scutTemplate, '<h2>Subspace Communications Universal Transceiver</h2>'), 'SCUT template exposes the expanded visible heading');
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
 $test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/sector'), 'SCUT page reads current sector coverage');
 $test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/scut-network/'), 'SCUT page reads existing network details');
@@ -324,7 +326,13 @@ $test->assert(is_string($movementScript) && str_contains($movementScript, 'curre
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-network-coverage-podium-title'), 'stats view exposes the SCUT network coverage podium');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'data-stats-podium-extra hidden'), 'stats route renders extra ranking rows as hidden by default');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutRelayActivatorRows'), 'stats route renders SCUT relay activator rows');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutNetworkCoverageRows'), 'stats route renders SCUT network coverage rows');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Secteurs couverts par au moins un réseau SCUT'"), 'French translations include the SCUT covered-sector metric');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Sectors covered by at least one SCUT network'"), 'English translations include the SCUT covered-sector metric');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -447,6 +455,7 @@ $statsRankingFactory->initializeSchema($statsRankingPdo);
 $statsRankingPlayers = new PlayerRepository($statsRankingPdo);
 $statsRankingProbes = new NeumannProbeRepository($statsRankingPdo);
 $statsRankingVisitedSectors = new VisitedSectorRepository($statsRankingPdo);
+$statsRankingProbeRows = [];
 for ($ranking = 1; $ranking <= 10; $ranking++) {
     $rankingPlayer = $statsRankingPlayers->createPlayer(
         'stats-ranking-' . $ranking,
@@ -454,10 +463,60 @@ for ($ranking = 1; $ranking <= 10; $ranking++) {
         null,
         new SectorCoordinates(200 + ($ranking * 2), 0, 0),
     );
-    $statsRankingProbes->createForPlayer($rankingPlayer->id, 'Stats Ranking Probe ' . $ranking, $rankingPlayer->homeSector);
+    $statsRankingProbeRows[$ranking] = $statsRankingProbes->createForPlayer($rankingPlayer->id, 'Stats Ranking Probe ' . $ranking, $rankingPlayer->homeSector);
     for ($visit = 0; $visit <= 10 - $ranking; $visit++) {
         $statsRankingVisitedSectors->markVisited($rankingPlayer, new SectorCoordinates(200 + ($ranking * 2), $visit * 2, 0));
     }
+}
+$statsScutNetworkInsert = $statsRankingPdo->prepare(
+    'INSERT INTO scut_networks (name, covered_sectors_json, created_at, updated_at)
+     VALUES (:name, :covered_sectors_json, :created_at, :updated_at)'
+);
+$statsScutRelayInsert = $statsRankingPdo->prepare(
+    'INSERT INTO scut_relays
+     (created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, covered_sectors_json, created_at, activated_at, updated_at)
+     VALUES (:created_by_probe_id, :x, :y, :z, :status, :network_id, :covered_sectors_json, :created_at, :activated_at, :updated_at)'
+);
+$statsScutNetworkOneCoverage = [
+    ['x' => 0, 'y' => 0, 'z' => 0],
+    ['x' => 2, 'y' => 0, 'z' => 0],
+    ['x' => 4, 'y' => 0, 'z' => 0],
+];
+$statsScutNetworkTwoCoverage = [
+    ['x' => 2, 'y' => 0, 'z' => 0],
+    ['x' => 6, 'y' => 0, 'z' => 0],
+];
+$statsScutNetworkInsert->execute([
+    'name' => 'Stats SCUT Alpha',
+    'covered_sectors_json' => json_encode($statsScutNetworkOneCoverage, JSON_THROW_ON_ERROR),
+    'created_at' => '2026-01-01T00:00:00+00:00',
+    'updated_at' => '2026-01-01T00:00:00+00:00',
+]);
+$statsScutNetworkOneId = (int) $statsRankingPdo->lastInsertId();
+$statsScutNetworkInsert->execute([
+    'name' => 'Stats SCUT Beta',
+    'covered_sectors_json' => json_encode($statsScutNetworkTwoCoverage, JSON_THROW_ON_ERROR),
+    'created_at' => '2026-01-02T00:00:00+00:00',
+    'updated_at' => '2026-01-02T00:00:00+00:00',
+]);
+$statsScutNetworkTwoId = (int) $statsRankingPdo->lastInsertId();
+foreach ([
+    [$statsRankingProbeRows[1]->id, $statsScutNetworkOneId, 'on', $statsScutNetworkOneCoverage],
+    [$statsRankingProbeRows[1]->id, $statsScutNetworkTwoId, 'on', $statsScutNetworkTwoCoverage],
+    [$statsRankingProbeRows[2]->id, $statsScutNetworkTwoId, 'off', array_merge($statsScutNetworkOneCoverage, $statsScutNetworkTwoCoverage)],
+] as $relayIndex => [$creatorProbeId, $networkId, $status, $coverage]) {
+    $statsScutRelayInsert->execute([
+        'created_by_probe_id' => $creatorProbeId,
+        'x' => 300 + ($relayIndex * 2),
+        'y' => 0,
+        'z' => 0,
+        'status' => $status,
+        'network_id' => $networkId,
+        'covered_sectors_json' => json_encode($coverage, JSON_THROW_ON_ERROR),
+        'created_at' => '2026-01-01T00:00:00+00:00',
+        'activated_at' => $status === 'on' ? '2026-01-01T00:00:00+00:00' : null,
+        'updated_at' => '2026-01-01T00:00:00+00:00',
+    ]);
 }
 $rankingStats = (new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe'))->collect();
 $topRankingProbes = $rankingStats['metrics']['topVisitedProbes'] ?? [];
@@ -465,6 +524,14 @@ $test->assertEquals(9, count($topRankingProbes), 'public stats visited-sector ra
 $test->assertEquals('Stats Ranking Probe 1', $topRankingProbes[0]['probeName'] ?? null, 'public stats top-nine ranking keeps the first-ranked probe first');
 $test->assertEquals('Stats Ranking Probe 9', $topRankingProbes[8]['probeName'] ?? null, 'public stats top-nine ranking keeps the ninth-ranked probe visible');
 $test->assert(!in_array('Stats Ranking Probe 10', array_column($topRankingProbes, 'probeName'), true), 'public stats top-nine ranking excludes the tenth row');
+$test->assertEquals(4, $rankingStats['metrics']['scutCoveredSectors'] ?? null, 'public stats count sectors covered by at least one SCUT network once');
+$topScutRelayActivators = $rankingStats['metrics']['topScutRelayActivators'] ?? [];
+$test->assertEquals('Stats Ranking Probe 1', $topScutRelayActivators[0]['probeName'] ?? null, 'public stats SCUT activator podium ranks relay creators');
+$test->assertEquals(2, $topScutRelayActivators[0]['activatedRelays'] ?? null, 'public stats SCUT activator podium counts online relays only');
+$topScutNetworksByCoverage = $rankingStats['metrics']['topScutNetworksByCoverage'] ?? [];
+$test->assertEquals('Stats SCUT Alpha', $topScutNetworksByCoverage[0]['networkName'] ?? null, 'public stats SCUT network coverage podium ranks networks by covered sectors');
+$test->assertEquals(3, $topScutNetworksByCoverage[0]['coveredSectors'] ?? null, 'public stats SCUT network coverage podium exposes covered-sector counts');
+$test->assert(!in_array(5, array_column($topScutNetworksByCoverage, 'coveredSectors'), true), 'public stats SCUT network coverage podium is not based on relay coverage');
 
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();

@@ -8,6 +8,7 @@ use PDO;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use VonNeumannGame\Domain\ResourceComposition;
+use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
 
@@ -33,6 +34,7 @@ final class UniverseStatsService
         $probeDistances = $this->probeDistances($probeRows);
         $waypointStats = $this->waypointStats();
         $intelligentLifeStats = $this->intelligentLifeDiscoveryStats();
+        $scutStats = $this->scutStats();
 
         return [
             'generatedAt' => gmdate('c'),
@@ -52,11 +54,14 @@ final class UniverseStatsService
                 'closestProbeDistance' => $probeDistances['closest'],
                 'waypointBookmarksInstalled' => $waypointStats['installed'],
                 'intelligentLifeWorlds' => $intelligentLifeStats['worlds'],
+                'scutCoveredSectors' => $scutStats['coveredSectors'],
                 'successfulMissions' => 0,
                 'failedMissions' => 0,
                 'topVisitedProbes' => $this->topVisitedProbes(),
                 'topWaypointPlayers' => $waypointStats['topPlayers'],
                 'topIntelligentLifeDiscoverers' => $intelligentLifeStats['topDiscoverers'],
+                'topScutRelayActivators' => $scutStats['topActivators'],
+                'topScutNetworksByCoverage' => $scutStats['topNetworks'],
             ],
         ];
     }
@@ -237,6 +242,124 @@ final class UniverseStatsService
     }
 
     /**
+     * @return array{
+     *     coveredSectors: int,
+     *     topActivators: array<int, array{rank: int, probeName: string, activatedRelays: int}>,
+     *     topNetworks: array<int, array{rank: int, networkId: int, networkName: string, coveredSectors: int}>
+     * }
+     */
+    private function scutStats(): array
+    {
+        $coveredSectors = [];
+        $networkStmt = $this->pdo->query('SELECT id, name, covered_sectors_json FROM scut_networks ORDER BY id ASC');
+        $networkRows = $networkStmt === false ? [] : $networkStmt->fetchAll(PDO::FETCH_ASSOC);
+        $topNetworks = [];
+        foreach ($networkRows as $row) {
+            $networkCoveredSectors = $this->decodedSectors((string) ($row['covered_sectors_json'] ?? '[]'));
+            foreach ($networkCoveredSectors as $sector) {
+                $coveredSectors[$this->sectorKeyFromArray($sector)] = true;
+            }
+            $networkId = (int) ($row['id'] ?? 0);
+            $topNetworks[] = [
+                'networkId' => $networkId,
+                'networkName' => trim((string) ($row['name'] ?? '')) !== '' ? trim((string) $row['name']) : 'SCUT network #' . $networkId,
+                'coveredSectors' => count($networkCoveredSectors),
+            ];
+        }
+
+        $relayStmt = $this->pdo->query(
+            "SELECT scut_relays.id, scut_relays.created_by_probe_id,
+                    neumann_probes.id AS probe_id,
+                    neumann_probes.name AS probe_name,
+                    neumann_probes.exclude_from_stats AS probe_excluded
+             FROM scut_relays
+             LEFT JOIN neumann_probes ON neumann_probes.id = scut_relays.created_by_probe_id
+             WHERE scut_relays.status = '" . ScutRelay::STATUS_ON . "'
+             ORDER BY scut_relays.id ASC"
+        );
+        $relayRows = $relayStmt === false ? [] : $relayStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $activators = [];
+        foreach ($relayRows as $row) {
+            $creatorId = $row['created_by_probe_id'] !== null ? (int) $row['created_by_probe_id'] : null;
+            if ($creatorId === null) {
+                continue;
+            }
+            if ($row['probe_id'] !== null && (int) ($row['probe_excluded'] ?? 0) === 1) {
+                continue;
+            }
+
+            $probeName = trim((string) ($row['probe_name'] ?? ''));
+            if ($probeName === '') {
+                $probeName = 'death probe';
+            }
+            $key = 'probe:' . $creatorId;
+            if (!isset($activators[$key])) {
+                $activators[$key] = [
+                    'probeName' => $probeName,
+                    'activatedRelays' => 0,
+                ];
+            }
+            $activators[$key]['activatedRelays']++;
+        }
+
+        uasort($activators, static fn(array $a, array $b): int => (
+            ($b['activatedRelays'] <=> $a['activatedRelays'])
+            ?: strcasecmp($a['probeName'], $b['probeName'])
+        ));
+        usort($topNetworks, static fn(array $a, array $b): int => (
+            ($b['coveredSectors'] <=> $a['coveredSectors'])
+            ?: strcasecmp($a['networkName'], $b['networkName'])
+            ?: ($a['networkId'] <=> $b['networkId'])
+        ));
+
+        return [
+            'coveredSectors' => count($coveredSectors),
+            'topActivators' => $this->rankedScutActivators($activators),
+            'topNetworks' => $this->rankedScutNetworks($topNetworks),
+        ];
+    }
+
+    /**
+     * @param array<string, array{probeName: string, activatedRelays: int}> $activators
+     * @return array<int, array{rank: int, probeName: string, activatedRelays: int}>
+     */
+    private function rankedScutActivators(array $activators): array
+    {
+        $rank = 1;
+        $topActivators = [];
+        foreach (array_slice($activators, 0, self::PUBLIC_RANKING_LIMIT) as $activator) {
+            $topActivators[] = [
+                'rank' => $rank++,
+                'probeName' => $activator['probeName'],
+                'activatedRelays' => $activator['activatedRelays'],
+            ];
+        }
+
+        return $topActivators;
+    }
+
+    /**
+     * @param array<int, array{networkId: int, networkName: string, coveredSectors: int}> $networks
+     * @return array<int, array{rank: int, networkId: int, networkName: string, coveredSectors: int}>
+     */
+    private function rankedScutNetworks(array $networks): array
+    {
+        $rank = 1;
+        $topNetworks = [];
+        foreach (array_slice($networks, 0, self::PUBLIC_RANKING_LIMIT) as $network) {
+            $topNetworks[] = [
+                'rank' => $rank++,
+                'networkId' => $network['networkId'],
+                'networkName' => $network['networkName'],
+                'coveredSectors' => $network['coveredSectors'],
+            ];
+        }
+
+        return $topNetworks;
+    }
+
+    /**
      * @return array<string, array{playerId: int, playerName: string}>
      */
     private function firstDiscoverersBySector(): array
@@ -393,6 +516,31 @@ final class UniverseStatsService
         }
 
         return is_array($data) ? $data : null;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function decodedSectors(string $json): array
+    {
+        try {
+            $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return [];
+        }
+
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $sectors = [];
+        foreach ($decoded as $sector) {
+            if (is_array($sector)) {
+                $sectors[$this->sectorKeyFromArray($sector)] = $sector;
+            }
+        }
+
+        return array_values($sectors);
     }
 
     /**
@@ -651,6 +799,18 @@ final class UniverseStatsService
             (int) ($coordinates['x'] ?? 0),
             (int) ($coordinates['y'] ?? 0),
             (int) ($coordinates['z'] ?? 0),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $sector
+     */
+    private function sectorKeyFromArray(array $sector): string
+    {
+        return $this->sectorKey(
+            (int) ($sector['x'] ?? 0),
+            (int) ($sector['y'] ?? 0),
+            (int) ($sector['z'] ?? 0),
         );
     }
 

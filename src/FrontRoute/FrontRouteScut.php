@@ -29,7 +29,7 @@ class FrontRouteScut extends FrontRoute{
 
     public function getPageTitle(?string $bearer, string $language): string
     {
-        return 'Von Neumann Game - SCUT Network';
+        return 'Von Neumann Game - Subspace Communications Universal Transceiver';
     }
 
     public function getCustomJs(): string
