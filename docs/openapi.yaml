@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '50'
+  version: '57'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 50
+                apiVersion: 55
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -161,6 +161,64 @@ paths:
                       type: integrated_circuit
                       name: Integrated circuit
                       containerSpace: 0.001
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: solar_panel
+                    name: Solar panel
+                    description: A foldable photovoltaic panel with printed conductors, crystal substrate, and a reinforced mounting plate.
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: micro_conductor
+                        quantity: 2
+                        unit: item
+                      - type: crystal_substrate
+                        quantity: 1
+                        unit: item
+                      - type: ceramic_insulator
+                        quantity: 1
+                        unit: item
+                      - type: steel_plate
+                        quantity: 1
+                        unit: item
+                      - type: metals
+                        quantity: 0.02
+                        unit: earth_container_equivalent
+                    durationSeconds: 1800
+                    output:
+                      type: solar_panel
+                      name: Solar panel
+                      containerSpace: 0.015
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: scut_relay
+                    name: SCUT relay
+                    description: A long-range SCUT communication relay module with its own solar power array, buffer batteries, control circuits, and deployable structure.
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: steel_plate
+                        quantity: 32
+                        unit: item
+                      - type: steel_bar
+                        quantity: 28
+                        unit: item
+                      - type: battery_pack
+                        quantity: 6
+                        unit: item
+                      - type: solar_panel
+                        quantity: 4
+                        unit: item
+                      - type: integrated_circuit
+                        quantity: 5
+                        unit: item
+                      - type: electric_motor
+                        quantity: 4
+                        unit: item
+                      - type: linear_actuator
+                        quantity: 2
+                        unit: item
+                    durationSeconds: 172800
+                    output:
+                      type: scut_relay
+                      name: SCUT relay
+                      containerSpace: 0.12
                       containerSpaceUnit: earth_container_equivalent
                   - id: manny
                     name: Manny
@@ -993,9 +1051,9 @@ paths:
       summary: List persistent probe alerts
       description: >
         Returns persistent alerts produced for the authenticated probe. Alerts
-        currently cover fragile external storage movement warnings and
-        intelligent-life detections when the probe arrives in a sector, plus
-        debug-injected sector object detections.
+        currently cover fragile external storage movement warnings,
+        intelligent-life detections when the probe arrives in a sector,
+        debug-injected sector object detections, and anomaly detections.
       responses:
         '200':
           description: Current and past alerts for the authenticated probe
@@ -1055,6 +1113,18 @@ paths:
                       resourceTypes: [deuterium]
                     createdAt: '2026-06-12T15:00:00+00:00'
                     updatedAt: '2026-06-12T15:00:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                  - id: 10
+                    type: anomaly_detected
+                    status: unread
+                    message: "ANOMALY DETECTED\n\nSensors report a coherent signal propagating through space.\n\nThe signal originates from the approximative direction -50 25 -15 relative to the current position. Distance unknown.\n\nAnalysis in progress."
+                    phase: detection
+                    scheduledAt: '2026-06-12T16:00:00+00:00'
+                    sector:
+                      relative: { x: 20, y: -10, z: 6 }
+                    createdAt: '2026-06-12T16:00:00+00:00'
+                    updatedAt: '2026-06-12T16:00:00+00:00'
                     readAt: null
                     resolvedAt: null
                 rules:
@@ -1466,10 +1536,11 @@ paths:
       summary: Jettison an inventory entry into space
       description: >
         Discards stored metals/non-metal materials by amount, ejects an idle onboard Manny
-        into the current sector, or adds supported crafted items to an aggregated
-        drifting-item stack in the current sector. Non-persisted core equipment
-        and additional containers cannot be jettisoned. The external deuterium
-        tank is not jettisonable.
+        into the current sector, deploys a scut_relay item as an inactive SCUT
+        relay in the current sector, or adds other supported crafted items to an
+        aggregated drifting-item stack in the current sector. Non-persisted core
+        equipment and additional containers cannot be jettisoned. The external
+        deuterium tank is not jettisonable.
       parameters:
         - name: itemId
           in: path
@@ -1753,8 +1824,11 @@ paths:
     post:
       summary: Recover a drifting sector object with a Manny
       description: >
-        Starts a five-minute recovery task. The target is checked again when
-        the delay ends; if another player has already recovered it, the task
+        Starts a five-minute recovery task. Recoverable targets include
+        abandoned Mannys, drifting item stacks, detached storage containers, and
+        inactive SCUT relays present in the probe current sector. The target is
+        checked again when the delay ends; if another player has already
+        recovered it or an inactive relay has been switched on, the task
         completes with a failed result and no object is transferred.
       parameters:
         - $ref: '#/components/parameters/MannyId'
@@ -2159,11 +2233,12 @@ paths:
       summary: Send a Manny to turn on a SCUT relay
       description: >
         Starts a five-minute Manny task that turns on an inactive SCUT relay in
-        the probe current sector. The task consumes one integrated_circuit from
-        the probe inventory. If the relay joins existing relay coverage, the
-        resulting network keeps the name of the largest existing network, with
-        oldest network as tie-breaker; otherwise networkName or "scut network"
-        is used.
+        the probe current sector. The current sector must contain a star because
+        the relay needs solar energy. The task consumes one integrated_circuit
+        from the probe inventory. If the relay joins existing relay coverage,
+        the resulting network keeps the name of the largest existing network,
+        with oldest network as tie-breaker; otherwise networkName or "scut
+        network" is used.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -2201,7 +2276,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Relay is not in the current sector or the probe lacks an integrated circuit
+          description: Relay is not in the current sector, the sector has no star, or the probe lacks an integrated circuit
           content:
             application/json:
               schema:
@@ -2510,7 +2585,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -2584,7 +2659,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         description:
@@ -2612,7 +2687,7 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, thermal_protection_shell, parachute_pack, descent_guidance_module]
         quantity:
           type: number
           minimum: 0
@@ -2629,7 +2704,7 @@ components:
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         containerSpace:
@@ -3576,7 +3651,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, anomaly_detected]
         status:
           type: string
           enum: [unread, read]
@@ -3688,12 +3763,12 @@ components:
       properties:
         type:
           type: string
-          enum: [probe, planet]
+          enum: [probe, planet, unknown]
         id:
           oneOf:
             - type: integer
             - type: string
-          description: Numeric probe id for probe endpoints, opaque planet object id for planet endpoints. Planet ids must not be interpreted as coordinates.
+          description: Numeric probe id for probe endpoints, opaque planet object id for planet endpoints, or opaque sender id for unknown endpoints. Planet ids must not be interpreted as coordinates.
         probeId:
           type: integer
           description: Present when `type` is `probe`.
@@ -3702,7 +3777,7 @@ components:
           description: Present when `type` is `planet`.
         name:
           type: string
-          description: Public endpoint label. Planet endpoint names that would reveal absolute coordinates are replaced by a public label.
+          description: Public endpoint label. Planet endpoint names that would reveal absolute coordinates are replaced by a public label; unknown endpoints may use a generic sender label.
     ProbeInventory:
       type: object
       required: [capacity, capacityUnit, usedCapacity, freeCapacity, items, resourceStocks, containers, externalTanks]
@@ -3822,7 +3897,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
             amount:
               type: number
               description: Present for discarded resources and deuterium.
@@ -3834,7 +3909,11 @@ components:
               description: Total quantity of this crafted item type now drifting in the current sector.
             objectId:
               type: string
-              description: Current-sector drifting item object id for crafted item jettison.
+              description: Current-sector drifting item object id for crafted item jettison, or SCUT relay object id for scut_relay jettison.
+            status:
+              type: string
+              enum: [off]
+              description: Present for scut_relay jettison.
             containerSpace:
               type: number
         manny:
@@ -3861,7 +3940,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         containerSpace:
@@ -3893,7 +3972,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         currentTask:
@@ -3996,7 +4075,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
           description: >
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
@@ -4191,7 +4270,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, returning, waiting_for_space, moving_stockage]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, returning, waiting_for_space, moving_stockage]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -4297,6 +4376,10 @@ components:
         createdByProbeId:
           type: integer
           nullable: true
+        createdByProbeName:
+          type: string
+          nullable: true
+          description: Probe name when the creator still exists, "death probe" when createdByProbeId points to a deleted probe, null when no creator was recorded.
         createdAt:
           type: string
           format: date-time
@@ -4525,7 +4608,7 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         itemType:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
           description: Present only for drifting item stacks.
         quantity:
           type: integer
@@ -4562,6 +4645,10 @@ components:
           type: integer
           nullable: true
           description: Present only for SCUT relay objects.
+        createdByProbeName:
+          type: string
+          nullable: true
+          description: Present only for SCUT relay objects; probe name when the creator still exists, "death probe" when createdByProbeId points to a deleted probe, null when no creator was recorded.
         activatedAt:
           type: string
           format: date-time

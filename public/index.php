@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260625-manny-inventory-hash';
+const ASSET_VERSION = '20260627-origin-broadcast';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -222,6 +222,16 @@ $availableroutes = [
         'routeClass' => 'FrontRouteMovement',
         'displayOnMainMenu' => true,
         'displayOnFooter' => false,   
+    ],
+    "SCUT" => [
+        'name'  => 'SCUT',
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/scut$#',
+        'linkUri' => '/scut',
+        'routeClass' => 'FrontRouteScut',
+        'displayOnMainMenu' => true,
+        'displayOnFooter' => false,
     ],
     "Messaging" => [
         'name'  => translatedRouteName($translator, 'tabMessages'),

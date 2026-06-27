@@ -62,6 +62,10 @@
         return "sector-alert";
     }
 
+    function alertMessageHtml(message) {
+        return window.VNG.escapeHtml(message || "").replace(/\r?\n/g, "<br>");
+    }
+
     function persistentAlerts(alerts) {
         return (Array.isArray(alerts) ? alerts : []).map((alert) => ({
             "kind": "persistent-alert",
@@ -99,7 +103,7 @@
 
         list.innerHTML = alerts.map((alert, index) => (
             "<article class=\"sector-alert " + window.VNG.escapeHtml(alert.className) + (alert.acknowledged ? " acknowledged" : "") + "\" data-alert-index=\"" + String(index) + "\">"
-                + "<span class=\"sector-alert-message\">" + window.VNG.escapeHtml(alert.message) + "</span>"
+                + "<span class=\"sector-alert-message\">" + alertMessageHtml(alert.message) + "</span>"
                 + "<button class=\"sector-alert-acknowledge\" type=\"button\"" + (alert.acknowledged ? " disabled aria-disabled=\"true\"" : " aria-disabled=\"false\"") + ">"
                 + window.VNG.escapeHtml(alert.acknowledged ? tr("acknowledgedAlert", "Acknowledged") : tr("acknowledgeAlert", "Acknowledge"))
                 + "</button>"

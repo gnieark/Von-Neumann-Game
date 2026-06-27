@@ -1,0 +1,24 @@
+<article id="scut-panel" class="data-panel active">
+    <div class="panel-heading">
+        <div>
+            <h2>Subspace Communications Universal Transceiver</h2>
+        </div>
+        <button class="icon-button" data-refresh="scut" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+    </div>
+    <p id="scut-status" class="action-status" aria-live="polite"></p>
+    <label id="scut-network-choice" class="scut-network-choice" hidden>
+        <span>{{t.scutNetwork}}</span>
+        <select id="scut-network-select"></select>
+    </label>
+    <div id="scut-summary" class="metrics" aria-live="polite"></div>
+    <section class="scut-section" aria-labelledby="scut-probes-title">
+        <h3 id="scut-probes-title">{{t.scutNetworkProbes}}</h3>
+        <div id="scut-probes-list" class="scut-list" aria-live="polite"></div>
+        <p id="scut-probes-empty" class="sector-context">{{t.scutNoProbes}}</p>
+    </section>
+    <section class="scut-section" aria-labelledby="scut-relays-title">
+        <h3 id="scut-relays-title">{{t.scutNetworkRelays}}</h3>
+        <div id="scut-relays-list" class="scut-list" aria-live="polite"></div>
+        <p id="scut-relays-empty" class="sector-context">{{t.scutNoRelays}}</p>
+    </section>
+</article>

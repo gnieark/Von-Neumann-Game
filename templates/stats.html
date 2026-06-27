@@ -75,6 +75,52 @@
         </div>
         <!-- END waypointPodiumMore -->
     </section>
+    <section class="stats-podium" aria-labelledby="stats-scut-activator-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-scut-activator-podium-title">{{t.statsTopScutRelayActivators}}</h2>
+            <p>{{t.statsTopScutRelayActivatorsHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN scutRelayActivator -->
+            <li class="stats-podium-rank"{{scutRelayActivator.extraAttributes}}>
+                <span>{{scutRelayActivator.rank}}</span>
+                <strong>{{scutRelayActivator.name}}</strong>
+                <b>{{scutRelayActivator.activatedRelays}} {{scutRelayActivator.activatedRelaysLabel}}</b>
+            </li>
+            <!-- END scutRelayActivator -->
+            <!-- BEGIN emptyScutActivatorPodium -->
+            <li class="stats-podium-empty">{{t.statsTopScutRelayActivatorsEmpty}}</li>
+            <!-- END emptyScutActivatorPodium -->
+        </ol>
+        <!-- BEGIN scutActivatorPodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END scutActivatorPodiumMore -->
+    </section>
+    <section class="stats-podium" aria-labelledby="stats-scut-network-coverage-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-scut-network-coverage-podium-title">{{t.statsTopScutNetworksByCoverage}}</h2>
+            <p>{{t.statsTopScutNetworksByCoverageHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN scutNetworkCoverage -->
+            <li class="stats-podium-rank"{{scutNetworkCoverage.extraAttributes}}>
+                <span>{{scutNetworkCoverage.rank}}</span>
+                <strong>{{scutNetworkCoverage.name}}</strong>
+                <b>{{scutNetworkCoverage.coveredSectors}} {{scutNetworkCoverage.coveredSectorsLabel}}</b>
+            </li>
+            <!-- END scutNetworkCoverage -->
+            <!-- BEGIN emptyScutNetworkCoveragePodium -->
+            <li class="stats-podium-empty">{{t.statsTopScutNetworksByCoverageEmpty}}</li>
+            <!-- END emptyScutNetworkCoveragePodium -->
+        </ol>
+        <!-- BEGIN scutNetworkCoveragePodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END scutNetworkCoveragePodiumMore -->
+    </section>
     <div class="stats-grid">
         <!-- BEGIN metric -->
         <article class="stats-card">

@@ -5,7 +5,7 @@
     const MANNY_MINING_AMOUNT_MAX = 0.55;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay"]);
 
     const state = {
         currentCraftingRecipes: [],
@@ -104,6 +104,7 @@
             "manny": item,
             "actions": {
                 "deuteriumRefuelStationAvailable": sectorHasDeuteriumRefuelStation(),
+                "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
             },
         }));
 
@@ -163,6 +164,7 @@
             "dropping_storage_container": tr("droppingStorageContainer", "Dropping storage container"),
             "inspecting_asteroid": tr("inspectingAsteroid", "Inspecting asteroid"),
             "refilling_deuterium_tank": tr("refillingDeuteriumTank", "Refilling deuterium tank"),
+            "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
         }[task] || task || tr("noTask", "None");
@@ -186,6 +188,7 @@
             "drifting_item": tr("driftingItemObject", "Drifting item"),
             "detached_container": tr("detachedContainerObject", "Detached container"),
             "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
+            "scut_relay": tr("scutRelayObject", "SCUT relay"),
             "waypoint_bookmark": tr("waypointBookmark", "Waypoint bookmark"),
             "manny": tr("mannyObject", "Manny"),
             "probe": tr("tabProbe", "Probe"),
@@ -368,6 +371,7 @@
             "itemType": object.itemType || null,
             "quantity": object.quantity || null,
             "containerSpace": object.containerSpace || null,
+            "status": object.status || null,
         }));
     }
 
@@ -439,6 +443,11 @@
 
     function sectorHasDeuteriumRefuelStation() {
         return state.currentSectorObjects.some((object) => object && object.type === "deuterium_refuel_station");
+    }
+
+    function inactiveScutRelayTargets() {
+        return (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
+            .filter((object) => object && object.type === "scut_relay" && object.status === "off" && object.id);
     }
 
     function bookmarkTargetLabel(target) {
@@ -593,6 +602,12 @@
     function bookmarkItems() {
         return Array.isArray(state.currentInventory && state.currentInventory.items)
             ? state.currentInventory.items.filter((item) => item.type === "waypoint_bookmark")
+            : [];
+    }
+
+    function integratedCircuitItems() {
+        return Array.isArray(state.currentInventory && state.currentInventory.items)
+            ? state.currentInventory.items.filter((item) => item.type === "integrated_circuit")
             : [];
     }
 
@@ -1198,6 +1213,15 @@
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
         }
+        if (manny.currentTask === "turning_on_scut_relay") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("turningOnScutRelayInProgress", "SCUT relay activation in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("turningOnScutRelayTaskDetail", "{target} is receiving its final circuit."), {
+                    "target": payload.target ? salvageTargetLabel(payload.target) : (payload.relayId || tr("scutRelayObject", "SCUT relay")),
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "</section>";
+        }
         if (manny.currentTask === "installing_waypoint_bookmark") {
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("bookmarkInstallInProgress", "Waypoint bookmark installation in progress")) + "</h4>"
@@ -1546,6 +1570,43 @@
             + "</form>";
     }
 
+    function scutRelayTargetOptions(selected) {
+        const targets = inactiveScutRelayTargets();
+        if (targets.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return targets.map((target) => (
+            "<option value=\"" + escaped(target.id) + "\"" + (String(target.id) === String(selected) ? " selected" : "") + ">"
+            + escaped([objectTypeLabel("scut_relay"), target.name || target.id].filter(Boolean).join(" "))
+            + "</option>"
+        )).join("");
+    }
+
+    function turnOnRelayHint(relayCount, circuitCount) {
+        if (relayCount === 0) {
+            return tr("noInactiveScutRelay", "No inactive SCUT relay is present in this sector.");
+        }
+        if (circuitCount === 0) {
+            return tr("missingIntegratedCircuitForRelay", "An integrated circuit is required in stock.");
+        }
+
+        return tr("turnOnScutRelayHint", "Send a Manny to solder the final electronic circuit onto the relay and bring it online.");
+    }
+
+    function renderTurnOnRelayForm() {
+        const relays = inactiveScutRelayTargets();
+        const circuits = integratedCircuitItems();
+        const disabled = relays.length === 0 || circuits.length === 0;
+
+        return "<form class=\"manny-turn-on-relay-form manny-form\">"
+            + "<label>" + escaped(tr("scutRelayObject", "SCUT relay")) + "<select class=\"manny-turn-on-relay-target\" name=\"relayId\" required>" + scutRelayTargetOptions("") + "</select></label>"
+            + "<label>" + escaped(tr("scutNetworkNameOptional", "Network name to create (optional)")) + "<input name=\"networkName\" maxlength=\"80\"></label>"
+            + "<button class=\"manny-turn-on-relay-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("turnOnScutRelay", "Activate relay")) + "</button>"
+            + "<p class=\"manny-turn-on-relay-hint\">" + escaped(turnOnRelayHint(relays.length, circuits.length)) + "</p>"
+            + "</form>";
+    }
+
     function bookmarkTargetOptions(selected) {
         const targets = bookmarkTargets();
         if (targets.length === 0) {
@@ -1569,6 +1630,7 @@
             {"id": "detach-storage", "title": tr("detachStorageActionTitle", "Detach a container"), "render": renderDetachStorageContainerForm},
             {"id": "drop-storage", "title": tr("dropStorageActionTitle", "Drop a container on a planet"), "render": renderDropStorageContainerForm},
             {"id": "recover-storage", "title": tr("recoverStorageContainerActionTitle", "Recover a detached container"), "render": renderRecoverStorageContainerForm},
+            {"id": "turn-on-relay", "title": tr("turnOnScutRelayActionTitle", "Activate a SCUT relay"), "render": renderTurnOnRelayForm},
             {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint-bookmark"), "render": renderBookmarkForm},
             {"id": "craft", "title": tr("craftingActionTitle", "Craft"), "render": renderCraftForm},
         ];
@@ -1613,6 +1675,7 @@
             "bookmark": renderBookmarkForm,
             "craft": renderCraftForm,
             "atomic-printer-craft": renderAtomicPrinterCraftForm,
+            "turn-on-relay": renderTurnOnRelayForm,
         }[actionId]?.() || "";
     }
 
@@ -2344,6 +2407,28 @@
                     "objectId": formData.get("objectId"),
                     ...(source ? {source} : {}),
                 }),
+            });
+        }
+        if (form.classList.contains("manny-turn-on-relay-form")) {
+            const targetSelect = form.querySelector(".manny-turn-on-relay-target");
+            if (integratedCircuitItems().length === 0) {
+                setStatus(tr("missingIntegratedCircuitForRelay", "An integrated circuit is required in stock."));
+                return null;
+            }
+            if (!targetSelect || !targetSelect.value) {
+                setStatus(tr("noInactiveScutRelay", "No inactive SCUT relay is present in this sector."));
+                return null;
+            }
+
+            const body = {"relayId": Number.parseInt(String(formData.get("relayId") || ""), 10)};
+            const networkName = String(formData.get("networkName") || "").trim();
+            if (networkName !== "") {
+                body.networkName = networkName;
+            }
+
+            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/turn-on-relay", {
+                "method": "POST",
+                "body": JSON.stringify(body),
             });
         }
         if (form.classList.contains("manny-craft-form")) {

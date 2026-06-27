@@ -67,6 +67,22 @@ final class CraftingRecipeCatalog
     public const LINEAR_ACTUATOR_METALS_COST = 0.01;
     public const LINEAR_ACTUATOR_CONTAINER_SPACE = 0.01;
     public const LINEAR_ACTUATOR_CRAFTING_SECONDS = 1200;
+    public const SOLAR_PANEL_MICRO_CONDUCTORS = 2;
+    public const SOLAR_PANEL_CRYSTAL_SUBSTRATES = 1;
+    public const SOLAR_PANEL_CERAMIC_INSULATORS = 1;
+    public const SOLAR_PANEL_STEEL_PLATES = 1;
+    public const SOLAR_PANEL_METALS_COST = 0.02;
+    public const SOLAR_PANEL_CONTAINER_SPACE = 0.015;
+    public const SOLAR_PANEL_CRAFTING_SECONDS = 1800;
+    public const SCUT_RELAY_STEEL_PLATES = 32;
+    public const SCUT_RELAY_STEEL_BARS = 28;
+    public const SCUT_RELAY_BATTERY_PACKS = 6;
+    public const SCUT_RELAY_SOLAR_PANELS = 4;
+    public const SCUT_RELAY_INTEGRATED_CIRCUITS = 5;
+    public const SCUT_RELAY_ELECTRIC_MOTORS = 4;
+    public const SCUT_RELAY_LINEAR_ACTUATORS = 2;
+    public const SCUT_RELAY_CONTAINER_SPACE = 0.12;
+    public const SCUT_RELAY_CRAFTING_SECONDS = 172800;
     public const THERMAL_PROTECTION_SHELL_CERAMIC_INSULATORS = 8;
     public const THERMAL_PROTECTION_SHELL_STEEL_PLATES = 4;
     public const THERMAL_PROTECTION_SHELL_ORGANIC_COST = 0.06;
@@ -115,6 +131,8 @@ final class CraftingRecipeCatalog
         'electric_motor' => 'A compact rotary actuator that converts stored electrical energy into mechanical motion.',
         'battery_pack' => 'A rechargeable power pack for mobile tools, actuators, and autonomous Manny systems.',
         'linear_actuator' => 'A precise push-pull mechanism used wherever a Manny needs controlled force.',
+        'solar_panel' => 'A foldable photovoltaic panel with printed conductors, crystal substrate, and a reinforced mounting plate.',
+        'scut_relay' => 'A long-range SCUT communication relay module with its own solar power array, buffer batteries, control circuits, and deployable structure.',
         'thermal_protection_shell' => 'A disposable ablative shell that protects a storage container during atmospheric entry.',
         'parachute_pack' => 'A folded braking canopy pack with compact deployment hardware for cargo descents.',
         'descent_guidance_module' => 'A small avionics and actuator package for limited steering during a cargo drop.',
@@ -140,6 +158,8 @@ final class CraftingRecipeCatalog
             self::electricMotor($config),
             self::batteryPack($config),
             self::linearActuator($config),
+            self::solarPanel($config),
+            self::scutRelay($config),
             self::thermalProtectionShell($config),
             self::parachutePack($config),
             self::descentGuidanceModule($config),
@@ -479,6 +499,60 @@ final class CraftingRecipeCatalog
                 ProbeItem::TYPE_LINEAR_ACTUATOR,
                 ProbeItem::LINEAR_ACTUATOR_NAME,
                 Config::float($config, 'linear_actuator.containerSpace', self::LINEAR_ACTUATOR_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function solarPanel(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_SOLAR_PANEL,
+            'name' => ProbeItem::SOLAR_PANEL_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_SOLAR_PANEL),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_MICRO_CONDUCTOR, Config::int($config, 'solar_panel.microConductorCount', self::SOLAR_PANEL_MICRO_CONDUCTORS)),
+                self::itemIngredient(ProbeItem::TYPE_CRYSTAL_SUBSTRATE, Config::int($config, 'solar_panel.crystalSubstrateCount', self::SOLAR_PANEL_CRYSTAL_SUBSTRATES)),
+                self::itemIngredient(ProbeItem::TYPE_CERAMIC_INSULATOR, Config::int($config, 'solar_panel.ceramicInsulatorCount', self::SOLAR_PANEL_CERAMIC_INSULATORS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'solar_panel.steelPlateCount', self::SOLAR_PANEL_STEEL_PLATES)),
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'solar_panel.metalsCost', self::SOLAR_PANEL_METALS_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'solar_panel.durationSeconds', self::SOLAR_PANEL_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_SOLAR_PANEL,
+                ProbeItem::SOLAR_PANEL_NAME,
+                Config::float($config, 'solar_panel.containerSpace', self::SOLAR_PANEL_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function scutRelay(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_SCUT_RELAY,
+            'name' => ProbeItem::SCUT_RELAY_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_SCUT_RELAY),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'scut_relay.steelPlateCount', self::SCUT_RELAY_STEEL_PLATES)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_BAR, Config::int($config, 'scut_relay.steelBarCount', self::SCUT_RELAY_STEEL_BARS)),
+                self::itemIngredient(ProbeItem::TYPE_BATTERY_PACK, Config::int($config, 'scut_relay.batteryPackCount', self::SCUT_RELAY_BATTERY_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_SOLAR_PANEL, Config::int($config, 'scut_relay.solarPanelCount', self::SCUT_RELAY_SOLAR_PANELS)),
+                self::itemIngredient(ProbeItem::TYPE_INTEGRATED_CIRCUIT, Config::int($config, 'scut_relay.integratedCircuitCount', self::SCUT_RELAY_INTEGRATED_CIRCUITS)),
+                self::itemIngredient(ProbeItem::TYPE_ELECTRIC_MOTOR, Config::int($config, 'scut_relay.electricMotorCount', self::SCUT_RELAY_ELECTRIC_MOTORS)),
+                self::itemIngredient(ProbeItem::TYPE_LINEAR_ACTUATOR, Config::int($config, 'scut_relay.linearActuatorCount', self::SCUT_RELAY_LINEAR_ACTUATORS)),
+            ],
+            'durationSeconds' => Config::int($config, 'scut_relay.durationSeconds', self::SCUT_RELAY_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_SCUT_RELAY,
+                ProbeItem::SCUT_RELAY_NAME,
+                Config::float($config, 'scut_relay.containerSpace', self::SCUT_RELAY_CONTAINER_SPACE),
             ),
         ];
     }

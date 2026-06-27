@@ -306,7 +306,6 @@ final class SchemaInitializer
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
-                FOREIGN KEY(created_by_probe_id) REFERENCES neumann_probes(id),
                 FOREIGN KEY(network_id) REFERENCES scut_networks(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)",
@@ -484,10 +483,10 @@ final class SchemaInitializer
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
-                FOREIGN KEY(created_by_probe_id) REFERENCES neumann_probes(id),
                 FOREIGN KEY(network_id) REFERENCES scut_networks(id)
             )"
         );
+        $this->removeScutRelayCreatorForeignKey($pdo);
         if ($this->driver === 'mysql') {
             $pdo->exec('ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL');
             $pdo->exec('ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL');
@@ -495,6 +494,92 @@ final class SchemaInitializer
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_status_sector ON scut_relays(status, sector_x, sector_y, sector_z)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_network ON scut_relays(network_id)');
+    }
+
+    private function removeScutRelayCreatorForeignKey(PDO $pdo): void
+    {
+        if ($this->driver === 'sqlite') {
+            $foreignKeys = $pdo->query('PRAGMA foreign_key_list(scut_relays)')->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($foreignKeys as $foreignKey) {
+                if (($foreignKey['from'] ?? null) === 'created_by_probe_id' && ($foreignKey['table'] ?? null) === 'neumann_probes') {
+                    $this->rebuildSqliteScutRelaysWithoutCreatorForeignKey($pdo);
+                    return;
+                }
+            }
+
+            return;
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT CONSTRAINT_NAME
+             FROM information_schema.KEY_COLUMN_USAGE
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'scut_relays'
+               AND COLUMN_NAME = 'created_by_probe_id'
+               AND REFERENCED_TABLE_NAME = 'neumann_probes'"
+        );
+        $stmt->execute();
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $constraintName) {
+            $escaped = str_replace('`', '``', (string) $constraintName);
+            $pdo->exec("ALTER TABLE scut_relays DROP FOREIGN KEY `$escaped`");
+        }
+    }
+
+    private function rebuildSqliteScutRelaysWithoutCreatorForeignKey(PDO $pdo): void
+    {
+        $rows = $pdo->query('SELECT * FROM scut_relays')->fetchAll(PDO::FETCH_ASSOC);
+        $pdo->exec('PRAGMA foreign_keys=OFF');
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec('ALTER TABLE scut_relays RENAME TO scut_relays_creator_fk_backup');
+            $pdo->exec(
+                'CREATE TABLE scut_relays (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_by_probe_id INTEGER NULL,
+                    sector_x INTEGER NOT NULL,
+                    sector_y INTEGER NOT NULL,
+                    sector_z INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    network_id INTEGER NULL,
+                    covered_sectors_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    activated_at TEXT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(network_id) REFERENCES scut_networks(id)
+                )'
+            );
+
+            $insert = $pdo->prepare(
+                'INSERT INTO scut_relays
+                 (id, created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, covered_sectors_json, created_at, activated_at, updated_at)
+                 VALUES (:id, :created_by_probe_id, :sector_x, :sector_y, :sector_z, :status, :network_id, :covered_sectors_json, :created_at, :activated_at, :updated_at)'
+            );
+            foreach ($rows as $row) {
+                $insert->execute([
+                    'id' => (int) $row['id'],
+                    'created_by_probe_id' => $row['created_by_probe_id'] !== null ? (int) $row['created_by_probe_id'] : null,
+                    'sector_x' => (int) $row['sector_x'],
+                    'sector_y' => (int) $row['sector_y'],
+                    'sector_z' => (int) $row['sector_z'],
+                    'status' => (string) $row['status'],
+                    'network_id' => $row['network_id'] !== null ? (int) $row['network_id'] : null,
+                    'covered_sectors_json' => (string) $row['covered_sectors_json'],
+                    'created_at' => (string) $row['created_at'],
+                    'activated_at' => $row['activated_at'] !== null ? (string) $row['activated_at'] : null,
+                    'updated_at' => (string) $row['updated_at'],
+                ]);
+            }
+
+            $pdo->exec('DROP TABLE scut_relays_creator_fk_backup');
+            $pdo->commit();
+        } catch (\Throwable $error) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $error;
+        } finally {
+            $pdo->exec('PRAGMA foreign_keys=ON');
+        }
     }
 
     private function ensureProbeMessageSchema(PDO $pdo): void

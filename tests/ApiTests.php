@@ -11,6 +11,7 @@ use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
@@ -286,29 +287,55 @@ $test->assertEquals(
     'OAuth service extracts the OpenID subject without profile data'
 );
 $loginTemplate = file_get_contents($root . '/templates/loginview.html');
+$frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
 $manniesTemplate = file_get_contents($root . '/templates/mannies.html');
+$scutTemplate = file_get_contents($root . '/templates/scut.html');
 $statsTemplate = file_get_contents($root . '/templates/stats.html');
 $statsRoute = file_get_contents($root . '/src/FrontRoute/FrontRouteStats.php');
 $inventoriesScript = file_get_contents($root . '/public/assets/inventories.js');
+$messagingScript = file_get_contents($root . '/public/assets/messaging.js');
+$scutScript = file_get_contents($root . '/public/assets/scut.js');
+$scutRoute = file_get_contents($root . '/src/FrontRoute/FrontRouteScut.php');
 $manniesScript = file_get_contents($root . '/public/assets/mannies.js');
 $statsScript = file_get_contents($root . '/public/assets/stats.js');
 $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
+$translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
+$openApi = file_get_contents($root . '/docs/openapi.yaml');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oauth-remember"'), 'OAuth login view exposes the remember-me checkbox');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'url.searchParams.set("remember", "1")'), 'main JS sends remember=1 when OAuth remember-me is checked');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut$#'"), 'front routes expose the SCUT Network page');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT'"), 'SCUT route keeps the requested short nav title');
+$test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js'), 'SCUT front route loads the SCUT page script');
+$test->assert(is_string($scutRoute) && str_contains($scutRoute, 'Subspace Communications Universal Transceiver'), 'SCUT route uses the expanded page title');
+$test->assert(is_string($scutTemplate) && str_contains($scutTemplate, '<h2>Subspace Communications Universal Transceiver</h2>'), 'SCUT template exposes the expanded visible heading');
+$test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
+$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/sector'), 'SCUT page reads current sector coverage');
+$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/scut-network/'), 'SCUT page reads existing network details');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigationScutCoverage'), 'main JS can set SCUT nav LED state');
+$test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-network-coverage-podium-title'), 'stats view exposes the SCUT network coverage podium');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'data-stats-podium-extra hidden'), 'stats route renders extra ranking rows as hidden by default');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutRelayActivatorRows'), 'stats route renders SCUT relay activator rows');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutNetworkCoverageRows'), 'stats route renders SCUT network coverage rows');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Secteurs couverts par au moins un réseau SCUT'"), 'French translations include the SCUT covered-sector metric');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Sectors covered by at least one SCUT network'"), 'English translations include the SCUT covered-sector metric');
+$test->assert(str_contains($openApi, 'anomaly_detected'), 'OpenAPI documents anomaly-detected alerts');
+$test->assert(str_contains($openApi, 'enum: [probe, planet, unknown]'), 'OpenAPI documents unknown message endpoints');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -335,6 +362,17 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'schedul
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'PROBE_INVENTORY_ACTIONS'), 'mannies JS tracks actions whose forms depend on probe inventory');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshProbeInventory'), 'mannies JS refreshes probe inventory lazily before rendering inventory-dependent forms');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"turn-on-relay"'), 'mannies JS exposes the SCUT relay activation action');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-turn-on-relay-form'), 'mannies JS renders the SCUT relay activation form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/turn-on-relay'), 'mannies JS posts SCUT relay activation orders');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'integratedCircuitItems().length === 0'), 'mannies JS blocks SCUT relay activation without an integrated circuit');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'inactiveScutRelayTargets()'), 'mannies JS detects inactive SCUT relay activation targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'networkName'), 'mannies JS renders the optional SCUT network name field');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'turning_on_scut_relay'), 'mannies JS displays SCUT relay activation tasks');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, 'String(probe.id) !== String(state.currentProbeId'), 'messaging JS excludes the current probe from SCUT network recipients');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, 'scutNetworkRecipientLabel'), 'messaging JS labels SCUT network recipients');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"printer": atomicPrinterItem() ? "available" : null'), 'mannies JS excludes atomic-printer inventory details from the card refresh hash');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'isMannyTaskAssignmentForm'), 'mannies JS can identify task assignment forms');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await loadManniesPage();'), 'mannies JS refreshes Manny cards immediately after a successful task assignment');
@@ -353,6 +391,12 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuteri
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/refill-deuterium-tank'), 'mannies JS can start a deuterium tank refill action');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_relay": tr("scutRelayObject"'), 'mannies JS labels SCUT relay sector objects');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -363,6 +407,7 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT network coverage storage fits radius-10 sector lists');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT relay coverage storage fits radius-10 sector lists');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'FOREIGN KEY(created_by_probe_id)'), 'SCUT relay creator ids are stored without a probe foreign key');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),
@@ -413,6 +458,7 @@ $statsRankingFactory->initializeSchema($statsRankingPdo);
 $statsRankingPlayers = new PlayerRepository($statsRankingPdo);
 $statsRankingProbes = new NeumannProbeRepository($statsRankingPdo);
 $statsRankingVisitedSectors = new VisitedSectorRepository($statsRankingPdo);
+$statsRankingProbeRows = [];
 for ($ranking = 1; $ranking <= 10; $ranking++) {
     $rankingPlayer = $statsRankingPlayers->createPlayer(
         'stats-ranking-' . $ranking,
@@ -420,10 +466,60 @@ for ($ranking = 1; $ranking <= 10; $ranking++) {
         null,
         new SectorCoordinates(200 + ($ranking * 2), 0, 0),
     );
-    $statsRankingProbes->createForPlayer($rankingPlayer->id, 'Stats Ranking Probe ' . $ranking, $rankingPlayer->homeSector);
+    $statsRankingProbeRows[$ranking] = $statsRankingProbes->createForPlayer($rankingPlayer->id, 'Stats Ranking Probe ' . $ranking, $rankingPlayer->homeSector);
     for ($visit = 0; $visit <= 10 - $ranking; $visit++) {
         $statsRankingVisitedSectors->markVisited($rankingPlayer, new SectorCoordinates(200 + ($ranking * 2), $visit * 2, 0));
     }
+}
+$statsScutNetworkInsert = $statsRankingPdo->prepare(
+    'INSERT INTO scut_networks (name, covered_sectors_json, created_at, updated_at)
+     VALUES (:name, :covered_sectors_json, :created_at, :updated_at)'
+);
+$statsScutRelayInsert = $statsRankingPdo->prepare(
+    'INSERT INTO scut_relays
+     (created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, covered_sectors_json, created_at, activated_at, updated_at)
+     VALUES (:created_by_probe_id, :x, :y, :z, :status, :network_id, :covered_sectors_json, :created_at, :activated_at, :updated_at)'
+);
+$statsScutNetworkOneCoverage = [
+    ['x' => 0, 'y' => 0, 'z' => 0],
+    ['x' => 2, 'y' => 0, 'z' => 0],
+    ['x' => 4, 'y' => 0, 'z' => 0],
+];
+$statsScutNetworkTwoCoverage = [
+    ['x' => 2, 'y' => 0, 'z' => 0],
+    ['x' => 6, 'y' => 0, 'z' => 0],
+];
+$statsScutNetworkInsert->execute([
+    'name' => 'Stats SCUT Alpha',
+    'covered_sectors_json' => json_encode($statsScutNetworkOneCoverage, JSON_THROW_ON_ERROR),
+    'created_at' => '2026-01-01T00:00:00+00:00',
+    'updated_at' => '2026-01-01T00:00:00+00:00',
+]);
+$statsScutNetworkOneId = (int) $statsRankingPdo->lastInsertId();
+$statsScutNetworkInsert->execute([
+    'name' => 'Stats SCUT Beta',
+    'covered_sectors_json' => json_encode($statsScutNetworkTwoCoverage, JSON_THROW_ON_ERROR),
+    'created_at' => '2026-01-02T00:00:00+00:00',
+    'updated_at' => '2026-01-02T00:00:00+00:00',
+]);
+$statsScutNetworkTwoId = (int) $statsRankingPdo->lastInsertId();
+foreach ([
+    [$statsRankingProbeRows[1]->id, $statsScutNetworkOneId, 'on', $statsScutNetworkOneCoverage],
+    [$statsRankingProbeRows[1]->id, $statsScutNetworkTwoId, 'on', $statsScutNetworkTwoCoverage],
+    [$statsRankingProbeRows[2]->id, $statsScutNetworkTwoId, 'off', array_merge($statsScutNetworkOneCoverage, $statsScutNetworkTwoCoverage)],
+] as $relayIndex => [$creatorProbeId, $networkId, $status, $coverage]) {
+    $statsScutRelayInsert->execute([
+        'created_by_probe_id' => $creatorProbeId,
+        'x' => 300 + ($relayIndex * 2),
+        'y' => 0,
+        'z' => 0,
+        'status' => $status,
+        'network_id' => $networkId,
+        'covered_sectors_json' => json_encode($coverage, JSON_THROW_ON_ERROR),
+        'created_at' => '2026-01-01T00:00:00+00:00',
+        'activated_at' => $status === 'on' ? '2026-01-01T00:00:00+00:00' : null,
+        'updated_at' => '2026-01-01T00:00:00+00:00',
+    ]);
 }
 $rankingStats = (new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe'))->collect();
 $topRankingProbes = $rankingStats['metrics']['topVisitedProbes'] ?? [];
@@ -431,6 +527,14 @@ $test->assertEquals(9, count($topRankingProbes), 'public stats visited-sector ra
 $test->assertEquals('Stats Ranking Probe 1', $topRankingProbes[0]['probeName'] ?? null, 'public stats top-nine ranking keeps the first-ranked probe first');
 $test->assertEquals('Stats Ranking Probe 9', $topRankingProbes[8]['probeName'] ?? null, 'public stats top-nine ranking keeps the ninth-ranked probe visible');
 $test->assert(!in_array('Stats Ranking Probe 10', array_column($topRankingProbes, 'probeName'), true), 'public stats top-nine ranking excludes the tenth row');
+$test->assertEquals(4, $rankingStats['metrics']['scutCoveredSectors'] ?? null, 'public stats count sectors covered by at least one SCUT network once');
+$topScutRelayActivators = $rankingStats['metrics']['topScutRelayActivators'] ?? [];
+$test->assertEquals('Stats Ranking Probe 1', $topScutRelayActivators[0]['probeName'] ?? null, 'public stats SCUT activator podium ranks relay creators');
+$test->assertEquals(2, $topScutRelayActivators[0]['activatedRelays'] ?? null, 'public stats SCUT activator podium counts online relays only');
+$topScutNetworksByCoverage = $rankingStats['metrics']['topScutNetworksByCoverage'] ?? [];
+$test->assertEquals('Stats SCUT Alpha', $topScutNetworksByCoverage[0]['networkName'] ?? null, 'public stats SCUT network coverage podium ranks networks by covered sectors');
+$test->assertEquals(3, $topScutNetworksByCoverage[0]['coveredSectors'] ?? null, 'public stats SCUT network coverage podium exposes covered-sector counts');
+$test->assert(!in_array(5, array_column($topScutNetworksByCoverage, 'coveredSectors'), true), 'public stats SCUT network coverage podium is not based on relay coverage');
 
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();
@@ -515,6 +619,12 @@ $scutRelaySchemaColumns = array_map(
 );
 $test->assert(in_array('created_by_probe_id', $scutRelaySchemaColumns, true), 'SCUT relays store their creator probe id');
 $test->assert(in_array('covered_sectors_json', $scutRelaySchemaColumns, true), 'SCUT relays persist their covered sectors');
+$scutRelayForeignKeys = $pdo->query('PRAGMA foreign_key_list(scut_relays)')->fetchAll(PDO::FETCH_ASSOC);
+$scutRelayCreatorForeignKeys = array_values(array_filter(
+    $scutRelayForeignKeys,
+    static fn(array $row): bool => ($row['from'] ?? null) === 'created_by_probe_id' && ($row['table'] ?? null) === 'neumann_probes',
+));
+$test->assertEquals(0, count($scutRelayCreatorForeignKeys), 'SCUT relay creator ids do not block probe deletion');
 $scutNetworkSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(scut_networks)')->fetchAll(PDO::FETCH_ASSOC),
@@ -554,7 +664,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(51, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(57, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -824,6 +934,7 @@ if ($createdProbe !== null) {
     $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, '/api/probe/alerts'), 'alerts page uses the generic persistent-alert endpoint');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'replace(/\\r?\\n/g, "<br>")'), 'alerts page renders message line breaks');
 
     $lowFuelCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-deuterium-asteroid-alerts-for-low-fuel.php')
@@ -835,6 +946,84 @@ if ($createdProbe !== null) {
     $lowFuelText = implode("\n", $lowFuelOutput);
     $test->assertEquals(0, $lowFuelStatus, 'low-fuel deuterium asteroid CLI exits successfully');
     $test->assert(str_contains($lowFuelText, 'processed: 1'), 'low-fuel CLI calls the per-player script for matching players');
+    $anomalyPlayer = $auth->registerPlayerWithPassword('origin-anomaly', 'secret', 'Origin Anomaly', 'Origin anomaly probe');
+    $anomalyProbe = $probes->findByPlayerId($anomalyPlayer->id);
+    $test->assert($anomalyProbe !== null, 'origin anomaly test probe is created');
+    if ($anomalyProbe !== null) {
+        $pdo->prepare('UPDATE neumann_probes SET sector_x = 20, sector_y = -10, sector_z = 6, exclude_from_stats = 1 WHERE id = :id')->execute(['id' => $anomalyProbe->id]);
+    }
+    $anomalyProbeCount = (int) $pdo->query('SELECT COUNT(*) FROM neumann_probes')->fetchColumn();
+    $anomalyAlertCountBefore = (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn();
+    $dryRunAnomalyCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-origin-anomaly-alerts.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --dry-run';
+    exec($dryRunAnomalyCommand . ' 2>&1', $dryRunAnomalyOutput, $dryRunAnomalyStatus);
+    $dryRunAnomalyText = implode("\n", $dryRunAnomalyOutput);
+    $test->assertEquals(0, $dryRunAnomalyStatus, 'origin anomaly CLI dry-run exits successfully');
+    $test->assert(str_contains($dryRunAnomalyText, 'direction: -50 25 -15'), 'origin anomaly CLI dry-run computes approximate origin direction');
+    $test->assertEquals(
+        $anomalyAlertCountBefore,
+        (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn(),
+        'origin anomaly CLI dry-run leaves alerts unchanged',
+    );
+    $anomalyCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-origin-anomaly-alerts.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --delay-seconds=0';
+    exec($anomalyCommand . ' 2>&1', $anomalyOutput, $anomalyStatus);
+    $anomalyText = implode("\n", $anomalyOutput);
+    $test->assertEquals(0, $anomalyStatus, 'origin anomaly CLI exits successfully');
+    $test->assert(str_contains($anomalyText, 'initial alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one initial alert per probe');
+    $test->assert(str_contains($anomalyText, 'messages created: ' . $anomalyProbeCount), 'origin anomaly CLI sends one SCUT plans message per probe');
+    $test->assert(str_contains($anomalyText, 'final alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one final alert per probe');
+    $test->assertEquals(
+        $anomalyAlertCountBefore + ($anomalyProbeCount * 2),
+        (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn(),
+        'origin anomaly CLI persists two anomaly alerts per probe',
+    );
+    $test->assertEquals(
+        $anomalyProbeCount,
+        (int) $pdo->query("SELECT COUNT(*) FROM probe_messages WHERE sender_type = 'unknown' AND sender_id = 'origin-anomaly-broadcast'")->fetchColumn(),
+        'origin anomaly CLI persists one unknown-sender message per probe',
+    );
+    $anomalyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($anomalyPlayer)['token']];
+    $anomalyAlerts = $kernel->handle('GET', '/api/probe/alerts', $anomalyHeaders);
+    $initialAnomalyAlert = null;
+    $finalAnomalyAlert = null;
+    foreach ($anomalyAlerts->body['alerts'] ?? [] as $alert) {
+        if (($alert['type'] ?? null) !== 'anomaly_detected') {
+            continue;
+        }
+        if (str_starts_with((string) ($alert['message'] ?? ''), 'ANOMALY DETECTED')) {
+            $initialAnomalyAlert = $alert;
+        }
+        if (($alert['message'] ?? null) === 'The "SCUT RELAY" plans have been integrated.') {
+            $finalAnomalyAlert = $alert;
+        }
+    }
+    $test->assert($initialAnomalyAlert !== null, 'GET /api/probe/alerts exposes origin anomaly CLI initial alerts');
+    if ($initialAnomalyAlert !== null) {
+        $test->assertEquals('unread', $initialAnomalyAlert['status'] ?? null, 'origin anomaly alert starts unread');
+        $test->assert(str_contains((string) ($initialAnomalyAlert['message'] ?? ''), 'approximative direction -50 25 -15'), 'origin anomaly alert stores the approximate direction');
+        $test->assert(str_contains((string) ($initialAnomalyAlert['message'] ?? ''), 'Distance unknown.'), 'origin anomaly alert stores the requested distance wording');
+    }
+    $test->assert($finalAnomalyAlert !== null, 'GET /api/probe/alerts exposes SCUT plans integration alerts');
+    $anomalyMessages = $kernel->handle('GET', '/api/probe/messages', $anomalyHeaders);
+    $scutPlansMessage = null;
+    foreach ($anomalyMessages->body['messages'] ?? [] as $message) {
+        if (($message['sender']['type'] ?? null) === 'unknown') {
+            $scutPlansMessage = $message;
+            break;
+        }
+    }
+    $test->assert($scutPlansMessage !== null, 'GET /api/probe/messages exposes unknown-sender SCUT plans messages');
+    if ($scutPlansMessage !== null) {
+        $test->assertEquals('Expéditeur inconnu', $scutPlansMessage['sender']['name'] ?? null, 'SCUT plans message exposes the requested unknown sender');
+        $test->assert(str_contains((string) ($scutPlansMessage['body'] ?? ''), 'Attached are the manufacturing specifications for a SCUT relay.'), 'SCUT plans message stores the requested relay specification text');
+        $test->assert(str_contains((string) ($scutPlansMessage['body'] ?? ''), 'Together...'), 'SCUT plans message keeps the requested line breaks in the body');
+    }
+    $pdo->exec("DELETE FROM probe_messages WHERE sender_type = 'unknown' AND sender_id = 'origin-anomaly-broadcast'");
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 
     $storageRepairSession = $auth->createSessionForPlayer($player);
@@ -1014,7 +1203,7 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
     $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
-    $test->assertEquals(null, $scutRelays->findById($deleteRelay->id)?->createdByProbeId, 'account deletion keeps SCUT relays but clears the deleted probe creator');
+    $test->assertEquals($deleteProbe->id, $scutRelays->findById($deleteRelay->id)?->createdByProbeId, 'account deletion keeps SCUT relays with their historical creator id');
     $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
     $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
     $detachedManny = $mannies->findByUid($outsideManny->uid);
@@ -1100,9 +1289,20 @@ $scutPlayer = $auth->registerPlayerWithPassword('scut-sender', 'secret', 'SCUT S
 $scutSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'scut-sender', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $scutHeaders = ['Authorization' => 'Bearer ' . (string) ($scutSession->body['token'] ?? '')];
 $scutProbe = $probes->findByPlayerId($scutPlayer->id) ?? throw new RuntimeException('SCUT test probe missing.');
+$sectorRepository->save(new SectorContent($scutProbe->currentSector, [
+    new Asteroid('scut-dark-rock', null, 'iron', ['iron'], 'small', 0.000001, 0.001),
+]));
 $scutRelay = $scut->createOffRelay($scutProbe->currentSector, $scutProbe->id);
 $storage->addItem($scutProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
 $scutMannyId = (string) (($kernel->handle('GET', '/api/probe/mannies', $scutHeaders)->body['mannies'][0]['id'] ?? null) ?? '');
+$scutTurnOnWithoutStar = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/turn-on-relay', $scutHeaders, json_encode([
+    'relayId' => $scutRelay->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(422, $scutTurnOnWithoutStar->status, 'Manny cannot turn on a SCUT relay in a sector without a star');
+$test->assertEquals('scut_relay_requires_star', $scutTurnOnWithoutStar->body['error']['code'] ?? null, 'SCUT relay solar-energy requirement returns an explicit error');
+$sectorRepository->save(new SectorContent($scutProbe->currentSector, [
+    new Star('scut-unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+]));
 $scutTurnOn = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/turn-on-relay', $scutHeaders, json_encode([
     'relayId' => $scutRelay->id,
     'networkName' => 'Delta SCUT',
@@ -1133,7 +1333,46 @@ $scutRelayObjects = array_values(array_filter(
     static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay',
 ));
 $test->assertEquals(1, count($scutRelayObjects), 'Current sector exposes the SCUT relay as a sector object');
+$test->assertEquals((string) $scutRelay->id, $scutRelayObjects[0]['id'] ?? null, 'SCUT relay sector object exposes a string object id');
+$test->assertEquals($scutProbe->id, $scutRelayObjects[0]['createdByProbeId'] ?? null, 'SCUT relay sector object exposes its historical creator id');
+$test->assertEquals($scutProbe->name, $scutRelayObjects[0]['createdByProbeName'] ?? null, 'SCUT relay sector object resolves a living creator probe name');
 $test->assertEquals($scutNetworkId, $scutSector->body['sector']['scutNetworks'][0]['id'] ?? null, 'Current sector exposes covering SCUT networks');
+$orphanScutRelay = $scut->createOffRelay($scutProbe->currentSector, 987654321);
+$orphanScutSector = $kernel->handle('GET', '/api/probe/sector', $scutHeaders);
+$orphanScutRelayObjects = array_values(array_filter(
+    $orphanScutSector->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay' && ($object['id'] ?? null) === (string) $orphanScutRelay->id,
+));
+$test->assertEquals(1, count($orphanScutRelayObjects), 'SCUT relay sector object survives with an orphan creator id');
+$test->assertEquals(987654321, $orphanScutRelayObjects[0]['createdByProbeId'] ?? null, 'SCUT relay sector object keeps an orphan creator id');
+$test->assertEquals('death probe', $orphanScutRelayObjects[0]['createdByProbeName'] ?? null, 'SCUT relay sector object falls back to death probe for missing creators');
+$scutSalvageRelay = $scut->createOffRelay($scutProbe->currentSector, $scutProbe->id);
+$scutSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/salvage', $scutHeaders, json_encode([
+    'objectId' => (string) $scutSalvageRelay->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(202, $scutSalvage->status, 'Manny can start recovering an inactive SCUT relay from the sector');
+$test->assertEquals(ProbeItem::TYPE_SCUT_RELAY, $scutSalvage->body['manny']['task']['target']['type'] ?? null, 'inactive SCUT relay salvage target is exposed as a SCUT relay item');
+$secondScutSalvageManny = array_values(array_filter(
+    $mannies->findByProbeId($scutProbe->id),
+    static fn(Manny $manny): bool => $manny->uid !== $scutMannyId && $manny->isOnProbe() && $manny->currentTask === null,
+))[0] ?? null;
+if ($secondScutSalvageManny !== null) {
+    $duplicateScutSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondScutSalvageManny->uid) . '/salvage', $scutHeaders, json_encode([
+        'objectId' => (string) $scutSalvageRelay->id,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $duplicateScutSalvage->status, 'second Manny cannot recover the same inactive SCUT relay while salvage is pending');
+    $test->assertEquals('invalid_salvage_target', $duplicateScutSalvage->body['error']['code'] ?? null, 'duplicate SCUT relay salvage returns an explicit salvage-target error');
+}
+$scutSalvageManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT salvage Manny task missing.');
+$scutSalvageManny->taskEndsAt = gmdate('c', time() - 5);
+$mannies->save($scutSalvageManny);
+$kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
+$test->assertEquals(null, $scutRelays->findById($scutSalvageRelay->id), 'salvaged inactive SCUT relay is removed from sector relays');
+$scutRecoveredRelayItems = array_values(array_filter(
+    $items->findByProbeId($scutProbe->id),
+    static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_SCUT_RELAY,
+));
+$test->assertEquals(1, count($scutRecoveredRelayItems), 'salvaged inactive SCUT relay returns to probe inventory');
 
 $scutRemotePlayer = $auth->registerPlayerWithPassword('scut-remote', 'secret', 'SCUT Remote', 'SCUT remote probe');
 $scutRemoteProbe = $probes->findByPlayerId($scutRemotePlayer->id) ?? throw new RuntimeException('SCUT remote probe missing.');
@@ -1280,6 +1519,27 @@ $test->assert(isset($recipesById['battery_pack']), 'crafting recipes expose batt
 $test->assertEquals('carbon_compounds', $recipesById['battery_pack']['ingredients'][2]['type'] ?? null, 'battery pack uses organic compounds');
 $test->assert(isset($recipesById['linear_actuator']), 'crafting recipes expose linear actuators');
 $test->assertEquals('electric_motor', $recipesById['linear_actuator']['ingredients'][2]['type'] ?? null, 'linear actuator requires an electric motor');
+$test->assert(isset($recipesById['solar_panel']), 'crafting recipes expose solar panels');
+$test->assertEquals(['manny'], $recipesById['solar_panel']['craftableBy'] ?? null, 'solar panels are assembled by Manny');
+$test->assertEquals('micro_conductor', $recipesById['solar_panel']['ingredients'][0]['type'] ?? null, 'solar panel requires micro conductors');
+$test->assertEquals(2, $recipesById['solar_panel']['ingredients'][0]['quantity'] ?? null, 'solar panel requires two micro conductors');
+$test->assertEquals(1800, $recipesById['solar_panel']['durationSeconds'] ?? null, 'solar panel assembly takes thirty real minutes');
+$test->assertEquals(0.015, $recipesById['solar_panel']['output']['containerSpace'] ?? null, 'solar panel occupies 0.015 containers');
+$test->assert(isset($recipesById['scut_relay']), 'crafting recipes expose SCUT relays');
+$test->assertEquals(['manny'], $recipesById['scut_relay']['craftableBy'] ?? null, 'SCUT relay is assembled by Manny');
+$scutRelayIngredients = [];
+foreach ($recipesById['scut_relay']['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $scutRelayIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(32, $scutRelayIngredients['steel_plate']['quantity'] ?? null, 'SCUT relay requires thirty-two steel plates');
+$test->assertEquals(28, $scutRelayIngredients['steel_bar']['quantity'] ?? null, 'SCUT relay requires twenty-eight steel bars');
+$test->assertEquals(6, $scutRelayIngredients['battery_pack']['quantity'] ?? null, 'SCUT relay requires six battery packs');
+$test->assertEquals(4, $scutRelayIngredients['solar_panel']['quantity'] ?? null, 'SCUT relay requires four solar panels');
+$test->assertEquals(5, $scutRelayIngredients['integrated_circuit']['quantity'] ?? null, 'SCUT relay requires five integrated circuits');
+$test->assertEquals(172800, $recipesById['scut_relay']['durationSeconds'] ?? null, 'prepared SCUT relay assembly takes forty-eight real hours');
+$test->assertEquals(0.12, $recipesById['scut_relay']['output']['containerSpace'] ?? null, 'SCUT relay occupies 0.12 containers');
 $test->assert(isset($recipesById['thermal_protection_shell']), 'crafting recipes expose thermal protection shells');
 $test->assertEquals('ceramic_insulator', $recipesById['thermal_protection_shell']['ingredients'][0]['type'] ?? null, 'thermal protection shells require ceramic insulators');
 $test->assert(isset($recipesById['parachute_pack']), 'crafting recipes expose parachute packs');
@@ -1387,6 +1647,40 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $test->assertEquals(0.1, $storage->resourceStock($freshProbeForStorageRace, 'ice'), 'stale probe storage refresh adds its own resource without rebuilding from old totals');
         $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
     }
+
+    for ($index = 0; $index < 6; $index++) {
+        $storage->addItem($craftProbeEntity, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    }
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, [
+        'metals' => 3.8,
+        'ice' => 0.81,
+        'carbon_compounds' => 1.07,
+    ]);
+    $rawScutRelayCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'scut_relay',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $rawScutRelayCraft->status, 'Manny can start a SCUT relay craft from raw resources');
+    $test->assertEquals(259200, $rawScutRelayCraft->body['manny']['task']['durationSeconds'] ?? null, 'raw SCUT relay craft takes seventy-two real hours');
+    $test->assertEquals(3.8, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['metals'] ?? null, 'raw SCUT relay craft commits its raw metal costs');
+    $test->assertEquals(0.81, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['ice'] ?? null, 'raw SCUT relay craft commits its raw ice costs');
+    $test->assertEquals(1.07, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'raw SCUT relay craft commits its raw organic-compound costs');
+    $test->assertEquals(0.97, $rawScutRelayCraft->body['manny']['task']['resourceCosts']['deuterium'] ?? null, 'raw SCUT relay craft stays within one full deuterium tank');
+    $test->assertEquals(3.0, $probes->findByPlayerId($craftPlayer->id)?->deuteriumStock, 'raw SCUT relay craft consumes ninety-seven percent of the deuterium tank');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $scutRelayProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $scutRelayItems = array_values(array_filter(
+        $scutRelayProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === ProbeItem::TYPE_SCUT_RELAY,
+    ));
+    $test->assertEquals(1, count($scutRelayItems), 'completed SCUT relay craft adds one relay item');
+    $test->assertEquals(0.12, $scutRelayItems[0]['containerSpace'] ?? null, 'crafted SCUT relay item occupies 0.12 containers');
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
 
     $mannyComponentSeeds = [
         [ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, 6],
@@ -3252,6 +3546,31 @@ if ($createdProbe !== null) {
     $test->assertEquals(true, $scanDriftingItems[0]['salvageable'] ?? null, 'drifting craftable item stacks are exposed as salvageable');
     $test->assertEquals(7, $scanDriftingItems[0]['quantity'] ?? null, 'current-sector scan exposes drifting item quantity');
 
+    $scutRelayItemId = $items->create(
+        $createdProbe->id,
+        ProbeItem::TYPE_SCUT_RELAY,
+        ProbeItem::SCUT_RELAY_NAME,
+        CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
+        ['test' => 'relay-jettison'],
+    )->uid;
+    $jettisonScutRelay = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($scutRelayItemId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $jettisonScutRelay->status, 'POST /api/probe/inventory/{itemId}/jettison deploys a SCUT relay item into the sector');
+    $test->assertEquals(ProbeItem::TYPE_SCUT_RELAY, $jettisonScutRelay->body['jettisoned']['type'] ?? null, 'SCUT relay jettison response exposes relay item type');
+    $test->assertEquals('off', $jettisonScutRelay->body['jettisoned']['status'] ?? null, 'jettisoned SCUT relay starts switched off');
+    $scutJettisonRelayId = (string) ($jettisonScutRelay->body['jettisoned']['objectId'] ?? '');
+    $test->assert($scutJettisonRelayId !== '', 'SCUT relay jettison response exposes the sector relay object id');
+    $test->assertEquals(null, $sectorRepository->load($createdProbe->currentSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_RELAY)), 'jettisoned SCUT relay is not persisted as a drifting item stack');
+    $jettisonedRelay = $scutRelays->findById((int) $scutJettisonRelayId);
+    $test->assert($jettisonedRelay?->sector->equals($createdProbe->currentSector) === true, 'jettisoned SCUT relay is persisted in the current sector');
+    $test->assertEquals('off', $jettisonedRelay?->status, 'jettisoned SCUT relay is persisted as an inactive relay');
+    $scanWithJettisonedRelay = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $scanScutRelays = array_values(array_filter(
+        $scanWithJettisonedRelay->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay' && ($object['id'] ?? null) === $scutJettisonRelayId
+    ));
+    $test->assertEquals(1, count($scanScutRelays), 'current-sector scan exposes the jettisoned SCUT relay');
+    $test->assertEquals(true, $scanScutRelays[0]['salvageable'] ?? null, 'inactive SCUT relays are exposed as salvageable for Manny recovery forms');
+
     $salvageSteelBars = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
         'objectId' => $driftingObjectId,
     ], JSON_THROW_ON_ERROR));
@@ -3739,7 +4058,7 @@ if ($riskProbe !== null) {
         $test->assert($probes->findById($riskProbe->id) === null, 'mind snapshot reassignment deletes the terminal probe');
         $test->assert($missions->findByUidForProbe($riskProbe->id, $reassignmentMission->uid) === null, 'mind snapshot reassignment deletes terminal probe missions');
         $test->assert($reassignmentWarning === null || $damageWarnings->findById($reassignmentWarning->id) === null, 'mind snapshot reassignment deletes terminal probe damage warnings before movements');
-        $test->assertEquals(null, $scutRelays->findById($reassignmentRelay->id)?->createdByProbeId, 'mind snapshot reassignment keeps SCUT relays but clears the terminal probe creator');
+        $test->assertEquals($riskProbe->id, $scutRelays->findById($reassignmentRelay->id)?->createdByProbeId, 'mind snapshot reassignment keeps SCUT relays with their historical creator id');
         $newRiskProbe = $probes->findByPlayerId($riskPlayer->id);
         $updatedRiskPlayer = $players->findById($riskPlayer->id);
         $test->assert($newRiskProbe !== null && $newRiskProbe->id !== $riskProbe->id, 'mind snapshot reassignment creates a fresh probe row');

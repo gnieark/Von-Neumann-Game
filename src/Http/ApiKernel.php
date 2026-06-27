@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 51;
+    public const API_VERSION = 57;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -1620,8 +1620,9 @@ final class ApiKernel
     private function scutRelayArray(Player $player, ScutRelay $relay, bool $includeSector): array
     {
         $network = $relay->networkId !== null ? $this->scut->networkById($relay->networkId) : null;
+        $createdByProbeName = $this->scutRelayCreatorProbeName($relay);
         $payload = [
-            'id' => $relay->id,
+            'id' => $includeSector ? $relay->id : (string) $relay->id,
             'type' => 'scut_relay',
             'name' => 'Relais SCUT',
             'estimated' => false,
@@ -1631,11 +1632,12 @@ final class ApiKernel
             'dangerLevel' => 'low',
             'status' => $relay->status,
             'createdByProbeId' => $relay->createdByProbeId,
+            'createdByProbeName' => $createdByProbeName,
             'createdAt' => $relay->createdAt,
             'activatedAt' => $relay->activatedAt,
             'coverageRadiusSectors' => ScutRelay::RADIUS_SECTORS,
             'network' => $network !== null ? $this->scutNetworkReferenceArray($network) : null,
-        ];
+        ] + (!$relay->isOn() ? ['salvageable' => true] : []);
         if ($includeSector) {
             $payload['sector'] = [
                 'relative' => (new PlayerReferenceFrame($player->homeSector))->globalToRelative($relay->sector),
@@ -1643,6 +1645,15 @@ final class ApiKernel
         }
 
         return $payload;
+    }
+
+    private function scutRelayCreatorProbeName(ScutRelay $relay): ?string
+    {
+        if ($relay->createdByProbeId === null) {
+            return null;
+        }
+
+        return $this->probes->findById($relay->createdByProbeId)?->name ?? 'death probe';
     }
 
     private function scutNetworkReferenceArray(ScutNetwork $network): array
@@ -1891,6 +1902,13 @@ final class ApiKernel
                 'id' => $publicId,
                 'probeId' => $publicId,
                 'name' => $probe?->name ?? $name ?? 'Probe #' . $publicId,
+            ];
+        }
+        if ($type === ProbeMessage::ENDPOINT_UNKNOWN) {
+            return [
+                'type' => ProbeMessage::ENDPOINT_UNKNOWN,
+                'id' => $id,
+                'name' => $name !== null && trim($name) !== '' ? $name : 'Unknown sender',
             ];
         }
 

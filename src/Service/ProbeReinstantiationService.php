@@ -146,10 +146,6 @@ final class ProbeReinstantiationService
             ['probe_id' => $probeId],
         );
         $this->execute('DELETE FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute(
-            'UPDATE scut_relays SET created_by_probe_id = NULL, updated_at = :updated_at WHERE created_by_probe_id = :probe_id',
-            ['probe_id' => $probeId, 'updated_at' => gmdate('c')],
-        );
         $this->execute('DELETE FROM neumann_probes WHERE id = :probe_id', ['probe_id' => $probeId]);
     }
 

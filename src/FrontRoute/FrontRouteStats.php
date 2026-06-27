@@ -71,6 +71,40 @@ class FrontRouteStats extends FrontRoute{
                 $tpl->addSubBlock(new TplBlock('waypointPodiumMore'));
             }
         }
+        $scutActivatorPodium = $this->topScutRelayActivatorRows($stats['metrics'], $translator);
+        if ($scutActivatorPodium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyScutActivatorPodium'));
+        } else {
+            foreach ($scutActivatorPodium as $index => $probe) {
+                $tpl->addSubBlock((new TplBlock('scutRelayActivator'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
+                    'rank' => self::e($probe['rank']),
+                    'name' => self::e($probe['name']),
+                    'activatedRelays' => self::e($probe['activatedRelays']),
+                    'activatedRelaysLabel' => self::e($probe['activatedRelaysLabel']),
+                ]));
+            }
+            if (count($scutActivatorPodium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('scutActivatorPodiumMore'));
+            }
+        }
+        $scutNetworkCoveragePodium = $this->topScutNetworkCoverageRows($stats['metrics'], $translator);
+        if ($scutNetworkCoveragePodium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyScutNetworkCoveragePodium'));
+        } else {
+            foreach ($scutNetworkCoveragePodium as $index => $network) {
+                $tpl->addSubBlock((new TplBlock('scutNetworkCoverage'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
+                    'rank' => self::e($network['rank']),
+                    'name' => self::e($network['name']),
+                    'coveredSectors' => self::e($network['coveredSectors']),
+                    'coveredSectorsLabel' => self::e($network['coveredSectorsLabel']),
+                ]));
+            }
+            if (count($scutNetworkCoveragePodium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('scutNetworkCoveragePodiumMore'));
+            }
+        }
         foreach ($this->metricRows($stats['metrics'], $translator) as $metric) {
             $tpl->addSubBlock((new TplBlock('metric'))->addVars([
                 'label' => self::e($metric['label']),
@@ -126,11 +160,14 @@ class FrontRouteStats extends FrontRoute{
             'closestProbeDistance' => 0,
             'waypointBookmarksInstalled' => 0,
             'intelligentLifeWorlds' => 0,
+            'scutCoveredSectors' => 0,
             'successfulMissions' => 0,
             'failedMissions' => 0,
             'topVisitedProbes' => [],
             'topIntelligentLifeDiscoverers' => [],
             'topWaypointPlayers' => [],
+            'topScutRelayActivators' => [],
+            'topScutNetworksByCoverage' => [],
         ];
 
         $json = is_file($path) ? file_get_contents($path) : false;
@@ -228,6 +265,54 @@ class FrontRouteStats extends FrontRoute{
 
     /**
      * @param array<string, mixed> $metrics
+     * @return array<int, array{rank: string, name: string, activatedRelays: string, activatedRelaysLabel: string}>
+     */
+    private function topScutRelayActivatorRows(array $metrics, Translator $translator): array
+    {
+        $rows = is_array($metrics['topScutRelayActivators'] ?? null) ? $metrics['topScutRelayActivators'] : [];
+        $podium = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $activatedRelays = max(0, (int) ($row['activatedRelays'] ?? 0));
+            $podium[] = [
+                'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
+                'name' => trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownProbe'),
+                'activatedRelays' => $this->formatNumber($activatedRelays),
+                'activatedRelaysLabel' => $translator->get($activatedRelays > 1 ? 'statsScutActivatedRelaysPlural' : 'statsScutActivatedRelaysSingular'),
+            ];
+        }
+
+        return $podium;
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
+     * @return array<int, array{rank: string, name: string, coveredSectors: string, coveredSectorsLabel: string}>
+     */
+    private function topScutNetworkCoverageRows(array $metrics, Translator $translator): array
+    {
+        $rows = is_array($metrics['topScutNetworksByCoverage'] ?? null) ? $metrics['topScutNetworksByCoverage'] : [];
+        $podium = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $coveredSectors = max(0, (int) ($row['coveredSectors'] ?? 0));
+            $podium[] = [
+                'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
+                'name' => trim((string) ($row['networkName'] ?? '')) !== '' ? (string) $row['networkName'] : $translator->get('scutNetwork'),
+                'coveredSectors' => $this->formatNumber($coveredSectors),
+                'coveredSectorsLabel' => $translator->get($coveredSectors > 1 ? 'statsScutCoveredSectorsPlural' : 'statsScutCoveredSectorsSingular'),
+            ];
+        }
+
+        return $podium;
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
      * @return array<int, array{label: string, value: string}>
      */
     private function metricRows(array $metrics, Translator $translator): array
@@ -253,6 +338,7 @@ class FrontRouteStats extends FrontRoute{
             ['label' => $translator->get('statsClosestProbeDistance'), 'value' => $this->formatNumber($metrics['closestProbeDistance'] ?? 0)],
             ['label' => $translator->get('statsWaypointBookmarksInstalled'), 'value' => $this->formatNumber($metrics['waypointBookmarksInstalled'] ?? 0)],
             ['label' => $translator->get('statsIntelligentLifeWorlds'), 'value' => $this->formatNumber($metrics['intelligentLifeWorlds'] ?? 0)],
+            ['label' => $translator->get('statsScutCoveredSectors'), 'value' => $this->formatNumber($metrics['scutCoveredSectors'] ?? 0)],
             ['label' => $translator->get('statsSuccessfulMissions'), 'value' => $this->formatNumber($metrics['successfulMissions'] ?? 0)],
             ['label' => $translator->get('statsFailedMissions'), 'value' => $this->formatNumber($metrics['failedMissions'] ?? 0)],
         ];

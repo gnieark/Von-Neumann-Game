@@ -213,6 +213,28 @@
       "containerSpace": 0.01,
       "durationSeconds": 1200
     },
+    "solar_panel": {
+      "description": "A foldable photovoltaic panel with printed conductors, crystal substrate, and a reinforced mounting plate.",
+      "microConductorCount": 2,
+      "crystalSubstrateCount": 1,
+      "ceramicInsulatorCount": 1,
+      "steelPlateCount": 1,
+      "metalsCost": 0.02,
+      "containerSpace": 0.015,
+      "durationSeconds": 1800
+    },
+    "scut_relay": {
+      "description": "A long-range SCUT communication relay module with its own solar power array, buffer batteries, control circuits, and deployable structure.",
+      "steelPlateCount": 32,
+      "steelBarCount": 28,
+      "batteryPackCount": 6,
+      "solarPanelCount": 4,
+      "integratedCircuitCount": 5,
+      "electricMotorCount": 4,
+      "linearActuatorCount": 2,
+      "containerSpace": 0.12,
+      "durationSeconds": 172800
+    },
     "thermal_protection_shell": {
       "description": "A disposable ablative shell that protects a storage container during atmospheric entry.",
       "ceramicInsulatorCount": 8,
