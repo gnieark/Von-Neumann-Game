@@ -353,6 +353,8 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuteri
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/refill-deuterium-tank'), 'mannies JS can start a deuterium tank refill action');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_relay": tr("scutRelayObject"'), 'mannies JS labels SCUT relay sector objects');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -554,7 +556,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(52, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(54, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1098,9 +1100,20 @@ $scutPlayer = $auth->registerPlayerWithPassword('scut-sender', 'secret', 'SCUT S
 $scutSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'scut-sender', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $scutHeaders = ['Authorization' => 'Bearer ' . (string) ($scutSession->body['token'] ?? '')];
 $scutProbe = $probes->findByPlayerId($scutPlayer->id) ?? throw new RuntimeException('SCUT test probe missing.');
+$sectorRepository->save(new SectorContent($scutProbe->currentSector, [
+    new Asteroid('scut-dark-rock', null, 'iron', ['iron'], 'small', 0.000001, 0.001),
+]));
 $scutRelay = $scut->createOffRelay($scutProbe->currentSector, $scutProbe->id);
 $storage->addItem($scutProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
 $scutMannyId = (string) (($kernel->handle('GET', '/api/probe/mannies', $scutHeaders)->body['mannies'][0]['id'] ?? null) ?? '');
+$scutTurnOnWithoutStar = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/turn-on-relay', $scutHeaders, json_encode([
+    'relayId' => $scutRelay->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(422, $scutTurnOnWithoutStar->status, 'Manny cannot turn on a SCUT relay in a sector without a star');
+$test->assertEquals('scut_relay_requires_star', $scutTurnOnWithoutStar->body['error']['code'] ?? null, 'SCUT relay solar-energy requirement returns an explicit error');
+$sectorRepository->save(new SectorContent($scutProbe->currentSector, [
+    new Star('scut-unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+]));
 $scutTurnOn = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/turn-on-relay', $scutHeaders, json_encode([
     'relayId' => $scutRelay->id,
     'networkName' => 'Delta SCUT',
@@ -1131,7 +1144,24 @@ $scutRelayObjects = array_values(array_filter(
     static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay',
 ));
 $test->assertEquals(1, count($scutRelayObjects), 'Current sector exposes the SCUT relay as a sector object');
+$test->assertEquals((string) $scutRelay->id, $scutRelayObjects[0]['id'] ?? null, 'SCUT relay sector object exposes a string object id');
 $test->assertEquals($scutNetworkId, $scutSector->body['sector']['scutNetworks'][0]['id'] ?? null, 'Current sector exposes covering SCUT networks');
+$scutSalvageRelay = $scut->createOffRelay($scutProbe->currentSector, $scutProbe->id);
+$scutSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/salvage', $scutHeaders, json_encode([
+    'objectId' => (string) $scutSalvageRelay->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(202, $scutSalvage->status, 'Manny can start recovering an inactive SCUT relay from the sector');
+$test->assertEquals(ProbeItem::TYPE_SCUT_RELAY, $scutSalvage->body['manny']['task']['target']['type'] ?? null, 'inactive SCUT relay salvage target is exposed as a SCUT relay item');
+$scutSalvageManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT salvage Manny task missing.');
+$scutSalvageManny->taskEndsAt = gmdate('c', time() - 5);
+$mannies->save($scutSalvageManny);
+$kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
+$test->assertEquals(null, $scutRelays->findById($scutSalvageRelay->id), 'salvaged inactive SCUT relay is removed from sector relays');
+$scutRecoveredRelayItems = array_values(array_filter(
+    $items->findByProbeId($scutProbe->id),
+    static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_SCUT_RELAY,
+));
+$test->assertEquals(1, count($scutRecoveredRelayItems), 'salvaged inactive SCUT relay returns to probe inventory');
 
 $scutRemotePlayer = $auth->registerPlayerWithPassword('scut-remote', 'secret', 'SCUT Remote', 'SCUT remote probe');
 $scutRemoteProbe = $probes->findByPlayerId($scutRemotePlayer->id) ?? throw new RuntimeException('SCUT remote probe missing.');
@@ -3304,6 +3334,31 @@ if ($createdProbe !== null) {
     ));
     $test->assertEquals(true, $scanDriftingItems[0]['salvageable'] ?? null, 'drifting craftable item stacks are exposed as salvageable');
     $test->assertEquals(7, $scanDriftingItems[0]['quantity'] ?? null, 'current-sector scan exposes drifting item quantity');
+
+    $scutRelayItemId = $items->create(
+        $createdProbe->id,
+        ProbeItem::TYPE_SCUT_RELAY,
+        ProbeItem::SCUT_RELAY_NAME,
+        CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
+        ['test' => 'relay-jettison'],
+    )->uid;
+    $jettisonScutRelay = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($scutRelayItemId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $jettisonScutRelay->status, 'POST /api/probe/inventory/{itemId}/jettison deploys a SCUT relay item into the sector');
+    $test->assertEquals(ProbeItem::TYPE_SCUT_RELAY, $jettisonScutRelay->body['jettisoned']['type'] ?? null, 'SCUT relay jettison response exposes relay item type');
+    $test->assertEquals('off', $jettisonScutRelay->body['jettisoned']['status'] ?? null, 'jettisoned SCUT relay starts switched off');
+    $scutJettisonRelayId = (string) ($jettisonScutRelay->body['jettisoned']['objectId'] ?? '');
+    $test->assert($scutJettisonRelayId !== '', 'SCUT relay jettison response exposes the sector relay object id');
+    $test->assertEquals(null, $sectorRepository->load($createdProbe->currentSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_RELAY)), 'jettisoned SCUT relay is not persisted as a drifting item stack');
+    $jettisonedRelay = $scutRelays->findById((int) $scutJettisonRelayId);
+    $test->assert($jettisonedRelay?->sector->equals($createdProbe->currentSector) === true, 'jettisoned SCUT relay is persisted in the current sector');
+    $test->assertEquals('off', $jettisonedRelay?->status, 'jettisoned SCUT relay is persisted as an inactive relay');
+    $scanWithJettisonedRelay = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $scanScutRelays = array_values(array_filter(
+        $scanWithJettisonedRelay->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay' && ($object['id'] ?? null) === $scutJettisonRelayId
+    ));
+    $test->assertEquals(1, count($scanScutRelays), 'current-sector scan exposes the jettisoned SCUT relay');
+    $test->assertEquals(true, $scanScutRelays[0]['salvageable'] ?? null, 'inactive SCUT relays are exposed as salvageable for Manny recovery forms');
 
     $salvageSteelBars = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
         'objectId' => $driftingObjectId,

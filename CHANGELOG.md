@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-27
+
+### Changed
+
+- API v54 : `POST /api/probe/inventory/{itemId}/jettison` déploie désormais un item `scut_relay` comme relais SCUT éteint dans le secteur courant, exposé comme récupérable par les Mannys.
+- API v53 : `POST /api/probe/mannies/{mannyId}/turn-on-relay` exige désormais une étoile dans le secteur courant (`scut_relay_requires_star`) et `POST /api/probe/mannies/{mannyId}/salvage` peut récupérer un relais SCUT éteint présent dans le secteur.
+
 ## 2026-06-26
 
 ### Added

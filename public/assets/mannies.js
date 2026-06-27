@@ -186,6 +186,7 @@
             "drifting_item": tr("driftingItemObject", "Drifting item"),
             "detached_container": tr("detachedContainerObject", "Detached container"),
             "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
+            "scut_relay": tr("scutRelayObject", "SCUT relay"),
             "waypoint_bookmark": tr("waypointBookmark", "Waypoint bookmark"),
             "manny": tr("mannyObject", "Manny"),
             "probe": tr("tabProbe", "Probe"),
@@ -368,6 +369,7 @@
             "itemType": object.itemType || null,
             "quantity": object.quantity || null,
             "containerSpace": object.containerSpace || null,
+            "status": object.status || null,
         }));
     }
 

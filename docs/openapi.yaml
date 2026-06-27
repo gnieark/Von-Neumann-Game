@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 52
+                apiVersion: 54
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1524,10 +1524,11 @@ paths:
       summary: Jettison an inventory entry into space
       description: >
         Discards stored metals/non-metal materials by amount, ejects an idle onboard Manny
-        into the current sector, or adds supported crafted items to an aggregated
-        drifting-item stack in the current sector. Non-persisted core equipment
-        and additional containers cannot be jettisoned. The external deuterium
-        tank is not jettisonable.
+        into the current sector, deploys a scut_relay item as an inactive SCUT
+        relay in the current sector, or adds other supported crafted items to an
+        aggregated drifting-item stack in the current sector. Non-persisted core
+        equipment and additional containers cannot be jettisoned. The external
+        deuterium tank is not jettisonable.
       parameters:
         - name: itemId
           in: path
@@ -1811,8 +1812,11 @@ paths:
     post:
       summary: Recover a drifting sector object with a Manny
       description: >
-        Starts a five-minute recovery task. The target is checked again when
-        the delay ends; if another player has already recovered it, the task
+        Starts a five-minute recovery task. Recoverable targets include
+        abandoned Mannys, drifting item stacks, detached storage containers, and
+        inactive SCUT relays present in the probe current sector. The target is
+        checked again when the delay ends; if another player has already
+        recovered it or an inactive relay has been switched on, the task
         completes with a failed result and no object is transferred.
       parameters:
         - $ref: '#/components/parameters/MannyId'
@@ -2217,11 +2221,12 @@ paths:
       summary: Send a Manny to turn on a SCUT relay
       description: >
         Starts a five-minute Manny task that turns on an inactive SCUT relay in
-        the probe current sector. The task consumes one integrated_circuit from
-        the probe inventory. If the relay joins existing relay coverage, the
-        resulting network keeps the name of the largest existing network, with
-        oldest network as tie-breaker; otherwise networkName or "scut network"
-        is used.
+        the probe current sector. The current sector must contain a star because
+        the relay needs solar energy. The task consumes one integrated_circuit
+        from the probe inventory. If the relay joins existing relay coverage,
+        the resulting network keeps the name of the largest existing network,
+        with oldest network as tie-breaker; otherwise networkName or "scut
+        network" is used.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -2259,7 +2264,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Relay is not in the current sector or the probe lacks an integrated circuit
+          description: Relay is not in the current sector, the sector has no star, or the probe lacks an integrated circuit
           content:
             application/json:
               schema:
@@ -2568,7 +2573,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -3892,7 +3897,11 @@ components:
               description: Total quantity of this crafted item type now drifting in the current sector.
             objectId:
               type: string
-              description: Current-sector drifting item object id for crafted item jettison.
+              description: Current-sector drifting item object id for crafted item jettison, or SCUT relay object id for scut_relay jettison.
+            status:
+              type: string
+              enum: [off]
+              description: Present for scut_relay jettison.
             containerSpace:
               type: number
         manny:

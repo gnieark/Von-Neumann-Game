@@ -13,6 +13,7 @@ use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
+use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
@@ -344,8 +345,8 @@ final class MannyService
         $this->ensureMannyIdle($manny);
         $this->refreshOtherMannyStates($probe, $manny);
 
-        $target = $this->findObjectInCurrentSector($probe, $objectId);
-        if ($target === null || !$this->isSalvageableObject($target)) {
+        $target = $this->findObjectInCurrentSector($probe, $objectId) ?? $this->findScutRelayInCurrentSector($probe, $objectId);
+        if ($target === null || !$this->isSalvageableTarget($target)) {
             throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
         }
 
@@ -636,6 +637,9 @@ final class MannyService
         if (!$manny->isOnProbe()) {
             throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to turn on a SCUT relay.');
         }
+        if (!$this->currentSectorHasStar($probe)) {
+            throw new MannyActionException(422, 'scut_relay_requires_star', 'A SCUT relay needs solar energy and can only be turned on in a sector with a star.');
+        }
 
         $relay = $this->scut->relayById($relayId)
             ?? throw new MannyActionException(404, 'scut_relay_not_found', 'SCUT relay not found.');
@@ -911,6 +915,24 @@ final class MannyService
             throw new MannyActionException(422, 'item_not_jettisonable', 'This inventory item cannot be jettisoned.');
         }
 
+        if ($item->type === ProbeItem::TYPE_SCUT_RELAY) {
+            if ($this->scut === null) {
+                throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
+            }
+            $relay = $this->scut->createOffRelay($probe->currentSector, $probe->id);
+            $this->items->delete($item);
+
+            return [
+                'type' => $item->type,
+                'name' => $this->itemDisplayName($item->type, $item->name),
+                'quantity' => 1,
+                'objectId' => (string) $relay->id,
+                'status' => $relay->status,
+                'containerSpace' => $item->containerSpace,
+                'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
+            ];
+        }
+
         $sector = $this->sectors->getOrCreateSector($probe->currentSector);
         $drifting = $this->addDriftingItemToSector($sector, $item->type, $this->itemDisplayName($item->type, $item->name), $item->containerSpace, 1);
         $this->sectors->saveSector($sector);
@@ -1114,7 +1136,10 @@ final class MannyService
         }
 
         $target = $objectId !== '' ? $sector->findObjectById($objectId) : null;
-        if ($target === null || !$this->isSalvageableObject($target)) {
+        if ($target === null) {
+            $target = $this->findScutRelayInSector($sector, $objectId);
+        }
+        if ($target === null || !$this->isSalvageableTarget($target)) {
             $result['result'] = 'failed';
             $result['failureReason'] = 'target_unavailable';
             $this->finishSalvageActor($manny, $probe, $result);
@@ -2146,6 +2171,11 @@ final class MannyService
         return false;
     }
 
+    private function currentSectorHasStar(NeumannProbe $probe): bool
+    {
+        return $this->sectors->getOrCreateSector($probe->currentSector)->hasStar();
+    }
+
     /**
      * @return array<string>
      */
@@ -2249,21 +2279,55 @@ final class MannyService
         return $this->sectors->getOrCreateSector($probe->currentSector)->findObjectById($objectId);
     }
 
+    private function findScutRelayInCurrentSector(NeumannProbe $probe, string $objectId): ?ScutRelay
+    {
+        return $this->findScutRelayInSector(
+            $this->sectors->getOrCreateSector($probe->currentSector),
+            $objectId,
+        );
+    }
+
+    private function findScutRelayInSector(SectorContent $sector, string $objectId): ?ScutRelay
+    {
+        if ($this->scut === null || !ctype_digit($objectId)) {
+            return null;
+        }
+
+        $relay = $this->scut->relayById((int) $objectId);
+        if ($relay === null || !$relay->sector->equals($sector->getCoordinates())) {
+            return null;
+        }
+
+        return $relay;
+    }
+
     private function isMineableObject(UniverseObject $object): bool
     {
         return $object instanceof Asteroid
             || ($object instanceof Planet && $object->getMass() <= $this->mineablePlanetMaxMass());
     }
 
-    private function isSalvageableObject(UniverseObject $object): bool
+    private function isSalvageableTarget(UniverseObject|ScutRelay $object): bool
     {
         return ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_ABANDONED)
             || ($object instanceof SectorDriftingItem && $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0)
-            || $object instanceof SectorDetachedContainer;
+            || $object instanceof SectorDetachedContainer
+            || ($object instanceof ScutRelay && !$object->isOn());
     }
 
-    private function salvageTargetArray(UniverseObject $object): array
+    private function salvageTargetArray(UniverseObject|ScutRelay $object): array
     {
+        if ($object instanceof ScutRelay) {
+            return [
+                'id' => (string) $object->id,
+                'type' => ProbeItem::TYPE_SCUT_RELAY,
+                'name' => ProbeItem::SCUT_RELAY_NAME,
+                'status' => $object->status,
+                'containerSpace' => CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
+                'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
+            ];
+        }
+
         return [
             'id' => $object->getId(),
             'type' => $object->getType()->value,
@@ -2346,8 +2410,27 @@ final class MannyService
     /**
      * @return array<string, mixed>
      */
-    private function completeSalvageTarget(NeumannProbe $probe, SectorContent $sector, UniverseObject $target): array
+    private function scutRelayReservedItemPayload(ScutRelay $relay): array
     {
+        return [
+            'objectId' => (string) $relay->id,
+            'type' => ProbeItem::TYPE_SCUT_RELAY,
+            'name' => ProbeItem::SCUT_RELAY_NAME,
+            'quantity' => 1,
+            'containerSpace' => CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
+            'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function completeSalvageTarget(NeumannProbe $probe, SectorContent $sector, UniverseObject|ScutRelay $target): array
+    {
+        if ($target instanceof ScutRelay) {
+            return $this->completeScutRelaySalvageTarget($probe, $sector, $target);
+        }
+
         if (!$target instanceof SectorManny || $target->getState() !== SectorManny::STATE_ABANDONED) {
             return [
                 'result' => 'failed',
@@ -2389,6 +2472,40 @@ final class MannyService
                 'type' => 'manny',
                 'id' => $recovered->uid,
                 'name' => $recovered->name,
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function completeScutRelaySalvageTarget(NeumannProbe $probe, SectorContent $sector, ScutRelay $target): array
+    {
+        if ($this->scut === null) {
+            return [
+                'result' => 'failed',
+                'failureReason' => 'target_unavailable',
+            ];
+        }
+        $relay = $this->scut->relayById($target->id);
+        if ($relay === null || $relay->isOn() || !$relay->sector->equals($sector->getCoordinates())) {
+            return [
+                'result' => 'failed',
+                'failureReason' => 'target_unavailable',
+            ];
+        }
+
+        $this->scut->deleteRelay($relay->id);
+        $reservedItem = $this->scutRelayReservedItemPayload($relay);
+
+        return [
+            'result' => 'success',
+            'reservedItem' => $reservedItem,
+            'salvaged' => [
+                'type' => ProbeItem::TYPE_SCUT_RELAY,
+                'name' => ProbeItem::SCUT_RELAY_NAME,
+                'quantity' => 1,
+                'containerSpace' => $reservedItem['containerSpace'],
             ],
         ];
     }

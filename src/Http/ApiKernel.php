@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 52;
+    public const API_VERSION = 54;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -1621,7 +1621,7 @@ final class ApiKernel
     {
         $network = $relay->networkId !== null ? $this->scut->networkById($relay->networkId) : null;
         $payload = [
-            'id' => $relay->id,
+            'id' => $includeSector ? $relay->id : (string) $relay->id,
             'type' => 'scut_relay',
             'name' => 'Relais SCUT',
             'estimated' => false,
@@ -1635,7 +1635,7 @@ final class ApiKernel
             'activatedAt' => $relay->activatedAt,
             'coverageRadiusSectors' => ScutRelay::RADIUS_SECTORS,
             'network' => $network !== null ? $this->scutNetworkReferenceArray($network) : null,
-        ];
+        ] + (!$relay->isOn() ? ['salvageable' => true] : []);
         if ($includeSector) {
             $payload['sector'] = [
                 'relative' => (new PlayerReferenceFrame($player->homeSector))->globalToRelative($relay->sector),

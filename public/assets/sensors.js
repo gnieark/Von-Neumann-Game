@@ -51,6 +51,7 @@
             "drifting_item": tr("driftingItemObject", "Drifting item"),
             "detached_container": tr("detachedContainerObject", "Detached container"),
             "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
+            "scut_relay": tr("scutRelayObject", "SCUT relay"),
             "object": tr("object", "Object"),
             "unknown": tr("unknownObject", "Unknown object"),
         }[type] || type || tr("unknownObject", "Unknown object");

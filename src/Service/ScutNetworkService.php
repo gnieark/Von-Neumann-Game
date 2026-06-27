@@ -134,6 +134,11 @@ final class ScutNetworkService
         return $this->networks->findById($id);
     }
 
+    public function deleteRelay(int $id): void
+    {
+        $this->relays->delete($id);
+    }
+
     /**
      * @return array<ScutRelay>
      */

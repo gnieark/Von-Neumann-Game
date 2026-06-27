@@ -162,6 +162,12 @@ final class ScutRelayRepository
         ]);
     }
 
+    public function delete(int $id): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM scut_relays WHERE id = :id');
+        $stmt->execute(['id' => $id]);
+    }
+
     private function hydrate(array $row): ScutRelay
     {
         $covered = json_decode((string) ($row['covered_sectors_json'] ?? '[]'), true);
