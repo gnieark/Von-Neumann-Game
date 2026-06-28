@@ -20,6 +20,7 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorDriftingItem;
@@ -47,6 +48,10 @@ final class MannyService
     public const WAYPOINT_BOOKMARK_METALS_COST = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_METALS_COST;
     public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CONTAINER_SPACE;
     public const WAYPOINT_BOOKMARK_CRAFTING_SECONDS = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CRAFTING_SECONDS;
+    public const PUBLIC_TASK_UNKNOWN_TOO_FAR = 'unknown_too_far';
+    public const TASK_VISIBILITY_LOCAL = 'local';
+    public const TASK_VISIBILITY_SCUT_NETWORK = 'scut_network';
+    public const TASK_VISIBILITY_TOO_FAR = 'too_far';
 
     private readonly WaypointBookmarkService $bookmarks;
 
@@ -139,9 +144,17 @@ final class MannyService
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
         $this->ensureMannyIdle($manny);
         $this->refreshOtherMannyStates($probe, $manny);
+        $remoteViaScut = !$manny->isInSameSectorAs($probe);
+        if ($remoteViaScut) {
+            if (!$this->canOrderRemoteMannyViaScut($probe, $manny)) {
+                $this->ensureMannyInRange($manny, $probe);
+            }
+            if ($targetContainerId === null) {
+                throw new MannyActionException(422, 'invalid_storage_container', 'Remote SCUT mining requires a detached target container in the Manny sector.');
+            }
+        }
 
         try {
             $selectedResources = ResourceComposition::normalizeSelection($resourceTypes);
@@ -153,14 +166,15 @@ final class MannyService
             throw new MannyActionException(400, 'bad_request', 'Mining target amount must be greater than zero.');
         }
 
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $taskSector = $manny->sector ?? $probe->currentSector;
+        $sector = $this->sectors->getOrCreateSector($taskSector);
         $target = $sector->findObjectById($objectId);
         if ($target === null || !$this->isMineableObject($target)) {
             throw new MannyActionException(422, 'invalid_mining_target', 'This object cannot be mined by a Manny.');
         }
 
         $availableAmounts = $target instanceof Asteroid
-            ? $this->availableAsteroidResourceAmountsForOrders($probe, $target)
+            ? $this->availableAsteroidResourceAmountsForOrders($probe, $target, $taskSector)
             : null;
         $composition = $availableAmounts !== null
             ? ResourceComposition::fromAmounts($availableAmounts)
@@ -201,7 +215,7 @@ final class MannyService
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $manny->locationType = Manny::LOCATION_SECTOR;
-        $manny->sector = $probe->currentSector;
+        $manny->sector = $taskSector;
         $manny->currentTask = Manny::TASK_MINING;
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . $this->miningDurationSeconds($targetAmount, $miningTravelSeconds) . ' seconds')->format('c');
@@ -772,6 +786,9 @@ final class MannyService
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        if (!$manny->isInSameSectorAs($probe) && $this->canRecallRemoteMannyViaScut($probe, $manny)) {
+            return $this->abandonRemoteMannyTask($manny);
+        }
         $this->ensureMannyInRange($manny, $probe);
 
         if ($manny->currentTask === Manny::TASK_REPAIR) {
@@ -848,6 +865,51 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
+    }
+
+    private function canRecallRemoteMannyViaScut(NeumannProbe $probe, Manny $manny): bool
+    {
+        return $manny->currentTask !== null
+            && $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
+    }
+
+    private function canOrderRemoteMannyViaScut(NeumannProbe $probe, Manny $manny): bool
+    {
+        return $manny->currentTask === null
+            && $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
+    }
+
+    private function canRefreshRemoteMiningViaScut(NeumannProbe $probe, Manny $manny): bool
+    {
+        return $manny->currentTask === Manny::TASK_MINING
+            && $this->miningTaskTargetContainerId($manny) !== null
+            && $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
+    }
+
+    private function abandonRemoteMannyTask(Manny $manny): Manny
+    {
+        $lastTask = $manny->currentTask;
+        if ($manny->currentTask === Manny::TASK_SALVAGE) {
+            $this->restoreReservedSalvageItem($manny);
+            $this->restoreReservedDetachedContainer($manny);
+        }
+
+        $this->clearTask($manny, [
+            'lastTask' => $lastTask,
+            'result' => 'forgotten',
+            'reason' => 'remote_scut_recall',
+        ]);
+        $manny->locationType = Manny::LOCATION_SECTOR;
+        $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
     }
 
     public function dropMannyCargo(NeumannProbe $probe, string $uid): Manny
@@ -957,7 +1019,7 @@ final class MannyService
         if ($manny->currentTask === null) {
             return $manny;
         }
-        if (!$manny->isInSameSectorAs($probe)) {
+        if (!$manny->isInSameSectorAs($probe) && !$this->canRefreshRemoteMiningViaScut($probe, $manny)) {
             return $manny;
         }
 
@@ -1008,19 +1070,48 @@ final class MannyService
 
     public function publicArray(NeumannProbe $probe, Manny $manny, ?array $relativeSector = null): array
     {
+        $taskVisibility = $this->taskVisibilityFor($probe, $manny);
+        $currentTask = $manny->currentTask;
+        $taskProgressPercent = $manny->taskProgressPercent();
+        $taskEstimatedEndTime = $manny->taskEndsAt;
+        $task = $this->publicTaskPayload($manny);
+        if ($manny->currentTask !== null && $taskVisibility === self::TASK_VISIBILITY_TOO_FAR) {
+            $currentTask = self::PUBLIC_TASK_UNKNOWN_TOO_FAR;
+            $taskProgressPercent = 0.0;
+            $taskEstimatedEndTime = null;
+            $task = [];
+        }
+
         return [
             'id' => $manny->uid,
             'name' => $manny->name,
             'location' => $manny->isOnProbe()
                 ? ['type' => Manny::LOCATION_PROBE]
                 : ['type' => Manny::LOCATION_SECTOR, 'sector' => ['relative' => $relativeSector]],
-            'currentTask' => $manny->currentTask,
-            'taskProgressPercent' => $manny->taskProgressPercent(),
-            'taskEstimatedEndTime' => $manny->taskEndsAt,
-            'task' => $this->publicTaskPayload($manny),
+            'currentTask' => $currentTask,
+            'taskProgressPercent' => $taskProgressPercent,
+            'taskEstimatedEndTime' => $taskEstimatedEndTime,
+            'task' => $task,
+            'taskVisibility' => $taskVisibility,
             'cargo' => $this->mannyCargoArray($manny),
             'canReceiveOrders' => $manny->probeId === $probe->id && $manny->isInSameSectorAs($probe) && $manny->currentTask === null,
         ];
+    }
+
+    private function taskVisibilityFor(NeumannProbe $probe, Manny $manny): string
+    {
+        if ($manny->isInSameSectorAs($probe)) {
+            return self::TASK_VISIBILITY_LOCAL;
+        }
+        if (
+            $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector)
+        ) {
+            return self::TASK_VISIBILITY_SCUT_NETWORK;
+        }
+
+        return self::TASK_VISIBILITY_TOO_FAR;
     }
 
     /**
@@ -1674,7 +1765,7 @@ final class MannyService
             }
 
             $fresh = $this->mannies->findById($manny->id) ?? $manny;
-            if ($fresh->currentTask !== Manny::TASK_MINING || !$fresh->isInSameSectorAs($probe)) {
+            if ($fresh->currentTask !== Manny::TASK_MINING || (!$fresh->isInSameSectorAs($probe) && !$this->canRefreshRemoteMiningViaScut($probe, $fresh))) {
                 return $fresh;
             }
 
@@ -2962,11 +3053,14 @@ final class MannyService
     /**
      * @return array<string, float>
      */
-    private function availableAsteroidResourceAmountsForOrders(NeumannProbe $probe, Asteroid $asteroid): array
+    private function availableAsteroidResourceAmountsForOrders(NeumannProbe $probe, Asteroid $asteroid, SectorCoordinates $sector): array
     {
         $availableAmounts = $asteroid->getResourceAmounts();
         foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
             if ($manny->currentTask !== Manny::TASK_MINING || ($manny->taskPayload['objectId'] ?? null) !== $asteroid->getId()) {
+                continue;
+            }
+            if ($manny->sector === null || !$manny->sector->equals($sector)) {
                 continue;
             }
 
