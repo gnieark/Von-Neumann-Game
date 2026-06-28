@@ -8,6 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - API v58 : `GET /api/probe/mannies` expose les détails de tâche d’une Manny éloignée seulement si son secteur et celui de la sonde sont couverts par le même réseau SCUT; sinon `currentTask` vaut `unknown_too_far` et le payload/progrès de tâche est masqué.
 - Interface : `/mannies` affiche les tâches distantes joignables via SCUT avec la progression habituelle et une mention courte de liaison SCUT, tout en conservant “Trop éloignée” hors portée.
+- Interface : la mention de tâche distante via SCUT est maintenant visible directement dans le bouton d’accordéon Manny, et l’action de rappel distante est libellée comme un abandon de tâche.
 
 ## 2026-06-27
 

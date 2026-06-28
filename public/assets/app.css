@@ -2434,6 +2434,10 @@ button.account-menu-item {
     overflow-wrap: anywhere;
 }
 
+.manny-accordion-task-scut {
+    color: #9fe8f4;
+}
+
 .manny-accordion-panel {
     display: grid;
     gap: 12px;
@@ -2558,12 +2562,6 @@ button.account-menu-item {
     margin: 0;
     color: var(--muted);
     line-height: 1.5;
-}
-
-.manny-scut-remote-note {
-    margin: 0;
-    color: #9fe8f4;
-    font-size: .9rem;
 }
 
 .manny-form select {

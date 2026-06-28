@@ -1127,6 +1127,9 @@
                 parts.push(resources);
             }
         }
+        if (mannyTaskVisibleViaScut(manny)) {
+            parts.push(tr("mannyRemoteScutTask", "Remote sector via SCUT"));
+        }
 
         return parts.join(" - ");
     }
@@ -1140,7 +1143,8 @@
 
         return "<span class=\"manny-accordion-task-status\">" + escaped(taskName) + "</span>"
             + "<span class=\"manny-accordion-task-progress\">" + progressValueHtml(manny) + "</span>"
-            + (resources ? "<span class=\"manny-accordion-task-resources\">" + escaped(resources) + "</span>" : "");
+            + (resources ? "<span class=\"manny-accordion-task-resources\">" + escaped(resources) + "</span>" : "")
+            + (mannyTaskVisibleViaScut(manny) ? "<span class=\"manny-accordion-task-scut\">" + escaped(tr("mannyRemoteScutTask", "Remote sector via SCUT")) + "</span>" : "");
     }
 
     function miningTaskTarget(payload) {
@@ -1154,6 +1158,9 @@
     function renderMannyTaskPanel(manny) {
         const payload = manny.task || {};
         const progress = progressValueHtml(manny);
+        const recallLabel = mannyTaskVisibleViaScut(manny)
+            ? tr("abandonRemoteMannyTask", "Abandon task")
+            : null;
         if (manny.currentTask === "repair") {
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("repairInProgress", "Repair in progress")) + "</h4>"
@@ -1162,7 +1169,7 @@
                     "metals": window.VNG.numberValue(payload.metalsCost),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
-                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(tr("cancelRepair", "Cancel repairs")) + "</button>"
+                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("cancelRepair", "Cancel repairs")) + "</button>"
                 + "</section>";
         }
         if (manny.currentTask === "mining") {
@@ -1174,7 +1181,7 @@
                 })) + "</p>"
                 + miningTaskTargetContainerDetail(payload)
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
-                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(tr("recall", "Recall")) + "</button>"
+                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("recall", "Recall")) + "</button>"
                 + "</section>";
         }
         if (manny.currentTask === "crafting") {
@@ -1185,7 +1192,7 @@
                     "resources": resourceCostsLabel(payload.resourceCosts || {"metals": payload.metalsCost || 0}),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
-                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(tr("cancelCrafting", "Cancel crafting")) + "</button>"
+                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("cancelCrafting", "Cancel crafting")) + "</button>"
                 + "</section>";
         }
         if (manny.currentTask === "assisting_atomic_printer") {
@@ -1195,7 +1202,7 @@
                     "recipe": payload.recipeName || tr("integratedCircuit", "Integrated circuit"),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
-                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(tr("cancelCrafting", "Cancel crafting")) + "</button>"
+                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("cancelCrafting", "Cancel crafting")) + "</button>"
                 + "</section>";
         }
         if (manny.currentTask === "waiting_for_space") {
@@ -1818,10 +1825,6 @@
         const buttonTaskTitle = tooFar ? taskName : mannyAccordionTaskText(manny, taskName);
         const buttonTitle = (manny.name || mannyId) + " - " + buttonTaskTitle;
         const rackStatusClass = mannyRackStatusClass(manny, tooFar);
-        const scutRemote = mannyTaskVisibleViaScut(manny);
-        const scutRemoteNote = scutRemote
-            ? "<p class=\"manny-scut-remote-note\">" + escaped(tr("mannyRemoteScutTask", "Remote sector via SCUT")) + "</p>"
-            : "";
         const panelContent = tooFar
             ? "<div class=\"manny-metrics\">"
                 + metric(tr("location", "Location"), mannyLocation(manny))
@@ -1834,7 +1837,6 @@
                 + metric(tr("cargo", "Cargo"), mannyCargo(manny), "manny-cargo-value")
                 + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null, busy ? progressDataAttributes(manny) : "")
                 + "</div>"
-                + scutRemoteNote
                 + "<form class=\"manny-rename-form manny-form\" hidden>"
                 + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
                 + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"

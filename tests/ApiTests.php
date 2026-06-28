@@ -372,6 +372,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'network
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'turning_on_scut_relay'), 'mannies JS displays SCUT relay activation tasks');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyTaskVisibleViaScut'), 'mannies JS keeps remote SCUT-visible tasks expanded with live progress');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyRemoteScutTask'), 'mannies JS labels remote SCUT-visible Manny tasks');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-accordion-task-scut'), 'mannies JS renders remote SCUT-visible task labels inside the accordion button');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'abandonRemoteMannyTask'), 'mannies JS relabels remote SCUT-visible recall actions without changing the endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'String(probe.id) !== String(state.currentProbeId'), 'messaging JS excludes the current probe from SCUT network recipients');
