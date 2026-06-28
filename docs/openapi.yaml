@@ -2141,7 +2141,10 @@ paths:
         Manny is outside the probe. By default the return lasts one Manny travel
         time. If the cancelled task has been running for less than that travel
         time, the Manny turns around and the return duration matches the elapsed
-        task time.
+        task time. When the Manny is in a different sector that shares SCUT
+        network coverage with the probe sector, the order is accepted remotely:
+        the task is cancelled, the Manny stays in that sector, and it is
+        registered there as forgotten instead of returning.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       responses:
@@ -2160,7 +2163,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Manny is outside the probe current sector
+          description: Manny is outside both the probe current sector and same-SCUT remote command range
           content:
             application/json:
               schema:

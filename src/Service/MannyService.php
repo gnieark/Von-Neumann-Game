@@ -776,6 +776,9 @@ final class MannyService
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        if (!$manny->isInSameSectorAs($probe) && $this->canRecallRemoteMannyViaScut($probe, $manny)) {
+            return $this->abandonRemoteMannyTask($manny);
+        }
         $this->ensureMannyInRange($manny, $probe);
 
         if ($manny->currentTask === Manny::TASK_REPAIR) {
@@ -852,6 +855,34 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
+    }
+
+    private function canRecallRemoteMannyViaScut(NeumannProbe $probe, Manny $manny): bool
+    {
+        return $manny->currentTask !== null
+            && $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
+    }
+
+    private function abandonRemoteMannyTask(Manny $manny): Manny
+    {
+        $lastTask = $manny->currentTask;
+        if ($manny->currentTask === Manny::TASK_SALVAGE) {
+            $this->restoreReservedSalvageItem($manny);
+            $this->restoreReservedDetachedContainer($manny);
+        }
+
+        $this->clearTask($manny, [
+            'lastTask' => $lastTask,
+            'result' => 'forgotten',
+            'reason' => 'remote_scut_recall',
+        ]);
+        $manny->locationType = Manny::LOCATION_SECTOR;
+        $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
     }
 
     public function dropMannyCargo(NeumannProbe $probe, string $uid): Manny

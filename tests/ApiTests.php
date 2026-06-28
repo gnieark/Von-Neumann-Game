@@ -669,7 +669,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(58, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(59, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2269,6 +2269,31 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $hiddenMinedSector = $sectorRepository->load($detachProbe->currentSector);
         $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
         $test->assertEquals(0.231, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'duplicate stale mining refreshes do not deliver hidden-container mining twice');
+
+        $remoteScutRecallMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
+            'objectId' => 'cache-rock',
+            'resource' => 'metals',
+            'targetAmount' => 0.001,
+            'targetContainerId' => $hiddenDetachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $remoteScutRecallMine->status, 'Manny can start a mining task before remote SCUT recall');
+        $moveDetachProbe(new SectorCoordinates(
+            $detachProbe->currentSector->getX() + 2,
+            $detachProbe->currentSector->getY(),
+            $detachProbe->currentSector->getZ(),
+        ));
+        $remoteScutRecall = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/recall', $detachHeaders, json_encode([], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $remoteScutRecall->status, 'POST /api/probe/mannies/{id}/recall accepts a remote Manny inside the same SCUT network');
+        $test->assertEquals(null, $remoteScutRecall->body['manny']['currentTask'] ?? null, 'remote SCUT recall cancels the Manny task without starting a return');
+        $test->assertEquals('forgotten', $remoteScutRecall->body['manny']['task']['result'] ?? null, 'remote SCUT recall reports a forgotten result');
+        $test->assertEquals('remote_scut_recall', $remoteScutRecall->body['manny']['task']['reason'] ?? null, 'remote SCUT recall records its reason');
+        $remoteScutRecalledManny = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
+        $test->assertEquals(Manny::LOCATION_SECTOR, $remoteScutRecalledManny?->locationType, 'remote SCUT recalled Manny remains outside the probe');
+        $test->assert($remoteScutRecalledManny?->sector !== null && $remoteScutRecalledManny->sector->equals($detachProbe->currentSector), 'remote SCUT recalled Manny remains in its task sector');
+        $test->assertEquals($detachProbe->id, $remoteScutRecalledManny?->probeId, 'remote SCUT recalled Manny keeps its owner probe link');
+        $remoteScutForgottenObject = $sectorRepository->load($detachProbe->currentSector)->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId));
+        $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutForgottenObject?->toArray()['state'] ?? null, 'remote SCUT recall registers the Manny as forgotten in its sector');
+        $moveDetachProbe($detachProbe->currentSector);
 
         $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
