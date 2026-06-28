@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '60'
+  version: '61'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 60
+                apiVersion: 61
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -3090,6 +3090,7 @@ components:
           type: string
         message:
           type: string
+          description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
         action:
           type: object
           required: [label, method, endpoint]
@@ -3668,6 +3669,7 @@ components:
           enum: [unread, read]
         message:
           type: string
+          description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
         phase:
           type: string
           enum: [acceleration_end, deceleration_start, arrival, detection]

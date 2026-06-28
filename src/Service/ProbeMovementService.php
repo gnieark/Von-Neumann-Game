@@ -6,6 +6,7 @@ namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeMovement;
@@ -18,6 +19,7 @@ use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
@@ -56,7 +58,7 @@ final class ProbeMovementService
         $this->movementConfig = Config::getArray($gameplayConfig, 'movement', $gameplayConfig);
     }
 
-    public function startMovement(NeumannProbe $probe, SectorCoordinates $target): ProbeMovement
+    public function startMovement(NeumannProbe $probe, SectorCoordinates $target, ?Player $player = null): ProbeMovement
     {
         $probe = $this->refreshProbeMovementState($probe);
         $this->ensureProbeOperational($probe);
@@ -99,7 +101,7 @@ final class ProbeMovementService
         $this->probes->save($probe);
         $this->cancelBlackHoleTrap($probe);
         $this->scheduleMovementEvents($movement);
-        $this->scheduleFragileContainerLossIfNeeded($probe, $movement);
+        $this->scheduleFragileContainerLossIfNeeded($probe, $movement, $player);
 
         return $movement;
     }
@@ -503,7 +505,7 @@ final class ProbeMovementService
         }
     }
 
-    private function scheduleFragileContainerLossIfNeeded(NeumannProbe $probe, ProbeMovement $movement): void
+    private function scheduleFragileContainerLossIfNeeded(NeumannProbe $probe, ProbeMovement $movement, ?Player $player = null): void
     {
         if ($this->scheduledEvents === null || $this->storage === null || $this->damageWarnings === null) {
             return;
@@ -530,9 +532,10 @@ final class ProbeMovementService
         $runAt = $atOrigin ? $movement->accelerationEndsAt : $movement->cruiseEndsAt;
         $objectId = SectorDetachedContainer::objectIdForContainer((string) $container['id']);
         $riskPercent = round($risk * 100, 2);
+        $sectorLabel = $this->publicMovementSectorLabel($sector, $player, $atOrigin ? 'movement origin sector' : 'movement target sector');
         $message = 'Fragile external storage warning: from 5 additional containers onward, movement can break a container link. '
             . 'This jump is expected to lose ' . (string) $container['label']
-            . ' near sector ' . $sector->toKey()
+            . ' near ' . $sectorLabel
             . ' with a ' . $riskPercent . '% break risk.';
 
         $warning = $this->damageWarnings->createStorageContainerBreakWarning(
@@ -629,6 +632,27 @@ final class ProbeMovementService
     private function fragileContainerLossRisk(int $additionalContainerCount): float
     {
         return min(1.0, max(0.0, ($additionalContainerCount - 4) * 0.10));
+    }
+
+    private function publicMovementSectorLabel(SectorCoordinates $sector, ?Player $player, string $fallback): string
+    {
+        if ($player === null) {
+            return $fallback;
+        }
+
+        $relative = (new PlayerReferenceFrame($player->homeSector))->globalToRelative($sector);
+
+        return 'relative sector ' . $this->coordinateLabel($relative);
+    }
+
+    /**
+     * @param array{x: int, y: int, z: int} $coordinates
+     */
+    private function coordinateLabel(array $coordinates): string
+    {
+        return (string) ($coordinates['x'] ?? 0)
+            . ':' . (string) ($coordinates['y'] ?? 0)
+            . ':' . (string) ($coordinates['z'] ?? 0);
     }
 
     private function deterministicFloat(string $purpose, ProbeMovement $movement): float

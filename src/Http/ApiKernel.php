@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 60;
+    public const API_VERSION = 61;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -1323,7 +1323,7 @@ final class ApiKernel
         }
 
         $target = $this->observations->relativeToAbsolute($player, $data['target']['x'], $data['target']['y'], $data['target']['z']);
-        $movement = $this->movements->startMovement($probe, $target);
+        $movement = $this->movements->startMovement($probe, $target, $player);
 
         return new ApiResponse(202, ['movement' => $this->movementArray($player, $movement)]);
     }
@@ -1929,6 +1929,23 @@ final class ApiKernel
         return $fallback;
     }
 
+    /**
+     * @param array{x: int, y: int, z: int} $coordinates
+     */
+    private function coordinateLabel(array $coordinates): string
+    {
+        return (string) ($coordinates['x'] ?? 0)
+            . ':' . (string) ($coordinates['y'] ?? 0)
+            . ':' . (string) ($coordinates['z'] ?? 0);
+    }
+
+    private function percentLabel(float $percent): string
+    {
+        $rounded = round($percent, 2);
+
+        return (abs($rounded - round($rounded)) < 0.0001 ? (string) (int) round($rounded) : (string) $rounded) . '%';
+    }
+
     private function nameContainsAbsoluteCoordinates(string $name, ?SectorCoordinates $sector): bool
     {
         if ($sector !== null) {
@@ -2153,6 +2170,13 @@ final class ApiKernel
                 'additionalContainerCount' => $warning->additionalContainerCount,
                 'ruleStartsAtAdditionalContainers' => 5,
             ];
+            $when = $warning->phase === 'deceleration_start' ? 'arrival sector' : 'origin sector';
+            $alert['message'] = 'Fragile storage warning: '
+                . ($warning->containerLabel !== '' ? $warning->containerLabel : 'Detached container')
+                . ' may break loose during this jump near the ' . $when
+                . ' (relative sector ' . $this->coordinateLabel($relativeSector) . '). Risk: '
+                . $this->percentLabel($warning->riskPercent)
+                . '. This can happen from 5 additional containers onward.';
         }
 
         if ($warning->type === ProbeDamageWarning::TYPE_INTELLIGENT_LIFE) {

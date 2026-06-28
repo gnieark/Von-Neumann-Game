@@ -676,7 +676,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(60, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(61, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2474,6 +2474,13 @@ if ($damageWarningProbe !== null) {
     $test->assertEquals('unread', $damageWarning['status'] ?? null, 'damage warning starts unread');
     $test->assertEquals(100.0, $damageWarning['risk']['percent'] ?? null, 'fourteen additional containers produce a 100 percent break risk');
     $test->assertEquals(14, $damageWarning['risk']['additionalContainerCount'] ?? null, 'damage warning exposes the additional container count');
+    $damageWarningRelativeSector = is_array($damageWarning['sector']['relative'] ?? null) ? $damageWarning['sector']['relative'] : [];
+    $damageWarningRelativeLabel = (string) ($damageWarningRelativeSector['x'] ?? 0)
+        . ':' . (string) ($damageWarningRelativeSector['y'] ?? 0)
+        . ':' . (string) ($damageWarningRelativeSector['z'] ?? 0);
+    $damageWarningMessage = (string) ($damageWarning['message'] ?? '');
+    $test->assert(str_contains($damageWarningMessage, 'relative sector ' . $damageWarningRelativeLabel), 'damage warning API message uses relative sector coordinates');
+    $test->assert(!str_contains($damageWarningMessage, ' near sector '), 'damage warning API message does not expose raw sector coordinates');
     $warningContainerId = (string) ($damageWarning['container']['id'] ?? '');
     $warningObjectId = (string) ($damageWarning['container']['detachedObjectId'] ?? '');
     $warningId = (int) ($damageWarning['id'] ?? 0);
@@ -2494,6 +2501,8 @@ if ($damageWarningProbe !== null) {
 
     $storedWarning = $damageWarnings->findById($warningId);
     $test->assert($storedWarning?->resolvedAt !== null, 'processed storage break resolves the damage warning');
+    $test->assert($storedWarning !== null && str_contains($storedWarning->message, 'relative sector'), 'stored movement damage warning message avoids absolute sector coordinates');
+    $test->assert($storedWarning === null || !str_contains($storedWarning->message, ' near sector '), 'stored movement damage warning message does not use raw sector keys');
     $test->assert($storageContainers->findByUidForProbe($damageWarningProbe->id, $warningContainerId) === null, 'storage break removes the selected container from probe storage');
     $test->assertEquals(0.0, $probes->findByPlayerId($damageWarningPlayer->id)?->metalsStock, 'storage break removes selected container resources from probe totals');
     if ($storedWarning !== null) {
