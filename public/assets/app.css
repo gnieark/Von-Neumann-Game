@@ -2348,6 +2348,15 @@ button.account-menu-item {
         inset 0 1px 1px rgba(255,255,255,.35);
 }
 
+.manny-card.manny-status-scut .manny-accordion-trigger::before {
+    background:
+        radial-gradient(circle at 35% 30%, rgba(224, 252, 255, .72) 0 10%, transparent 11%),
+        radial-gradient(circle, #6fdfff 0 28%, #1d4d62 52%, #061013 74%);
+    box-shadow:
+        0 0 10px rgba(111, 223, 255, .36),
+        inset 0 1px 1px rgba(255,255,255,.35);
+}
+
 .manny-card.manny-status-waiting .manny-accordion-trigger::before {
     animation: manny-rack-waiting-led-blink .8s steps(2, start) infinite;
 }
@@ -2549,6 +2558,12 @@ button.account-menu-item {
     margin: 0;
     color: var(--muted);
     line-height: 1.5;
+}
+
+.manny-scut-remote-note {
+    margin: 0;
+    color: #9fe8f4;
+    font-size: .9rem;
 }
 
 .manny-form select {

@@ -47,6 +47,10 @@ final class MannyService
     public const WAYPOINT_BOOKMARK_METALS_COST = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_METALS_COST;
     public const WAYPOINT_BOOKMARK_CONTAINER_SPACE = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CONTAINER_SPACE;
     public const WAYPOINT_BOOKMARK_CRAFTING_SECONDS = CraftingRecipeCatalog::WAYPOINT_BOOKMARK_CRAFTING_SECONDS;
+    public const PUBLIC_TASK_UNKNOWN_TOO_FAR = 'unknown_too_far';
+    public const TASK_VISIBILITY_LOCAL = 'local';
+    public const TASK_VISIBILITY_SCUT_NETWORK = 'scut_network';
+    public const TASK_VISIBILITY_TOO_FAR = 'too_far';
 
     private readonly WaypointBookmarkService $bookmarks;
 
@@ -1008,19 +1012,48 @@ final class MannyService
 
     public function publicArray(NeumannProbe $probe, Manny $manny, ?array $relativeSector = null): array
     {
+        $taskVisibility = $this->taskVisibilityFor($probe, $manny);
+        $currentTask = $manny->currentTask;
+        $taskProgressPercent = $manny->taskProgressPercent();
+        $taskEstimatedEndTime = $manny->taskEndsAt;
+        $task = $this->publicTaskPayload($manny);
+        if ($manny->currentTask !== null && $taskVisibility === self::TASK_VISIBILITY_TOO_FAR) {
+            $currentTask = self::PUBLIC_TASK_UNKNOWN_TOO_FAR;
+            $taskProgressPercent = 0.0;
+            $taskEstimatedEndTime = null;
+            $task = [];
+        }
+
         return [
             'id' => $manny->uid,
             'name' => $manny->name,
             'location' => $manny->isOnProbe()
                 ? ['type' => Manny::LOCATION_PROBE]
                 : ['type' => Manny::LOCATION_SECTOR, 'sector' => ['relative' => $relativeSector]],
-            'currentTask' => $manny->currentTask,
-            'taskProgressPercent' => $manny->taskProgressPercent(),
-            'taskEstimatedEndTime' => $manny->taskEndsAt,
-            'task' => $this->publicTaskPayload($manny),
+            'currentTask' => $currentTask,
+            'taskProgressPercent' => $taskProgressPercent,
+            'taskEstimatedEndTime' => $taskEstimatedEndTime,
+            'task' => $task,
+            'taskVisibility' => $taskVisibility,
             'cargo' => $this->mannyCargoArray($manny),
             'canReceiveOrders' => $manny->probeId === $probe->id && $manny->isInSameSectorAs($probe) && $manny->currentTask === null,
         ];
+    }
+
+    private function taskVisibilityFor(NeumannProbe $probe, Manny $manny): string
+    {
+        if ($manny->isInSameSectorAs($probe)) {
+            return self::TASK_VISIBILITY_LOCAL;
+        }
+        if (
+            $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector)
+        ) {
+            return self::TASK_VISIBILITY_SCUT_NETWORK;
+        }
+
+        return self::TASK_VISIBILITY_TOO_FAR;
     }
 
     /**

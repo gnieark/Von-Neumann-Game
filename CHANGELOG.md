@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-06-28
+
+### Changed
+
+- API v58 : `GET /api/probe/mannies` expose les détails de tâche d’une Manny éloignée seulement si son secteur et celui de la sonde sont couverts par le même réseau SCUT; sinon `currentTask` vaut `unknown_too_far` et le payload/progrès de tâche est masqué.
+- Interface : `/mannies` affiche les tâches distantes joignables via SCUT avec la progression habituelle et une mention courte de liaison SCUT, tout en conservant “Trop éloignée” hors portée.
+
 ## 2026-06-27
 
 ### Changed

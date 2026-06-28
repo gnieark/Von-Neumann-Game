@@ -20,6 +20,7 @@ use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
+use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
@@ -369,6 +370,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'integra
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'inactiveScutRelayTargets()'), 'mannies JS detects inactive SCUT relay activation targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'networkName'), 'mannies JS renders the optional SCUT network name field');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'turning_on_scut_relay'), 'mannies JS displays SCUT relay activation tasks');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyTaskVisibleViaScut'), 'mannies JS keeps remote SCUT-visible tasks expanded with live progress');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyRemoteScutTask'), 'mannies JS labels remote SCUT-visible Manny tasks');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'String(probe.id) !== String(state.currentProbeId'), 'messaging JS excludes the current probe from SCUT network recipients');
@@ -664,7 +667,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(57, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(58, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2182,6 +2185,49 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals('hidden_on_asteroid', $activeHiddenTargetContainerTask['targetContainer']['mode'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target container mode');
         $test->assertEquals('cache-rock', $activeHiddenTargetContainerTask['targetContainer']['targetObjectId'] ?? null, 'GET /api/probe/mannies exposes the hidden mining target asteroid id');
         $test->assertEquals(true, $activeHiddenTargetContainerTask['targetContainer']['travelDeducted'] ?? null, 'GET /api/probe/mannies exposes same-asteroid travel deduction for hidden target containers');
+        $test->assertEquals('local', $activeHiddenTargetContainerManny['taskVisibility'] ?? null, 'GET /api/probe/mannies marks same-sector Manny task telemetry as local');
+        $telemetryRelay = $scut->createOffRelay($detachProbe->currentSector, $detachProbe->id);
+        $scut->turnOnRelay($telemetryRelay->id, 'Manny telemetry test');
+        $moveDetachProbe = static function (SectorCoordinates $sector) use ($pdo, $detachProbe): void {
+            $pdo->prepare('UPDATE neumann_probes SET sector_x = :x, sector_y = :y, sector_z = :z, entered_current_sector_at = :entered WHERE id = :id')->execute([
+                'id' => $detachProbe->id,
+                'x' => $sector->getX(),
+                'y' => $sector->getY(),
+                'z' => $sector->getZ(),
+                'entered' => gmdate('c', time() - 3600),
+            ]);
+        };
+        $moveDetachProbe(new SectorCoordinates(
+            $detachProbe->currentSector->getX() + 2,
+            $detachProbe->currentSector->getY(),
+            $detachProbe->currentSector->getZ(),
+        ));
+        $sameScutMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $sameScutManny = array_values(array_filter(
+            $sameScutMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $sameScutTask = is_array($sameScutManny) && is_array($sameScutManny['task'] ?? null) ? $sameScutManny['task'] : [];
+        $test->assertEquals('mining', $sameScutManny['currentTask'] ?? null, 'GET /api/probe/mannies keeps remote mining currentTask visible inside the same SCUT network');
+        $test->assertEquals('scut_network', $sameScutManny['taskVisibility'] ?? null, 'GET /api/probe/mannies marks remote same-SCUT Manny task telemetry');
+        $test->assertEquals($hiddenDetachedObjectId, $sameScutTask['targetContainer']['id'] ?? null, 'GET /api/probe/mannies keeps hidden target-container detail visible inside the same SCUT network');
+        $test->assert(is_numeric($sameScutManny['taskProgressPercent'] ?? null), 'GET /api/probe/mannies keeps task progress visible inside the same SCUT network');
+        $moveDetachProbe(new SectorCoordinates(
+            $detachProbe->currentSector->getX() + ScutRelay::RADIUS_SECTORS + 6,
+            $detachProbe->currentSector->getY(),
+            $detachProbe->currentSector->getZ(),
+        ));
+        $tooFarMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $tooFarManny = array_values(array_filter(
+            $tooFarMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $test->assertEquals(MannyService::PUBLIC_TASK_UNKNOWN_TOO_FAR, $tooFarManny['currentTask'] ?? null, 'GET /api/probe/mannies hides remote Manny task status outside local and same-SCUT telemetry range');
+        $test->assertEquals('too_far', $tooFarManny['taskVisibility'] ?? null, 'GET /api/probe/mannies marks remote out-of-SCUT Manny task telemetry as too far');
+        $test->assertEquals([], $tooFarManny['task'] ?? null, 'GET /api/probe/mannies hides remote out-of-SCUT Manny task payload');
+        $test->assertEquals(0.0, $tooFarManny['taskProgressPercent'] ?? null, 'GET /api/probe/mannies hides remote out-of-SCUT Manny task progress');
+        $test->assertEquals(null, $tooFarManny['taskEstimatedEndTime'] ?? null, 'GET /api/probe/mannies hides remote out-of-SCUT Manny task timing');
+        $moveDetachProbe($detachProbe->currentSector);
         $hiddenMineRow = $pdo->prepare('SELECT task_started_at, task_ends_at FROM mannies WHERE uid = :uid');
         $hiddenMineRow->execute(['uid' => $detachSecondMannyId]);
         $hiddenMineTiming = $hiddenMineRow->fetch(PDO::FETCH_ASSOC) ?: [];

@@ -167,6 +167,7 @@
             "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
+            "unknown_too_far": tr("mannyUnknownTooFar", "Status unknown, too far"),
         }[task] || task || tr("noTask", "None");
     }
 
@@ -1750,8 +1751,25 @@
         return relativeCoordinates(relative);
     }
 
+    function mannyTaskVisibleViaScut(manny) {
+        return Boolean(
+            manny
+            && manny.currentTask !== null
+            && manny.currentTask !== "unknown_too_far"
+            && manny.taskVisibility === "scut_network"
+            && manny.location
+            && manny.location.type === "sector"
+        );
+    }
+
     function mannyIsTooFar(manny) {
         if (!manny || !manny.location || manny.location.type !== "sector") {
+            return false;
+        }
+        if (manny.currentTask === "unknown_too_far") {
+            return true;
+        }
+        if (mannyTaskVisibleViaScut(manny)) {
             return false;
         }
         if (manny.currentTask === null && manny.canReceiveOrders === false) {
@@ -1766,6 +1784,9 @@
     function mannyRackStatusClass(manny, tooFar) {
         if (tooFar) {
             return "manny-status-away";
+        }
+        if (mannyTaskVisibleViaScut(manny)) {
+            return "manny-status-scut";
         }
         if (manny && manny.currentTask === "waiting_for_space") {
             return "manny-status-waiting";
@@ -1797,6 +1818,10 @@
         const buttonTaskTitle = tooFar ? taskName : mannyAccordionTaskText(manny, taskName);
         const buttonTitle = (manny.name || mannyId) + " - " + buttonTaskTitle;
         const rackStatusClass = mannyRackStatusClass(manny, tooFar);
+        const scutRemote = mannyTaskVisibleViaScut(manny);
+        const scutRemoteNote = scutRemote
+            ? "<p class=\"manny-scut-remote-note\">" + escaped(tr("mannyRemoteScutTask", "Remote sector via SCUT")) + "</p>"
+            : "";
         const panelContent = tooFar
             ? "<div class=\"manny-metrics\">"
                 + metric(tr("location", "Location"), mannyLocation(manny))
@@ -1809,6 +1834,7 @@
                 + metric(tr("cargo", "Cargo"), mannyCargo(manny), "manny-cargo-value")
                 + metric(tr("task", "Task"), busy ? progressText(manny) : tr("noTask", "None"), busy ? "manny-task-progress-value" : null, busy ? progressDataAttributes(manny) : "")
                 + "</div>"
+                + scutRemoteNote
                 + "<form class=\"manny-rename-form manny-form\" hidden>"
                 + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
                 + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"

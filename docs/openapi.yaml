@@ -1593,6 +1593,11 @@ paths:
   /api/probe/mannies:
     get:
       summary: List persisted Manny robots for the current probe
+      description: >
+        Active Manny task details are exposed when the Manny is in the probe
+        current sector or when the Manny sector and probe sector are covered
+        by the same SCUT network. Active tasks outside that range are reported
+        as currentTask unknown_too_far with an empty task payload.
       responses:
         '200':
           description: Manny robots
@@ -4256,7 +4261,7 @@ components:
           $ref: '#/components/schemas/ArtificialObjectDetection'
     Manny:
       type: object
-      required: [id, name, location, currentTask, taskProgressPercent, taskEstimatedEndTime, task, cargo, canReceiveOrders]
+      required: [id, name, location, currentTask, taskProgressPercent, taskEstimatedEndTime, task, taskVisibility, cargo, canReceiveOrders]
       properties:
         id:
           type: string
@@ -4270,7 +4275,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, returning, waiting_for_space, moving_stockage]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -4287,13 +4292,22 @@ components:
             asteroids and resourceProfile for the selected split. Sensitive
             internal task state such as detached-container reservation objects,
             detached-container snapshots, and absolute target sectors is omitted
-            from public responses. Idle Mannys may expose an empty payload.
+            from public responses. Idle Mannys and active Mannys outside local
+            or same-SCUT telemetry range may expose an empty payload.
           anyOf:
             - $ref: '#/components/schemas/MannyMiningTask'
             - type: object
               additionalProperties: true
             - type: array
               maxItems: 0
+        taskVisibility:
+          type: string
+          enum: [local, scut_network, too_far]
+          description: >
+            Visibility of the Manny task telemetry from the current probe:
+            local for the current sector or probe rack, scut_network for a
+            different sector covered by the same SCUT network, too_far when
+            task details are not available.
         cargo:
           $ref: '#/components/schemas/MannyCargo'
         canReceiveOrders:
