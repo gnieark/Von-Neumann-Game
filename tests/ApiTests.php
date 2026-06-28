@@ -371,8 +371,13 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'inactiv
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'networkName'), 'mannies JS renders the optional SCUT network name field');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'turning_on_scut_relay'), 'mannies JS displays SCUT relay activation tasks');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyTaskVisibleViaScut'), 'mannies JS keeps remote SCUT-visible tasks expanded with live progress');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannySectorVisibleViaScut'), 'mannies JS labels idle remote same-SCUT Mannys without marking them too far');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyRemoteScutTask'), 'mannies JS labels remote SCUT-visible Manny tasks');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-accordion-task-scut'), 'mannies JS renders remote SCUT-visible task labels inside the accordion button');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'renderRemoteMannyActionForms'), 'mannies JS renders a limited remote action panel for idle same-SCUT Mannys');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-require-external-storage'), 'mannies JS can require detached-container storage for remote mining forms');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/api/sector?'), 'mannies JS loads remote same-SCUT Manny sector details through relative-sector scans');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-mine'), 'mannies JS exposes only the remote mining action for idle same-SCUT Mannys');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'abandonRemoteMannyTask'), 'mannies JS relabels remote SCUT-visible recall actions without changing the endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
@@ -400,6 +405,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_r
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'Aucun container détaché n’est disponible dans le secteur de cette Manny.'"), 'French translations include remote Manny mining storage hints');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'No detached container is available in this Manny sector.'"), 'English translations include remote Manny mining storage hints');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
@@ -669,7 +676,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(59, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(60, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2293,6 +2300,49 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals($detachProbe->id, $remoteScutRecalledManny?->probeId, 'remote SCUT recalled Manny keeps its owner probe link');
         $remoteScutForgottenObject = $sectorRepository->load($detachProbe->currentSector)->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId));
         $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutForgottenObject?->toArray()['state'] ?? null, 'remote SCUT recall registers the Manny as forgotten in its sector');
+        $remoteScutForgottenList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $remoteScutForgottenManny = array_values(array_filter(
+            $remoteScutForgottenList->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $test->assertEquals(null, $remoteScutForgottenManny['currentTask'] ?? null, 'GET /api/probe/mannies exposes remote same-SCUT forgotten Mannys as inactive');
+        $test->assertEquals('scut_network', $remoteScutForgottenManny['taskVisibility'] ?? null, 'GET /api/probe/mannies keeps same-SCUT forgotten Manny location telemetry visible');
+        $test->assertEquals(false, $remoteScutForgottenManny['canReceiveOrders'] ?? null, 'GET /api/probe/mannies does not allow remote same-SCUT forgotten Mannys to receive orders');
+        $remoteScutMineWithoutContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
+            'objectId' => 'cache-rock',
+            'resource' => 'metals',
+            'targetAmount' => 0.001,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(422, $remoteScutMineWithoutContainer->status, 'remote same-SCUT forgotten Manny mining requires a detached sector container');
+        $test->assertEquals('invalid_storage_container', $remoteScutMineWithoutContainer->body['error']['code'] ?? null, 'remote same-SCUT forgotten Manny mining without container returns a storage error');
+        $remoteScutMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
+            'objectId' => 'cache-rock',
+            'resource' => 'metals',
+            'targetAmount' => 0.001,
+            'targetContainerId' => $hiddenDetachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $remoteScutMine->status, 'remote same-SCUT forgotten Manny can start mining into a detached sector container');
+        $test->assertEquals('mining', $remoteScutMine->body['manny']['currentTask'] ?? null, 'remote same-SCUT mining starts the Manny mining task');
+        $test->assertEquals('scut_network', $remoteScutMine->body['manny']['taskVisibility'] ?? null, 'remote same-SCUT mining remains visible through SCUT telemetry');
+        $test->assertEquals($hiddenDetachedObjectId, $remoteScutMine->body['manny']['task']['targetContainer']['id'] ?? null, 'remote same-SCUT mining exposes its detached target container');
+        $remoteScutMineRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+        $remoteScutMineRow->execute(['uid' => $detachSecondMannyId]);
+        $remoteScutMineMannyDbId = (int) $remoteScutMineRow->fetchColumn();
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $remoteScutMineMannyDbId,
+            'started' => gmdate('c', time() - 400),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $remoteScutMineCompletedList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $remoteScutMineCompletedManny = array_values(array_filter(
+            $remoteScutMineCompletedList->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $remoteScutMinedSector = $sectorRepository->load($detachProbe->currentSector);
+        $remoteScutMinedContainer = $remoteScutMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $test->assertEquals(0.232, $remoteScutMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'remote same-SCUT mining deposits resources into the detached sector container');
+        $test->assertEquals(null, $remoteScutMineCompletedManny['currentTask'] ?? null, 'completed remote same-SCUT mining leaves the Manny inactive');
+        $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutMinedSector->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId))?->toArray()['state'] ?? null, 'completed remote same-SCUT mining registers the Manny as forgotten in its sector');
         $moveDetachProbe($detachProbe->currentSector);
 
         $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
@@ -2322,7 +2372,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $restoredHiddenContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
-        $test->assertEquals(0.231, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
+        $test->assertEquals(0.232, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
         $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
 
         $dropSector = new SectorContent($detachProbe->currentSector, [

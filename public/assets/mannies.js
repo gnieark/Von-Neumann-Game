@@ -15,6 +15,7 @@
         currentMannySalvageTargets: [],
         currentProbeSectorRelative: null,
         currentSectorObjects: [],
+        remoteSectorScans: {},
     };
 
     let i18n = {};
@@ -105,6 +106,7 @@
             "actions": {
                 "deuteriumRefuelStationAvailable": sectorHasDeuteriumRefuelStation(),
                 "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
+                "remoteSectorMine": remoteMannyMineStateHash(item),
             },
         }));
 
@@ -234,6 +236,39 @@
         const b = relativeCoordinates(right);
 
         return a !== null && b !== null && a.x === b.x && a.y === b.y && a.z === b.z;
+    }
+
+    function relativeSectorKey(relative) {
+        const coordinates = relativeCoordinates(relative);
+        return coordinates ? coordinates.x + ":" + coordinates.y + ":" + coordinates.z : "";
+    }
+
+    function remoteSectorScanForKey(key) {
+        return key && state.remoteSectorScans[key] ? state.remoteSectorScans[key] : null;
+    }
+
+    async function fetchRelativeSectorScan(relative) {
+        const coordinates = relativeCoordinates(relative);
+        if (!coordinates) {
+            return {"status": "unavailable", "objects": []};
+        }
+
+        const query = new URLSearchParams({
+            "x": String(coordinates.x),
+            "y": String(coordinates.y),
+            "z": String(coordinates.z),
+        });
+
+        try {
+            const data = await window.VNG.apiJson("/api/sector?" + query.toString(), {"method": "GET"});
+            const sector = data && data.sector ? data.sector : {};
+            return {
+                "status": "loaded",
+                "objects": Array.isArray(sector.objects) ? sector.objects : [],
+            };
+        } catch (error) {
+            return {"status": "unavailable", "objects": []};
+        }
     }
 
     function resourceTypeFromHint(hint) {
@@ -480,15 +515,7 @@
             targets.push(target);
         };
 
-        state.currentSectorObjects
-            .filter((object) => object && object.type === "detached_container" && object.id)
-            .forEach((object) => add({
-                "id": object.id,
-                "name": object.name || object.id,
-                "source": object.mode === "hidden_on_asteroid" ? "asteroid" : "drifting",
-                "hidden": object.mode === "hidden_on_asteroid",
-                "targetObjectId": object.targetObjectId || null,
-            }));
+        detachedContainerTargetsFromObjects(state.currentSectorObjects).forEach(add);
 
         state.currentMannies.forEach((manny) => {
             const detection = artificialObjectDetection(manny && manny.task);
@@ -506,12 +533,24 @@
         return targets;
     }
 
-    function miningStorageTargets(target) {
+    function detachedContainerTargetsFromObjects(objects) {
+        return (Array.isArray(objects) ? objects : [])
+            .filter((object) => object && object.type === "detached_container" && object.id)
+            .map((object) => ({
+                "id": object.id,
+                "name": object.name || object.id,
+                "source": object.mode === "hidden_on_asteroid" ? "asteroid" : "drifting",
+                "hidden": object.mode === "hidden_on_asteroid",
+                "targetObjectId": object.targetObjectId || null,
+            }));
+    }
+
+    function miningStorageTargetsForTarget(target, containers) {
         if (!target || !target.id) {
             return [];
         }
 
-        return detectedDetachedContainerTargets().filter((container) => (
+        return (Array.isArray(containers) ? containers : []).filter((container) => (
             container
             && container.id
             && (
@@ -523,6 +562,10 @@
                 )
             )
         ));
+    }
+
+    function miningStorageTargets(target) {
+        return miningStorageTargetsForTarget(target, detectedDetachedContainerTargets());
     }
 
     function miningStorageTargetLabel(target) {
@@ -553,18 +596,25 @@
         })) + "</p>";
     }
 
-    function miningStorageTargetOptions(target, selected) {
-        const containers = miningStorageTargets(target);
-        const defaultOption = "<option value=\"\">" + escaped(tr("mineStoreOnProbe", "Probe and linked containers")) + "</option>";
-        if (containers.length === 0) {
+    function miningStorageTargetOptionsForTarget(target, selected, containers, includeDefault) {
+        const targetContainers = miningStorageTargetsForTarget(target, containers);
+        const defaultOption = includeDefault ? "<option value=\"\">" + escaped(tr("mineStoreOnProbe", "Probe and linked containers")) + "</option>" : "";
+        if (targetContainers.length === 0 && !includeDefault) {
+            return "<option value=\"\">-</option>";
+        }
+        if (targetContainers.length === 0) {
             return defaultOption;
         }
 
-        return defaultOption + containers.map((container) => (
+        return defaultOption + targetContainers.map((container) => (
             "<option value=\"" + escaped(container.id) + "\"" + (container.id === selected ? " selected" : "") + ">"
             + escaped(miningStorageTargetLabel(container))
             + "</option>"
         )).join("");
+    }
+
+    function miningStorageTargetOptions(target, selected) {
+        return miningStorageTargetOptionsForTarget(target, selected, detectedDetachedContainerTargets(), true);
     }
 
     function detachedContainerRecoveryTargetLabel(target) {
@@ -1116,8 +1166,13 @@
     }
 
     function mannyAccordionTaskText(manny, taskName) {
-        if (!manny || manny.currentTask === null) {
+        if (!manny) {
             return taskName;
+        }
+        if (manny.currentTask === null) {
+            return mannySectorVisibleViaScut(manny)
+                ? [taskName, tr("mannyRemoteScutTask", "Remote sector via SCUT")].join(" - ")
+                : taskName;
         }
 
         const parts = [taskName, progressText(manny)];
@@ -1127,7 +1182,7 @@
                 parts.push(resources);
             }
         }
-        if (mannyTaskVisibleViaScut(manny)) {
+        if (mannySectorVisibleViaScut(manny)) {
             parts.push(tr("mannyRemoteScutTask", "Remote sector via SCUT"));
         }
 
@@ -1135,8 +1190,14 @@
     }
 
     function mannyAccordionTaskHtml(manny, taskName) {
-        if (!manny || manny.currentTask === null) {
+        if (!manny) {
             return escaped(taskName);
+        }
+        if (manny.currentTask === null) {
+            return mannySectorVisibleViaScut(manny)
+                ? "<span class=\"manny-accordion-task-status\">" + escaped(taskName) + "</span>"
+                    + "<span class=\"manny-accordion-task-scut\">" + escaped(tr("mannyRemoteScutTask", "Remote sector via SCUT")) + "</span>"
+                : escaped(taskName);
         }
 
         const resources = manny.currentTask === "mining" ? miningResourceSummary(manny) : "";
@@ -1144,7 +1205,7 @@
         return "<span class=\"manny-accordion-task-status\">" + escaped(taskName) + "</span>"
             + "<span class=\"manny-accordion-task-progress\">" + progressValueHtml(manny) + "</span>"
             + (resources ? "<span class=\"manny-accordion-task-resources\">" + escaped(resources) + "</span>" : "")
-            + (mannyTaskVisibleViaScut(manny) ? "<span class=\"manny-accordion-task-scut\">" + escaped(tr("mannyRemoteScutTask", "Remote sector via SCUT")) + "</span>" : "");
+            + (mannySectorVisibleViaScut(manny) ? "<span class=\"manny-accordion-task-scut\">" + escaped(tr("mannyRemoteScutTask", "Remote sector via SCUT")) + "</span>" : "");
     }
 
     function miningTaskTarget(payload) {
@@ -1309,16 +1370,20 @@
             + "</form>";
     }
 
-    function mineTargetOptions(selected) {
-        if (state.currentMannyMineTargets.length === 0) {
+    function mineTargetOptionsForTargets(targets, selected) {
+        if (targets.length === 0) {
             return "<option value=\"\">-</option>";
         }
 
-        return state.currentMannyMineTargets.map((target) => (
+        return targets.map((target) => (
             "<option value=\"" + escaped(target.id) + "\"" + (target.id === selected ? " selected" : "") + ">"
             + escaped(mineTargetLabel(target))
             + "</option>"
         )).join("");
+    }
+
+    function mineTargetOptions(selected) {
+        return mineTargetOptionsForTargets(state.currentMannyMineTargets, selected);
     }
 
     function resourceProfileForMineSelection(target, selectedResources) {
@@ -1385,21 +1450,76 @@
         }).join("");
     }
 
-    function renderMineForm() {
-        const mineTarget = state.currentMannyMineTargets[0] || null;
-        const mineAmountMax = mineTargetMaxAmount(mineTarget, resourceTypesForTarget(mineTarget));
-        const mineStorageTargets = miningStorageTargets(mineTarget);
+    function remoteMannyMineContext(manny) {
+        const key = relativeSectorKey(mannyRelativeSector(manny));
+        const scan = remoteSectorScanForKey(key);
+        const objects = scan && Array.isArray(scan.objects) ? scan.objects : [];
 
-        return "<form class=\"manny-mine-form manny-form\">"
-            + "<label>" + escaped(tr("mineTarget", "Object")) + "<select class=\"manny-mine-target\" name=\"objectId\">" + mineTargetOptions("") + "</select></label>"
+        return {
+            "key": key,
+            "status": scan ? scan.status : "loading",
+            "targets": mineTargetsFromObjects(objects),
+            "storageTargets": detachedContainerTargetsFromObjects(objects),
+        };
+    }
+
+    function remoteMannyMineStateHash(manny) {
+        if (!mannyRemoteIdleViaScut(manny)) {
+            return "";
+        }
+        const context = remoteMannyMineContext(manny);
+
+        return stableHashPayload({
+            "key": context.key,
+            "status": context.status,
+            "targets": context.targets.map((target) => target.id),
+            "storageTargets": context.storageTargets.map((target) => target.id + ":" + (target.targetObjectId || "")),
+        });
+    }
+
+    function renderMineFormWithContext(context) {
+        const targets = Array.isArray(context && context.targets) ? context.targets : state.currentMannyMineTargets;
+        const storageTargets = Array.isArray(context && context.storageTargets) ? context.storageTargets : detectedDetachedContainerTargets();
+        const requireExternalStorage = Boolean(context && context.requireExternalStorage);
+        const sectorKey = context && context.sectorKey ? context.sectorKey : "";
+        const status = context && context.status ? context.status : "loaded";
+        const mineTarget = targets[0] || null;
+        const initialResources = resourceTypesForTarget(mineTarget);
+        const mineAmountMax = mineTargetMaxAmount(mineTarget, initialResources);
+        const mineStorageTargets = miningStorageTargetsForTarget(mineTarget, storageTargets);
+        const externalStorageDisabled = requireExternalStorage && initialResources.includes("deuterium");
+        const disabled = !mineTarget || mineAmountMax < 0.01 || (requireExternalStorage && (mineStorageTargets.length === 0 || externalStorageDisabled));
+        const hint = status === "unavailable"
+            ? tr("remoteMannySectorUnavailable", "Remote sector data is unavailable.")
+            : (requireExternalStorage && mineStorageTargets.length === 0
+                ? tr("noRemoteMiningStorageTarget", "No detached container is available in this Manny sector.")
+                : tr("mannyMiningHint", "A Manny can carry 0.05 ECE (Earth container equivalent). If you ask it to mine more, it will make round trips between the mined object and the probe."));
+
+        return "<form class=\"manny-mine-form manny-form\" data-require-external-storage=\"" + (requireExternalStorage ? "1" : "0") + "\" data-sector-key=\"" + escaped(sectorKey) + "\">"
+            + "<label>" + escaped(tr("mineTarget", "Object")) + "<select class=\"manny-mine-target\" name=\"objectId\">" + mineTargetOptionsForTargets(targets, "") + "</select></label>"
             + "<label>" + escaped(tr("mineResourcesSelection", "Select resources to extract")) + "<select class=\"manny-mine-resources\" name=\"resources\" multiple size=\"4\">"
             + mineResourceOptions(mineTarget, [])
             + "</select></label>"
-            + "<label class=\"manny-mine-storage-label\"" + (mineStorageTargets.length > 0 ? "" : " hidden") + ">" + escaped(tr("mineStoreOn", "Store in")) + "<select class=\"manny-mine-storage-target\" name=\"targetContainerId\">" + miningStorageTargetOptions(mineTarget, "") + "</select></label>"
+            + "<label class=\"manny-mine-storage-label\"" + (!requireExternalStorage && mineStorageTargets.length === 0 ? " hidden" : "") + ">" + escaped(tr("mineStoreOn", "Store in")) + "<select class=\"manny-mine-storage-target\" name=\"targetContainerId\"" + (requireExternalStorage ? " required" : "") + (mineStorageTargets.length === 0 || externalStorageDisabled ? " disabled" : "") + ">" + miningStorageTargetOptionsForTarget(mineTarget, "", storageTargets, !requireExternalStorage) + "</select></label>"
             + "<label class=\"manny-mine-amount-label\"><span class=\"manny-mine-amount-text\">" + escaped(miningAmountLabel(mineAmountMax)) + "</span><input name=\"targetAmount\" type=\"number\" min=\"0.01\" max=\"" + escaped(String(mineAmountMax)) + "\" step=\"0.01\" value=\"" + escaped(mineAmountMax >= 0.01 ? "0.01" : "0") + "\"></label>"
-            + "<button class=\"manny-mine-button\" type=\"submit\"" + (mineTarget ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("mine", "Mine")) + "</button>"
-            + "<p class=\"manny-mine-hint\">" + escaped(tr("mannyMiningHint", "A Manny can carry 0.05 ECE (Earth container equivalent). If you ask it to mine more, it will make round trips between the mined object and the probe.")) + "</p>"
+            + "<button class=\"manny-mine-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("mine", "Mine")) + "</button>"
+            + "<p class=\"manny-mine-hint\">" + escaped(hint) + "</p>"
             + "</form>";
+    }
+
+    function renderMineForm() {
+        return renderMineFormWithContext({});
+    }
+
+    function renderRemoteMineForm(manny) {
+        const context = remoteMannyMineContext(manny);
+        return renderMineFormWithContext({
+            "targets": context.targets,
+            "storageTargets": context.storageTargets,
+            "requireExternalStorage": true,
+            "sectorKey": context.key,
+            "status": context.status,
+        });
     }
 
     function salvageTargetOptions(selected) {
@@ -1657,6 +1777,20 @@
             + "</div>";
     }
 
+    function renderRemoteMannyActionForms(idPrefix, manny) {
+        const prefix = String(idPrefix || "manny-remote-actions").replace(/[^a-zA-Z0-9_-]/g, "-");
+
+        return "<div class=\"manny-action-grid\">"
+            + "<h4 class=\"manny-action-heading\">" + escaped(tr("assignMannyTask", "Assign a task to this Manny")) + "</h4>"
+            + renderMannyActionAccordion(
+                prefix + "-mine",
+                tr("miningActionTitle", "Mine the sector"),
+                "remote-mine",
+                renderRemoteMineForm(manny)
+            )
+            + "</div>";
+    }
+
     function renderAtomicPrinterCraftForm() {
         const noAssistant = availableAtomicPrinterAssistants().length === 0;
         const noRecipes = !atomicPrinterHasRecipes();
@@ -1758,15 +1892,25 @@
         return relativeCoordinates(relative);
     }
 
-    function mannyTaskVisibleViaScut(manny) {
+    function mannySectorVisibleViaScut(manny) {
         return Boolean(
             manny
-            && manny.currentTask !== null
             && manny.currentTask !== "unknown_too_far"
             && manny.taskVisibility === "scut_network"
             && manny.location
             && manny.location.type === "sector"
         );
+    }
+
+    function mannyTaskVisibleViaScut(manny) {
+        return mannySectorVisibleViaScut(manny)
+            && manny.currentTask !== null;
+    }
+
+    function mannyRemoteIdleViaScut(manny) {
+        return mannySectorVisibleViaScut(manny)
+            && manny.currentTask === null
+            && manny.canReceiveOrders === false;
     }
 
     function mannyIsTooFar(manny) {
@@ -1776,7 +1920,7 @@
         if (manny.currentTask === "unknown_too_far") {
             return true;
         }
-        if (mannyTaskVisibleViaScut(manny)) {
+        if (mannySectorVisibleViaScut(manny)) {
             return false;
         }
         if (manny.currentTask === null && manny.canReceiveOrders === false) {
@@ -1818,6 +1962,8 @@
         const busy = manny.currentTask !== null;
         const mannyId = String(manny.id || "");
         const tooFar = mannyIsTooFar(manny);
+        const canReceiveOrders = manny.canReceiveOrders !== false;
+        const remoteIdleViaScut = mannyRemoteIdleViaScut(manny);
         const taskName = tooFar
             ? tr("mannyTooFar", "Too far away")
             : (manny.currentTask ? taskLabel(manny.currentTask) : tr("mannyInactive", "Inactive"));
@@ -1841,7 +1987,7 @@
                 + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
                 + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"
                 + "</form>"
-                + (busy ? renderMannyTaskPanel(manny) : renderMannyActionForms(panelId));
+                + (busy ? renderMannyTaskPanel(manny) : (canReceiveOrders ? renderMannyActionForms(panelId) : (remoteIdleViaScut ? renderRemoteMannyActionForms(panelId, manny) : "")));
 
         return "<article class=\"manny-card " + rackStatusClass + "\" data-manny-id=\"" + escaped(manny.id) + "\" data-manny-hash=\"" + escaped(manny[MANNY_HASH_FIELD] || "") + "\">"
             + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
@@ -1959,6 +2105,24 @@
         document.querySelectorAll(".manny-mine-form").forEach(updateMannyMineFormState);
     }
 
+    function mineTargetsForForm(form) {
+        if (form && form.dataset.requireExternalStorage === "1") {
+            const scan = remoteSectorScanForKey(form.dataset.sectorKey || "");
+            return mineTargetsFromObjects(scan && Array.isArray(scan.objects) ? scan.objects : []);
+        }
+
+        return state.currentMannyMineTargets;
+    }
+
+    function miningStorageContainersForForm(form) {
+        if (form && form.dataset.requireExternalStorage === "1") {
+            const scan = remoteSectorScanForKey(form.dataset.sectorKey || "");
+            return detachedContainerTargetsFromObjects(scan && Array.isArray(scan.objects) ? scan.objects : []);
+        }
+
+        return detectedDetachedContainerTargets();
+    }
+
     function updateMannyMineFormState(form) {
         if (!form) {
             return;
@@ -1975,23 +2139,26 @@
             return;
         }
 
-        const target = state.currentMannyMineTargets.find((item) => item.id === targetSelect.value) || null;
+        const targets = mineTargetsForForm(form);
+        const storageContainers = miningStorageContainersForForm(form);
+        const requireExternalStorage = form.dataset.requireExternalStorage === "1";
+        const target = targets.find((item) => item.id === targetSelect.value) || null;
         const selectedResources = Array.from(resourceSelect.selectedOptions)
             .filter((option) => !option.disabled)
             .map((option) => option.value);
         const maxAmount = mineTargetMaxAmount(target, selectedResources);
         const selectedStorage = storageSelect ? storageSelect.value : "";
-        const storageTargets = miningStorageTargets(target);
+        const storageTargets = miningStorageTargetsForTarget(target, storageContainers);
         const externalStorageDisabled = selectedResources.includes("deuterium");
         if (storageSelect) {
-            storageSelect.innerHTML = miningStorageTargetOptions(target, selectedStorage);
+            storageSelect.innerHTML = miningStorageTargetOptionsForTarget(target, selectedStorage, storageContainers, !requireExternalStorage);
             if (!storageTargets.some((container) => container.id === storageSelect.value) || externalStorageDisabled) {
-                storageSelect.value = "";
+                storageSelect.value = requireExternalStorage && !externalStorageDisabled && storageTargets[0] ? storageTargets[0].id : "";
             }
             storageSelect.disabled = storageTargets.length === 0 || externalStorageDisabled;
         }
         if (storageLabel) {
-            storageLabel.hidden = storageTargets.length === 0;
+            storageLabel.hidden = !requireExternalStorage && storageTargets.length === 0;
         }
         if (amountText) {
             amountText.textContent = miningAmountLabel(maxAmount);
@@ -2006,10 +2173,13 @@
             }
         }
         if (mineButton) {
-            const disabled = !target || maxAmount < 0.01;
+            const missingRequiredStorage = requireExternalStorage && (!storageSelect || !storageSelect.value || storageTargets.length === 0 || externalStorageDisabled);
+            const disabled = !target || maxAmount < 0.01 || missingRequiredStorage;
             mineButton.disabled = disabled;
             mineButton.setAttribute("aria-disabled", disabled ? "true" : "false");
-            mineButton.title = !target ? tr("noMiningTargetSelected", "Select a mining target.") : "";
+            mineButton.title = !target
+                ? tr("noMiningTargetSelected", "Select a mining target.")
+                : (missingRequiredStorage ? tr("noRemoteMiningStorageSelected", "Select a detached container in the Manny sector.") : "");
         }
     }
 
@@ -2024,7 +2194,7 @@
             return;
         }
 
-        const target = state.currentMannyMineTargets.find((item) => item.id === targetSelect.value) || null;
+        const target = mineTargetsForForm(form).find((item) => item.id === targetSelect.value) || null;
         const selectedResources = Array.from(resourceSelect.selectedOptions).map((option) => option.value);
         resourceSelect.innerHTML = mineResourceOptions(target, selectedResources);
         updateMannyMineFormState(form);
@@ -2265,6 +2435,28 @@
         refreshTimer = window.setTimeout(loadManniesPage, MANNY_REFRESH_MS);
     }
 
+    async function loadRemoteMannySectorScans(mannies) {
+        const relativeByKey = {};
+        (Array.isArray(mannies) ? mannies : []).forEach((manny) => {
+            if (!mannyRemoteIdleViaScut(manny)) {
+                return;
+            }
+            const relative = mannyRelativeSector(manny);
+            const key = relativeSectorKey(relative);
+            if (key) {
+                relativeByKey[key] = relative;
+            }
+        });
+
+        const entries = await Promise.all(Object.entries(relativeByKey).map(async ([key, relative]) => [
+            key,
+            await fetchRelativeSectorScan(relative),
+        ]));
+        entries.forEach(([key, scan]) => {
+            state.remoteSectorScans[key] = scan;
+        });
+    }
+
     async function loadManniesPage() {
         if (loadInProgress) {
             loadRequestedWhileInProgress = true;
@@ -2287,12 +2479,12 @@
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
             state.currentInventory = probe.inventory || (sectorData && sectorData.inventory) || null;
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
-            state.currentMannies = Array.isArray(mannyData && mannyData.mannies)
-                ? mannyData.mannies.map(withMannyStateHash)
-                : [];
+            const rawMannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);
+            await loadRemoteMannySectorScans(rawMannies);
+            state.currentMannies = rawMannies.map(withMannyStateHash);
             renderMannyList(state.currentMannies);
         } catch (error) {
             renderMannyList([]);
@@ -2341,6 +2533,11 @@
                 "targetAmount": Number.parseFloat(formData.get("targetAmount")),
             };
             const targetContainerId = String(formData.get("targetContainerId") || "");
+            if (form.dataset.requireExternalStorage === "1" && targetContainerId === "") {
+                updateMannyMineFormState(form);
+                setStatus(tr("noRemoteMiningStorageSelected", "Select a detached container in the Manny sector."));
+                return null;
+            }
             if (targetContainerId !== "") {
                 body.targetContainerId = targetContainerId;
             }
