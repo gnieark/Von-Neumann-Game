@@ -2396,7 +2396,7 @@ final class MannyService
     {
         return ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_ABANDONED)
             || ($object instanceof SectorDriftingItem && $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0)
-            || $object instanceof SectorDetachedContainer
+            || ($object instanceof SectorDetachedContainer && $object->getMode() === SectorDetachedContainer::MODE_DRIFTING)
             || ($object instanceof ScutRelay && !$object->isOn());
     }
 
@@ -2506,7 +2506,7 @@ final class MannyService
             'targetObjectId' => $container->getTargetObjectId(),
             'capacity' => $container->getCapacity(),
             'capacityUnit' => $container->getCapacityUnit(),
-            'salvageable' => true,
+            'salvageable' => $container->getMode() === SectorDetachedContainer::MODE_DRIFTING,
         ];
     }
 

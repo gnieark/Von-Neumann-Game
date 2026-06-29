@@ -407,6 +407,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorH
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/refill-deuterium-tank'), 'mannies JS can start a deuterium tank refill action');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_relay": tr("scutRelayObject"'), 'mannies JS labels SCUT relay sector objects');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "detached_container" && object.mode === "hidden_on_asteroid"'), 'mannies JS excludes hidden detached containers from generic salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'Aucun container détaché n’est disponible dans le secteur de cette Manny.'"), 'French translations include remote Manny mining storage hints');
@@ -415,7 +416,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260629-sensors-waypoint-tiles-placement"), 'asset version is bumped for sensors waypoint placement UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260629-mannies-hidden-container-recovery-targets"), 'asset version is bumped for Manny hidden-container recovery UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -683,7 +684,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(61, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(62, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2128,6 +2129,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $completedHiddenDetachTask = is_array($completedHiddenDetachManny) && is_array($completedHiddenDetachManny['task'] ?? null) ? $completedHiddenDetachManny['task'] : [];
         $test->assertEquals($hiddenDetachedObjectId, $completedHiddenDetachTask['artificialObjectDetected']['objectId'] ?? null, 'completed hidden detach keeps the hidden container detection in the Manny result');
         $test->assertEquals('cache-rock', $completedHiddenDetachTask['artificialObjectDetected']['targetObjectId'] ?? null, 'completed hidden detach keeps the asteroid target in the Manny result');
+        $test->assertEquals(false, $completedHiddenDetachTask['detachedContainer']['salvageable'] ?? null, 'completed hidden detach result does not expose the hidden container as a generic salvage target');
         $hiddenStoredSector = $sectorRepository->load($detachProbe->currentSector);
         $test->assertEquals(1, count($hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')), 'completed hidden detach persists the container on the asteroid');
         $hiddenStoredContainer = $hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')[0] ?? null;
@@ -2146,7 +2148,13 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(1, count($visibleHiddenContainers), 'owner-discovered hidden detached containers appear in sector observation');
         $test->assertEquals('hidden_on_asteroid', $visibleHiddenContainers[0]['mode'] ?? null, 'visible hidden detached container keeps its hidden mode');
         $test->assertEquals('cache-rock', $visibleHiddenContainers[0]['targetObjectId'] ?? null, 'visible hidden detached container exposes its asteroid target');
+        $test->assertEquals(false, $visibleHiddenContainers[0]['salvageable'] ?? null, 'visible hidden detached containers are not generic salvage targets');
         $test->assert(!array_key_exists('payload', $visibleHiddenContainers[0] ?? []), 'visible hidden detached container observation does not expose contents');
+        $hiddenSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/salvage', $detachHeaders, json_encode([
+            'objectId' => $hiddenDetachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(422, $hiddenSalvage->status, 'hidden detached containers cannot be recovered through generic salvage');
+        $test->assertEquals('invalid_salvage_target', $hiddenSalvage->body['error']['code'] ?? null, 'hidden detached container generic salvage returns a salvage-target error');
 
         $scoutPlayer = $auth->registerPlayerWithPassword('container-scout', 'secret', 'Container Scout', 'Scout test probe');
         $scoutProbe = $probes->findByPlayerId($scoutPlayer->id);

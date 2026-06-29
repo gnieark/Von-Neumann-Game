@@ -399,6 +399,7 @@
     function salvageTargetsFromObjects(objects) {
         return (Array.isArray(objects) ? objects : []).filter((object) => (
             object && object.salvageable && object.id
+            && !(object.type === "detached_container" && object.mode === "hidden_on_asteroid")
         )).map((object) => ({
             "id": object.id,
             "type": object.type || "object",
@@ -408,6 +409,7 @@
             "quantity": object.quantity || null,
             "containerSpace": object.containerSpace || null,
             "status": object.status || null,
+            "mode": object.mode || null,
         }));
     }
 

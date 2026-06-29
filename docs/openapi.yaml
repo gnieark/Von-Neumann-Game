@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 61
+                apiVersion: 62
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -4607,7 +4607,7 @@ components:
           description: Present on planets in detailed current-sector or already-visited-sector observations.
         salvageable:
           type: boolean
-          description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage.
+          description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage. Detached containers expose true only when mode is drifting; hidden_on_asteroid containers must be recovered with POST /api/probe/mannies/{mannyId}/recover-storage-container.
         waypointBookmarks:
           type: array
           items:

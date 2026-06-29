@@ -254,7 +254,7 @@ final class SectorObservationService
             $data['targetObjectId'] = $object->getTargetObjectId();
             $data['capacity'] = $object->getCapacity();
             $data['capacityUnit'] = $object->getCapacityUnit();
-            $data['salvageable'] = true;
+            $data['salvageable'] = $object->getMode() === SectorDetachedContainer::MODE_DRIFTING;
         }
 
         if ($object instanceof DeuteriumRefuelStation) {

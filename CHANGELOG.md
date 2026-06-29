@@ -10,11 +10,13 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v59 : `POST /api/probe/mannies/{mannyId}/recall` accepte désormais l’arrêt distant d’une Manny active située dans un secteur couvert par le même réseau SCUT que la sonde; la Manny ne revient pas, sa tâche est annulée et elle est enregistrée comme `forgotten` dans son secteur.
 - API v60 : `POST /api/probe/mannies/{mannyId}/mine` accepte désormais l’ordre pour une Manny oubliée située dans un secteur distant couvert par le même réseau SCUT que la sonde, à condition de déposer le minage dans un container détaché du secteur de la Manny.
 - API v61 : les messages publics `ProbeDamageWarning.message` des alertes de rupture de container pendant un mouvement utilisent désormais les coordonnées relatives du joueur et ne divulguent plus les coordonnées absolues du secteur.
+- API v62 : les containers détachés cachés sur astéroïde ne sont plus exposés comme récupérables via `POST /api/probe/mannies/{mannyId}/salvage`; ils restent récupérables via `POST /api/probe/mannies/{mannyId}/recover-storage-container`.
 - Interface : `/mannies` affiche les tâches distantes joignables via SCUT avec la progression habituelle et une mention courte de liaison SCUT, tout en conservant “Trop éloignée” hors portée.
 - Interface : la mention de tâche distante via SCUT est maintenant visible directement dans le bouton d’accordéon Manny, et l’action de rappel distante est libellée comme un abandon de tâche.
 - Interface : une Manny oubliée mais encore dans un secteur couvert par le même réseau SCUT s’affiche maintenant comme inactive avec la mention “Secteur distant via SCUT”, au lieu de “Trop éloignée”.
 - Interface : une Manny oubliée joignable via SCUT propose désormais uniquement l’action “Mine the sector”, alimentée par `/api/sector` pour cibler le secteur de la Manny et limiter “Store in” aux containers détachés de ce secteur.
 - Interface : `/sensors` affiche maintenant le joueur et l’âge de pose des marque-pages de navigation dans le scan courant, les tuiles de secteurs voisins et les scans détaillés des secteurs visités.
+- Interface : `/mannies` ne propose plus les containers détachés cachés dans “Récupérer un objet à la dérive”; ils restent listés dans “Récupérer un container détaché”.
 
 ### Fixed
 
