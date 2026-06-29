@@ -20,10 +20,6 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Manny : les livraisons de minage parallèles incrémentent désormais les stocks de la sonde sans écraser les apports d’une autre Manny, y compris pour le deutérium stocké dans la cuve dédiée.
 
-### Fixed
-
-- Manny : les livraisons de minage parallèles incrémentent désormais les stocks de la sonde sans écraser les apports d’une autre Manny, y compris pour le deutérium stocké dans la cuve dédiée.
-
 ## 2026-06-27
 
 ### Changed
