@@ -295,11 +295,10 @@ final class ProbeStorageService
             return 0.0;
         }
         if ($type === ResourceComposition::DEUTERIUM) {
-            $before = $probe->deuteriumStock;
-            $probe->deuteriumStock = round(min($this->maxDeuteriumPercent(), $probe->deuteriumStock + ($amount * $this->maxDeuteriumPercent())), 4);
-            $this->probes->save($probe);
+            $result = $this->probes->addDeuteriumStock($probe->id, $amount * $this->maxDeuteriumPercent(), $this->maxDeuteriumPercent());
+            $probe->deuteriumStock = $result['stock'];
 
-            return round(($probe->deuteriumStock - $before) / $this->maxDeuteriumPercent(), 4);
+            return round($result['accepted'] / $this->maxDeuteriumPercent(), 4);
         }
 
         $this->ensureProbeStorage($probe);
@@ -323,8 +322,7 @@ final class ProbeStorageService
             if ($added <= 0.0) {
                 continue;
             }
-            $resources = $this->containers->resourceAmounts($container->id);
-            $this->containers->setResourceAmount($container->id, $type, round((float) ($resources[$type] ?? 0.0) + $added, 4));
+            $this->containers->incrementResourceAmount($container->id, $type, $added);
             $accepted = round($accepted + $added, 4);
             if ($accepted + self::EPSILON >= $amount) {
                 break;

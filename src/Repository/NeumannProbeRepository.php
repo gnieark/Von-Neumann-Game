@@ -176,6 +176,68 @@ final class NeumannProbeRepository
         ]);
     }
 
+    /**
+     * @return array{accepted:float, stock:float}
+     */
+    public function addDeuteriumStock(int $probeId, float $stockPercent, float $maxStockPercent): array
+    {
+        $stockPercent = round(max(0.0, $stockPercent), 4);
+        $maxStockPercent = round(max(0.0001, $maxStockPercent), 4);
+        if ($stockPercent <= 0.0) {
+            $probe = $this->findById($probeId);
+
+            return [
+                'accepted' => 0.0,
+                'stock' => $probe?->deuteriumStock ?? 0.0,
+            ];
+        }
+
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $sql = 'SELECT deuterium_stock FROM neumann_probes WHERE id = :id';
+            if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $sql .= ' FOR UPDATE';
+            }
+            $select = $this->pdo->prepare($sql);
+            $select->execute(['id' => $probeId]);
+            $before = max(0.0, min($maxStockPercent, (float) $select->fetchColumn()));
+            $accepted = round(min($stockPercent, max(0.0, $maxStockPercent - $before)), 4);
+            $after = round(min($maxStockPercent, $before + $accepted), 4);
+
+            if ($accepted > 0.0) {
+                $stmt = $this->pdo->prepare(
+                    'UPDATE neumann_probes
+                     SET deuterium_stock = :deuterium_stock, updated_at = :updated_at
+                     WHERE id = :id'
+                );
+                $stmt->execute([
+                    'id' => $probeId,
+                    'deuterium_stock' => $after,
+                    'updated_at' => gmdate('c'),
+                ]);
+            }
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+
+            return [
+                'accepted' => $accepted,
+                'stock' => $after,
+            ];
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
     private function hydrate(array $row): NeumannProbe
     {
         return new NeumannProbe(

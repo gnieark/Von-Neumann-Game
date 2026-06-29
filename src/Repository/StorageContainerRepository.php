@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Repository;
 
 use PDO;
+use PDOException;
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\StorageContainer;
@@ -146,6 +147,50 @@ final class StorageContainerRepository
             'amount' => $amount,
             'updated_at' => $now,
         ]);
+    }
+
+    public function incrementResourceAmount(int $containerId, string $resourceType, float $amount): void
+    {
+        $amount = round(max(0.0, $amount), 4);
+        if ($amount <= 0.0) {
+            return;
+        }
+
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'UPDATE storage_container_resources
+             SET amount = ROUND(amount + :amount, 4), updated_at = :updated_at
+             WHERE container_id = :container_id AND resource_type = :resource_type'
+        );
+        $stmt->execute([
+            'container_id' => $containerId,
+            'resource_type' => $resourceType,
+            'amount' => $amount,
+            'updated_at' => $now,
+        ]);
+        if ($stmt->rowCount() > 0) {
+            return;
+        }
+
+        try {
+            $insert = $this->pdo->prepare(
+                'INSERT INTO storage_container_resources (container_id, resource_type, amount, updated_at)
+                 VALUES (:container_id, :resource_type, :amount, :updated_at)'
+            );
+            $insert->execute([
+                'container_id' => $containerId,
+                'resource_type' => $resourceType,
+                'amount' => $amount,
+                'updated_at' => $now,
+            ]);
+        } catch (PDOException $e) {
+            $stmt->execute([
+                'container_id' => $containerId,
+                'resource_type' => $resourceType,
+                'amount' => $amount,
+                'updated_at' => $now,
+            ]);
+        }
     }
 
     public function delete(StorageContainer $container): void
