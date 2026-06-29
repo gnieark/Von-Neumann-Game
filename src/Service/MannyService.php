@@ -1821,7 +1821,6 @@ final class MannyService
                     'pendingAmount' => $deliveryAmount,
                     'resourceProfile' => $resourceProfile,
                 ]);
-                $this->probes->save($probe);
                 $this->mannies->save($manny);
 
                 return $this->mannies->findById($manny->id) ?? $manny;
@@ -1857,7 +1856,6 @@ final class MannyService
                     'pendingAmount' => $remaining,
                     'resourceProfile' => $resourceProfile,
                 ]);
-                $this->probes->save($probe);
                 $this->mannies->save($manny);
 
                 return $this->mannies->findById($manny->id) ?? $manny;
@@ -1871,14 +1869,12 @@ final class MannyService
             if (!$manny->isInSameSectorAs($probe)) {
                 $this->clearTask($manny);
                 $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
-                $this->probes->save($probe);
                 $this->mannies->save($manny);
 
                 return $this->mannies->findById($manny->id) ?? $manny;
             }
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
                 $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
-                $this->probes->save($probe);
                 $this->mannies->save($manny);
 
                 return $this->mannies->findById($manny->id) ?? $manny;
@@ -1889,7 +1885,6 @@ final class MannyService
             $this->clearTask($manny);
         }
 
-        $this->probes->save($probe);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -1915,7 +1910,6 @@ final class MannyService
             $finalPayload = ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null) ? $manny->taskPayload : [];
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
                 $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
-                $this->probes->save($probe);
                 $this->mannies->save($manny);
 
                 return $this->mannies->findById($manny->id) ?? $manny;
@@ -1927,7 +1921,6 @@ final class MannyService
         } else {
             $this->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
         }
-        $this->probes->save($probe);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -1946,7 +1939,6 @@ final class MannyService
             $finalPayload = ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null) ? $manny->taskPayload : [];
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
                 $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
-                $this->probes->save($probe);
                 $this->mannies->save($manny);
 
                 return $this->mannies->findById($manny->id) ?? $manny;
@@ -1959,7 +1951,6 @@ final class MannyService
             $this->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
         }
 
-        $this->probes->save($probe);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;

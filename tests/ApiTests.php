@@ -3350,6 +3350,79 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.96, $staleMinedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'duplicate stale mining refreshes do not deplete regular mining twice');
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('parallel-metal-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.2]),
+    ]));
+    $parallelMetalMineA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'parallel-metal-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.04,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $parallelMetalMineA->status, 'first Manny starts a parallel metal mining task');
+    $parallelMetalMineB = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($thirdMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'parallel-metal-rock',
+        'resource' => 'metals',
+        'targetAmount' => 0.04,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $parallelMetalMineB->status, 'second Manny starts a parallel metal mining task');
+    $parallelThirdRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $parallelThirdRow->execute(['uid' => $thirdMannyId]);
+    $parallelThirdMannyDbId = (int) $parallelThirdRow->fetchColumn();
+    foreach ([$mineMannyDbId, $parallelThirdMannyDbId] as $parallelMannyDbId) {
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $parallelMannyDbId,
+            'started' => gmdate('c', time() - 4000),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+    }
+    $parallelMetalMannyA = $mannies->findById($mineMannyDbId);
+    $parallelMetalMannyB = $mannies->findById($parallelThirdMannyDbId);
+    $parallelMetalProbeA = $probes->findByPlayerId($player->id);
+    $parallelMetalProbeB = $probes->findByPlayerId($player->id);
+    if ($parallelMetalMannyA !== null && $parallelMetalMannyB !== null && $parallelMetalProbeA !== null && $parallelMetalProbeB !== null) {
+        $mannyService->refreshMannyState($parallelMetalMannyA, $parallelMetalProbeA);
+        $mannyService->refreshMannyState($parallelMetalMannyB, $parallelMetalProbeB);
+    }
+    $test->assertEquals(0.16, $probes->findByPlayerId($player->id)?->metalsStock, 'parallel Manny mining deliveries preserve both metal additions');
+    $parallelMetalAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-metal-rock');
+    $test->assertEquals(0.12, $parallelMetalAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'parallel Manny mining depletes both metal deliveries');
+    $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.08]);
+
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 0 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('parallel-deuterium-rock', null, 'deuterium', ['deuterium'], 'small', 0.000001, 0.001, null, ['deuterium' => 0.2]),
+    ]));
+    $parallelDeuteriumMineA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'parallel-deuterium-rock',
+        'resource' => 'deuterium',
+        'targetAmount' => 0.1,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $parallelDeuteriumMineA->status, 'first Manny starts a parallel deuterium mining task');
+    $parallelDeuteriumMineB = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($thirdMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'parallel-deuterium-rock',
+        'resource' => 'deuterium',
+        'targetAmount' => 0.1,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $parallelDeuteriumMineB->status, 'second Manny starts a parallel deuterium mining task');
+    foreach ([$mineMannyDbId, $parallelThirdMannyDbId] as $parallelMannyDbId) {
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $parallelMannyDbId,
+            'started' => gmdate('c', time() - 9000),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+    }
+    $parallelDeuteriumMannyA = $mannies->findById($mineMannyDbId);
+    $parallelDeuteriumMannyB = $mannies->findById($parallelThirdMannyDbId);
+    $parallelDeuteriumProbeA = $probes->findByPlayerId($player->id);
+    $parallelDeuteriumProbeB = $probes->findByPlayerId($player->id);
+    if ($parallelDeuteriumMannyA !== null && $parallelDeuteriumMannyB !== null && $parallelDeuteriumProbeA !== null && $parallelDeuteriumProbeB !== null) {
+        $mannyService->refreshMannyState($parallelDeuteriumMannyA, $parallelDeuteriumProbeA);
+        $mannyService->refreshMannyState($parallelDeuteriumMannyB, $parallelDeuteriumProbeB);
+    }
+    $test->assertEquals(20.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'parallel Manny mining deliveries preserve both deuterium additions');
+    $parallelDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-deuterium-rock');
+    $test->assertEquals(0.0, $parallelDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'parallel Manny mining depletes both deuterium deliveries');
+
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('thin-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.005]),
     ]));
     $oversizedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
