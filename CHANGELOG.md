@@ -21,7 +21,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Fixed
 
 - Manny : les livraisons de minage parallèles incrémentent désormais les stocks de la sonde sans écraser les apports d’une autre Manny, y compris pour le deutérium stocké dans la cuve dédiée.
-- Interface : `/mannies` ne propose plus de récupérer un container détaché caché détecté par une Manny située dans un autre secteur que la sonde.
+- Interface : `/mannies` ne propose plus de récupérer un container détaché caché uniquement connu via une ancienne détection Manny; le formulaire suit les containers présents dans le scan du secteur courant.
 
 ## 2026-06-27
 

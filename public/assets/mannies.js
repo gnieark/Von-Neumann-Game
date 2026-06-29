@@ -552,6 +552,10 @@
         return targets;
     }
 
+    function recoverableDetachedContainerTargets() {
+        return detachedContainerTargetsFromObjects(state.currentSectorObjects);
+    }
+
     function detachedContainerTargetsFromObjects(objects) {
         return (Array.isArray(objects) ? objects : [])
             .filter((object) => object && object.type === "detached_container" && object.id)
@@ -1660,7 +1664,7 @@
     }
 
     function recoverStorageContainerTargetOptions(selected) {
-        const targets = detectedDetachedContainerTargets();
+        const targets = recoverableDetachedContainerTargets();
         if (targets.length === 0) {
             return "<option value=\"\">-</option>";
         }
@@ -1673,7 +1677,7 @@
     }
 
     function renderRecoverStorageContainerForm() {
-        const targets = detectedDetachedContainerTargets();
+        const targets = recoverableDetachedContainerTargets();
         const hasTarget = targets.length > 0;
 
         return "<form class=\"manny-recover-storage-container-form manny-form\">"
@@ -2331,7 +2335,7 @@
             const button = form.querySelector(".manny-recover-storage-container-button");
             const hint = form.querySelector(".manny-recover-storage-container-hint");
             const selected = targetSelect ? targetSelect.value : "";
-            const targets = detectedDetachedContainerTargets();
+            const targets = recoverableDetachedContainerTargets();
             if (targetSelect) {
                 targetSelect.innerHTML = recoverStorageContainerTargetOptions(selected);
                 if (!targets.some((target) => target.id === targetSelect.value)) {
