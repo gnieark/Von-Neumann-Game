@@ -395,6 +395,8 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVi
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorWaypointBookmarkHighlightHtml'), 'sensors JS highlights waypoint bookmarks in visited-sector tiles');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorObjectSummaryItems(sector, false)'), 'sensors JS keeps waypoint bookmark highlights out of the detailed visited-sector scan');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'bookmarkPlacementText'), 'sensors JS renders waypoint bookmark placement metadata');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'waypointBookmarkPlacedBy'), 'sensors JS formats waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-waypoint-bookmark-highlight'), 'sensors CSS styles waypoint bookmark tile highlights');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorDeuteriumStationHighlightHtml'), 'sensors JS highlights deuterium refuel stations in visited-sector tiles');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuterium_refuel_station'), 'sensors JS recognizes deuterium refuel station objects');
@@ -409,6 +411,9 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'No detached container is available in this Manny sector.'"), 'English translations include remote Manny mining storage hints');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260629-sensors-waypoint-placement"), 'asset version is bumped for sensors waypoint placement UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

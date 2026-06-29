@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260628-manny-scut-remote-mine';
+const ASSET_VERSION = '20260629-sensors-waypoint-placement';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);

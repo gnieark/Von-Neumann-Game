@@ -179,6 +179,36 @@
         }).format(date);
     }
 
+    function formatBookmarkAge(createdAt) {
+        if (!createdAt) {
+            return "-";
+        }
+
+        const timestamp = Date.parse(createdAt);
+        if (!Number.isFinite(timestamp)) {
+            return "-";
+        }
+
+        const days = Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+        const key = days === 1 ? "scutNetworkAgeDay" : "scutNetworkAgeDays";
+        const fallback = days === 1 ? "{days} day" : "{days} days";
+        return window.VNG.formatText(tr(key, fallback), {"days": String(days)});
+    }
+
+    function bookmarkPlacementText(bookmark) {
+        if (!bookmark || typeof bookmark !== "object") {
+            return "";
+        }
+
+        const playerName = bookmark.playerName || tr("unknownPlayer", "Unknown player");
+        const age = formatBookmarkAge(bookmark.createdAt);
+
+        return window.VNG.formatText(
+            tr("waypointBookmarkPlacedBy", "Placed by {playerName} {age} ago"),
+            {"playerName": playerName, "age": age}
+        );
+    }
+
     function relativeCoordinates(value) {
         if (!value || !Number.isFinite(Number(value.x)) || !Number.isFinite(Number(value.y)) || !Number.isFinite(Number(value.z))) {
             return null;
@@ -618,6 +648,12 @@
         return bookmarkedSectorObjects(sector).map((bookmarkTarget, index) => {
             const bookmarks = Array.isArray(bookmarkTarget.bookmarks) ? bookmarkTarget.bookmarks : [];
             const bookmarkNames = bookmarks.map((bookmark) => bookmark && bookmark.name ? bookmark.name : "").filter(Boolean);
+            const bookmarkDetails = bookmarks
+                .map((bookmark) => ({
+                    "name": bookmark && bookmark.name ? bookmark.name : "",
+                    "placement": bookmarkPlacementText(bookmark),
+                }))
+                .filter((detail) => detail.placement !== "");
 
             return {
                 "id": "waypoint-bookmark-" + String(bookmarkTarget.key || index),
@@ -628,6 +664,7 @@
                 "dangerLevel": "low",
                 "targetLabel": bookmarkTarget.label || "",
                 "bookmarkNames": bookmarkNames,
+                "bookmarkDetails": bookmarkDetails,
             };
         });
     }
@@ -691,8 +728,20 @@
             ].filter(Boolean).join(" - ")) + "</p>";
         }
         if (object.type === "waypoint_bookmark") {
+            const details = Array.isArray(object.bookmarkDetails) ? object.bookmarkDetails : [];
+            const placementHtml = details.length > 0
+                ? details.map((detail) => {
+                    const label = detail.name
+                        ? detail.name + " - " + detail.placement
+                        : detail.placement;
+
+                    return "<p>" + window.VNG.escapeHtml(label) + "</p>";
+                }).join("")
+                : "";
+
             return "<p>" + window.VNG.escapeHtml(tr("bookmarkTarget", "Target") + " " + (object.targetLabel || "-")) + "</p>"
-                + "<p>" + window.VNG.escapeHtml(tr("bookmarkName", "Name") + " " + (Array.isArray(object.bookmarkNames) && object.bookmarkNames.length > 0 ? object.bookmarkNames.join(", ") : (object.name || "-"))) + "</p>";
+                + "<p>" + window.VNG.escapeHtml(tr("bookmarkName", "Name") + " " + (Array.isArray(object.bookmarkNames) && object.bookmarkNames.length > 0 ? object.bookmarkNames.join(", ") : (object.name || "-"))) + "</p>"
+                + placementHtml;
         }
         if (object.type === "deuterium_refuel_station") {
             return "<p>" + window.VNG.escapeHtml(tr("resources", "Resources") + " " + resourceTypeLabel("deuterium")) + "</p>"

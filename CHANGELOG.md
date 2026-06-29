@@ -14,6 +14,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Interface : la mention de tâche distante via SCUT est maintenant visible directement dans le bouton d’accordéon Manny, et l’action de rappel distante est libellée comme un abandon de tâche.
 - Interface : une Manny oubliée mais encore dans un secteur couvert par le même réseau SCUT s’affiche maintenant comme inactive avec la mention “Secteur distant via SCUT”, au lieu de “Trop éloignée”.
 - Interface : une Manny oubliée joignable via SCUT propose désormais uniquement l’action “Mine the sector”, alimentée par `/api/sector` pour cibler le secteur de la Manny et limiter “Store in” aux containers détachés de ce secteur.
+- Interface : `/sensors` affiche maintenant le joueur et l’âge de pose des marque-pages de navigation dans le scan courant et les scans détaillés des secteurs visités.
+
+### Fixed
+
+- Manny : les livraisons de minage parallèles incrémentent désormais les stocks de la sonde sans écraser les apports d’une autre Manny, y compris pour le deutérium stocké dans la cuve dédiée.
 
 ### Fixed
 
