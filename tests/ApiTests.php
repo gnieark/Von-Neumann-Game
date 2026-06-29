@@ -842,7 +842,7 @@ if ($createdProbe !== null) {
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' --path-only'
         . ' --sector=4,0,0';
-    exec($sectorJsonPathCommand . ' 2>&1', $sectorJsonPathOutput, $sectorJsonPathStatus);
+    exec($sectorJsonPathCommand, $sectorJsonPathOutput, $sectorJsonPathStatus);
     $test->assertEquals(0, $sectorJsonPathStatus, 'sector-json CLI path-only exits successfully');
     $test->assertEquals($cliSectorRepository->getPath($cliSectorCoordinates), $sectorJsonPathOutput[0] ?? null, 'sector-json CLI path-only prints the resolved sector path');
 
