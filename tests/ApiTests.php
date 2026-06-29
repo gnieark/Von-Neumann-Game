@@ -833,7 +833,7 @@ if ($createdProbe !== null) {
         . ' ' . escapeshellarg($root . '/scripts/sector-json.php')
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' 4 0 0';
-    exec($sectorJsonCommand . ' 2>&1', $sectorJsonOutput, $sectorJsonStatus);
+    exec($sectorJsonCommand, $sectorJsonOutput, $sectorJsonStatus);
     $sectorJsonText = implode("\n", $sectorJsonOutput);
     $test->assertEquals(0, $sectorJsonStatus, 'sector-json CLI exits successfully for an existing sector');
     $test->assertEquals(['x' => 4, 'y' => 0, 'z' => 0], json_decode($sectorJsonText, true, 512, JSON_THROW_ON_ERROR)['coordinates'] ?? null, 'sector-json CLI prints the sector JSON');
