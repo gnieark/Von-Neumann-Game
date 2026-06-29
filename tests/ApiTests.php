@@ -2382,6 +2382,86 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(0.232, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
         $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
 
+        $multiHiddenPlayer = $auth->registerPlayerWithPassword('multi-hidden-container-recover', 'secret', 'Multi Hidden Recover', 'Multi hidden probe');
+        $multiHiddenProbe = $probes->findByPlayerId($multiHiddenPlayer->id);
+        if ($multiHiddenProbe !== null) {
+            $multiHiddenSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'multi-hidden-container-recover', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+            $multiHiddenHeaders = ['Authorization' => 'Bearer ' . (string) ($multiHiddenSession->body['token'] ?? '')];
+            $multiHiddenMannyList = $kernel->handle('GET', '/api/probe/mannies', $multiHiddenHeaders);
+            $multiHiddenMannyIds = array_map(
+                static fn(array $manny): string => (string) ($manny['id'] ?? ''),
+                array_slice($multiHiddenMannyList->body['mannies'] ?? [], 0, 4),
+            );
+            $multiHiddenSector = new SectorContent($multiHiddenProbe->currentSector, [
+                new Asteroid('multi-cache-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
+            ]);
+            $sectorRepository->save($multiHiddenSector);
+
+            $multiHiddenItemA = $storage->addItem($multiHiddenProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+            $multiHiddenItemB = $storage->addItem($multiHiddenProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+            $multiHiddenContainerIdA = 'container-' . $multiHiddenItemA->uid;
+            $multiHiddenContainerIdB = 'container-' . $multiHiddenItemB->uid;
+            $multiHiddenContainerA = $storageContainers->findByUidForProbe($multiHiddenProbe->id, $multiHiddenContainerIdA);
+            $multiHiddenContainerB = $storageContainers->findByUidForProbe($multiHiddenProbe->id, $multiHiddenContainerIdB);
+            if ($multiHiddenContainerA !== null && $multiHiddenContainerB !== null && count(array_filter($multiHiddenMannyIds)) >= 4) {
+                $storageContainers->setResourceAmount($multiHiddenContainerA->id, 'metals', 0.111);
+                $storageContainers->setResourceAmount($multiHiddenContainerB->id, 'metals', 0.222);
+
+                $multiDetachA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[0]) . '/detach-storage-container', $multiHiddenHeaders, json_encode([
+                    'containerId' => $multiHiddenContainerIdA,
+                    'mode' => 'hidden_on_asteroid',
+                    'objectId' => 'multi-cache-rock',
+                ], JSON_THROW_ON_ERROR));
+                $multiDetachB = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[1]) . '/detach-storage-container', $multiHiddenHeaders, json_encode([
+                    'containerId' => $multiHiddenContainerIdB,
+                    'mode' => 'hidden_on_asteroid',
+                    'objectId' => 'multi-cache-rock',
+                ], JSON_THROW_ON_ERROR));
+                $test->assertEquals(202, $multiDetachA->status, 'first hidden container detach on a shared asteroid is accepted');
+                $test->assertEquals(202, $multiDetachB->status, 'second hidden container detach on a shared asteroid is accepted');
+                $multiHiddenObjectIdA = (string) ($multiDetachA->body['manny']['task']['objectId'] ?? '');
+                $multiHiddenObjectIdB = (string) ($multiDetachB->body['manny']['task']['objectId'] ?? '');
+                $test->assert($multiHiddenObjectIdA !== '' && $multiHiddenObjectIdB !== '' && $multiHiddenObjectIdA !== $multiHiddenObjectIdB, 'hidden container detaches keep distinct sector object ids');
+
+                foreach ([$multiHiddenMannyIds[0], $multiHiddenMannyIds[1]] as $multiDetachMannyId) {
+                    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+                        'uid' => $multiDetachMannyId,
+                        'ended' => gmdate('c', time() - 1),
+                    ]);
+                }
+                $kernel->handle('GET', '/api/probe/mannies', $multiHiddenHeaders);
+                $multiHiddenStoredSector = $sectorRepository->load($multiHiddenProbe->currentSector);
+                $test->assertEquals(2, count($multiHiddenStoredSector->hiddenDetachedContainersForObject('multi-cache-rock')), 'multiple hidden containers can coexist on the same asteroid');
+
+                $multiRecoverA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[2]) . '/recover-storage-container', $multiHiddenHeaders, json_encode([
+                    'objectId' => $multiHiddenObjectIdA,
+                    'source' => 'asteroid',
+                ], JSON_THROW_ON_ERROR));
+                $multiRecoverB = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[3]) . '/recover-storage-container', $multiHiddenHeaders, json_encode([
+                    'objectId' => $multiHiddenObjectIdB,
+                    'source' => 'asteroid',
+                ], JSON_THROW_ON_ERROR));
+                $test->assertEquals(202, $multiRecoverA->status, 'first hidden container recovery on a shared asteroid is accepted');
+                $test->assertEquals(202, $multiRecoverB->status, 'second hidden container recovery on a shared asteroid is accepted');
+                $test->assertEquals(0, count($sectorRepository->load($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'recovering multiple hidden containers reserves all of them out of sector JSON');
+
+                foreach ([$multiHiddenMannyIds[2], $multiHiddenMannyIds[3]] as $multiRecoverMannyId) {
+                    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+                        'uid' => $multiRecoverMannyId,
+                        'ended' => gmdate('c', time() - 1),
+                    ]);
+                }
+                $kernel->handle('GET', '/api/probe/mannies', $multiHiddenHeaders);
+                $multiRestoredContainerA = $storageContainers->findByUidForProbe($multiHiddenProbe->id, $multiHiddenContainerIdA);
+                $multiRestoredContainerB = $storageContainers->findByUidForProbe($multiHiddenProbe->id, $multiHiddenContainerIdB);
+                $test->assert($multiRestoredContainerA !== null, 'recovering multiple hidden containers restores the first source container once');
+                $test->assert($multiRestoredContainerB !== null, 'recovering multiple hidden containers restores the second source container once');
+                $test->assertEquals(0.111, $multiRestoredContainerA !== null ? ($storageContainers->resourceAmounts($multiRestoredContainerA->id)['metals'] ?? null) : null, 'first recovered hidden container keeps its own resources');
+                $test->assertEquals(0.222, $multiRestoredContainerB !== null ? ($storageContainers->resourceAmounts($multiRestoredContainerB->id)['metals'] ?? null) : null, 'second recovered hidden container keeps its own resources');
+                $test->assertEquals(0, count($sectorRepository->load($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'completed multiple hidden-container recovery leaves no stale sector copies');
+            }
+        }
+
         $dropSector = new SectorContent($detachProbe->currentSector, [
             new Planet('drop-target-planet', 'Drop target', 'rocky', 1.0, 1.0, true, 0.42, ['metals']),
         ]);
