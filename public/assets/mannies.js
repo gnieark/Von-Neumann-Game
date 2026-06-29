@@ -506,6 +506,20 @@
             : null;
     }
 
+    function mannyInCurrentProbeSector(manny) {
+        if (!manny || !manny.location || manny.location.type === "probe") {
+            return true;
+        }
+
+        const relative = mannyRelativeSector(manny);
+        const current = state.currentProbeSectorRelative;
+        return relative
+            && current
+            && relative.x === current.x
+            && relative.y === current.y
+            && relative.z === current.z;
+    }
+
     function detectedDetachedContainerTargets() {
         const targets = [];
         const seen = new Set();
@@ -520,6 +534,9 @@
         detachedContainerTargetsFromObjects(state.currentSectorObjects).forEach(add);
 
         state.currentMannies.forEach((manny) => {
+            if (!mannyInCurrentProbeSector(manny)) {
+                return;
+            }
             const detection = artificialObjectDetection(manny && manny.task);
             if (detection && detection.type === "detached_storage_container" && detection.objectId) {
                 add({

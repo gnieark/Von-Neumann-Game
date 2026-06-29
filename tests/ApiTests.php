@@ -347,6 +347,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-m
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'container.label !== "Sonde"'), 'mannies JS honors custom probe-core container labels');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.targetContainerId = targetContainerId'), 'mannies JS sends targetContainerId for external mining storage');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detection.targetObjectId'), 'mannies JS uses explicit hidden-container asteroid targets when provided');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyInCurrentProbeSector'), 'mannies JS ignores hidden-container recovery detections from remote Manny sectors');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-manny-hash'), 'mannies JS exposes the Manny state hash on Manny cards');
@@ -416,7 +417,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260629-mannies-hidden-container-recovery-targets"), 'asset version is bumped for Manny hidden-container recovery UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260629-mannies-recover-current-sector"), 'asset version is bumped for Manny hidden-container recovery UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
