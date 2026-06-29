@@ -625,11 +625,16 @@
     function sectorWaypointBookmarkHighlights(sector) {
         return bookmarkedSectorObjects(sector).map((bookmarkTarget) => {
             const bookmarks = uniqueWaypointBookmarks(bookmarkTarget.bookmarks);
-            const bookmarkNames = bookmarks.map((bookmark) => bookmark && bookmark.name ? bookmark.name : "").filter(Boolean);
+            const bookmarkDetails = bookmarks.map((bookmark) => {
+                const name = bookmark && bookmark.name ? bookmark.name : tr("waypointBookmark", "Waypoint bookmark");
+                const placement = bookmarkPlacementText(bookmark);
+
+                return placement ? name + " - " + placement : name;
+            }).filter(Boolean);
             const label = bookmarkTarget.label || tr("unknownObject", "Unknown object");
 
-            return bookmarkNames.length > 0
-                ? label + " (" + bookmarkNames.join(", ") + ")"
+            return bookmarkDetails.length > 0
+                ? label + " (" + bookmarkDetails.join(", ") + ")"
                 : label;
         });
     }
@@ -1007,11 +1012,13 @@
             ? scanErrorMessage(error)
             : sectorSummary(sector);
         const context = error ? "" : sectorContext(sector);
+        const waypointHighlight = error ? "" : sectorWaypointBookmarkHighlightHtml(sector);
 
         return "<article class=\"neighbor-sector-tile\">"
             + "<h4>" + window.VNG.escapeHtml(coordinates) + "</h4>"
             + (context ? "<p class=\"neighbor-sector-context\">" + window.VNG.escapeHtml(context) + "</p>" : "")
             + "<p>" + window.VNG.escapeHtml(summary) + "</p>"
+            + waypointHighlight
             + "<a class=\"button-link neighbor-sector-jump\" href=\"" + window.VNG.escapeHtml(movementUrl(target)) + "\">" + window.VNG.escapeHtml(tr("prepareJump", "Prepare jump")) + "</a>"
             + "</article>";
     }
