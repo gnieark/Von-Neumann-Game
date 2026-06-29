@@ -209,6 +209,32 @@
         );
     }
 
+    function uniqueWaypointBookmarks(bookmarks) {
+        if (!Array.isArray(bookmarks)) {
+            return [];
+        }
+
+        const seen = new Set();
+
+        return bookmarks.filter((bookmark) => {
+            if (!bookmark || typeof bookmark !== "object") {
+                return false;
+            }
+
+            const key = [
+                bookmark.name || "",
+                bookmark.playerName || "",
+                bookmark.createdAt || "",
+            ].join("\u0000");
+            if (seen.has(key)) {
+                return false;
+            }
+
+            seen.add(key);
+            return true;
+        });
+    }
+
     function relativeCoordinates(value) {
         if (!value || !Number.isFinite(Number(value.x)) || !Number.isFinite(Number(value.y)) || !Number.isFinite(Number(value.z))) {
             return null;
@@ -598,7 +624,7 @@
 
     function sectorWaypointBookmarkHighlights(sector) {
         return bookmarkedSectorObjects(sector).map((bookmarkTarget) => {
-            const bookmarks = Array.isArray(bookmarkTarget.bookmarks) ? bookmarkTarget.bookmarks : [];
+            const bookmarks = uniqueWaypointBookmarks(bookmarkTarget.bookmarks);
             const bookmarkNames = bookmarks.map((bookmark) => bookmark && bookmark.name ? bookmark.name : "").filter(Boolean);
             const label = bookmarkTarget.label || tr("unknownObject", "Unknown object");
 
@@ -646,7 +672,7 @@
 
     function sectorBookmarkObjects(sector) {
         return bookmarkedSectorObjects(sector).map((bookmarkTarget, index) => {
-            const bookmarks = Array.isArray(bookmarkTarget.bookmarks) ? bookmarkTarget.bookmarks : [];
+            const bookmarks = uniqueWaypointBookmarks(bookmarkTarget.bookmarks);
             const bookmarkNames = bookmarks.map((bookmark) => bookmark && bookmark.name ? bookmark.name : "").filter(Boolean);
             const bookmarkDetails = bookmarks
                 .map((bookmark) => ({
