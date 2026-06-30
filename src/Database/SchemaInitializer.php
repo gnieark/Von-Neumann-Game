@@ -29,7 +29,6 @@ final class SchemaInitializer
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
         $caseSensitiveText = $this->driver === 'mysql' ? 'VARCHAR(255) COLLATE utf8mb4_bin' : 'TEXT';
-        $largeText = $this->driver === 'mysql' ? 'MEDIUMTEXT' : 'TEXT';
         $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
         $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
 
@@ -290,7 +289,6 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS scut_networks (
                 id $id,
                 name $text NOT NULL,
-                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL
             )",
@@ -302,15 +300,27 @@ final class SchemaInitializer
                 sector_z INTEGER NOT NULL,
                 status $text NOT NULL,
                 network_id INTEGER NULL,
-                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
                 FOREIGN KEY(network_id) REFERENCES scut_networks(id)
             )",
+            "CREATE TABLE IF NOT EXISTS scut_covered_sectors (
+                id $id,
+                scut_network_id INTEGER NULL,
+                scut_relay_id INTEGER NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                FOREIGN KEY(scut_network_id) REFERENCES scut_networks(id) ON DELETE CASCADE,
+                FOREIGN KEY(scut_relay_id) REFERENCES scut_relays(id) ON DELETE CASCADE
+            )",
             "CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)",
             "CREATE INDEX IF NOT EXISTS idx_scut_relays_status_sector ON scut_relays(status, sector_x, sector_y, sector_z)",
             "CREATE INDEX IF NOT EXISTS idx_scut_relays_network ON scut_relays(network_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_scut_covered_sectors_relay_sector ON scut_covered_sectors(scut_relay_id, sector_x, sector_y, sector_z)",
+            "CREATE INDEX IF NOT EXISTS idx_scut_covered_sectors_network_sector ON scut_covered_sectors(scut_network_id, sector_x, sector_y, sector_z)",
+            "CREATE INDEX IF NOT EXISTS idx_scut_covered_sectors_sector ON scut_covered_sectors(sector_x, sector_y, sector_z)",
             "CREATE TABLE IF NOT EXISTS visited_sectors (
                 id $id,
                 player_id INTEGER NOT NULL,
@@ -459,13 +469,11 @@ final class SchemaInitializer
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
-        $largeText = $this->driver === 'mysql' ? 'MEDIUMTEXT' : 'TEXT';
 
         $pdo->exec(
             "CREATE TABLE IF NOT EXISTS scut_networks (
                 id $id,
                 name $text NOT NULL,
-                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL
             )"
@@ -479,21 +487,31 @@ final class SchemaInitializer
                 sector_z INTEGER NOT NULL,
                 status $text NOT NULL,
                 network_id INTEGER NULL,
-                covered_sectors_json $largeText NOT NULL,
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
                 FOREIGN KEY(network_id) REFERENCES scut_networks(id)
             )"
         );
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS scut_covered_sectors (
+                id $id,
+                scut_network_id INTEGER NULL,
+                scut_relay_id INTEGER NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                FOREIGN KEY(scut_network_id) REFERENCES scut_networks(id) ON DELETE CASCADE,
+                FOREIGN KEY(scut_relay_id) REFERENCES scut_relays(id) ON DELETE CASCADE
+            )"
+        );
         $this->removeScutRelayCreatorForeignKey($pdo);
-        if ($this->driver === 'mysql') {
-            $pdo->exec('ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL');
-            $pdo->exec('ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL');
-        }
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_status_sector ON scut_relays(status, sector_x, sector_y, sector_z)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_network ON scut_relays(network_id)');
+        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_scut_covered_sectors_relay_sector ON scut_covered_sectors(scut_relay_id, sector_x, sector_y, sector_z)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_covered_sectors_network_sector ON scut_covered_sectors(scut_network_id, sector_x, sector_y, sector_z)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_covered_sectors_sector ON scut_covered_sectors(sector_x, sector_y, sector_z)');
     }
 
     private function removeScutRelayCreatorForeignKey(PDO $pdo): void
@@ -541,7 +559,6 @@ final class SchemaInitializer
                     sector_z INTEGER NOT NULL,
                     status TEXT NOT NULL,
                     network_id INTEGER NULL,
-                    covered_sectors_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     activated_at TEXT NULL,
                     updated_at TEXT NOT NULL,
@@ -551,8 +568,8 @@ final class SchemaInitializer
 
             $insert = $pdo->prepare(
                 'INSERT INTO scut_relays
-                 (id, created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, covered_sectors_json, created_at, activated_at, updated_at)
-                 VALUES (:id, :created_by_probe_id, :sector_x, :sector_y, :sector_z, :status, :network_id, :covered_sectors_json, :created_at, :activated_at, :updated_at)'
+                 (id, created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, created_at, activated_at, updated_at)
+                 VALUES (:id, :created_by_probe_id, :sector_x, :sector_y, :sector_z, :status, :network_id, :created_at, :activated_at, :updated_at)'
             );
             foreach ($rows as $row) {
                 $insert->execute([
@@ -563,7 +580,6 @@ final class SchemaInitializer
                     'sector_z' => (int) $row['sector_z'],
                     'status' => (string) $row['status'],
                     'network_id' => $row['network_id'] !== null ? (int) $row['network_id'] : null,
-                    'covered_sectors_json' => (string) $row['covered_sectors_json'],
                     'created_at' => (string) $row['created_at'],
                     'activated_at' => $row['activated_at'] !== null ? (string) $row['activated_at'] : null,
                     'updated_at' => (string) $row['updated_at'],

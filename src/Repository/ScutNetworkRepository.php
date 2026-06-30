@@ -19,17 +19,20 @@ final class ScutNetworkRepository
         $now = gmdate('c');
         $createdAt ??= $now;
         $stmt = $this->pdo->prepare(
-            'INSERT INTO scut_networks (name, covered_sectors_json, created_at, updated_at)
-             VALUES (:name, :covered_sectors_json, :created_at, :updated_at)'
+            'INSERT INTO scut_networks (name, created_at, updated_at)
+             VALUES (:name, :created_at, :updated_at)'
         );
         $stmt->execute([
             'name' => $name,
-            'covered_sectors_json' => json_encode($coveredSectors, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'created_at' => $createdAt,
             'updated_at' => $now,
         ]);
 
-        return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('SCUT network creation failed.');
+        $network = $this->findById((int) $this->pdo->lastInsertId())
+            ?? throw new \RuntimeException('SCUT network creation failed.');
+        $network->coveredSectors = $coveredSectors;
+
+        return $network;
     }
 
     public function findById(int $id): ?ScutNetwork
@@ -65,7 +68,6 @@ final class ScutNetworkRepository
         $stmt = $this->pdo->prepare(
             'UPDATE scut_networks SET
                 name = :name,
-                covered_sectors_json = :covered_sectors_json,
                 created_at = :created_at,
                 updated_at = :updated_at
              WHERE id = :id'
@@ -73,7 +75,6 @@ final class ScutNetworkRepository
         $stmt->execute([
             'id' => $network->id,
             'name' => $network->name,
-            'covered_sectors_json' => json_encode($network->coveredSectors, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'created_at' => $network->createdAt,
             'updated_at' => $network->updatedAt,
         ]);
@@ -81,23 +82,45 @@ final class ScutNetworkRepository
 
     public function delete(int $id): void
     {
+        $coverageStmt = $this->pdo->prepare('DELETE FROM scut_covered_sectors WHERE scut_network_id = :id');
+        $coverageStmt->execute(['id' => $id]);
+
         $stmt = $this->pdo->prepare('DELETE FROM scut_networks WHERE id = :id');
         $stmt->execute(['id' => $id]);
     }
 
     private function hydrate(array $row): ScutNetwork
     {
-        $covered = json_decode((string) ($row['covered_sectors_json'] ?? '[]'), true);
-        if (!is_array($covered)) {
-            $covered = [];
-        }
-
         return new ScutNetwork(
             (int) $row['id'],
             (string) $row['name'],
-            array_values(array_filter($covered, static fn(mixed $sector): bool => is_array($sector))),
+            $this->coverageForNetwork((int) $row['id']),
             (string) $row['created_at'],
             (string) $row['updated_at'],
+        );
+    }
+
+    /**
+     * @return array<array{x:int,y:int,z:int}>
+     */
+    private function coverageForNetwork(int $networkId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT sector_x, sector_y, sector_z
+             FROM scut_covered_sectors
+             WHERE scut_network_id = :network_id
+             GROUP BY sector_x, sector_y, sector_z
+             ORDER BY sector_x ASC, sector_y ASC, sector_z ASC'
+        );
+        $stmt->execute(['network_id' => $networkId]);
+
+        return array_map(
+            static fn(array $row): array => [
+                'x' => (int) $row['sector_x'],
+                'y' => (int) $row['sector_y'],
+                'z' => (int) $row['sector_z'],
+            ],
+            $stmt->fetchAll(),
         );
     }
 }

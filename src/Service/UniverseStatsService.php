@@ -251,15 +251,16 @@ final class UniverseStatsService
     private function scutStats(): array
     {
         $coveredSectors = [];
-        $networkStmt = $this->pdo->query('SELECT id, name, covered_sectors_json FROM scut_networks ORDER BY id ASC');
+        $coverageRowsByNetwork = $this->scutCoverageRowsByNetwork();
+        $networkStmt = $this->pdo->query('SELECT id, name FROM scut_networks ORDER BY id ASC');
         $networkRows = $networkStmt === false ? [] : $networkStmt->fetchAll(PDO::FETCH_ASSOC);
         $topNetworks = [];
         foreach ($networkRows as $row) {
-            $networkCoveredSectors = $this->decodedSectors((string) ($row['covered_sectors_json'] ?? '[]'));
+            $networkId = (int) ($row['id'] ?? 0);
+            $networkCoveredSectors = $coverageRowsByNetwork[$networkId] ?? [];
             foreach ($networkCoveredSectors as $sector) {
                 $coveredSectors[$this->sectorKeyFromArray($sector)] = true;
             }
-            $networkId = (int) ($row['id'] ?? 0);
             $topNetworks[] = [
                 'networkId' => $networkId,
                 'networkName' => trim((string) ($row['name'] ?? '')) !== '' ? trim((string) $row['name']) : 'SCUT network #' . $networkId,
@@ -318,6 +319,33 @@ final class UniverseStatsService
             'topActivators' => $this->rankedScutActivators($activators),
             'topNetworks' => $this->rankedScutNetworks($topNetworks),
         ];
+    }
+
+    /**
+     * @return array<int, array<int, array{x:int,y:int,z:int}>>
+     */
+    private function scutCoverageRowsByNetwork(): array
+    {
+        $stmt = $this->pdo->query(
+            'SELECT scut_network_id, sector_x, sector_y, sector_z
+             FROM scut_covered_sectors
+             WHERE scut_network_id IS NOT NULL
+             GROUP BY scut_network_id, sector_x, sector_y, sector_z
+             ORDER BY scut_network_id ASC, sector_x ASC, sector_y ASC, sector_z ASC'
+        );
+        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $coverage = [];
+        foreach ($rows as $row) {
+            $networkId = (int) ($row['scut_network_id'] ?? 0);
+            $coverage[$networkId][] = [
+                'x' => (int) ($row['sector_x'] ?? 0),
+                'y' => (int) ($row['sector_y'] ?? 0),
+                'z' => (int) ($row['sector_z'] ?? 0),
+            ];
+        }
+
+        return $coverage;
     }
 
     /**
@@ -516,31 +544,6 @@ final class UniverseStatsService
         }
 
         return is_array($data) ? $data : null;
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function decodedSectors(string $json): array
-    {
-        try {
-            $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return [];
-        }
-
-        if (!is_array($decoded)) {
-            return [];
-        }
-
-        $sectors = [];
-        foreach ($decoded as $sector) {
-            if (is_array($sector)) {
-                $sectors[$this->sectorKeyFromArray($sector)] = $sector;
-            }
-        }
-
-        return array_values($sectors);
     }
 
     /**

@@ -17,8 +17,8 @@ final class ScutRelayRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO scut_relays
-             (created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, covered_sectors_json, created_at, activated_at, updated_at)
-             VALUES (:created_by_probe_id, :x, :y, :z, :status, NULL, :covered_sectors_json, :created_at, NULL, :updated_at)'
+             (created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, created_at, activated_at, updated_at)
+             VALUES (:created_by_probe_id, :x, :y, :z, :status, NULL, :created_at, NULL, :updated_at)'
         );
         $stmt->execute([
             'created_by_probe_id' => $createdByProbeId,
@@ -26,7 +26,6 @@ final class ScutRelayRepository
             'y' => $sector->getY(),
             'z' => $sector->getZ(),
             'status' => ScutRelay::STATUS_OFF,
-            'covered_sectors_json' => '[]',
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -135,7 +134,6 @@ final class ScutRelayRepository
             'UPDATE scut_relays SET
                 status = :status,
                 network_id = :network_id,
-                covered_sectors_json = :covered_sectors_json,
                 activated_at = :activated_at,
                 updated_at = :updated_at
              WHERE id = :id'
@@ -144,10 +142,10 @@ final class ScutRelayRepository
             'id' => $relay->id,
             'status' => $relay->status,
             'network_id' => $relay->networkId,
-            'covered_sectors_json' => json_encode($relay->coveredSectors, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'activated_at' => $relay->activatedAt,
             'updated_at' => $relay->updatedAt,
         ]);
+        $this->replaceCoverage($relay);
     }
 
     public function reassignNetwork(int $fromNetworkId, int $toNetworkId): void
@@ -160,31 +158,88 @@ final class ScutRelayRepository
             'to_network_id' => $toNetworkId,
             'updated_at' => gmdate('c'),
         ]);
+
+        $coverageStmt = $this->pdo->prepare(
+            'UPDATE scut_covered_sectors SET scut_network_id = :to_network_id WHERE scut_network_id = :from_network_id'
+        );
+        $coverageStmt->execute([
+            'from_network_id' => $fromNetworkId,
+            'to_network_id' => $toNetworkId,
+        ]);
     }
 
     public function delete(int $id): void
     {
+        $coverageStmt = $this->pdo->prepare('DELETE FROM scut_covered_sectors WHERE scut_relay_id = :id');
+        $coverageStmt->execute(['id' => $id]);
+
         $stmt = $this->pdo->prepare('DELETE FROM scut_relays WHERE id = :id');
         $stmt->execute(['id' => $id]);
     }
 
     private function hydrate(array $row): ScutRelay
     {
-        $covered = json_decode((string) ($row['covered_sectors_json'] ?? '[]'), true);
-        if (!is_array($covered)) {
-            $covered = [];
-        }
-
         return new ScutRelay(
             (int) $row['id'],
             $row['created_by_probe_id'] !== null ? (int) $row['created_by_probe_id'] : null,
             new SectorCoordinates((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z']),
             (string) $row['status'],
             $row['network_id'] !== null ? (int) $row['network_id'] : null,
-            array_values(array_filter($covered, static fn(mixed $sector): bool => is_array($sector))),
+            $this->coverageForRelay((int) $row['id']),
             (string) $row['created_at'],
             $row['activated_at'] !== null ? (string) $row['activated_at'] : null,
             (string) $row['updated_at'],
         );
+    }
+
+    /**
+     * @return array<array{x:int,y:int,z:int}>
+     */
+    private function coverageForRelay(int $relayId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT sector_x, sector_y, sector_z
+             FROM scut_covered_sectors
+             WHERE scut_relay_id = :relay_id
+             ORDER BY sector_x ASC, sector_y ASC, sector_z ASC'
+        );
+        $stmt->execute(['relay_id' => $relayId]);
+
+        return array_map(
+            static fn(array $row): array => [
+                'x' => (int) $row['sector_x'],
+                'y' => (int) $row['sector_y'],
+                'z' => (int) $row['sector_z'],
+            ],
+            $stmt->fetchAll(),
+        );
+    }
+
+    private function replaceCoverage(ScutRelay $relay): void
+    {
+        $delete = $this->pdo->prepare('DELETE FROM scut_covered_sectors WHERE scut_relay_id = :relay_id');
+        $delete->execute(['relay_id' => $relay->id]);
+
+        if ($relay->coveredSectors === []) {
+            return;
+        }
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO scut_covered_sectors
+             (scut_network_id, scut_relay_id, sector_x, sector_y, sector_z)
+             VALUES (:network_id, :relay_id, :x, :y, :z)'
+        );
+        foreach ($relay->coveredSectors as $sector) {
+            if (!is_array($sector)) {
+                continue;
+            }
+            $insert->execute([
+                'network_id' => $relay->networkId,
+                'relay_id' => $relay->id,
+                'x' => (int) ($sector['x'] ?? 0),
+                'y' => (int) ($sector['y'] ?? 0),
+                'z' => (int) ($sector['z'] ?? 0),
+            ]);
+        }
     }
 }

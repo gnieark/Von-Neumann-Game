@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Stockage : les couvertures SCUT ne sont plus stockées dans des colonnes JSON `covered_sectors_json`; elles passent par la table relationnelle `scut_covered_sectors`. Après déploiement sur une base existante, exécuter `php scripts/migrate-scut-coverage.php`.
 - API v58 : `GET /api/probe/mannies` expose les détails de tâche d’une Manny éloignée seulement si son secteur et celui de la sonde sont couverts par le même réseau SCUT; sinon `currentTask` vaut `unknown_too_far` et le payload/progrès de tâche est masqué.
 - API v59 : `POST /api/probe/mannies/{mannyId}/recall` accepte désormais l’arrêt distant d’une Manny active située dans un secteur couvert par le même réseau SCUT que la sonde; la Manny ne revient pas, sa tâche est annulée et elle est enregistrée comme `forgotten` dans son secteur.
 - API v60 : `POST /api/probe/mannies/{mannyId}/mine` accepte désormais l’ordre pour une Manny oubliée située dans un secteur distant couvert par le même réseau SCUT que la sonde, à condition de déposer le minage dans un container détaché du secteur de la Manny.

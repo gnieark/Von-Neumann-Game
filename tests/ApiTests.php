@@ -306,6 +306,7 @@ $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
+$scutCoverageMigrationScript = file_get_contents($root . '/scripts/migrate-scut-coverage.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oauth-remember"'), 'OAuth login view exposes the remember-me checkbox');
@@ -423,12 +424,14 @@ $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigra
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database.json.old'), 'SQLite to MySQL migration script backs up the active database config');
+$test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'scut_covered_sectors'), 'SCUT coverage migration script fills the relational coverage table');
+$test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'DROP COLUMN'), 'SCUT coverage migration script removes legacy JSON columns');
 $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.php');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
-$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_networks MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT network coverage storage fits radius-10 sector lists');
-$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ALTER TABLE scut_relays MODIFY covered_sectors_json MEDIUMTEXT NOT NULL"), 'MySQL SCUT relay coverage storage fits radius-10 sector lists');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS scut_covered_sectors'), 'SCUT coverage sectors are stored in a relational table');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'covered_sectors_json'), 'SCUT coverage is no longer stored in JSON columns');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'FOREIGN KEY(created_by_probe_id)'), 'SCUT relay creator ids are stored without a probe foreign key');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
@@ -494,13 +497,18 @@ for ($ranking = 1; $ranking <= 10; $ranking++) {
     }
 }
 $statsScutNetworkInsert = $statsRankingPdo->prepare(
-    'INSERT INTO scut_networks (name, covered_sectors_json, created_at, updated_at)
-     VALUES (:name, :covered_sectors_json, :created_at, :updated_at)'
+    'INSERT INTO scut_networks (name, created_at, updated_at)
+     VALUES (:name, :created_at, :updated_at)'
 );
 $statsScutRelayInsert = $statsRankingPdo->prepare(
     'INSERT INTO scut_relays
-     (created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, covered_sectors_json, created_at, activated_at, updated_at)
-     VALUES (:created_by_probe_id, :x, :y, :z, :status, :network_id, :covered_sectors_json, :created_at, :activated_at, :updated_at)'
+     (created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, created_at, activated_at, updated_at)
+     VALUES (:created_by_probe_id, :x, :y, :z, :status, :network_id, :created_at, :activated_at, :updated_at)'
+);
+$statsScutCoverageInsert = $statsRankingPdo->prepare(
+    'INSERT INTO scut_covered_sectors
+     (scut_network_id, scut_relay_id, sector_x, sector_y, sector_z)
+     VALUES (:network_id, :relay_id, :x, :y, :z)'
 );
 $statsScutNetworkOneCoverage = [
     ['x' => 0, 'y' => 0, 'z' => 0],
@@ -513,14 +521,12 @@ $statsScutNetworkTwoCoverage = [
 ];
 $statsScutNetworkInsert->execute([
     'name' => 'Stats SCUT Alpha',
-    'covered_sectors_json' => json_encode($statsScutNetworkOneCoverage, JSON_THROW_ON_ERROR),
     'created_at' => '2026-01-01T00:00:00+00:00',
     'updated_at' => '2026-01-01T00:00:00+00:00',
 ]);
 $statsScutNetworkOneId = (int) $statsRankingPdo->lastInsertId();
 $statsScutNetworkInsert->execute([
     'name' => 'Stats SCUT Beta',
-    'covered_sectors_json' => json_encode($statsScutNetworkTwoCoverage, JSON_THROW_ON_ERROR),
     'created_at' => '2026-01-02T00:00:00+00:00',
     'updated_at' => '2026-01-02T00:00:00+00:00',
 ]);
@@ -528,7 +534,7 @@ $statsScutNetworkTwoId = (int) $statsRankingPdo->lastInsertId();
 foreach ([
     [$statsRankingProbeRows[1]->id, $statsScutNetworkOneId, 'on', $statsScutNetworkOneCoverage],
     [$statsRankingProbeRows[1]->id, $statsScutNetworkTwoId, 'on', $statsScutNetworkTwoCoverage],
-    [$statsRankingProbeRows[2]->id, $statsScutNetworkTwoId, 'off', array_merge($statsScutNetworkOneCoverage, $statsScutNetworkTwoCoverage)],
+    [$statsRankingProbeRows[2]->id, $statsScutNetworkTwoId, 'off', []],
 ] as $relayIndex => [$creatorProbeId, $networkId, $status, $coverage]) {
     $statsScutRelayInsert->execute([
         'created_by_probe_id' => $creatorProbeId,
@@ -537,11 +543,20 @@ foreach ([
         'z' => 0,
         'status' => $status,
         'network_id' => $networkId,
-        'covered_sectors_json' => json_encode($coverage, JSON_THROW_ON_ERROR),
         'created_at' => '2026-01-01T00:00:00+00:00',
         'activated_at' => $status === 'on' ? '2026-01-01T00:00:00+00:00' : null,
         'updated_at' => '2026-01-01T00:00:00+00:00',
     ]);
+    $relayId = (int) $statsRankingPdo->lastInsertId();
+    foreach ($coverage as $sector) {
+        $statsScutCoverageInsert->execute([
+            'network_id' => $networkId,
+            'relay_id' => $relayId,
+            'x' => $sector['x'],
+            'y' => $sector['y'],
+            'z' => $sector['z'],
+        ]);
+    }
 }
 $rankingStats = (new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe'))->collect();
 $topRankingProbes = $rankingStats['metrics']['topVisitedProbes'] ?? [];
@@ -556,7 +571,7 @@ $test->assertEquals(2, $topScutRelayActivators[0]['activatedRelays'] ?? null, 'p
 $topScutNetworksByCoverage = $rankingStats['metrics']['topScutNetworksByCoverage'] ?? [];
 $test->assertEquals('Stats SCUT Alpha', $topScutNetworksByCoverage[0]['networkName'] ?? null, 'public stats SCUT network coverage podium ranks networks by covered sectors');
 $test->assertEquals(3, $topScutNetworksByCoverage[0]['coveredSectors'] ?? null, 'public stats SCUT network coverage podium exposes covered-sector counts');
-$test->assert(!in_array(5, array_column($topScutNetworksByCoverage, 'coveredSectors'), true), 'public stats SCUT network coverage podium is not based on relay coverage');
+$test->assert(!in_array(5, array_column($topScutNetworksByCoverage, 'coveredSectors'), true), 'public stats SCUT network coverage podium ignores inactive relay coverage');
 
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();
@@ -640,7 +655,7 @@ $scutRelaySchemaColumns = array_map(
     $pdo->query('PRAGMA table_info(scut_relays)')->fetchAll(PDO::FETCH_ASSOC),
 );
 $test->assert(in_array('created_by_probe_id', $scutRelaySchemaColumns, true), 'SCUT relays store their creator probe id');
-$test->assert(in_array('covered_sectors_json', $scutRelaySchemaColumns, true), 'SCUT relays persist their covered sectors');
+$test->assert(!in_array('covered_sectors_json', $scutRelaySchemaColumns, true), 'SCUT relays do not store covered sectors in JSON');
 $scutRelayForeignKeys = $pdo->query('PRAGMA foreign_key_list(scut_relays)')->fetchAll(PDO::FETCH_ASSOC);
 $scutRelayCreatorForeignKeys = array_values(array_filter(
     $scutRelayForeignKeys,
@@ -652,7 +667,14 @@ $scutNetworkSchemaColumns = array_map(
     $pdo->query('PRAGMA table_info(scut_networks)')->fetchAll(PDO::FETCH_ASSOC),
 );
 $test->assert(in_array('name', $scutNetworkSchemaColumns, true), 'SCUT networks store their name');
-$test->assert(in_array('covered_sectors_json', $scutNetworkSchemaColumns, true), 'SCUT networks persist their covered sectors');
+$test->assert(!in_array('covered_sectors_json', $scutNetworkSchemaColumns, true), 'SCUT networks do not store covered sectors in JSON');
+$scutCoverageSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(scut_covered_sectors)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('scut_network_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their network id');
+$test->assert(in_array('scut_relay_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their relay id');
+$test->assert(in_array('sector_x', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store sector coordinates');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
