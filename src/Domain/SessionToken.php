@@ -11,8 +11,9 @@ final class SessionToken
         public readonly int $playerId,
         public readonly string $tokenHash,
         public readonly string $createdAt,
-        public readonly string $expiresAt,
+        public string $expiresAt,
         public string $lastUsedAt,
         public ?string $revokedAt,
+        public readonly bool $rememberMe = false,
     ) {}
 }

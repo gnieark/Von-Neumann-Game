@@ -11,13 +11,13 @@ final class SessionRepository
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function createSession(int $playerId, string $plainToken, string $expiresAt): SessionToken
+    public function createSession(int $playerId, string $plainToken, string $expiresAt, bool $rememberMe = false): SessionToken
     {
         $now = gmdate('c');
         $tokenHash = self::hashToken($plainToken);
         $stmt = $this->pdo->prepare(
-            'INSERT INTO sessions (player_id, token_hash, created_at, expires_at, last_used_at, revoked_at)
-             VALUES (:player_id, :token_hash, :created_at, :expires_at, :last_used_at, NULL)'
+            'INSERT INTO sessions (player_id, token_hash, created_at, expires_at, last_used_at, remember_me, revoked_at)
+             VALUES (:player_id, :token_hash, :created_at, :expires_at, :last_used_at, :remember_me, NULL)'
         );
         $stmt->execute([
             'player_id' => $playerId,
@@ -25,9 +25,10 @@ final class SessionRepository
             'created_at' => $now,
             'expires_at' => $expiresAt,
             'last_used_at' => $now,
+            'remember_me' => $rememberMe ? 1 : 0,
         ]);
 
-        return new SessionToken((int) $this->pdo->lastInsertId(), $playerId, $tokenHash, $now, $expiresAt, $now, null);
+        return new SessionToken((int) $this->pdo->lastInsertId(), $playerId, $tokenHash, $now, $expiresAt, $now, null, $rememberMe);
     }
 
     public function findValidSessionByToken(string $plainToken): ?SessionToken
@@ -54,6 +55,21 @@ final class SessionRepository
         $stmt->execute(['id' => $session->id, 'last_used_at' => $session->lastUsedAt]);
     }
 
+    public function extendSession(SessionToken $session, string $expiresAt): void
+    {
+        $now = gmdate('c');
+        $session->expiresAt = $expiresAt;
+        $session->lastUsedAt = $now;
+        $stmt = $this->pdo->prepare(
+            'UPDATE sessions SET expires_at = :expires_at, last_used_at = :last_used_at WHERE id = :id'
+        );
+        $stmt->execute([
+            'id' => $session->id,
+            'expires_at' => $expiresAt,
+            'last_used_at' => $now,
+        ]);
+    }
+
     public static function hashToken(string $plainToken): string
     {
         return hash('sha256', $plainToken);
@@ -69,6 +85,7 @@ final class SessionRepository
             (string) $row['expires_at'],
             (string) $row['last_used_at'],
             $row['revoked_at'] !== null ? (string) $row['revoked_at'] : null,
+            isset($row['remember_me']) && (bool) $row['remember_me'],
         );
     }
 }

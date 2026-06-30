@@ -96,13 +96,32 @@ final class AuthService
     /**
      * @return array{token: string, expiresAt: string}
      */
-    public function createSessionForPlayer(Player $player): array
+    public function createSessionForPlayer(Player $player, bool $rememberMe = false): array
     {
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-        $expiresAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
-            ->modify('+' . $this->sessionTtlDays . ' days')
-            ->format('c');
-        $this->sessions->createSession($player->id, $token, $expiresAt);
+        $expiresAt = $this->newSessionExpiresAt();
+        $this->sessions->createSession($player->id, $token, $expiresAt, $rememberMe);
+
+        return ['token' => $token, 'expiresAt' => $expiresAt];
+    }
+
+    /**
+     * @return array{token: string, expiresAt: string}|null
+     */
+    public function refreshRememberedSessionFromBearerToken(?string $authorizationHeader): ?array
+    {
+        $token = $this->extractBearerToken($authorizationHeader);
+        if ($token === null) {
+            return null;
+        }
+
+        $session = $this->sessions->findValidSessionByToken($token);
+        if ($session === null || !$session->rememberMe) {
+            return null;
+        }
+
+        $expiresAt = $this->newSessionExpiresAt();
+        $this->sessions->extendSession($session, $expiresAt);
 
         return ['token' => $token, 'expiresAt' => $expiresAt];
     }
@@ -170,6 +189,13 @@ final class AuthService
         }
 
         return trim($matches[1]);
+    }
+
+    private function newSessionExpiresAt(): string
+    {
+        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->modify('+' . $this->sessionTtlDays . ' days')
+            ->format('c');
     }
 
     private function normalizeExternalProvider(string $provider): string

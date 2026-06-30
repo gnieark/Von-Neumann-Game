@@ -342,6 +342,7 @@ final class SchemaInitializer
                 created_at $text NOT NULL,
                 expires_at $text NOT NULL,
                 last_used_at $text NOT NULL,
+                remember_me $boolean,
                 revoked_at $nullableText,
                 FOREIGN KEY(player_id) REFERENCES players(id)
             )",
@@ -405,6 +406,7 @@ final class SchemaInitializer
         if ($this->driver === 'sqlite') {
             $this->ensureSqliteColumn($pdo, 'players', 'forum_admin', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureSqliteColumn($pdo, 'players', 'forum_moderator', 'INTEGER NOT NULL DEFAULT 0');
+            $this->ensureSqliteColumn($pdo, 'sessions', 'remember_me', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureSqliteColumn($pdo, 'forum_posts', 'first_message_id', 'INTEGER NULL');
             $this->ensureSqliteColumn($pdo, 'forum_messages', 'edited_at', 'TEXT NULL');
             $this->syncForumFirstMessages($pdo);
@@ -436,6 +438,7 @@ final class SchemaInitializer
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
+            $this->ensureMysqlColumn($pdo, 'sessions', 'remember_me', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER last_used_at');
             $this->ensureMysqlColumnCollation($pdo, 'players', 'username', 'utf8mb4_bin', 'VARCHAR(255) COLLATE utf8mb4_bin NOT NULL');
             $this->ensureMysqlColumn($pdo, 'forum_posts', 'first_message_id', 'INTEGER NULL AFTER pinned');
             $this->ensureMysqlColumn($pdo, 'forum_messages', 'edited_at', 'VARCHAR(255) NULL AFTER updated_at');

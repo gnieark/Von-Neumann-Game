@@ -25,7 +25,9 @@ $routePath = (string) (parse_url($path, PHP_URL_PATH) ?: '/');
 
 // Handle API requests 
 if (str_starts_with($routePath, '/api/')) {
-    $kernel = $factory->apiKernel();
+    $apiPdo = $factory->pdo(initializeSchema: true);
+    refreshRememberedSessionCookie($factory, $apiPdo);
+    $kernel = $factory->apiKernel($apiPdo);
     $headers = function_exists('getallheaders') ? getallheaders() : [];
     $body = file_get_contents('php://input') ?: '';
     $response = $kernel->handle($method, $path, $headers, $body);
@@ -69,6 +71,32 @@ function isHttps(): bool
         || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 }
 
+function refreshRememberedSessionCookie(AppFactory $factory, ?PDO $pdo = null): void
+{
+    $token = (string) ($_COOKIE[SESSION_COOKIE] ?? '');
+    if ($token === '') {
+        return;
+    }
+
+    $pdo ??= $factory->pdo(initializeSchema: true);
+    $refresh = $factory
+        ->authService($pdo)
+        ->refreshRememberedSessionFromBearerToken('Bearer ' . $token);
+
+    if ($refresh === null) {
+        return;
+    }
+
+    $expiresAt = new DateTimeImmutable((string) $refresh['expiresAt']);
+    setcookie(SESSION_COOKIE, (string) $refresh['token'], [
+        'expires' => $expiresAt->getTimestamp(),
+        'path' => '/',
+        'secure' => isHttps(),
+        'httponly' => false,
+        'samesite' => 'Lax',
+    ]);
+}
+
 function translatedRouteName(Translator $translator, string $key): string
 {
     return htmlspecialchars($translator->get($key), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -90,6 +118,8 @@ if ($routePath !== '/i18n' && isset($_GET['lang']) && in_array((string) $_GET['l
     header('Location: ' . ($routePath === '' ? '/' : $routePath), true, 303);
     return;
 }
+
+refreshRememberedSessionCookie($factory);
 
 $availableroutes = [
     'home' => [

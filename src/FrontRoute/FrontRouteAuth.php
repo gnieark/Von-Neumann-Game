@@ -294,7 +294,7 @@ class FrontRouteAuth extends FrontRoute{
 
     private function issueSessionCookie(AuthService $auth, Player $player, bool $remember = false): void
     {
-        $session = $auth->createSessionForPlayer($player);
+        $session = $auth->createSessionForPlayer($player, $remember);
         $expiresAt = new DateTimeImmutable((string) $session['expiresAt']);
         setcookie(self::SESSION_COOKIE, (string) $session['token'], [
             'expires' => $remember ? $expiresAt->getTimestamp() : 0,

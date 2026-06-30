@@ -616,6 +616,11 @@ $playerSchemaColumns = array_map(
 );
 $test->assert(in_array('forum_admin', $playerSchemaColumns, true), 'Player table stores forum admin flag');
 $test->assert(in_array('forum_moderator', $playerSchemaColumns, true), 'Player table stores forum moderator flag');
+$sessionSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(sessions)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('remember_me', $sessionSchemaColumns, true), 'Session table marks remembered browser sessions');
 $damageWarningSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_damage_warnings)')->fetchAll(PDO::FETCH_ASSOC),
@@ -1326,6 +1331,27 @@ $test->assertEquals(0, (int) $plainStored->fetchColumn(), 'session token is not 
 $hashedStored = $pdo->prepare('SELECT COUNT(*) FROM sessions WHERE token_hash = :hash');
 $hashedStored->execute(['hash' => SessionRepository::hashToken((string) $token)]);
 $test->assertEquals(1, (int) $hashedStored->fetchColumn(), 'session token hash is stored');
+
+$apiSessionRemembered = $pdo->prepare('SELECT remember_me FROM sessions WHERE token_hash = :hash');
+$apiSessionRemembered->execute(['hash' => SessionRepository::hashToken((string) $token)]);
+$test->assertEquals(0, (int) $apiSessionRemembered->fetchColumn(), 'API password sessions are not remembered browser sessions by default');
+$test->assertEquals(null, $auth->refreshRememberedSessionFromBearerToken('Bearer ' . $token), 'non-remembered sessions are not extended as remembered cookies');
+
+$rememberedSession = $auth->createSessionForPlayer($player, true);
+$rememberedToken = (string) $rememberedSession['token'];
+$rememberedHash = SessionRepository::hashToken($rememberedToken);
+$shortRememberedExpiry = gmdate('c', time() + 3600);
+$shortenRemembered = $pdo->prepare('UPDATE sessions SET expires_at = :expires_at WHERE token_hash = :hash');
+$shortenRemembered->execute(['expires_at' => $shortRememberedExpiry, 'hash' => $rememberedHash]);
+$rememberedRefresh = $auth->refreshRememberedSessionFromBearerToken('Bearer ' . $rememberedToken);
+$test->assert(is_array($rememberedRefresh), 'remembered browser sessions can be refreshed');
+$test->assertEquals($rememberedToken, $rememberedRefresh['token'] ?? null, 'remembered session refresh keeps the same token');
+$test->assert(strtotime((string) ($rememberedRefresh['expiresAt'] ?? '')) > time() + 6 * 24 * 3600, 'remembered session refresh extends expiry from now');
+$rememberedStored = $pdo->prepare('SELECT remember_me, expires_at FROM sessions WHERE token_hash = :hash');
+$rememberedStored->execute(['hash' => $rememberedHash]);
+$rememberedRow = $rememberedStored->fetch(PDO::FETCH_ASSOC);
+$test->assertEquals(1, (int) ($rememberedRow['remember_me'] ?? 0), 'remembered session is flagged in storage');
+$test->assertEquals($rememberedRefresh['expiresAt'] ?? null, $rememberedRow['expires_at'] ?? null, 'remembered session refresh persists the new expiry');
 
 $headers = ['Authorization' => 'Bearer ' . $token];
 $me = $kernel->handle('GET', '/api/me', $headers);
