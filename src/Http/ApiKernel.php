@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 62;
+    public const API_VERSION = 63;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -1352,7 +1352,7 @@ final class ApiKernel
 
         $frame = new PlayerReferenceFrame($player->homeSector);
         $relays = array_map(
-            fn(ScutRelay $relay): array => $this->scutRelayArray($player, $relay, includeSector: true),
+            fn(ScutRelay $relay): array => $this->scutRelayArray($player, $relay, includeSector: true, idAsString: false),
             $this->scut->relaysForNetwork($network->id),
         );
         $probes = array_map(
@@ -1598,7 +1598,7 @@ final class ApiKernel
             if ($relays !== []) {
                 $objects = is_array($observation['objects'] ?? null) ? $observation['objects'] : [];
                 foreach ($relays as $relay) {
-                    $objects[] = $this->scutRelayArray($player, $relay, includeSector: false);
+                    $objects[] = $this->scutRelayArray($player, $relay, includeSector: false, idAsString: true);
                 }
                 $observation['objects'] = $objects;
             }
@@ -1617,12 +1617,12 @@ final class ApiKernel
         return $observation;
     }
 
-    private function scutRelayArray(Player $player, ScutRelay $relay, bool $includeSector): array
+    private function scutRelayArray(Player $player, ScutRelay $relay, bool $includeSector, bool $idAsString): array
     {
         $network = $relay->networkId !== null ? $this->scut->networkById($relay->networkId) : null;
         $createdByProbeName = $this->scutRelayCreatorProbeName($relay);
         $payload = [
-            'id' => $includeSector ? $relay->id : (string) $relay->id,
+            'id' => $idAsString ? (string) $relay->id : $relay->id,
             'type' => 'scut_relay',
             'name' => 'Relais SCUT',
             'estimated' => false,

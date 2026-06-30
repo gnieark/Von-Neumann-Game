@@ -338,6 +338,9 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Sectors covered by at least one SCUT network'"), 'English translations include the SCUT covered-sector metric');
 $test->assert(str_contains($openApi, 'anomaly_detected'), 'OpenAPI documents anomaly-detected alerts');
 $test->assert(str_contains($openApi, 'enum: [probe, planet, unknown]'), 'OpenAPI documents unknown message endpoints');
+$test->assert(str_contains($openApi, 'For scut_relay objects this is the relay integer id serialized as a string'), 'OpenAPI documents SCUT relay SectorObject id conventions');
+$test->assert(str_contains($openApi, 'description: Present only for SCUT relay objects.'), 'OpenAPI documents SCUT relay-only SectorObject fields');
+$test->assert(str_contains($openApi, '$ref: \'#/components/schemas/ScutNetworkReference\''), 'OpenAPI documents SCUT relay SectorObject network references');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -708,7 +711,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(62, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(63, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1378,6 +1381,10 @@ $scutRelayObjects = array_values(array_filter(
 ));
 $test->assertEquals(1, count($scutRelayObjects), 'Current sector exposes the SCUT relay as a sector object');
 $test->assertEquals((string) $scutRelay->id, $scutRelayObjects[0]['id'] ?? null, 'SCUT relay sector object exposes a string object id');
+$test->assertEquals('on', $scutRelayObjects[0]['status'] ?? null, 'SCUT relay sector object exposes its status');
+$test->assertEquals(ScutRelay::RADIUS_SECTORS, $scutRelayObjects[0]['coverageRadiusSectors'] ?? null, 'SCUT relay sector object exposes its coverage radius');
+$test->assertEquals($scutNetworkId, $scutRelayObjects[0]['network']['id'] ?? null, 'SCUT relay sector object exposes its network reference');
+$test->assert(is_string($scutRelayObjects[0]['activatedAt'] ?? null), 'SCUT relay sector object exposes its activation timestamp');
 $test->assertEquals($scutProbe->id, $scutRelayObjects[0]['createdByProbeId'] ?? null, 'SCUT relay sector object exposes its historical creator id');
 $test->assertEquals($scutProbe->name, $scutRelayObjects[0]['createdByProbeName'] ?? null, 'SCUT relay sector object resolves a living creator probe name');
 $test->assertEquals($scutNetworkId, $scutSector->body['sector']['scutNetworks'][0]['id'] ?? null, 'Current sector exposes covering SCUT networks');
