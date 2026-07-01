@@ -12,11 +12,13 @@ use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -68,6 +70,7 @@ final class MannyService
         private readonly ?MissionService $missions = null,
         private readonly ?ScutNetworkService $scut = null,
         private readonly ?ProbeDamageWarningRepository $alerts = null,
+        private readonly ?ProbeImprovementRepository $improvements = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
     }
@@ -84,6 +87,11 @@ final class MannyService
         $this->recoverForgottenManniesInCurrentSector($probe);
 
         return $this->mannies->findByProbeId($probe->id);
+    }
+
+    public function maxDeuteriumPercentForProbe(NeumannProbe $probe): float
+    {
+        return $this->maxDeuteriumPercent($probe);
     }
 
     public function renameManny(NeumannProbe $probe, string $uid, string $name): Manny
@@ -352,6 +360,57 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    public function startProbeImprovement(NeumannProbe $probe, string $uid, string $improvement): Manny
+    {
+        if ($this->improvements === null) {
+            throw new MannyActionException(500, 'internal_error', 'Probe improvement storage is unavailable.');
+        }
+
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to improve it.');
+        }
+
+        $improvement = ProbeImprovementCatalog::normalizeId($improvement);
+        $definition = ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig());
+        if ($definition === null) {
+            throw new MannyActionException(400, 'invalid_probe_improvement', 'Unknown probe improvement.');
+        }
+
+        $state = $this->improvements->findForProbe($probe->id, $improvement);
+        if ($state === null || (!$state->available && !$state->done)) {
+            throw new MannyActionException(422, 'probe_improvement_unavailable', 'This probe improvement is not available yet.');
+        }
+        if ($state->done) {
+            throw new MannyActionException(409, 'probe_improvement_already_done', 'This probe improvement has already been completed.');
+        }
+
+        $plan = $this->probeImprovementPlan($probe, $definition);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $this->consumeProbeImprovementPlan($probe, $plan);
+        $this->probes->save($probe);
+
+        $manny->currentTask = Manny::TASK_IMPROVING_PROBE;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . (int) $plan['durationSeconds'] . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'improvement' => $improvement,
+            'improvementName' => (string) ($definition['name'] ?? $improvement),
+            'durationSeconds' => (int) $plan['durationSeconds'],
+            'ingredients' => is_array($definition['ingredients'] ?? null) ? $definition['ingredients'] : [],
+            'resourceCosts' => $plan['resourceCosts'],
+            'consumedItems' => $plan['consumedItems'],
+            'effects' => is_array($definition['effects'] ?? null) ? $definition['effects'] : [],
+        ];
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
     }
 
     public function startSalvage(NeumannProbe $probe, string $uid, string $objectId): Manny
@@ -629,7 +688,7 @@ final class MannyService
         if (!$this->currentSectorHasDeuteriumRefuelStation($probe)) {
             throw new MannyActionException(422, 'deuterium_refuel_station_not_found', 'No deuterium refuel station is available in the current sector.');
         }
-        if ($probe->deuteriumStock >= $this->maxDeuteriumPercent() - 0.0001) {
+        if ($probe->deuteriumStock >= $this->maxDeuteriumPercent($probe) - 0.0001) {
             throw new MannyActionException(409, 'probe_deuterium_full', 'The probe deuterium tank is already full.');
         }
 
@@ -810,6 +869,13 @@ final class MannyService
         }
         if ($manny->currentTask === Manny::TASK_CRAFTING || $manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
             $this->refundCraftingCommitment($probe, $manny);
+            $this->clearTask($manny);
+            $this->mannies->save($manny);
+
+            return $this->requiredManny($probe, $uid);
+        }
+        if ($manny->currentTask === Manny::TASK_IMPROVING_PROBE) {
+            $this->refundProbeImprovementCommitment($probe, $manny);
             $this->clearTask($manny);
             $this->mannies->save($manny);
 
@@ -1070,6 +1136,9 @@ final class MannyService
         if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
             return $this->refreshScutRelayTurnOn($manny, $probe, $now);
         }
+        if ($manny->currentTask === Manny::TASK_IMPROVING_PROBE) {
+            return $this->refreshProbeImprovement($manny, $probe, $now);
+        }
 
         return $manny;
     }
@@ -1293,6 +1362,58 @@ final class MannyService
     }
 
     /**
+     * @param array<string, mixed> $definition
+     * @return array<string, mixed>
+     */
+    private function probeImprovementPlan(NeumannProbe $probe, array $definition): array
+    {
+        $resourceCosts = [];
+        $itemsToConsume = [];
+        $consumedItems = [];
+        $itemsByType = $this->probeItemsByType($probe);
+        $ingredients = is_array($definition['ingredients'] ?? null) ? $definition['ingredients'] : [];
+        foreach ($ingredients as $ingredient) {
+            if (!is_array($ingredient)) {
+                continue;
+            }
+            $type = (string) ($ingredient['type'] ?? '');
+            if ($type === '') {
+                continue;
+            }
+
+            $quantity = max(0.0, (float) ($ingredient['quantity'] ?? 0));
+            if ($this->craftingIngredientKind($ingredient) !== 'item') {
+                $this->addResourceCost($resourceCosts, $this->normalizeCraftResourceType($type), $quantity);
+                continue;
+            }
+
+            $requiredCount = (int) ceil($quantity);
+            $availableItems = $itemsByType[$type] ?? [];
+            if (count($availableItems) < $requiredCount) {
+                throw new MannyActionException(422, 'insufficient_improvement_ingredients', 'Insufficient probe inventory for this improvement.');
+            }
+            for ($index = 0; $index < $requiredCount; $index++) {
+                $item = array_shift($availableItems);
+                if (!$item instanceof ProbeItem) {
+                    continue;
+                }
+                $itemsToConsume[] = $item;
+                $consumedItems[] = $this->consumedItemPayload($item);
+            }
+            $itemsByType[$type] = $availableItems;
+        }
+
+        $this->ensureResourceCostsAvailable($probe, $resourceCosts);
+
+        return [
+            'durationSeconds' => max(1, (int) ($definition['durationSeconds'] ?? 1)),
+            'resourceCosts' => $resourceCosts,
+            'itemsToConsume' => $itemsToConsume,
+            'consumedItems' => $consumedItems,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $recipeDefinition
      * @param array<string, array<ProbeItem>> $itemsByType
      * @param array<ProbeItem> $itemsToConsume
@@ -1503,6 +1624,14 @@ final class MannyService
                 $this->items->delete($item);
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $plan
+     */
+    private function consumeProbeImprovementPlan(NeumannProbe $probe, array $plan): void
+    {
+        $this->consumeCraftingPlan($probe, $plan);
     }
 
     private function subtractResourceFromProbe(NeumannProbe $probe, string $type, float $quantity): void
@@ -1719,6 +1848,11 @@ final class MannyService
         if ($refundedResources) {
             $this->probes->save($probe);
         }
+    }
+
+    private function refundProbeImprovementCommitment(NeumannProbe $probe, Manny $manny): void
+    {
+        $this->refundCraftingCommitment($probe, $manny);
     }
 
     /**
@@ -2048,6 +2182,36 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
+    private function refreshProbeImprovement(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+        if ($this->improvements === null) {
+            throw new MannyActionException(500, 'internal_error', 'Probe improvement storage is unavailable.');
+        }
+
+        $improvement = ProbeImprovementCatalog::normalizeId((string) ($manny->taskPayload['improvement'] ?? ''));
+        $result = [
+            'lastTask' => Manny::TASK_IMPROVING_PROBE,
+            'improvement' => $improvement,
+        ];
+
+        if (ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig()) === null) {
+            $result['result'] = 'failed';
+            $result['failureReason'] = 'invalid_probe_improvement';
+        } else {
+            $this->improvements->markDone($probe->id, $improvement);
+            $result['result'] = 'success';
+            $result['effects'] = is_array($manny->taskPayload['effects'] ?? null) ? $manny->taskPayload['effects'] : [];
+        }
+
+        $this->clearTask($manny, $result);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
     private function refreshWaypointBookmarkInstallation(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
@@ -2262,7 +2426,7 @@ final class MannyService
             return $manny;
         }
 
-        $probe->deuteriumStock = $this->maxDeuteriumPercent();
+        $probe->deuteriumStock = $this->maxDeuteriumPercent($probe);
         $this->probes->save($probe);
         $this->clearTask($manny, [
             'lastTask' => Manny::TASK_REFILLING_DEUTERIUM_TANK,
@@ -3821,9 +3985,28 @@ final class MannyService
         return max(0.0001, Config::float($this->config, 'probe.maxIntegrityPercent', self::MAX_INTEGRITY_PERCENT));
     }
 
-    private function maxDeuteriumPercent(): float
+    private function maxDeuteriumPercent(?NeumannProbe $probe = null): float
     {
-        return max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        $max = max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        if (
+            $probe !== null
+            && $this->improvements !== null
+            && $this->improvements->isDone($probe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION)
+        ) {
+            $definition = ProbeImprovementCatalog::find(ProbeImprovementCatalog::DEUTERIUM_COMPRESSION, $this->probeImprovementConfig());
+            $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
+            $max = max($max, (float) ($effects['maxDeuteriumPercent'] ?? ProbeImprovementCatalog::DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT));
+        }
+
+        return $max;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function probeImprovementConfig(): array
+    {
+        return is_array($this->config['probeImprovements'] ?? null) ? $this->config['probeImprovements'] : [];
     }
 
     private function mannyCargoArray(Manny $manny): array

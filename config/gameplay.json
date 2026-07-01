@@ -24,6 +24,30 @@
     "additionalContainerCapacity": 1.0,
     "maxDeuteriumPercent": 100.0
   },
+  "probeImprovements": {
+    "deuterium_compression": {
+      "name": "Deuterium compression",
+      "description": "Compresses the external deuterium tank reserve so it can hold up to 200% fuel.",
+      "durationSeconds": 300,
+      "ingredients": [
+        {
+          "type": "electric_motor",
+          "quantity": 1,
+          "unit": "item",
+          "kind": "item"
+        },
+        {
+          "type": "steel_bar",
+          "quantity": 2,
+          "unit": "item",
+          "kind": "item"
+        }
+      ],
+      "effects": {
+        "maxDeuteriumPercent": 200.0
+      }
+    }
+  },
   "manny": {
     "cargoCapacity": 0.05,
     "containerSpace": 0.05,

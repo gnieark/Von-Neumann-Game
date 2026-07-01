@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '66'
+  version: '67'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 66
+                apiVersion: 67
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -827,6 +827,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/probe-improvements-available:
+    get:
+      summary: List available probe improvements
+      description: >
+        Returns probe improvements that have been unlocked for the current
+        probe, plus improvements already completed. Pass `includeAll=1` to
+        include locked catalog entries as unavailable.
+      parameters:
+        - in: query
+          name: includeAll
+          schema:
+            type: boolean
+          required: false
+          description: Include locked improvements from the gameplay catalog.
+      responses:
+        '200':
+          description: Probe improvements visible to the authenticated probe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [improvements]
+                properties:
+                  improvements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProbeImprovement'
+              example:
+                improvements:
+                  - id: deuterium_compression
+                    name: Deuterium compression
+                    description: Compresses the external deuterium tank reserve so it can hold up to 200% fuel.
+                    available: true
+                    done: false
+                    durationSeconds: 300
+                    ingredients:
+                      - type: electric_motor
+                        quantity: 1
+                        unit: item
+                        kind: item
+                      - type: steel_bar
+                        quantity: 2
+                        unit: item
+                        kind: item
+                    effects:
+                      maxDeuteriumPercent: 200
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/probe/messages:
     get:
       summary: List messages received by the current probe
@@ -1778,6 +1826,54 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Insufficient resources, ingredients, or cargo capacity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/improve-probe:
+    post:
+      summary: Start improving the probe with a Manny
+      description: >
+        Starts an unlocked probe improvement on an idle onboard Manny. Required
+        ingredients are removed from the probe inventory when the order is
+        accepted; cancelling the Manny task refunds them.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyProbeImprovementRequest'
+            example:
+              improvement: deuterium_compression
+      responses:
+        '202':
+          description: Probe improvement task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, improvements]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  improvements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProbeImprovement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable or improvement already completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Improvement unavailable or required inventory missing
           content:
             application/json:
               schema:
@@ -3084,9 +3180,13 @@ components:
           $ref: '#/components/schemas/ProbeTerminalAlert'
         fuel:
           type: object
+          required: [deuterium]
           properties:
             deuterium:
               type: number
+            maxDeuterium:
+              type: number
+              description: Current effective deuterium tank maximum; 100 by default, higher after probe improvements.
         sensorMode:
           type: string
           enum: [normal, degraded, blind]
@@ -3309,6 +3409,57 @@ components:
           type: integer
           minimum: 1
           description: Optional cap applied to itemIds or targetMannyIds.
+    ProbeImprovement:
+      type: object
+      required: [id, name, description, available, done, durationSeconds, ingredients, effects]
+      properties:
+        id:
+          type: string
+          enum: [deuterium_compression]
+        name:
+          type: string
+        description:
+          type: string
+        available:
+          type: boolean
+          description: Whether the authenticated probe has unlocked the improvement.
+        done:
+          type: boolean
+          description: Whether the improvement effect has already been installed.
+        durationSeconds:
+          type: integer
+          minimum: 1
+        ingredients:
+          type: array
+          items:
+            type: object
+            required: [type, quantity, unit, kind]
+            properties:
+              type:
+                type: string
+                example: steel_bar
+              quantity:
+                type: number
+                minimum: 0
+              unit:
+                type: string
+                example: item
+              kind:
+                type: string
+                enum: [item, resource]
+        effects:
+          type: object
+          additionalProperties: true
+          properties:
+            maxDeuteriumPercent:
+              type: number
+              description: Effective deuterium tank maximum after completion.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     ProbeMessageSendRequest:
       type: object
       required: [body]
@@ -4159,6 +4310,14 @@ components:
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
             reserved for a later rule.
+    MannyProbeImprovementRequest:
+      type: object
+      required: [improvement]
+      properties:
+        improvement:
+          type: string
+          enum: [deuterium_compression]
+          description: Probe improvement id to install.
     AtomicPrinterCraftRequest:
       type: object
       required: [recipe]
@@ -4349,7 +4508,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, improving_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0

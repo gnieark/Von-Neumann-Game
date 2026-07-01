@@ -129,6 +129,18 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_probe_id ON probe_items(probe_id)",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_uid ON probe_items(uid)",
+            "CREATE TABLE IF NOT EXISTS probe_improvements (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                improvement $text NOT NULL,
+                available $boolean,
+                done $boolean,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(probe_id, improvement),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_improvements_probe_id ON probe_improvements(probe_id)",
             "CREATE TABLE IF NOT EXISTS storage_containers (
                 id $id,
                 uid $text NOT NULL,
@@ -435,6 +447,7 @@ final class SchemaInitializer
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureProbeMessageSchema($pdo);
             $this->ensureScutSchema($pdo);
+            $this->ensureProbeImprovementSchema($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
@@ -464,7 +477,30 @@ final class SchemaInitializer
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureProbeMessageSchema($pdo);
             $this->ensureScutSchema($pdo);
+            $this->ensureProbeImprovementSchema($pdo);
         }
+    }
+
+    private function ensureProbeImprovementSchema(PDO $pdo): void
+    {
+        $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
+
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS probe_improvements (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                improvement $text NOT NULL,
+                available $boolean,
+                done $boolean,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(probe_id, improvement),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_improvements_probe_id ON probe_improvements(probe_id)');
     }
 
     private function ensureScutSchema(PDO $pdo): void

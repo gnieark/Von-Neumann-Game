@@ -16,6 +16,7 @@ use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDirection;
+use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeStatus;
@@ -32,6 +33,7 @@ use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
@@ -242,6 +244,9 @@ $test->assertEquals(['local'], $loadedGameplayConfig['listValues'] ?? null, 'loc
 $configuredSteelBar = CraftingRecipeCatalog::find('steel_bar', $loadedGameplayConfig['crafting'] ?? []);
 $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafting recipes consume gameplay config overrides');
 $test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
+$configuredProbeImprovement = ProbeImprovementCatalog::find('deuterium-compression', $loadedGameplayConfig['probeImprovements'] ?? []);
+$test->assertEquals(300, $configuredProbeImprovement['durationSeconds'] ?? null, 'probe improvements expose default gameplay definitions');
+$test->assertEquals(200.0, $configuredProbeImprovement['effects']['maxDeuteriumPercent'] ?? null, 'deuterium compression raises the tank maximum to 200 percent');
 
 file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks.json', json_encode([], JSON_THROW_ON_ERROR));
 file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks-local.json', json_encode([
@@ -692,12 +697,21 @@ $scutCoverageSchemaColumns = array_map(
 $test->assert(in_array('scut_network_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their network id');
 $test->assert(in_array('scut_relay_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their relay id');
 $test->assert(in_array('sector_x', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store sector coordinates');
+$probeImprovementSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_improvements)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('probe_id', $probeImprovementSchemaColumns, true), 'probe improvements store their probe id');
+$test->assert(in_array('improvement', $probeImprovementSchemaColumns, true), 'probe improvements store their canonical improvement id');
+$test->assert(in_array('available', $probeImprovementSchemaColumns, true), 'probe improvements track availability');
+$test->assert(in_array('done', $probeImprovementSchemaColumns, true), 'probe improvements track completion');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
+$probeImprovements = new ProbeImprovementRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
 $scutRelays = new ScutRelayRepository($pdo);
 $scutNetworks = new ScutNetworkRepository($pdo);
@@ -714,18 +728,18 @@ $visitedSectors = new VisitedSectorRepository($pdo);
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
-$storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
+$storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(66, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(67, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -3521,6 +3535,7 @@ if ($foreignMannyId !== '') {
         ['POST', $foreignMannyPath . '/inspect-asteroid', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-asteroid'],
         ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
         ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],
+        ['POST', $foreignMannyPath . '/improve-probe', ['improvement' => 'deuterium_compression'], 'POST /api/probe/mannies/{id}/improve-probe'],
         ['POST', $foreignMannyPath . '/recall', [], 'POST /api/probe/mannies/{id}/recall'],
     ] as [$method, $path, $body, $label]) {
         assertForeignMannyEndpointReturnsNotFound($test, $kernel, $headers, $method, $path, $body, $label);
@@ -3598,6 +3613,79 @@ if ($createdProbe !== null) {
     $refillAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals(null, $refillAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed deuterium refill clears the Manny task');
     $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed deuterium refill fills the probe tank');
+
+    $improvementPlayer = $auth->registerPlayerWithPassword('probe-improvement-user', 'secret', 'Probe Improvement User');
+    $improvementHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($improvementPlayer)['token']];
+    $improvementProbe = $probes->findByPlayerId($improvementPlayer->id) ?? throw new RuntimeException('Expected improvement probe.');
+    $improvementMannyList = $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $improvementMannyId = (string) ($improvementMannyList->body['mannies'][0]['id'] ?? '');
+    $improvementMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $improvementMannyRow->execute(['uid' => $improvementMannyId]);
+    $improvementMannyDbId = (int) $improvementMannyRow->fetchColumn();
+
+    $improvementsUnavailable = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals(200, $improvementsUnavailable->status, 'GET /api/probe/probe-improvements-available is available');
+    $test->assertEquals([], $improvementsUnavailable->body['improvements'] ?? null, 'unavailable probe improvements are hidden by default');
+    $improvementsAll = $kernel->handle('GET', '/api/probe/probe-improvements-available?includeAll=1', $improvementHeaders);
+    $test->assertEquals('deuterium_compression', $improvementsAll->body['improvements'][0]['id'] ?? null, 'probe improvements can expose the full catalog when requested');
+    $test->assertEquals(false, $improvementsAll->body['improvements'][0]['available'] ?? null, 'deuterium compression is unavailable by default');
+    $improveUnavailable = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => 'deuterium_compression',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $improveUnavailable->status, 'unavailable probe improvements cannot be started');
+    $test->assertEquals('probe_improvement_unavailable', $improveUnavailable->body['error']['code'] ?? null, 'unavailable probe improvement returns an explicit error');
+
+    $probeImprovements->markAvailable($improvementProbe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION);
+    $availableImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals('deuterium_compression', $availableImprovements->body['improvements'][0]['id'] ?? null, 'available probe improvements are returned by default');
+    $test->assertEquals(300, $availableImprovements->body['improvements'][0]['durationSeconds'] ?? null, 'deuterium compression exposes its configured duration');
+
+    foreach ($items->findByProbeId($improvementProbe->id) as $item) {
+        if (in_array($item->type, [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::TYPE_STEEL_BAR], true)) {
+            $items->delete($item);
+        }
+    }
+    $missingImprovementIngredients = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => 'deuterium_compression',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingImprovementIngredients->status, 'probe improvements require their configured inventory items');
+    $test->assertEquals('insufficient_improvement_ingredients', $missingImprovementIngredients->body['error']['code'] ?? null, 'missing probe-improvement components return an explicit error');
+
+    $improvementMotor = $storage->addItem($improvementProbe, ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006);
+    $improvementBarA = $storage->addItem($improvementProbe, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01);
+    $improvementBarB = $storage->addItem($improvementProbe, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01);
+    $improveManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => 'deuterium_compression',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $improveManny->status, 'POST /api/probe/mannies/{id}/improve-probe starts a probe improvement task');
+    $test->assertEquals('improving_probe', $improveManny->body['manny']['currentTask'] ?? null, 'probe improvement task is exposed on Manny');
+    $test->assertEquals(300, $improveManny->body['manny']['task']['durationSeconds'] ?? null, 'deuterium compression takes five minutes');
+    $test->assertEquals(3, count($improveManny->body['manny']['task']['consumedItems'] ?? []), 'probe improvement task exposes the consumed components');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementMotor->uid), 'probe improvement consumes its electric motor');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementBarA->uid), 'probe improvement consumes its first steel bar');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementBarB->uid), 'probe improvement consumes its second steel bar');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $improvementMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $improvementAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $test->assertEquals(null, $improvementAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed probe improvement clears the Manny task');
+    $completedImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals(true, $completedImprovements->body['improvements'][0]['done'] ?? null, 'completed probe improvement is persisted as done');
+    $probeAfterImprovement = $kernel->handle('GET', '/api/probe', $improvementHeaders);
+    $test->assertEquals(200.0, $probeAfterImprovement->body['probe']['fuel']['maxDeuterium'] ?? null, 'deuterium compression raises the exposed fuel maximum');
+
+    $sectorRepository->save(new SectorContent($improvementProbe->currentSector, [
+        new DeuteriumRefuelStation('improvement-deuterium-station', 'Deuterium refuel station', 'improvement-planet', null, gmdate('c')),
+    ]));
+    $refillImprovedTank = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/refill-deuterium-tank', $improvementHeaders, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $refillImprovedTank->status, 'improved deuterium tank can be refilled above the default maximum');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $improvementMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $test->assertEquals(200.0, $probes->findByPlayerId($improvementPlayer->id)?->deuteriumStock, 'completed improved tank refill fills the probe to 200 percent');
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);

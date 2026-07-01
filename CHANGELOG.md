@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v67 : ajout du stockage `probe_improvements`, de `GET /api/probe/probe-improvements-available` et de `POST /api/probe/mannies/{mannyId}/improve-probe`; la première amélioration, `deuterium_compression`, consomme 1 `electric_motor` et 2 `steel_bar`, dure 5 minutes et porte la cuve de deutérium à 200 % une fois terminée.
 - API v64 : ajout des objets de secteur `dormant_construct`, exposés uniquement dans les scans détaillés de `/api/probe/sector` et `/api/sector`.
 - API v65 : `POST /api/probe/mannies/{mannyId}/inspect-sector-object` remplace l’action spécialisée `inspect-asteroid`, désormais dépréciée. L’inspection accepte les astéroïdes, les `dormant_construct` et les containers détachés visibles ou déjà découverts; les rapports de contenu de containers créent une alerte `manny_report`.
 - API v66 : l’arrivée d’une sonde dans un secteur contenant un `dormant_construct` crée une alerte persistante `sector_object_detected` en anglais invitant à envoyer une Manny l’inspecter.

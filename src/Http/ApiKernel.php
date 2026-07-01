@@ -12,6 +12,8 @@ use VonNeumannGame\Domain\MissionStep;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDamageWarning;
+use VonNeumannGame\Domain\ProbeImprovement;
+use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeMovement;
@@ -25,6 +27,7 @@ use VonNeumannGame\Forum\ForumPost;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
@@ -47,7 +50,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 66;
+    public const API_VERSION = 67;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -65,6 +68,7 @@ final class ApiKernel
         private readonly ProbeReinstantiationService $reinstantiation,
         private readonly ScutNetworkService $scut,
         private readonly array $gameplayConfig = [],
+        private readonly ?ProbeImprovementRepository $improvements = null,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -96,7 +100,7 @@ final class ApiKernel
                         : $this->probeStorageContainerResponse($player, rawurldecode($matches[1])),
                 );
             }
-            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|recall)$#', $routePath, $matches) === 1) {
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|improve-probe|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
             }
             if (preg_match('#^/api/probe/scut-network/(\d+)$#', $routePath, $matches) === 1) {
@@ -151,6 +155,7 @@ final class ApiKernel
                 '/api/probe' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeResponse($player)),
                 '/api/probe/mind-snapshot/reassign' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMindSnapshotReassignResponse($player)),
                 '/api/probe/storage-containers' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player)),
+                '/api/probe/probe-improvements-available' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeImprovementsResponse($player, $query)),
                 '/api/probe/storage-moves' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeStorageMoveResponse($player, $body)),
                 '/api/probe/atomic-printer/craft' => $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeAtomicPrinterCraftResponse($player, $body)),
                 '/api/probe/messages/sent' => $this->protectedRoute($method, ['GET'], $headers, fn(Player $player): ApiResponse => $this->probeSentMessagesResponse($player, $query)),
@@ -560,7 +565,10 @@ final class ApiKernel
                     'status' => 'trapped_by_black_hole',
                     'message' => 'The probe has crossed a black hole escape threshold. No signal or actuator response can be recovered.',
                     'alert' => $this->terminalProbeAlert($probe),
-                    'fuel' => ['deuterium' => $probe->deuteriumStock],
+                    'fuel' => [
+                        'deuterium' => $probe->deuteriumStock,
+                        'maxDeuterium' => $this->mannies->maxDeuteriumPercentForProbe($probe),
+                    ],
                     'sensorMode' => 'blind',
                     'systems' => [
                         'integrityPercent' => $probe->integrityPercent,
@@ -576,7 +584,10 @@ final class ApiKernel
                     'status' => 'dead',
                     'message' => 'The probe is no longer operational. Its intelligence core is isolated from all sensors and actuators.',
                     'alert' => $this->terminalProbeAlert($probe),
-                    'fuel' => ['deuterium' => $probe->deuteriumStock],
+                    'fuel' => [
+                        'deuterium' => $probe->deuteriumStock,
+                        'maxDeuterium' => $this->mannies->maxDeuteriumPercentForProbe($probe),
+                    ],
                     'sensorMode' => 'blind',
                     'systems' => [
                         'integrityPercent' => $probe->integrityPercent,
@@ -592,6 +603,16 @@ final class ApiKernel
         )->globalToRelative($probe->currentSector);
 
         return new ApiResponse(200, ['probe' => $this->probeArray($player, $probe, $relative)]);
+    }
+
+    private function probeImprovementsResponse(Player $player, array $query): ApiResponse
+    {
+        $probe = $this->requiredProbe($player);
+        $includeAll = $this->truthyQuery($query['includeAll'] ?? $query['all'] ?? null);
+
+        return new ApiResponse(200, [
+            'improvements' => $this->probeImprovementsArray($probe, $includeAll),
+        ]);
     }
 
     private function probeMindSnapshotReassignResponse(Player $player): ApiResponse
@@ -1531,6 +1552,20 @@ final class ApiKernel
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }
 
+        if ($action === 'improve-probe') {
+            $improvement = $data['improvement'] ?? $data['id'] ?? null;
+            if (!is_string($improvement) || trim($improvement) === '') {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain improvement.');
+            }
+
+            $manny = $this->mannies->startProbeImprovement($probe, $uid, $improvement);
+
+            return new ApiResponse(202, [
+                'manny' => $this->mannyArray($player, $probe, $manny),
+                'improvements' => $this->probeImprovementsArray($probe),
+            ]);
+        }
+
         if ($action === 'turn-on-relay') {
             $this->movements->ensureProbeOperational($probe);
             if ($this->movements->activeMovementForProbe($probe) !== null) {
@@ -1704,7 +1739,10 @@ final class ApiKernel
             'id' => $probe->id,
             'name' => $probe->name,
             'status' => $probe->status->value,
-            'fuel' => ['deuterium' => $probe->deuteriumStock],
+            'fuel' => [
+                'deuterium' => $probe->deuteriumStock,
+                'maxDeuterium' => $this->mannies->maxDeuteriumPercentForProbe($probe),
+            ],
             'sensorMode' => $sensorMode,
             'sector' => $movement === null ? ['relative' => $relative] : null,
             'navigation' => [
@@ -1739,6 +1777,50 @@ final class ApiKernel
             : (new PlayerReferenceFrame($player->homeSector))->globalToRelative($manny->sector);
 
         return $this->mannies->publicArray($probe, $manny, $relativeSector);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function probeImprovementsArray(NeumannProbe $probe, bool $includeAll = false): array
+    {
+        $definitions = [];
+        foreach (ProbeImprovementCatalog::all($this->gameplayConfig['probeImprovements'] ?? []) as $definition) {
+            $definitions[(string) $definition['id']] = $definition;
+        }
+
+        $rows = [];
+        if ($this->improvements !== null) {
+            foreach ($this->improvements->findByProbeId($probe->id) as $improvement) {
+                $rows[$improvement->improvement] = $improvement;
+            }
+        }
+
+        $result = [];
+        foreach ($definitions as $id => $definition) {
+            $row = $rows[$id] ?? new ProbeImprovement(0, $probe->id, $id, false, false, '', '');
+            if (!$includeAll && !$row->available && !$row->done) {
+                continue;
+            }
+            $result[] = $row->publicArray($definition);
+        }
+
+        return $result;
+    }
+
+    private function truthyQuery(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return (int) $value !== 0;
+        }
+        if (is_string($value)) {
+            return in_array(strtolower($value), ['1', 'true', 'yes', 'on'], true);
+        }
+
+        return false;
     }
 
     private function missionArray(Player $player, Mission $mission): array

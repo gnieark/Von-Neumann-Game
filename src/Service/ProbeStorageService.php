@@ -8,6 +8,7 @@ use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeExternalTank;
+use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeInventoryItem;
 use VonNeumannGame\Domain\ProbeItem;
@@ -15,6 +16,7 @@ use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\StorageContainer;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 
@@ -30,6 +32,7 @@ final class ProbeStorageService
         private readonly MannyRepository $mannies,
         private readonly NeumannProbeRepository $probes,
         private readonly array $config = [],
+        private readonly ?ProbeImprovementRepository $improvements = null,
     ) {}
 
     public function ensureProbeStorage(NeumannProbe $probe): void
@@ -295,10 +298,11 @@ final class ProbeStorageService
             return 0.0;
         }
         if ($type === ResourceComposition::DEUTERIUM) {
-            $result = $this->probes->addDeuteriumStock($probe->id, $amount * $this->maxDeuteriumPercent(), $this->maxDeuteriumPercent());
+            $maxDeuterium = $this->maxDeuteriumPercent($probe);
+            $result = $this->probes->addDeuteriumStock($probe->id, $amount * $maxDeuterium, $maxDeuterium);
             $probe->deuteriumStock = $result['stock'];
 
-            return round($result['accepted'] / $this->maxDeuteriumPercent(), 4);
+            return round($result['accepted'] / $maxDeuterium, 4);
         }
 
         $this->ensureProbeStorage($probe);
@@ -340,8 +344,9 @@ final class ProbeStorageService
             return 0.0;
         }
         if ($type === ResourceComposition::DEUTERIUM) {
-            $consumed = min($amount, round(max(0.0, $probe->deuteriumStock / $this->maxDeuteriumPercent()), 4));
-            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - ($consumed * $this->maxDeuteriumPercent())), 4);
+            $maxDeuterium = $this->maxDeuteriumPercent($probe);
+            $consumed = min($amount, round(max(0.0, $probe->deuteriumStock / $maxDeuterium), 4));
+            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - ($consumed * $maxDeuterium)), 4);
             $this->probes->save($probe);
 
             return $consumed;
@@ -400,7 +405,7 @@ final class ProbeStorageService
     {
         $type = $this->normalizeResourceType($type);
         if ($type === ResourceComposition::DEUTERIUM) {
-            return round(max(0.0, $probe->deuteriumStock / $this->maxDeuteriumPercent()), 4);
+            return round(max(0.0, $probe->deuteriumStock / $this->maxDeuteriumPercent($probe)), 4);
         }
 
         $this->ensureProbeStorage($probe);
@@ -1290,9 +1295,28 @@ final class ProbeStorageService
         return array_replace($manny->cargoArray(), ['capacity' => $this->mannyCargoCapacity()]);
     }
 
-    private function maxDeuteriumPercent(): float
+    private function maxDeuteriumPercent(?NeumannProbe $probe = null): float
     {
-        return max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        $max = max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        if (
+            $probe !== null
+            && $this->improvements !== null
+            && $this->improvements->isDone($probe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION)
+        ) {
+            $definition = ProbeImprovementCatalog::find(ProbeImprovementCatalog::DEUTERIUM_COMPRESSION, $this->probeImprovementConfig());
+            $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
+            $max = max($max, (float) ($effects['maxDeuteriumPercent'] ?? ProbeImprovementCatalog::DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT));
+        }
+
+        return $max;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function probeImprovementConfig(): array
+    {
+        return is_array($this->config['probeImprovements'] ?? null) ? $this->config['probeImprovements'] : [];
     }
 
     private function storageMoveSecondsPerUnit(): int
