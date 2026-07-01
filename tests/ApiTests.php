@@ -725,7 +725,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(65, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(66, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2790,6 +2790,57 @@ if ($teleportLifeProbe !== null) {
     $test->assertEquals(MissionService::FIRST_CONTACT_SIGNAL, $teleportLifeMessages->body['messages'][0]['body'] ?? null, 'observing current intelligent-life sector creates missing first-contact message');
     $teleportLifeMissions = $kernel->handle('GET', '/api/probe/missions', $teleportLifeHeaders);
     $test->assertEquals('first_contact.return_to_space_program', $teleportLifeMissions->body['missions'][0]['type'] ?? null, 'observing current intelligent-life sector creates missing first-contact mission');
+}
+
+$dormantAlertPlayer = $auth->registerPlayerWithPassword('dormant-alert', 'secret', 'Dormant Alert', 'Dormant alert probe');
+$dormantAlertProbe = $probes->findByPlayerId($dormantAlertPlayer->id);
+$dormantAlertSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'dormant-alert', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$dormantAlertHeaders = ['Authorization' => 'Bearer ' . (string) ($dormantAlertSession->body['token'] ?? '')];
+if ($dormantAlertProbe !== null) {
+    $dormantAlertTarget = $dormantAlertProbe->currentSector->add(2, 0, 0);
+    $sectorRepository->save(new SectorContent($dormantAlertTarget, [
+        new DormantConstruct('dormant-arrival-alert'),
+    ]));
+
+    $dormantAlertMove = $kernel->handle('POST', '/api/probe/move', $dormantAlertHeaders, json_encode([
+        'target' => [
+            'x' => 2,
+            'y' => 0,
+            'z' => 0,
+        ],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $dormantAlertMove->status, 'movement toward a dormant-construct sector starts');
+    $dormantAlertMovement = $movements->findActiveByProbeId($dormantAlertProbe->id);
+    if ($dormantAlertMovement !== null) {
+        $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+            'id' => $dormantAlertMovement->id,
+            'arrival' => gmdate('c', time() - 60),
+        ]);
+        $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $dormantAlertMovement->id, gmdate('c'), ['probeId' => $dormantAlertMovement->probeId, 'phase' => 'arrived']);
+        $dormantSchedulerStats = $scheduler->processDueEvents();
+        $test->assert($dormantSchedulerStats['processed'] >= 1, 'scheduler finalizes movement into dormant-construct sector');
+
+        $dormantAlertsResponse = $kernel->handle('GET', '/api/probe/alerts', $dormantAlertHeaders);
+        $test->assertEquals(200, $dormantAlertsResponse->status, 'GET /api/probe/alerts exposes dormant-construct alerts');
+        $dormantAlerts = array_values(array_filter(
+            $dormantAlertsResponse->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'sector_object_detected'
+                && ($alert['object']['type'] ?? null) === 'dormant_construct',
+        ));
+        $dormantAlert = $dormantAlerts[0] ?? null;
+        $test->assertEquals(1, count($dormantAlerts), 'arrival creates one dormant-construct detection alert');
+        $test->assertEquals('unread', $dormantAlert['status'] ?? null, 'dormant-construct alert starts unread');
+        $test->assertEquals('dormant-arrival-alert', $dormantAlert['object']['id'] ?? null, 'dormant-construct alert exposes the object id');
+        $test->assertEquals('Dormant construct', $dormantAlert['object']['label'] ?? null, 'dormant-construct alert exposes the public label');
+        $test->assertEquals([], $dormantAlert['object']['resourceTypes'] ?? null, 'dormant-construct alert does not invent resource types');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $dormantAlert['sector']['relative'] ?? null, 'dormant-construct alert exposes the relative sector');
+        $test->assertEquals(
+            'A dormant construct has been detected in this sector. Its origin and purpose are unknown; dispatching a Manny to inspect it is recommended.',
+            $dormantAlert['message'] ?? null,
+            'dormant-construct alert stores the improved English message',
+        );
+        $test->assert(!str_contains(json_encode($dormantAlert, JSON_THROW_ON_ERROR), $dormantAlertTarget->toKey()), 'dormant-construct alert response does not expose absolute sector keys');
+    }
 }
 
 if ($intelligentLifeProbe !== null) {

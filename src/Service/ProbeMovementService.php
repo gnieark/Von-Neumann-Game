@@ -18,6 +18,7 @@ use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorDetachedContainer;
@@ -130,6 +131,7 @@ final class ProbeMovementService
             $alreadyVisited = $this->visitedSectors->getVisitedSectorByPlayerId($probe->playerId, $movement->target) !== null;
             $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
             $this->createIntelligentLifeAlerts($probe, $movement);
+            $this->createDormantConstructAlerts($probe, $movement);
             if (!$alreadyVisited) {
                 $this->startIntelligentLifeScenarios($probe, $movement);
             }
@@ -403,6 +405,26 @@ final class ProbeMovementService
         }
     }
 
+    private function createDormantConstructAlerts(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->sectors === null || $this->damageWarnings === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($movement->target);
+        foreach ($this->dormantConstructs($sector->getObjects()) as $construct) {
+            $this->damageWarnings->createSectorObjectDetectedAlert(
+                $probe->id,
+                $movement->id,
+                $movement->target,
+                $construct->getId(),
+                $construct->getType()->value,
+                $construct->getName() ?? 'Dormant construct',
+                'A dormant construct has been detected in this sector. Its origin and purpose are unknown; dispatching a Manny to inspect it is recommended.',
+            );
+        }
+    }
+
     /**
      * @param array<UniverseObject> $objects
      * @return array<Planet>
@@ -427,6 +449,22 @@ final class ProbeMovementService
         }
 
         return $planets;
+    }
+
+    /**
+     * @param array<UniverseObject> $objects
+     * @return array<DormantConstruct>
+     */
+    private function dormantConstructs(array $objects): array
+    {
+        $constructs = [];
+        foreach ($objects as $object) {
+            if ($object instanceof DormantConstruct) {
+                $constructs[] = $object;
+            }
+        }
+
+        return $constructs;
     }
 
     private function directionBetween(SectorCoordinates $origin, SectorCoordinates $target): ProbeDirection

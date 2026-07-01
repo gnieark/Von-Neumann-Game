@@ -110,6 +110,16 @@ final class ProbeDamageWarningRepository
         string $objectLabel,
         string $message,
     ): ProbeDamageWarning {
+        $existing = $this->findByProbeMovementTypeAndObject(
+            $probeId,
+            $movementId,
+            ProbeDamageWarning::TYPE_SECTOR_OBJECT_DETECTED,
+            $objectId,
+        );
+        if ($existing !== null) {
+            return $existing;
+        }
+
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_damage_warnings

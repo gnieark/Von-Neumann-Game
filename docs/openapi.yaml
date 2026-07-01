@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '65'
+  version: '66'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 65
+                apiVersion: 66
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1101,16 +1101,16 @@ paths:
                   - id: 9
                     type: sector_object_detected
                     status: unread
-                    message: "Un nouvel objet vient d'être détecté dans le secteur : astéroïde contenant du deutérium. Il n'avait pas été détecté lors de votre arrivée dans ce secteur."
+                    message: 'A dormant construct has been detected in this sector. Its origin and purpose are unknown; dispatching a Manny to inspect it is recommended.'
                     phase: detection
                     scheduledAt: '2026-06-12T15:00:00+00:00'
                     sector:
                       relative: { x: 0, y: 0, z: 0 }
                     object:
-                      id: debug-deuterium-a9f0d8e7c6b5a4d3c2b1a0f9
-                      type: asteroid
-                      label: Astéroïde contenant du Deutérium
-                      resourceTypes: [deuterium]
+                      id: dormant-construct-7b5a4d3c2b1a0f9e8d7c
+                      type: dormant_construct
+                      label: Dormant construct
+                      resourceTypes: []
                     createdAt: '2026-06-12T15:00:00+00:00'
                     updatedAt: '2026-06-12T15:00:00+00:00'
                     readAt: null

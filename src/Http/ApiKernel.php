@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 65;
+    public const API_VERSION = 66;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -2199,11 +2199,12 @@ final class ApiKernel
         }
 
         if ($warning->type === ProbeDamageWarning::TYPE_SECTOR_OBJECT_DETECTED) {
+            $objectType = $warning->containerId !== '' ? $warning->containerId : 'object';
             $alert['object'] = [
                 'id' => $warning->objectId,
-                'type' => $warning->containerId !== '' ? $warning->containerId : 'object',
+                'type' => $objectType,
                 'label' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
-                'resourceTypes' => ['deuterium'],
+                'resourceTypes' => $objectType === 'asteroid' ? ['deuterium'] : [],
             ];
         }
 

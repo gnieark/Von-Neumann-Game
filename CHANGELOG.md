@@ -2,6 +2,16 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-01
+
+### Changed
+
+- API v64 : ajout des objets de secteur `dormant_construct`, exposés uniquement dans les scans détaillés de `/api/probe/sector` et `/api/sector`.
+- API v65 : `POST /api/probe/mannies/{mannyId}/inspect-sector-object` remplace l’action spécialisée `inspect-asteroid`, désormais dépréciée. L’inspection accepte les astéroïdes, les `dormant_construct` et les containers détachés visibles ou déjà découverts; les rapports de contenu de containers créent une alerte `manny_report`.
+- API v66 : l’arrivée d’une sonde dans un secteur contenant un `dormant_construct` crée une alerte persistante `sector_object_detected` en anglais invitant à envoyer une Manny l’inspecter.
+- Génération : les nouveaux secteurs ont désormais 1 chance sur 200 de contenir un `Dormant construct`; `scripts/add-dormant-construct.php` permet d’en ajouter un à un secteur, et `scripts/backfill-dormant-constructs.php` peut compléter les secteurs JSON non visités déjà générés.
+- Interface : `/mannies` propose l’action générique “Inspecter un objet du secteur” et `/alerts` met les rapports de Manny en évidence avec un style dédié.
+
 ## 2026-06-28
 
 ### Changed
@@ -13,10 +23,6 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v61 : les messages publics `ProbeDamageWarning.message` des alertes de rupture de container pendant un mouvement utilisent désormais les coordonnées relatives du joueur et ne divulguent plus les coordonnées absolues du secteur.
 - API v62 : les containers détachés cachés sur astéroïde ne sont plus exposés comme récupérables via `POST /api/probe/mannies/{mannyId}/salvage`; ils restent récupérables via `POST /api/probe/mannies/{mannyId}/recover-storage-container`.
 - API v63 : `docs/openapi.yaml` documente explicitement les champs SCUT relay-only des `SectorObject`, dont `status`, `coverageRadiusSectors`, `network`, `createdByProbeId`, `createdByProbeName` et la convention `id` string vers `relayId` entier.
-- API v64 : ajout des objets de secteur `dormant_construct`, exposés uniquement dans les scans détaillés de `/api/probe/sector` et `/api/sector`.
-- API v65 : `POST /api/probe/mannies/{mannyId}/inspect-sector-object` remplace l’action spécialisée `inspect-asteroid`, désormais dépréciée. L’inspection accepte les astéroïdes, les `dormant_construct` et les containers détachés visibles ou déjà découverts; les rapports de contenu de containers créent une alerte `manny_report`.
-- Génération : les nouveaux secteurs ont désormais 1 chance sur 200 de contenir un `Dormant construct`; `scripts/add-dormant-construct.php` permet d’en ajouter un à un secteur, et `scripts/backfill-dormant-constructs.php` peut compléter les secteurs JSON non visités déjà générés.
-- Interface : `/mannies` propose l’action générique “Inspecter un objet du secteur” et `/alerts` met les rapports de Manny en évidence avec un style dédié.
 - Interface : `/mannies` affiche les tâches distantes joignables via SCUT avec la progression habituelle et une mention courte de liaison SCUT, tout en conservant “Trop éloignée” hors portée.
 - Interface : la mention de tâche distante via SCUT est maintenant visible directement dans le bouton d’accordéon Manny, et l’action de rappel distante est libellée comme un abandon de tâche.
 - Interface : une Manny oubliée mais encore dans un secteur couvert par le même réseau SCUT s’affiche maintenant comme inactive avec la mention “Secteur distant via SCUT”, au lieu de “Trop éloignée”.
