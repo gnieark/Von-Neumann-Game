@@ -563,11 +563,17 @@ final class MannyService
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
         $this->ensureMannyIdle($manny);
         $this->refreshOtherMannyStates($probe, $manny);
+        $remoteViaScut = !$manny->isInSameSectorAs($probe);
+        if ($remoteViaScut && !$this->canOrderRemoteMannyViaScut($probe, $manny)) {
+            $this->ensureMannyInRange($manny, $probe);
+        } elseif (!$remoteViaScut) {
+            $this->ensureMannyInRange($manny, $probe);
+        }
 
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $taskSector = $manny->sector ?? $probe->currentSector;
+        $sector = $this->sectors->getOrCreateSector($taskSector);
         $target = $this->findInspectableSectorObject($sector, $objectId, $probe->playerId);
         if ($target === null) {
             throw new MannyActionException(422, 'invalid_sector_object_target', 'This object cannot be inspected by a Manny.');
@@ -579,7 +585,7 @@ final class MannyService
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $durationSeconds = $this->miningTravelSeconds() * 2;
         $manny->locationType = Manny::LOCATION_SECTOR;
-        $manny->sector = $probe->currentSector;
+        $manny->sector = $taskSector;
         $manny->currentTask = Manny::TASK_INSPECTING_SECTOR_OBJECT;
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
@@ -964,6 +970,14 @@ final class MannyService
             && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
     }
 
+    private function canRefreshRemoteInspectViaScut(NeumannProbe $probe, Manny $manny): bool
+    {
+        return $manny->currentTask === Manny::TASK_INSPECTING_SECTOR_OBJECT
+            && $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
+    }
+
     private function abandonRemoteMannyTask(Manny $manny): Manny
     {
         $lastTask = $manny->currentTask;
@@ -1091,7 +1105,11 @@ final class MannyService
         if ($manny->currentTask === null) {
             return $manny;
         }
-        if (!$manny->isInSameSectorAs($probe) && !$this->canRefreshRemoteMiningViaScut($probe, $manny)) {
+        if (
+            !$manny->isInSameSectorAs($probe)
+            && !$this->canRefreshRemoteMiningViaScut($probe, $manny)
+            && !$this->canRefreshRemoteInspectViaScut($probe, $manny)
+        ) {
             return $manny;
         }
 
@@ -2397,6 +2415,15 @@ final class MannyService
                 (string) ($target->getName() ?? $target->getId()),
                 $report['message'],
             );
+        }
+
+        if (!$manny->isInSameSectorAs($probe)) {
+            $this->clearTask($manny, $result);
+            $manny->locationType = Manny::LOCATION_SECTOR;
+            $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
         }
 
         if (!$this->storage->placeMannyOnProbe($probe, $manny)) {

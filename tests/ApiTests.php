@@ -739,7 +739,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(67, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(68, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2522,6 +2522,33 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(0.232, $remoteScutMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'remote same-SCUT mining deposits resources into the detached sector container');
         $test->assertEquals(null, $remoteScutMineCompletedManny['currentTask'] ?? null, 'completed remote same-SCUT mining leaves the Manny inactive');
         $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutMinedSector->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId))?->toArray()['state'] ?? null, 'completed remote same-SCUT mining registers the Manny as forgotten in its sector');
+
+        $remoteScutInspect = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
+            'objectId' => 'cache-rock',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $remoteScutInspect->status, 'remote same-SCUT forgotten Manny can inspect an object in its sector');
+        $test->assertEquals('inspecting_sector_object', $remoteScutInspect->body['manny']['currentTask'] ?? null, 'remote same-SCUT inspection starts the generic inspecting task');
+        $test->assertEquals('scut_network', $remoteScutInspect->body['manny']['taskVisibility'] ?? null, 'remote same-SCUT inspection remains visible through SCUT telemetry');
+        $test->assertEquals('cache-rock', $remoteScutInspect->body['manny']['task']['objectId'] ?? null, 'remote same-SCUT inspection targets an object in the Manny sector');
+        $test->assertEquals($hiddenDetachedObjectId, $remoteScutInspect->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'remote same-SCUT inspection detects hidden detached containers in the Manny sector');
+        $remoteScutInspectRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+        $remoteScutInspectRow->execute(['uid' => $detachSecondMannyId]);
+        $remoteScutInspectMannyDbId = (int) $remoteScutInspectRow->fetchColumn();
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $remoteScutInspectMannyDbId,
+            'started' => gmdate('c', time() - 2000),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $remoteScutInspectCompletedList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $remoteScutInspectCompletedManny = array_values(array_filter(
+            $remoteScutInspectCompletedList->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $remoteScutInspectedSector = $sectorRepository->load($detachProbe->currentSector);
+        $test->assertEquals(null, $remoteScutInspectCompletedManny['currentTask'] ?? null, 'completed remote same-SCUT inspection leaves the Manny inactive');
+        $test->assertEquals('success', $remoteScutInspectCompletedManny['task']['result'] ?? null, 'completed remote same-SCUT inspection records its result');
+        $test->assertEquals('scut_network', $remoteScutInspectCompletedManny['taskVisibility'] ?? null, 'completed remote same-SCUT inspection remains visible through SCUT telemetry');
+        $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutInspectedSector->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId))?->toArray()['state'] ?? null, 'completed remote same-SCUT inspection keeps the Manny forgotten in its sector');
         $moveDetachProbe($detachProbe->currentSector);
 
         $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
