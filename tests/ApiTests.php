@@ -55,6 +55,7 @@ use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\OrbitDescriptor;
 use VonNeumannGame\Sector\OrbitingBody;
 use VonNeumannGame\Sector\Planet;
@@ -341,6 +342,8 @@ $test->assert(str_contains($openApi, 'enum: [probe, planet, unknown]'), 'OpenAPI
 $test->assert(str_contains($openApi, 'For scut_relay objects this is the relay integer id serialized as a string'), 'OpenAPI documents SCUT relay SectorObject id conventions');
 $test->assert(str_contains($openApi, 'description: Present only for SCUT relay objects.'), 'OpenAPI documents SCUT relay-only SectorObject fields');
 $test->assert(str_contains($openApi, '$ref: \'#/components/schemas/ScutNetworkReference\''), 'OpenAPI documents SCUT relay SectorObject network references');
+$test->assert(str_contains($openApi, 'dormant_construct'), 'OpenAPI documents dormant construct sector objects');
+$test->assert(str_contains($openApi, 'knownFunction'), 'OpenAPI documents dormant construct function ambiguity');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -716,7 +719,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(63, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(64, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -878,6 +881,61 @@ if ($createdProbe !== null) {
     exec($sectorJsonPathCommand, $sectorJsonPathOutput, $sectorJsonPathStatus);
     $test->assertEquals(0, $sectorJsonPathStatus, 'sector-json CLI path-only exits successfully');
     $test->assertEquals($cliSectorRepository->getPath($cliSectorCoordinates), $sectorJsonPathOutput[0] ?? null, 'sector-json CLI path-only prints the resolved sector path');
+
+    $addConstructCoordinates = new SectorCoordinates(6, 0, 0);
+    $addConstructCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --sector=6:0:0';
+    exec($addConstructCommand . ' 2>&1', $addConstructOutput, $addConstructStatus);
+    $addConstructText = implode("\n", $addConstructOutput);
+    $test->assertEquals(0, $addConstructStatus, 'add-dormant-construct CLI exits successfully');
+    $test->assert(str_contains($addConstructText, 'Dormant construct in sector 6:0:0'), 'add-dormant-construct CLI reports the target sector');
+    $test->assert($cliSectorRepository->load($addConstructCoordinates)->findObjectById(DormantConstruct::objectIdForSector($addConstructCoordinates, 'local-development-world')) instanceof DormantConstruct, 'add-dormant-construct CLI persists a dormant construct');
+
+    $backfillUnvisitedCoordinates = new SectorCoordinates(8, 0, 0);
+    $backfillVisitedCoordinates = new SectorCoordinates(10, 0, 0);
+    $cliSectorRepository->save(new SectorContent($backfillUnvisitedCoordinates, source: 'cli-backfill-test'));
+    $cliSectorRepository->save(new SectorContent($backfillVisitedCoordinates, source: 'cli-backfill-test'));
+    $backfillDbPath = $tmp . DIRECTORY_SEPARATOR . 'backfill-dormant-constructs.sqlite';
+    $backfillDbConfig = $tmp . DIRECTORY_SEPARATOR . 'backfill-dormant-constructs-database.json';
+    file_put_contents($backfillDbConfig, json_encode([
+        'driver' => 'sqlite',
+        'path' => $backfillDbPath,
+    ], JSON_THROW_ON_ERROR));
+    $backfillDbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $backfillDbPath), $root);
+    $backfillPdo = $backfillDbFactory->create();
+    $backfillDbFactory->initializeSchema($backfillPdo);
+    $backfillPdo->prepare(
+        'INSERT INTO players (username, display_name, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
+         VALUES (:username, :display_name, 0, 0, 0, :created_at, :updated_at)'
+    )->execute([
+        'username' => 'backfill-visitor',
+        'display_name' => 'Backfill Visitor',
+        'created_at' => gmdate('c'),
+        'updated_at' => gmdate('c'),
+    ]);
+    $backfillPdo->prepare(
+        'INSERT INTO visited_sectors (player_id, sector_x, sector_y, sector_z, first_visited_at, last_visited_at, visit_count)
+         VALUES (1, :x, :y, :z, :first_visited_at, :last_visited_at, 1)'
+    )->execute([
+        'x' => $backfillVisitedCoordinates->getX(),
+        'y' => $backfillVisitedCoordinates->getY(),
+        'z' => $backfillVisitedCoordinates->getZ(),
+        'first_visited_at' => gmdate('c'),
+        'last_visited_at' => gmdate('c'),
+    ]);
+    $backfillCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/backfill-dormant-constructs.php')
+        . ' --database-config=' . escapeshellarg($backfillDbConfig)
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --chance-denominator=1';
+    exec($backfillCommand . ' 2>&1', $backfillOutput, $backfillStatus);
+    $backfillText = implode("\n", $backfillOutput);
+    $test->assertEquals(0, $backfillStatus, 'backfill-dormant-constructs CLI exits successfully');
+    $test->assert(str_contains($backfillText, 'Dormant construct backfill complete.'), 'backfill-dormant-constructs CLI reports completion');
+    $test->assert($cliSectorRepository->load($backfillUnvisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillUnvisitedCoordinates, 'local-development-world')) instanceof DormantConstruct, 'backfill-dormant-constructs adds dormant constructs to unvisited generated sectors on positive roll');
+    $test->assert(!($cliSectorRepository->load($backfillVisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillVisitedCoordinates, 'local-development-world')) instanceof DormantConstruct), 'backfill-dormant-constructs leaves visited generated sectors untouched');
 
     $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
@@ -3095,6 +3153,18 @@ $test->assertEquals(422, $jettisonDeuteriumTank->status, 'external deuterium tan
 $test->assertEquals('item_not_jettisonable', $jettisonDeuteriumTank->body['error']['code'] ?? null, 'deuterium tank jettison returns an explicit error');
 $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'failed deuterium tank jettison keeps fuel stock unchanged');
 if ($createdProbe !== null) {
+    $sectorWithConstruct = $sectorRepository->load($createdProbe->currentSector);
+    $sectorWithConstruct->addObject(new DormantConstruct('api-current-dormant-construct'));
+    $sectorRepository->save($sectorWithConstruct);
+    $currentConstructScan = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $currentConstructObjects = array_values(array_filter(
+        $currentConstructScan->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct',
+    ));
+    $test->assertEquals(1, count($currentConstructObjects), 'GET /api/probe/sector exposes dormant constructs in detailed scans');
+    $test->assertEquals('Dormant construct', $currentConstructObjects[0]['name'] ?? null, 'detailed dormant construct exposes its public name');
+    $test->assertEquals('unknown', $currentConstructObjects[0]['knownFunction'] ?? null, 'detailed dormant construct keeps its function unknown');
+
     $initialNeighbor = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
     $initialNeighborRelative = $initialNeighbor->subtract($player->homeSector);
     $initialNeighborScan = $kernel->handle('GET', '/api/sector?x=' . $initialNeighborRelative['x'] . '&y=' . $initialNeighborRelative['y'] . '&z=' . $initialNeighborRelative['z'], $headers);
@@ -4095,10 +4165,18 @@ if ($currentProbe !== null) {
     $neighbors = $grid->getNeighbors($currentProbe->currentSector);
     $visitedNeighbor = $neighbors[0];
     $visitedSectors->markVisited($player, $visitedNeighbor);
+    $sectorRepository->save(new SectorContent($visitedNeighbor, [
+        new DormantConstruct('api-visited-dormant-construct'),
+    ]));
     $visitedRelative = $visitedNeighbor->subtract($player->homeSector);
     $visitedResponse = $kernel->handle('GET', '/api/sector?x=' . $visitedRelative['x'] . '&y=' . $visitedRelative['y'] . '&z=' . $visitedRelative['z'], $headers);
     $test->assertEquals(200, $visitedResponse->status, 'visited sector can be consulted through GET /api/sector');
     $test->assertEquals('detailed', $visitedResponse->body['sector']['knowledgeLevel'] ?? null, 'visited sector returns detailed information');
+    $visitedConstructObjects = array_values(array_filter(
+        $visitedResponse->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct',
+    ));
+    $test->assertEquals(1, count($visitedConstructObjects), 'GET /api/sector exposes dormant constructs for detailed visited-sector scans');
 
     $currentProbe->enteredCurrentSectorAt = gmdate('c', time() - 8 * 3600);
     $probes->save($currentProbe);

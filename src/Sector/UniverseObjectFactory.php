@@ -21,6 +21,7 @@ final class UniverseObjectFactory
             UniverseObjectType::DriftingItem => SectorDriftingItem::fromArray($data),
             UniverseObjectType::DetachedContainer => SectorDetachedContainer::fromArray($data),
             UniverseObjectType::DeuteriumRefuelStation => DeuteriumRefuelStation::fromArray($data),
+            UniverseObjectType::DormantConstruct => DormantConstruct::fromArray($data),
         };
     }
 }

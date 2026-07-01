@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '63'
+  version: '64'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 63
+                apiVersion: 64
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -4544,7 +4544,7 @@ components:
           description: Opaque object id. Clients must not parse coordinates from it. For scut_relay objects this is the relay integer id serialized as a string; pass it as an integer relayId to turn-on-relay.
         type:
           type: string
-          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container, deuterium_refuel_station, scut_relay]
+          enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container, deuterium_refuel_station, dormant_construct, scut_relay]
         name:
           type: string
           nullable: true
@@ -4662,6 +4662,18 @@ components:
           type: string
           nullable: true
           description: Present only for deuterium refuel stations; public name of the planet that placed the station.
+        apparentOrigin:
+          type: string
+          enum: [unknown_non_natural]
+          description: Present only for dormant_construct objects.
+        activityStatus:
+          type: string
+          enum: [dormant]
+          description: Present only for dormant_construct objects.
+        knownFunction:
+          type: string
+          enum: [unknown]
+          description: Present only for dormant_construct objects; detailed scans cannot determine whether the structure is a vessel, factory, or another kind of utility.
         status:
           type: string
           enum: [off, on]
