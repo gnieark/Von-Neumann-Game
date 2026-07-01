@@ -164,7 +164,8 @@
             "installing_waypoint_bookmark": tr("installingWaypointBookmark", "Installing waypoint bookmark"),
             "detaching_storage_container": tr("detachingStorageContainer", "Detaching storage container"),
             "dropping_storage_container": tr("droppingStorageContainer", "Dropping storage container"),
-            "inspecting_asteroid": tr("inspectingAsteroid", "Inspecting asteroid"),
+            "inspecting_sector_object": tr("inspectingSectorObject", "Inspecting sector object"),
+            "inspecting_asteroid": tr("inspectingSectorObject", "Inspecting sector object"),
             "refilling_deuterium_tank": tr("refillingDeuteriumTank", "Refilling deuterium tank"),
             "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
@@ -190,6 +191,7 @@
             "dust_cloud": tr("dustCloudObject", "Dust cloud"),
             "drifting_item": tr("driftingItemObject", "Drifting item"),
             "detached_container": tr("detachedContainerObject", "Detached container"),
+            "dormant_construct": tr("dormantConstructObject", "Dormant construct"),
             "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
             "scut_relay": tr("scutRelayObject", "SCUT relay"),
             "waypoint_bookmark": tr("waypointBookmark", "Waypoint bookmark"),
@@ -496,6 +498,20 @@
         return [objectTypeLabel("asteroid"), target && (target.name || target.id)].filter(Boolean).join(" ");
     }
 
+    function sectorObjectInspectionTargetLabel(target) {
+        if (!target) {
+            return tr("sectorObject", "Sector object");
+        }
+        if (target.type === "asteroid") {
+            return asteroidTargetLabel(target);
+        }
+        if (target.type === "detached_container") {
+            return detachedContainerRecoveryTargetLabel(target);
+        }
+
+        return [objectTypeLabel(target.type || "object"), target.name || target.id].filter(Boolean).join(" ");
+    }
+
     function planetTargetLabel(target) {
         return [objectTypeLabel("planet"), target && (target.name || target.id)].filter(Boolean).join(" ");
     }
@@ -554,6 +570,26 @@
 
     function recoverableDetachedContainerTargets() {
         return detachedContainerTargetsFromObjects(state.currentSectorObjects);
+    }
+
+    function sectorObjectInspectionTargets() {
+        const targets = [];
+        const seen = new Set();
+        const add = (target) => {
+            if (!target || !target.id || seen.has(target.id)) {
+                return;
+            }
+            seen.add(target.id);
+            targets.push(target);
+        };
+
+        asteroidTargets().forEach(add);
+        detectedDetachedContainerTargets().forEach((target) => add(Object.assign({"type": "detached_container"}, target)));
+        (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
+            .filter((object) => object && object.type === "dormant_construct" && object.id)
+            .forEach(add);
+
+        return targets;
     }
 
     function detachedContainerTargetsFromObjects(objects) {
@@ -1347,10 +1383,10 @@
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
         }
-        if (manny.currentTask === "inspecting_asteroid") {
+        if (manny.currentTask === "inspecting_sector_object" || manny.currentTask === "inspecting_asteroid") {
             return "<section class=\"manny-task-panel\">"
-                + "<h4>" + escaped(tr("asteroidInspectionInProgress", "Asteroid inspection in progress")) + "</h4>"
-                + "<p>" + escaped(window.VNG.formatText(tr("asteroidInspectionTaskDetail", "{target} is being inspected."), {
+                + "<h4>" + escaped(tr("sectorObjectInspectionInProgress", "Sector object inspection in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("sectorObjectInspectionTaskDetail", "{target} is being inspected."), {
                     "target": bookmarkTargetLabel(payload.target || {}),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
@@ -1567,7 +1603,7 @@
             + "</form>";
     }
 
-    function inspectAsteroidTargetOptions(selected) {
+    function asteroidTargetOptions(selected) {
         const targets = asteroidTargets();
         if (targets.length === 0) {
             return "<option value=\"\">-</option>";
@@ -1580,14 +1616,27 @@
         )).join("");
     }
 
-    function renderInspectAsteroidForm() {
-        const targets = asteroidTargets();
+    function sectorObjectInspectionTargetOptions(selected) {
+        const targets = sectorObjectInspectionTargets();
+        if (targets.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return targets.map((target) => (
+            "<option value=\"" + escaped(target.id) + "\"" + (target.id === selected ? " selected" : "") + ">"
+            + escaped(sectorObjectInspectionTargetLabel(target))
+            + "</option>"
+        )).join("");
+    }
+
+    function renderInspectSectorObjectForm() {
+        const targets = sectorObjectInspectionTargets();
         const hasTarget = targets.length > 0;
 
-        return "<form class=\"manny-inspect-asteroid-form manny-form\">"
-            + "<label>" + escaped(tr("asteroidObject", "Asteroid")) + "<select class=\"manny-inspect-asteroid-target\" name=\"objectId\">" + inspectAsteroidTargetOptions("") + "</select></label>"
-            + "<button class=\"manny-inspect-asteroid-button\" type=\"submit\"" + (hasTarget ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("inspectAsteroid", "Inspect")) + "</button>"
-            + "<p class=\"manny-inspect-asteroid-hint\">" + escaped(hasTarget ? tr("inspectAsteroidHint", "Inspection can reveal a hidden detached container without mining.") : tr("noAsteroidTarget", "No asteroid available in the current sector.")) + "</p>"
+        return "<form class=\"manny-inspect-sector-object-form manny-form\">"
+            + "<label>" + escaped(tr("sectorObject", "Sector object")) + "<select class=\"manny-inspect-sector-object-target\" name=\"objectId\">" + sectorObjectInspectionTargetOptions("") + "</select></label>"
+            + "<button class=\"manny-inspect-sector-object-button\" type=\"submit\"" + (hasTarget ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("inspectSectorObject", "Inspect")) + "</button>"
+            + "<p class=\"manny-inspect-sector-object-hint\">" + escaped(hasTarget ? tr("inspectSectorObjectHint", "Inspection can reveal hidden containers or report detached-container contents.") : tr("noSectorObjectInspectionTarget", "No inspectable object available in the current sector.")) + "</p>"
             + "</form>";
     }
 
@@ -1615,7 +1664,7 @@
             + "<option value=\"drifting\">" + escaped(tr("detachModeDrifting", "Leave drifting")) + "</option>"
             + "<option value=\"hidden_on_asteroid\">" + escaped(tr("detachModeHiddenOnAsteroid", "Hide on an asteroid")) + "</option>"
             + "</select></label>"
-            + "<label class=\"manny-detach-asteroid-label\" hidden>" + escaped(tr("asteroidObject", "Asteroid")) + "<select class=\"manny-detach-asteroid-target\" name=\"objectId\">" + inspectAsteroidTargetOptions("") + "</select></label>"
+            + "<label class=\"manny-detach-asteroid-label\" hidden>" + escaped(tr("asteroidObject", "Asteroid")) + "<select class=\"manny-detach-asteroid-target\" name=\"objectId\">" + asteroidTargetOptions("") + "</select></label>"
             + "<button class=\"manny-detach-storage-button\" type=\"submit\"" + (hasContainer ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("detachStorageContainerShort", "Detach")) + "</button>"
             + "<p class=\"manny-detach-storage-hint\">" + escaped(hasContainer ? tr("detachStorageHint", "The container and its content leave the probe when the order is accepted.") : tr("noDetachableContainer", "No additional container can be detached."))
             + (asteroids.length === 0 ? " " + escaped(tr("noAsteroidTarget", "No asteroid available in the current sector.")) : "") + "</p>"
@@ -1777,7 +1826,7 @@
             {"id": "repair", "title": tr("repairActionTitle", "Repair"), "render": renderRepairForm},
             {"id": "mine", "title": tr("miningActionTitle", "Mine"), "render": renderMineForm},
             {"id": "salvage", "title": tr("salvageActionTitle", "Recover a drifting object"), "render": renderSalvageForm},
-            {"id": "inspect-asteroid", "title": tr("inspectAsteroidActionTitle", "Inspect an asteroid"), "render": renderInspectAsteroidForm},
+            {"id": "inspect-sector-object", "title": tr("inspectSectorObjectActionTitle", "Inspect a sector object"), "render": renderInspectSectorObjectForm},
             {"id": "detach-storage", "title": tr("detachStorageActionTitle", "Detach a container"), "render": renderDetachStorageContainerForm},
             {"id": "drop-storage", "title": tr("dropStorageActionTitle", "Drop a container on a planet"), "render": renderDropStorageContainerForm},
             {"id": "recover-storage", "title": tr("recoverStorageContainerActionTitle", "Recover a detached container"), "render": renderRecoverStorageContainerForm},
@@ -2116,7 +2165,7 @@
             updateMannyCraftForms();
             updatePrinterCraftForms();
             updateMannyBookmarkForms();
-            updateMannyInspectAsteroidForms();
+            updateMannyInspectSectorObjectForms();
             updateMannyDetachStorageContainerForms();
             updateMannyDropStorageContainerForms();
             updateMannyRecoverStorageContainerForms();
@@ -2223,15 +2272,15 @@
         updateMannyMineFormState(form);
     }
 
-    function updateMannyInspectAsteroidForms() {
-        document.querySelectorAll(".manny-inspect-asteroid-form").forEach((form) => {
-            const targetSelect = form.querySelector(".manny-inspect-asteroid-target");
-            const button = form.querySelector(".manny-inspect-asteroid-button");
-            const hint = form.querySelector(".manny-inspect-asteroid-hint");
+    function updateMannyInspectSectorObjectForms() {
+        document.querySelectorAll(".manny-inspect-sector-object-form").forEach((form) => {
+            const targetSelect = form.querySelector(".manny-inspect-sector-object-target");
+            const button = form.querySelector(".manny-inspect-sector-object-button");
+            const hint = form.querySelector(".manny-inspect-sector-object-hint");
             const selected = targetSelect ? targetSelect.value : "";
-            const targets = asteroidTargets();
+            const targets = sectorObjectInspectionTargets();
             if (targetSelect) {
-                targetSelect.innerHTML = inspectAsteroidTargetOptions(selected);
+                targetSelect.innerHTML = sectorObjectInspectionTargetOptions(selected);
                 if (!targets.some((target) => target.id === targetSelect.value)) {
                     targetSelect.value = targets[0] ? targets[0].id : "";
                 }
@@ -2242,8 +2291,8 @@
             }
             if (hint) {
                 hint.textContent = targets.length > 0
-                    ? tr("inspectAsteroidHint", "Inspection can reveal a hidden detached container without mining.")
-                    : tr("noAsteroidTarget", "No asteroid available in the current sector.");
+                    ? tr("inspectSectorObjectHint", "Inspection can reveal hidden containers or report detached-container contents.")
+                    : tr("noSectorObjectInspectionTarget", "No inspectable object available in the current sector.");
             }
         });
     }
@@ -2269,7 +2318,7 @@
                 }
             }
             if (asteroidSelect) {
-                asteroidSelect.innerHTML = inspectAsteroidTargetOptions(selectedAsteroid);
+                asteroidSelect.innerHTML = asteroidTargetOptions(selectedAsteroid);
                 if (!asteroids.some((target) => target.id === asteroidSelect.value)) {
                     asteroidSelect.value = asteroids[0] ? asteroids[0].id : "";
                 }
@@ -2593,15 +2642,15 @@
                 "body": JSON.stringify({}),
             });
         }
-        if (form.classList.contains("manny-inspect-asteroid-form")) {
-            const targetSelect = form.querySelector(".manny-inspect-asteroid-target");
+        if (form.classList.contains("manny-inspect-sector-object-form")) {
+            const targetSelect = form.querySelector(".manny-inspect-sector-object-target");
             if (!targetSelect || !targetSelect.value) {
-                updateMannyInspectAsteroidForms();
-                setStatus(tr("noAsteroidTarget", "No asteroid available in the current sector."));
+                updateMannyInspectSectorObjectForms();
+                setStatus(tr("noSectorObjectInspectionTarget", "No inspectable object available in the current sector."));
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/inspect-asteroid", {
+            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/inspect-sector-object", {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": formData.get("objectId")}),
             });
@@ -2795,8 +2844,8 @@
             if (event.target.classList.contains("manny-mine-storage-target")) {
                 updateMannyMineFormState(event.target.closest(".manny-mine-form"));
             }
-            if (event.target.classList.contains("manny-inspect-asteroid-target")) {
-                updateMannyInspectAsteroidForms();
+            if (event.target.classList.contains("manny-inspect-sector-object-target")) {
+                updateMannyInspectSectorObjectForms();
             }
             if (event.target.classList.contains("manny-detach-container") || event.target.classList.contains("manny-detach-storage-mode") || event.target.classList.contains("manny-detach-asteroid-target")) {
                 updateMannyDetachStorageContainerForms();

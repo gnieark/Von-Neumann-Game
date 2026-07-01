@@ -55,6 +55,9 @@
         if (alert && alert.type === "sector_object_detected") {
             return "sector-bookmark-alert";
         }
+        if (alert && alert.type === "manny_report") {
+            return "sector-manny-report-alert";
+        }
         if (alert && alert.type === "intelligent_life") {
             return "sector-probe-alert";
         }
@@ -77,13 +80,25 @@
         }));
     }
 
+    function alertPriority(alert) {
+        if (alert && alert.kind === "persistent-alert" && alert.type === "manny_report" && !alert.acknowledged) {
+            return 0;
+        }
+        if (alert && !alert.acknowledged) {
+            return 1;
+        }
+
+        return 2;
+    }
+
     function renderAlerts(sector, persistentAlertList) {
         currentSector = sector || {};
         const sectorAlerts = window.VNG.sectorAlerts(currentSector, i18n).map((alert) => ({
             ...alert,
             "kind": "sector-alert",
         }));
-        const alerts = sectorAlerts.concat(persistentAlerts(persistentAlertList));
+        const alerts = sectorAlerts.concat(persistentAlerts(persistentAlertList))
+            .sort((left, right) => alertPriority(left) - alertPriority(right));
         currentAlerts = alerts;
         const list = document.getElementById("console-alerts-list");
         const empty = document.getElementById("console-alerts-empty");

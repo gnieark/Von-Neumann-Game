@@ -344,6 +344,9 @@ $test->assert(str_contains($openApi, 'description: Present only for SCUT relay o
 $test->assert(str_contains($openApi, '$ref: \'#/components/schemas/ScutNetworkReference\''), 'OpenAPI documents SCUT relay SectorObject network references');
 $test->assert(str_contains($openApi, 'dormant_construct'), 'OpenAPI documents dormant construct sector objects');
 $test->assert(str_contains($openApi, 'knownFunction'), 'OpenAPI documents dormant construct function ambiguity');
+$test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
+$test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
+$test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -356,6 +359,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.ta
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detection.targetObjectId'), 'mannies JS uses explicit hidden-container asteroid targets when provided');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyInCurrentProbeSector'), 'mannies JS ignores hidden-container recovery detections from remote Manny sectors');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'recoverableDetachedContainerTargets'), 'mannies JS limits recovery targets to current-sector detached container objects');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargets'), 'mannies JS builds a generic sector-object inspection target list');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspect-sector-object'), 'mannies JS posts generic sector-object inspections');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-manny-hash'), 'mannies JS exposes the Manny state hash on Manny cards');
@@ -425,7 +430,8 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260629-mannies-recover-sector-objects"), 'asset version is bumped for Manny hidden-container recovery UI');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260701-manny-sector-object-inspection"), 'asset version is bumped for Manny sector-object inspection UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -712,14 +718,14 @@ $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
 $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(64, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(65, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1045,6 +1051,8 @@ if ($createdProbe !== null) {
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, '/api/probe/alerts'), 'alerts page uses the generic persistent-alert endpoint');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'replace(/\\r?\\n/g, "<br>")'), 'alerts page renders message line breaks');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'type === "manny_report"'), 'alerts page recognizes Manny report alerts');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alertPriority'), 'alerts page prioritizes Manny reports above regular unread alerts');
 
     $lowFuelCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-deuterium-asteroid-alerts-for-low-fuel.php')
@@ -2177,6 +2185,31 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(0.21, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a drifting detached container updates its stored resources');
         $test->assertEquals(0.0, $probes->findByPlayerId($detachPlayer->id)?->metalsStock, 'mining into a detached container does not add mined resources to the probe inventory');
 
+        $inspectDriftingContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
+            'objectId' => $detachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $inspectDriftingContainer->status, 'Manny can inspect a drifting detached container');
+        $test->assertEquals('inspecting_sector_object', $inspectDriftingContainer->body['manny']['currentTask'] ?? null, 'sector-object inspection uses the generic inspecting task type');
+        $test->assertEquals($detachedObjectId, $inspectDriftingContainer->body['manny']['task']['objectId'] ?? null, 'container inspection stores the inspected object id');
+        $detachThirdRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+        $detachThirdRow->execute(['uid' => $detachThirdMannyId]);
+        $detachThirdMannyDbId = (int) $detachThirdRow->fetchColumn();
+        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $detachThirdMannyDbId,
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $containerReportAlerts = $kernel->handle('GET', '/api/probe/alerts', $detachHeaders);
+        $driftingReports = array_values(array_filter(
+            $containerReportAlerts->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+                && ($alert['report']['objectId'] ?? null) === $detachedObjectId
+        ));
+        $test->assertEquals(1, count($driftingReports), 'completed detached-container inspection creates one Manny report alert');
+        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), 'Rapport de Manny'), 'Manny report alert message is labeled as a Manny report');
+        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), ProbeItem::STEEL_BAR_NAME), 'Manny report alert message includes stored items');
+        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), '0.21'), 'Manny report alert message includes stored resources');
+
         $recoverDrifting = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/salvage', $detachHeaders, json_encode([
             'objectId' => $detachedObjectId,
         ], JSON_THROW_ON_ERROR));
@@ -2294,6 +2327,8 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $scoutInspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scoutMannyId) . '/inspect-asteroid', $scoutHeaders, json_encode([
                 'objectId' => 'cache-rock',
             ], JSON_THROW_ON_ERROR));
+            $test->assertEquals(202, $scoutInspectHidden->status, 'deprecated asteroid inspection endpoint remains accepted');
+            $test->assertEquals('inspecting_sector_object', $scoutInspectHidden->body['manny']['currentTask'] ?? null, 'deprecated asteroid inspection endpoint starts the generic inspecting task');
             $test->assertEquals($hiddenDetachedObjectId, $scoutInspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection by another player detects the hidden container');
             $scoutDiscoveredContainer = $sectorRepository->load($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
             $test->assert($scoutDiscoveredContainer !== null && in_array($scoutPlayer->id, $scoutDiscoveredContainer->getDiscoveredByPlayerIds(), true), 'asteroid inspection records the discovering player');
@@ -2475,11 +2510,11 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutMinedSector->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId))?->toArray()['state'] ?? null, 'completed remote same-SCUT mining registers the Manny as forgotten in its sector');
         $moveDetachProbe($detachProbe->currentSector);
 
-        $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
+        $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
         ], JSON_THROW_ON_ERROR));
         $test->assertEquals(202, $inspectHidden->status, 'Manny can inspect an asteroid without mining');
-        $test->assertEquals('inspecting_asteroid', $inspectHidden->body['manny']['currentTask'] ?? null, 'asteroid inspection uses the inspecting task type');
+        $test->assertEquals('inspecting_sector_object', $inspectHidden->body['manny']['currentTask'] ?? null, 'asteroid inspection uses the generic inspecting task type');
         $test->assertEquals($hiddenDetachedObjectId, $inspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection reports hidden detached containers');
 
         $recoverHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachFourthMannyId) . '/recover-storage-container', $detachHeaders, json_encode([
@@ -3431,6 +3466,7 @@ if ($foreignMannyId !== '') {
         ['POST', $foreignMannyPath . '/detach-storage-container', ['containerId' => 'probe-core', 'mode' => 'drifting'], 'POST /api/probe/mannies/{id}/detach-storage-container'],
         ['POST', $foreignMannyPath . '/drop-storage-container', ['containerId' => 'probe-core', 'planetId' => 'current-habitable-planet'], 'POST /api/probe/mannies/{id}/drop-storage-container'],
         ['POST', $foreignMannyPath . '/drop-manny-cargo', [], 'POST /api/probe/mannies/{id}/drop-manny-cargo'],
+        ['POST', $foreignMannyPath . '/inspect-sector-object', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-sector-object'],
         ['POST', $foreignMannyPath . '/inspect-asteroid', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-asteroid'],
         ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
         ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],

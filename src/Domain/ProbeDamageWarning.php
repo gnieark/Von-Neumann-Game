@@ -10,6 +10,7 @@ final class ProbeDamageWarning
     public const TYPE_INTELLIGENT_LIFE = 'intelligent_life';
     public const TYPE_SECTOR_OBJECT_DETECTED = 'sector_object_detected';
     public const TYPE_ANOMALY_DETECTED = 'anomaly_detected';
+    public const TYPE_MANNY_REPORT = 'manny_report';
     public const STATUS_UNREAD = 'unread';
     public const STATUS_READ = 'read';
 

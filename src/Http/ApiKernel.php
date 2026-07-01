@@ -47,7 +47,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 64;
+    public const API_VERSION = 65;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -96,7 +96,7 @@ final class ApiKernel
                         : $this->probeStorageContainerResponse($player, rawurldecode($matches[1])),
                 );
             }
-            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|recall)$#', $routePath, $matches) === 1) {
+            if (preg_match('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|recall)$#', $routePath, $matches) === 1) {
                 return $this->protectedRoute($method, ['POST'], $headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, rawurldecode($matches[1]), $matches[2], $body));
             }
             if (preg_match('#^/api/probe/scut-network/(\d+)$#', $routePath, $matches) === 1) {
@@ -1499,12 +1499,12 @@ final class ApiKernel
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }
 
-        if ($action === 'inspect-asteroid') {
+        if ($action === 'inspect-sector-object' || $action === 'inspect-asteroid') {
             if (!isset($data['objectId']) || !is_string($data['objectId'])) {
                 return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
             }
 
-            $manny = $this->mannies->startInspectAsteroid($probe, $uid, $data['objectId']);
+            $manny = $this->mannies->startInspectSectorObject($probe, $uid, $data['objectId']);
 
             return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
         }
@@ -2204,6 +2204,15 @@ final class ApiKernel
                 'type' => $warning->containerId !== '' ? $warning->containerId : 'object',
                 'label' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
                 'resourceTypes' => ['deuterium'],
+            ];
+        }
+
+        if ($warning->type === ProbeDamageWarning::TYPE_MANNY_REPORT) {
+            $alert['report'] = [
+                'title' => 'Rapport de Manny',
+                'objectId' => $warning->objectId,
+                'objectType' => $warning->containerId !== '' ? $warning->containerId : 'object',
+                'objectLabel' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
             ];
         }
 

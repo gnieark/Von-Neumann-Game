@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '64'
+  version: '65'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 64
+                apiVersion: 65
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1986,14 +1986,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /api/probe/mannies/{mannyId}/inspect-asteroid:
+  /api/probe/mannies/{mannyId}/inspect-sector-object:
     post:
-      summary: Inspect an asteroid with a Manny
+      summary: Inspect a sector object with a Manny
       description: >
-        Sends a Manny to an asteroid and back without mining. If the asteroid
-        has a hidden detached storage container, the Manny task includes
-        artificialObjectDetected with the detached object id, but not the
-        container contents.
+        Sends a Manny to an inspectable current-sector object and back without
+        mining. Asteroids keep the existing hidden-detached-container detection
+        behavior. Visible detached containers and discovered hidden detached
+        containers generate a Manny report alert when the task completes.
+        Dormant constructs can be targeted but currently have no additional
+        inspection effect.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -2001,7 +2003,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MannyInspectAsteroidRequest'
+              $ref: '#/components/schemas/MannyInspectSectorObjectRequest'
             example:
               objectId: asteroid-abc123
       responses:
@@ -2026,7 +2028,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Target is not an asteroid
+          description: Target is not an inspectable sector object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/inspect-asteroid:
+    post:
+      summary: Inspect a sector object with a Manny (deprecated alias)
+      deprecated: true
+      description: >
+        Deprecated alias of `/api/probe/mannies/{mannyId}/inspect-sector-object`.
+        New clients should call the generic endpoint.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyInspectSectorObjectRequest'
+            example:
+              objectId: asteroid-abc123
+      responses:
+        '202':
+          description: Inspection task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Target is not an inspectable sector object
           content:
             application/json:
               schema:
@@ -2038,7 +2084,7 @@ paths:
         Starts a salvage-duration recovery task for a detached storage
         container. Drifting containers can also be recovered through the
         salvage endpoint. Hidden containers are recovered by the object id
-        returned from mining or inspect-asteroid detection.
+        returned from mining or inspect-sector-object detection.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -2596,7 +2642,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -3663,7 +3709,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected, anomaly_detected]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected]
         status:
           type: string
           enum: [unread, read]
@@ -3672,7 +3718,7 @@ components:
           description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
         phase:
           type: string
-          enum: [acceleration_end, deceleration_start, arrival, detection]
+          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report]
         scheduledAt:
           type: string
           format: date-time
@@ -3738,6 +3784,23 @@ components:
               items:
                 type: string
                 enum: [deuterium, metals, ice, carbon_compounds]
+        report:
+          type: object
+          description: Present for `manny_report` alerts.
+          required: [title, objectId, objectType, objectLabel]
+          properties:
+            title:
+              type: string
+              example: Rapport de Manny
+            objectId:
+              type: string
+              nullable: true
+            objectType:
+              type: string
+              example: detached_storage_container
+            objectLabel:
+              type: string
+              nullable: true
         createdAt:
           type: string
           format: date-time
@@ -4142,13 +4205,13 @@ components:
           type: string
           description: Current-sector planet id receiving the dropped container.
           example: planet-abc123
-    MannyInspectAsteroidRequest:
+    MannyInspectSectorObjectRequest:
       type: object
       required: [objectId]
       properties:
         objectId:
           type: string
-          description: Current-sector asteroid id to inspect.
+          description: Current-sector inspectable object id.
     MannyRecoverStorageContainerRequest:
       type: object
       required: [objectId]
@@ -4286,7 +4349,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0
