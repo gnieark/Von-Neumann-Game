@@ -299,6 +299,7 @@ $test->assertEquals(
 $loginTemplate = file_get_contents($root . '/templates/loginview.html');
 $frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
+$probeScript = file_get_contents($root . '/public/assets/probe.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
 $manniesTemplate = file_get_contents($root . '/templates/mannies.html');
@@ -336,6 +337,8 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-l
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.fuel.maxDeuterium'), 'probe JS reads the max deuterium fuel cap');
+$test->assert(is_string($appCss) && str_contains($appCss, '.metric .metric-secondary'), 'probe metric CSS styles secondary metric text');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
@@ -454,7 +457,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260702-manny-action-groups"), 'asset version is bumped for Manny action group UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260702-probe-deuterium-max"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

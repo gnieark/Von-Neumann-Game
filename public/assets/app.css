@@ -1181,7 +1181,8 @@ button.account-menu-item {
 }
 
 .metric > span,
-.metric b {
+.metric b,
+.metric .metric-secondary {
     position: relative;
     z-index: 1;
 }
@@ -1213,6 +1214,16 @@ button.account-menu-item {
     font-weight: 600;
     line-height: 1.35;
     white-space: pre-line;
+}
+
+.metric .metric-secondary {
+    display: block;
+    margin-top: 4px;
+    color: rgba(179, 255, 165, .68);
+    font-size: .72rem;
+    font-weight: 700;
+    line-height: 1.1;
+    text-transform: lowercase;
 }
 
 .interactive-metric {

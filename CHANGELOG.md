@@ -21,6 +21,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Interface : la métrique Deuterium de la page Probe affiche désormais en petit le plafond amélioré, par exemple `max 200`, quand `fuel.maxDeuterium` dépasse la valeur standard.
 - API : les rapports d’inspection Manny sont idempotents pour une même fin de tâche, afin d’éviter plusieurs alertes `manny_report` identiques quand la complétion est rafraîchie simultanément.
 - API : les rapports d’inspection Manny créés hors déplacement ne provoquent plus d’erreur 500 sur `/api/probe/sector`, `/api/probe/mannies` ou `/api/probe/alerts`; `probe_damage_warnings.movement_id` accepte désormais `NULL` pour ces alertes autonomes.
 - API : les nouveaux rapports Manny de contenu de container sont désormais générés en anglais, y compris quand aucun contenu n’est détecté.

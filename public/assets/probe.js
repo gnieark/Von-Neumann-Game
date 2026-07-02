@@ -112,6 +112,32 @@
         updateLiveMovementRemainingValues();
     }
 
+    function deuteriumMaxHint(probe) {
+        const maxDeuterium = Number(probe && probe.fuel ? probe.fuel.maxDeuterium : NaN);
+        if (!Number.isFinite(maxDeuterium) || maxDeuterium <= 100) {
+            return "";
+        }
+
+        return "max " + window.VNG.numberValue(maxDeuterium);
+    }
+
+    function renderDeuteriumMaxHint(probe) {
+        const hint = deuteriumMaxHint(probe);
+        if (hint === "") {
+            return;
+        }
+
+        const metric = document.querySelector("#probe-summary [data-metric=\"deuterium\"]");
+        if (!metric) {
+            return;
+        }
+
+        const node = document.createElement("small");
+        node.className = "metric-secondary";
+        node.textContent = hint;
+        metric.appendChild(node);
+    }
+
     function renderTerminalAlert(probe) {
         const node = document.getElementById("probe-terminal-alert");
         if (!node) {
@@ -209,6 +235,7 @@
                 "valueId": "probe-metric-heading",
             },
         ]);
+        renderDeuteriumMaxHint(probe);
 
         scheduleLiveMovementUpdates();
     }
