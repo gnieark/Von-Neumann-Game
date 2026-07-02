@@ -8,9 +8,10 @@ use VonNeumannGame\Config\Config;
 
 final class SectorContentGenerator
 {
-    private const GENERATION_VERSION = 4;
+    private const GENERATION_VERSION = 5;
     private const ASTEROID_BELT_CHANCE_PER_PLANET = 0.075;
     private const INTELLIGENT_LIFE_CHANCE = 0.2;
+    private const DORMANT_CONSTRUCT_CHANCE_DENOMINATOR = 200;
 
     public function __construct(private readonly array $config = []) {}
 
@@ -34,6 +35,10 @@ final class SectorContentGenerator
             'black_hole' => $this->addBlackHoleRegion($sector, $random, $coordinates),
             default => null,
         };
+
+        if ($random->nextInt(1, max(1, $this->int('dormantConstruct.chanceDenominator', self::DORMANT_CONSTRUCT_CHANCE_DENOMINATOR))) === 1) {
+            $sector->addObject($this->createDormantConstruct($coordinates, $worldSeed));
+        }
 
         return $sector;
     }
@@ -350,6 +355,11 @@ final class SectorContentGenerator
         if ($random->nextFloat() < $this->float('blackHoles.dustCloudChance', 0.45)) {
             $sector->addObject($this->createDustCloud($random, $coordinates, 0));
         }
+    }
+
+    private function createDormantConstruct(SectorCoordinates $coordinates, string $worldSeed): DormantConstruct
+    {
+        return new DormantConstruct(DormantConstruct::objectIdForSector($coordinates, $worldSeed));
     }
 
     private function createOrbit(DeterministicRandom $random, float $axis, float $starMass): OrbitDescriptor

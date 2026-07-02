@@ -8,16 +8,19 @@ use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
+use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\BlackHole;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorDetachedContainer;
@@ -47,6 +50,7 @@ final class ProbeMovementService
         private readonly ?ProbeStorageService $storage = null,
         private readonly ?ProbeDamageWarningRepository $damageWarnings = null,
         private readonly ?MissionService $missions = null,
+        private readonly ?ProbeImprovementRepository $improvements = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -130,6 +134,7 @@ final class ProbeMovementService
             $alreadyVisited = $this->visitedSectors->getVisitedSectorByPlayerId($probe->playerId, $movement->target) !== null;
             $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
             $this->createIntelligentLifeAlerts($probe, $movement);
+            $this->createDormantConstructAlerts($probe, $movement);
             if (!$alreadyVisited) {
                 $this->startIntelligentLifeScenarios($probe, $movement);
             }
@@ -403,6 +408,26 @@ final class ProbeMovementService
         }
     }
 
+    private function createDormantConstructAlerts(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->sectors === null || $this->damageWarnings === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($movement->target);
+        foreach ($this->dormantConstructs($sector->getObjects()) as $construct) {
+            $this->damageWarnings->createSectorObjectDetectedAlert(
+                $probe->id,
+                $movement->id,
+                $movement->target,
+                $construct->getId(),
+                $construct->getType()->value,
+                $construct->getName() ?? 'Dormant construct',
+                'A dormant construct has been detected in this sector. Its origin and purpose are unknown; dispatching a Manny to inspect it is recommended.',
+            );
+        }
+    }
+
     /**
      * @param array<UniverseObject> $objects
      * @return array<Planet>
@@ -427,6 +452,22 @@ final class ProbeMovementService
         }
 
         return $planets;
+    }
+
+    /**
+     * @param array<UniverseObject> $objects
+     * @return array<DormantConstruct>
+     */
+    private function dormantConstructs(array $objects): array
+    {
+        $constructs = [];
+        foreach ($objects as $object) {
+            if ($object instanceof DormantConstruct) {
+                $constructs[] = $object;
+            }
+        }
+
+        return $constructs;
     }
 
     private function directionBetween(SectorCoordinates $origin, SectorCoordinates $target): ProbeDirection
@@ -513,7 +554,7 @@ final class ProbeMovementService
 
         $containers = $this->storage->additionalContainerCandidates($probe);
         $count = count($containers);
-        $risk = $this->fragileContainerLossRisk($count);
+        $risk = $this->fragileContainerLossRisk($probe, $count);
         if ($risk <= 0.0 || $containers === []) {
             return;
         }
@@ -532,8 +573,9 @@ final class ProbeMovementService
         $runAt = $atOrigin ? $movement->accelerationEndsAt : $movement->cruiseEndsAt;
         $objectId = SectorDetachedContainer::objectIdForContainer((string) $container['id']);
         $riskPercent = round($risk * 100, 2);
+        $startsAtAdditionalContainers = 5 + $this->fragileContainerRiskDiscount($probe);
         $sectorLabel = $this->publicMovementSectorLabel($sector, $player, $atOrigin ? 'movement origin sector' : 'movement target sector');
-        $message = 'Fragile external storage warning: from 5 additional containers onward, movement can break a container link. '
+        $message = 'Fragile external storage warning: from ' . $startsAtAdditionalContainers . ' additional containers onward, movement can break a container link. '
             . 'This jump is expected to lose ' . (string) $container['label']
             . ' near ' . $sectorLabel
             . ' with a ' . $riskPercent . '% break risk.';
@@ -629,9 +671,29 @@ final class ProbeMovementService
         }
     }
 
-    private function fragileContainerLossRisk(int $additionalContainerCount): float
+    private function fragileContainerLossRisk(NeumannProbe $probe, int $additionalContainerCount): float
     {
-        return min(1.0, max(0.0, ($additionalContainerCount - 4) * 0.10));
+        $effectiveContainerCount = max(0, $additionalContainerCount - $this->fragileContainerRiskDiscount($probe));
+
+        return min(1.0, max(0.0, ($effectiveContainerCount - 4) * 0.10));
+    }
+
+    private function fragileContainerRiskDiscount(NeumannProbe $probe): int
+    {
+        if (
+            $this->improvements === null
+            || !$this->improvements->isDone($probe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS)
+        ) {
+            return 0;
+        }
+
+        $definition = ProbeImprovementCatalog::find(
+            ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+            Config::getArray($this->gameplayConfig, 'probeImprovements'),
+        );
+        $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
+
+        return max(0, (int) ($effects['fragileContainerRiskAdditionalContainerDiscount'] ?? ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS_CONTAINER_RISK_DISCOUNT));
     }
 
     private function publicMovementSectorLabel(SectorCoordinates $sector, ?Player $player, string $fallback): string

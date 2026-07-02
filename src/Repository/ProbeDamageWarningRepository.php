@@ -110,6 +110,16 @@ final class ProbeDamageWarningRepository
         string $objectLabel,
         string $message,
     ): ProbeDamageWarning {
+        $existing = $this->findByProbeMovementTypeAndObject(
+            $probeId,
+            $movementId,
+            ProbeDamageWarning::TYPE_SECTOR_OBJECT_DETECTED,
+            $objectId,
+        );
+        if ($existing !== null) {
+            return $existing;
+        }
+
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_damage_warnings
@@ -174,6 +184,58 @@ final class ProbeDamageWarningRepository
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe anomaly alert creation failed.');
     }
 
+    public function createMannyReportAlert(
+        int $probeId,
+        SectorCoordinates $sector,
+        string $objectId,
+        string $objectLabel,
+        string $message,
+        string $objectType = 'detached_storage_container',
+        ?string $scheduledAt = null,
+    ): ProbeDamageWarning {
+        $now = gmdate('c');
+        $scheduledAt = $scheduledAt !== null && trim($scheduledAt) !== '' ? $scheduledAt : $now;
+        $existing = $this->findMannyReportAlert(
+            $probeId,
+            $scheduledAt,
+            $sector,
+            $objectId,
+            $objectType,
+            $objectLabel,
+            $message,
+        );
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO probe_damage_warnings
+             (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, read_at, resolved_at, created_at, updated_at)
+             VALUES (:probe_id, :movement_id, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, :risk_percent, :additional_container_count, :message, NULL, NULL, :created_at, :updated_at)'
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'movement_id' => null,
+            'type' => ProbeDamageWarning::TYPE_MANNY_REPORT,
+            'status' => ProbeDamageWarning::STATUS_UNREAD,
+            'phase' => 'manny_report',
+            'scheduled_at' => $scheduledAt,
+            'sector_x' => $sector->getX(),
+            'sector_y' => $sector->getY(),
+            'sector_z' => $sector->getZ(),
+            'container_id' => $objectType,
+            'container_label' => $objectLabel,
+            'object_id' => $objectId,
+            'risk_percent' => 0.0,
+            'additional_container_count' => 0,
+            'message' => $message,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Manny report alert creation failed.');
+    }
+
     /**
      * @return array<ProbeDamageWarning>
      */
@@ -226,6 +288,50 @@ final class ProbeDamageWarningRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    private function findMannyReportAlert(
+        int $probeId,
+        string $scheduledAt,
+        SectorCoordinates $sector,
+        string $objectId,
+        string $objectType,
+        string $objectLabel,
+        string $message,
+    ): ?ProbeDamageWarning {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM probe_damage_warnings
+             WHERE probe_id = :probe_id
+               AND movement_id IS NULL
+               AND type = :type
+               AND phase = :phase
+               AND scheduled_at = :scheduled_at
+               AND sector_x = :sector_x
+               AND sector_y = :sector_y
+               AND sector_z = :sector_z
+               AND container_id = :container_id
+               AND container_label = :container_label
+               AND object_id = :object_id
+               AND message = :message
+             ORDER BY id ASC
+             LIMIT 1'
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'type' => ProbeDamageWarning::TYPE_MANNY_REPORT,
+            'phase' => 'manny_report',
+            'scheduled_at' => $scheduledAt,
+            'sector_x' => $sector->getX(),
+            'sector_y' => $sector->getY(),
+            'sector_z' => $sector->getZ(),
+            'container_id' => $objectType,
+            'container_label' => $objectLabel,
+            'object_id' => $objectId,
+            'message' => $message,
+        ]);
+        $row = $stmt->fetch();
+
+        return $row ? $this->hydrate($row) : null;
+    }
+
     public function markRead(ProbeDamageWarning $warning): ProbeDamageWarning
     {
         if ($warning->status === ProbeDamageWarning::STATUS_READ) {
@@ -267,7 +373,7 @@ final class ProbeDamageWarningRepository
         return new ProbeDamageWarning(
             (int) $row['id'],
             (int) $row['probe_id'],
-            (int) $row['movement_id'],
+            $row['movement_id'] !== null ? (int) $row['movement_id'] : null,
             (string) $row['type'],
             (string) $row['status'],
             (string) $row['phase'],

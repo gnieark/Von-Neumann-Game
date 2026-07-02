@@ -16,6 +16,7 @@ use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDirection;
+use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeStatus;
@@ -32,6 +33,7 @@ use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
@@ -55,6 +57,7 @@ use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\OrbitDescriptor;
 use VonNeumannGame\Sector\OrbitingBody;
 use VonNeumannGame\Sector\Planet;
@@ -241,6 +244,12 @@ $test->assertEquals(['local'], $loadedGameplayConfig['listValues'] ?? null, 'loc
 $configuredSteelBar = CraftingRecipeCatalog::find('steel_bar', $loadedGameplayConfig['crafting'] ?? []);
 $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafting recipes consume gameplay config overrides');
 $test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
+$configuredProbeImprovement = ProbeImprovementCatalog::find('deuterium-compression', $loadedGameplayConfig['probeImprovements'] ?? []);
+$test->assertEquals(300, $configuredProbeImprovement['durationSeconds'] ?? null, 'probe improvements expose default gameplay definitions');
+$configuredContainerCouplingsImprovement = ProbeImprovementCatalog::find('reinforced-container-couplings', $loadedGameplayConfig['probeImprovements'] ?? []);
+$test->assertEquals(0.4, $configuredContainerCouplingsImprovement['ingredients'][1]['quantity'] ?? null, 'reinforced container couplings consume carbon compounds');
+$test->assertEquals(5, $configuredContainerCouplingsImprovement['effects']['fragileContainerRiskAdditionalContainerDiscount'] ?? null, 'reinforced container couplings discount five additional containers');
+$test->assertEquals(200.0, $configuredProbeImprovement['effects']['maxDeuteriumPercent'] ?? null, 'deuterium compression raises the tank maximum to 200 percent');
 
 file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks.json', json_encode([], JSON_THROW_ON_ERROR));
 file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks-local.json', json_encode([
@@ -290,6 +299,7 @@ $test->assertEquals(
 $loginTemplate = file_get_contents($root . '/templates/loginview.html');
 $frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
+$probeScript = file_get_contents($root . '/public/assets/probe.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
 $manniesTemplate = file_get_contents($root . '/templates/mannies.html');
@@ -327,6 +337,12 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-l
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.fuel.maxDeuterium'), 'probe JS reads the max deuterium fuel cap');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeImprovementsOnce'), 'probe JS loads probe improvements once');
+$test->assert(is_string($probeScript) && str_contains($probeScript, '/api/probe/probe-improvements-available'), 'probe JS reads installed probe improvements');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'improvement.done === true'), 'probe JS lists completed probe improvements only');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'installed.slice(0, 2)'), 'probe JS summarizes installed probe improvements after two entries');
+$test->assert(is_string($appCss) && str_contains($appCss, '.metric .metric-secondary'), 'probe metric CSS styles secondary metric text');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
@@ -341,6 +357,11 @@ $test->assert(str_contains($openApi, 'enum: [probe, planet, unknown]'), 'OpenAPI
 $test->assert(str_contains($openApi, 'For scut_relay objects this is the relay integer id serialized as a string'), 'OpenAPI documents SCUT relay SectorObject id conventions');
 $test->assert(str_contains($openApi, 'description: Present only for SCUT relay objects.'), 'OpenAPI documents SCUT relay-only SectorObject fields');
 $test->assert(str_contains($openApi, '$ref: \'#/components/schemas/ScutNetworkReference\''), 'OpenAPI documents SCUT relay SectorObject network references');
+$test->assert(str_contains($openApi, 'dormant_construct'), 'OpenAPI documents dormant construct sector objects');
+$test->assert(str_contains($openApi, 'knownFunction'), 'OpenAPI documents dormant construct function ambiguity');
+$test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
+$test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
+$test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
@@ -353,6 +374,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.ta
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detection.targetObjectId'), 'mannies JS uses explicit hidden-container asteroid targets when provided');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyInCurrentProbeSector'), 'mannies JS ignores hidden-container recovery detections from remote Manny sectors');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'recoverableDetachedContainerTargets'), 'mannies JS limits recovery targets to current-sector detached container objects');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargets'), 'mannies JS builds a generic sector-object inspection target list');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspect-sector-object'), 'mannies JS posts generic sector-object inspections');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-manny-hash'), 'mannies JS exposes the Manny state hash on Manny cards');
@@ -383,7 +406,9 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-a
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'renderRemoteMannyActionForms'), 'mannies JS renders a limited remote action panel for idle same-SCUT Mannys');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-require-external-storage'), 'mannies JS can require detached-container storage for remote mining forms');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/api/sector?'), 'mannies JS loads remote same-SCUT Manny sector details through relative-sector scans');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-mine'), 'mannies JS exposes only the remote mining action for idle same-SCUT Mannys');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-mine'), 'mannies JS exposes remote mining for idle same-SCUT Mannys');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-inspect-sector-object'), 'mannies JS exposes remote sector-object inspection for idle same-SCUT Mannys');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargetsFromObjects'), 'mannies JS builds remote inspection targets from the Manny sector scan');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'abandonRemoteMannyTask'), 'mannies JS relabels remote SCUT-visible recall actions without changing the endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
@@ -411,18 +436,34 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuteri
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/refill-deuterium-tank'), 'mannies JS can start a deuterium tank refill action');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-action-group-trigger'), 'mannies JS groups task actions inside parent accordions');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupProbe'), 'mannies JS renders the probe action group');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupSector'), 'mannies JS renders the sector action group');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupContainers'), 'mannies JS renders the containers action group');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupCraft'), 'mannies JS renders the craft action group');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/api/probe/probe-improvements-available'), 'mannies JS loads available probe improvements');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-improve-probe-form'), 'mannies JS renders the probe improvement form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/improve-probe'), 'mannies JS posts probe improvement orders');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeImprovementAvailability'), 'mannies JS checks improvement ingredient availability');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'noProbeImprovementAvailable'), 'mannies JS displays an empty probe-improvement state');
+$test->assert(is_string($appCss) && str_contains($appCss, '.manny-action-group > .manny-action-accordion-trigger'), 'mannies CSS styles grouped action accordions');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_relay": tr("scutRelayObject"'), 'mannies JS labels SCUT relay sector objects');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "detached_container" && object.mode === "hidden_on_asteroid"'), 'mannies JS excludes hidden detached containers from generic salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installedProbeImprovements' => 'Améliorations installées'"), 'French translations include the installed probe improvements metric');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installedProbeImprovements' => 'Installed upgrades'"), 'English translations include the installed probe improvements metric');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noProbeImprovementAvailable' => 'Aucune amélioration n\\'est disponible'"), 'French translations include the empty probe-improvement message');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noProbeImprovementAvailable' => 'No improvement is available.'"), 'English translations include the empty probe-improvement message');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'Aucun container détaché n’est disponible dans le secteur de cette Manny.'"), 'French translations include remote Manny mining storage hints');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'No detached container is available in this Manny sector.'"), 'English translations include remote Manny mining storage hints');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via SCUT network {network}'"), 'English translations include SCUT network messaging recipient labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260629-mannies-recover-sector-objects"), 'asset version is bumped for Manny hidden-container recovery UI');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260702-probe-improvements-metric"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -627,6 +668,15 @@ $damageWarningSchemaColumns = array_map(
 );
 $test->assert(in_array('container_id', $damageWarningSchemaColumns, true), 'Probe damage warning table stores container ids');
 $test->assert(in_array('status', $damageWarningSchemaColumns, true), 'Probe damage warning table stores read status');
+$damageWarningSchemaRows = $pdo->query('PRAGMA table_info(probe_damage_warnings)')->fetchAll(PDO::FETCH_ASSOC);
+$damageWarningMovementColumn = null;
+foreach ($damageWarningSchemaRows as $row) {
+    if (($row['name'] ?? null) === 'movement_id') {
+        $damageWarningMovementColumn = $row;
+        break;
+    }
+}
+$test->assertEquals(0, (int) ($damageWarningMovementColumn['notnull'] ?? 1), 'Probe damage warning movement id is nullable for non-movement alerts');
 $forumCategorySchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(forum_categories)')->fetchAll(PDO::FETCH_ASSOC),
@@ -683,12 +733,21 @@ $scutCoverageSchemaColumns = array_map(
 $test->assert(in_array('scut_network_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their network id');
 $test->assert(in_array('scut_relay_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their relay id');
 $test->assert(in_array('sector_x', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store sector coordinates');
+$probeImprovementSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_improvements)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('probe_id', $probeImprovementSchemaColumns, true), 'probe improvements store their probe id');
+$test->assert(in_array('improvement', $probeImprovementSchemaColumns, true), 'probe improvements store their canonical improvement id');
+$test->assert(in_array('available', $probeImprovementSchemaColumns, true), 'probe improvements track availability');
+$test->assert(in_array('done', $probeImprovementSchemaColumns, true), 'probe improvements track completion');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $mannies = new MannyRepository($pdo);
 $items = new ProbeItemRepository($pdo);
+$probeImprovements = new ProbeImprovementRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
 $scutRelays = new ScutRelayRepository($pdo);
 $scutNetworks = new ScutNetworkRepository($pdo);
@@ -705,18 +764,18 @@ $visitedSectors = new VisitedSectorRepository($pdo);
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
-$storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes);
+$storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut);
+$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(63, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(71, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -879,6 +938,61 @@ if ($createdProbe !== null) {
     $test->assertEquals(0, $sectorJsonPathStatus, 'sector-json CLI path-only exits successfully');
     $test->assertEquals($cliSectorRepository->getPath($cliSectorCoordinates), $sectorJsonPathOutput[0] ?? null, 'sector-json CLI path-only prints the resolved sector path');
 
+    $addConstructCoordinates = new SectorCoordinates(6, 0, 0);
+    $addConstructCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --sector=6:0:0';
+    exec($addConstructCommand . ' 2>&1', $addConstructOutput, $addConstructStatus);
+    $addConstructText = implode("\n", $addConstructOutput);
+    $test->assertEquals(0, $addConstructStatus, 'add-dormant-construct CLI exits successfully');
+    $test->assert(str_contains($addConstructText, 'Dormant construct in sector 6:0:0'), 'add-dormant-construct CLI reports the target sector');
+    $test->assert($cliSectorRepository->load($addConstructCoordinates)->findObjectById(DormantConstruct::objectIdForSector($addConstructCoordinates, 'local-development-world')) instanceof DormantConstruct, 'add-dormant-construct CLI persists a dormant construct');
+
+    $backfillUnvisitedCoordinates = new SectorCoordinates(8, 0, 0);
+    $backfillVisitedCoordinates = new SectorCoordinates(10, 0, 0);
+    $cliSectorRepository->save(new SectorContent($backfillUnvisitedCoordinates, source: 'cli-backfill-test'));
+    $cliSectorRepository->save(new SectorContent($backfillVisitedCoordinates, source: 'cli-backfill-test'));
+    $backfillDbPath = $tmp . DIRECTORY_SEPARATOR . 'backfill-dormant-constructs.sqlite';
+    $backfillDbConfig = $tmp . DIRECTORY_SEPARATOR . 'backfill-dormant-constructs-database.json';
+    file_put_contents($backfillDbConfig, json_encode([
+        'driver' => 'sqlite',
+        'path' => $backfillDbPath,
+    ], JSON_THROW_ON_ERROR));
+    $backfillDbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $backfillDbPath), $root);
+    $backfillPdo = $backfillDbFactory->create();
+    $backfillDbFactory->initializeSchema($backfillPdo);
+    $backfillPdo->prepare(
+        'INSERT INTO players (username, display_name, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
+         VALUES (:username, :display_name, 0, 0, 0, :created_at, :updated_at)'
+    )->execute([
+        'username' => 'backfill-visitor',
+        'display_name' => 'Backfill Visitor',
+        'created_at' => gmdate('c'),
+        'updated_at' => gmdate('c'),
+    ]);
+    $backfillPdo->prepare(
+        'INSERT INTO visited_sectors (player_id, sector_x, sector_y, sector_z, first_visited_at, last_visited_at, visit_count)
+         VALUES (1, :x, :y, :z, :first_visited_at, :last_visited_at, 1)'
+    )->execute([
+        'x' => $backfillVisitedCoordinates->getX(),
+        'y' => $backfillVisitedCoordinates->getY(),
+        'z' => $backfillVisitedCoordinates->getZ(),
+        'first_visited_at' => gmdate('c'),
+        'last_visited_at' => gmdate('c'),
+    ]);
+    $backfillCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/backfill-dormant-constructs.php')
+        . ' --database-config=' . escapeshellarg($backfillDbConfig)
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --chance-denominator=1';
+    exec($backfillCommand . ' 2>&1', $backfillOutput, $backfillStatus);
+    $backfillText = implode("\n", $backfillOutput);
+    $test->assertEquals(0, $backfillStatus, 'backfill-dormant-constructs CLI exits successfully');
+    $test->assert(str_contains($backfillText, 'Dormant construct backfill complete.'), 'backfill-dormant-constructs CLI reports completion');
+    $test->assert($cliSectorRepository->load($backfillUnvisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillUnvisitedCoordinates, 'local-development-world')) instanceof DormantConstruct, 'backfill-dormant-constructs adds dormant constructs to unvisited generated sectors on positive roll');
+    $test->assert(!($cliSectorRepository->load($backfillVisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillVisitedCoordinates, 'local-development-world')) instanceof DormantConstruct), 'backfill-dormant-constructs leaves visited generated sectors untouched');
+
     $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
     if ($cliInventoryProbe !== null) {
@@ -987,6 +1101,8 @@ if ($createdProbe !== null) {
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, '/api/probe/alerts'), 'alerts page uses the generic persistent-alert endpoint');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'replace(/\\r?\\n/g, "<br>")'), 'alerts page renders message line breaks');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'type === "manny_report"'), 'alerts page recognizes Manny report alerts');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alertPriority'), 'alerts page prioritizes Manny reports above regular unread alerts');
 
     $lowFuelCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-deuterium-asteroid-alerts-for-low-fuel.php')
@@ -2119,6 +2235,51 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(0.21, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a drifting detached container updates its stored resources');
         $test->assertEquals(0.0, $probes->findByPlayerId($detachPlayer->id)?->metalsStock, 'mining into a detached container does not add mined resources to the probe inventory');
 
+        $inspectDriftingContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
+            'objectId' => $detachedObjectId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $inspectDriftingContainer->status, 'Manny can inspect a drifting detached container');
+        $test->assertEquals('inspecting_sector_object', $inspectDriftingContainer->body['manny']['currentTask'] ?? null, 'sector-object inspection uses the generic inspecting task type');
+        $test->assertEquals($detachedObjectId, $inspectDriftingContainer->body['manny']['task']['objectId'] ?? null, 'container inspection stores the inspected object id');
+        $detachThirdRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+        $detachThirdRow->execute(['uid' => $detachThirdMannyId]);
+        $detachThirdMannyDbId = (int) $detachThirdRow->fetchColumn();
+        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $detachThirdMannyDbId,
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $containerReportAlerts = $kernel->handle('GET', '/api/probe/alerts', $detachHeaders);
+        $driftingReports = array_values(array_filter(
+            $containerReportAlerts->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+                && ($alert['report']['objectId'] ?? null) === $detachedObjectId
+        ));
+        $test->assertEquals(1, count($driftingReports), 'completed detached-container inspection creates one Manny report alert');
+        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), 'Manny report'), 'Manny report alert message is labeled as a Manny report');
+        $test->assertEquals('Manny report', $driftingReports[0]['report']['title'] ?? null, 'Manny report alert exposes an English report title');
+        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), ProbeItem::STEEL_BAR_NAME), 'Manny report alert message includes stored items');
+        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), '0.21'), 'Manny report alert message includes stored resources');
+        $storedDriftingReport = $damageWarnings->findById((int) ($driftingReports[0]['id'] ?? 0));
+        $test->assertEquals(null, $storedDriftingReport?->movementId, 'Manny report alerts are not linked to fake movements');
+        $duplicateDriftingReport = $damageWarnings->createMannyReportAlert(
+            $detachProbe->id,
+            $detachProbe->currentSector,
+            $detachedObjectId,
+            (string) ($storedDriftingReport?->containerLabel ?? ''),
+            (string) ($storedDriftingReport?->message ?? ''),
+            (string) ($storedDriftingReport?->containerId ?? 'detached_storage_container'),
+            $storedDriftingReport?->scheduledAt,
+        );
+        $test->assertEquals($storedDriftingReport?->id, $duplicateDriftingReport->id, 'Manny report creation is idempotent for one completed inspection task');
+        $containerReportAlertsAfterReplay = $kernel->handle('GET', '/api/probe/alerts', $detachHeaders);
+        $driftingReportsAfterReplay = array_values(array_filter(
+            $containerReportAlertsAfterReplay->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+                && ($alert['report']['objectId'] ?? null) === $detachedObjectId
+        ));
+        $test->assertEquals(1, count($driftingReportsAfterReplay), 'replayed detached-container inspection report keeps one Manny report alert');
+
         $recoverDrifting = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/salvage', $detachHeaders, json_encode([
             'objectId' => $detachedObjectId,
         ], JSON_THROW_ON_ERROR));
@@ -2236,6 +2397,8 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $scoutInspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scoutMannyId) . '/inspect-asteroid', $scoutHeaders, json_encode([
                 'objectId' => 'cache-rock',
             ], JSON_THROW_ON_ERROR));
+            $test->assertEquals(202, $scoutInspectHidden->status, 'deprecated asteroid inspection endpoint remains accepted');
+            $test->assertEquals('inspecting_sector_object', $scoutInspectHidden->body['manny']['currentTask'] ?? null, 'deprecated asteroid inspection endpoint starts the generic inspecting task');
             $test->assertEquals($hiddenDetachedObjectId, $scoutInspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection by another player detects the hidden container');
             $scoutDiscoveredContainer = $sectorRepository->load($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
             $test->assert($scoutDiscoveredContainer !== null && in_array($scoutPlayer->id, $scoutDiscoveredContainer->getDiscoveredByPlayerIds(), true), 'asteroid inspection records the discovering player');
@@ -2415,13 +2578,40 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(0.232, $remoteScutMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'remote same-SCUT mining deposits resources into the detached sector container');
         $test->assertEquals(null, $remoteScutMineCompletedManny['currentTask'] ?? null, 'completed remote same-SCUT mining leaves the Manny inactive');
         $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutMinedSector->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId))?->toArray()['state'] ?? null, 'completed remote same-SCUT mining registers the Manny as forgotten in its sector');
+
+        $remoteScutInspect = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
+            'objectId' => 'cache-rock',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $remoteScutInspect->status, 'remote same-SCUT forgotten Manny can inspect an object in its sector');
+        $test->assertEquals('inspecting_sector_object', $remoteScutInspect->body['manny']['currentTask'] ?? null, 'remote same-SCUT inspection starts the generic inspecting task');
+        $test->assertEquals('scut_network', $remoteScutInspect->body['manny']['taskVisibility'] ?? null, 'remote same-SCUT inspection remains visible through SCUT telemetry');
+        $test->assertEquals('cache-rock', $remoteScutInspect->body['manny']['task']['objectId'] ?? null, 'remote same-SCUT inspection targets an object in the Manny sector');
+        $test->assertEquals($hiddenDetachedObjectId, $remoteScutInspect->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'remote same-SCUT inspection detects hidden detached containers in the Manny sector');
+        $remoteScutInspectRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+        $remoteScutInspectRow->execute(['uid' => $detachSecondMannyId]);
+        $remoteScutInspectMannyDbId = (int) $remoteScutInspectRow->fetchColumn();
+        $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $remoteScutInspectMannyDbId,
+            'started' => gmdate('c', time() - 2000),
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $remoteScutInspectCompletedList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $remoteScutInspectCompletedManny = array_values(array_filter(
+            $remoteScutInspectCompletedList->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $remoteScutInspectedSector = $sectorRepository->load($detachProbe->currentSector);
+        $test->assertEquals(null, $remoteScutInspectCompletedManny['currentTask'] ?? null, 'completed remote same-SCUT inspection leaves the Manny inactive');
+        $test->assertEquals('success', $remoteScutInspectCompletedManny['task']['result'] ?? null, 'completed remote same-SCUT inspection records its result');
+        $test->assertEquals('scut_network', $remoteScutInspectCompletedManny['taskVisibility'] ?? null, 'completed remote same-SCUT inspection remains visible through SCUT telemetry');
+        $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutInspectedSector->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId))?->toArray()['state'] ?? null, 'completed remote same-SCUT inspection keeps the Manny forgotten in its sector');
         $moveDetachProbe($detachProbe->currentSector);
 
-        $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-asteroid', $detachHeaders, json_encode([
+        $inspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
         ], JSON_THROW_ON_ERROR));
         $test->assertEquals(202, $inspectHidden->status, 'Manny can inspect an asteroid without mining');
-        $test->assertEquals('inspecting_asteroid', $inspectHidden->body['manny']['currentTask'] ?? null, 'asteroid inspection uses the inspecting task type');
+        $test->assertEquals('inspecting_sector_object', $inspectHidden->body['manny']['currentTask'] ?? null, 'asteroid inspection uses the generic inspecting task type');
         $test->assertEquals($hiddenDetachedObjectId, $inspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection reports hidden detached containers');
 
         $recoverHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachFourthMannyId) . '/recover-storage-container', $detachHeaders, json_encode([
@@ -2498,6 +2688,19 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $multiHiddenStoredSector = $sectorRepository->load($multiHiddenProbe->currentSector);
                 $test->assertEquals(2, count($multiHiddenStoredSector->hiddenDetachedContainersForObject('multi-cache-rock')), 'multiple hidden containers can coexist on the same asteroid');
 
+                $multiInterruptedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[0]) . '/mine', $multiHiddenHeaders, json_encode([
+                    'objectId' => 'multi-cache-rock',
+                    'resource' => 'metals',
+                    'targetAmount' => 0.02,
+                    'targetContainerId' => $multiHiddenObjectIdA,
+                ], JSON_THROW_ON_ERROR));
+                $test->assertEquals(202, $multiInterruptedMine->status, 'Manny can start mining into a container that will be recovered');
+                $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE uid = :uid')->execute([
+                    'uid' => $multiHiddenMannyIds[0],
+                    'started' => gmdate('c', time() - 350),
+                    'ended' => gmdate('c', time() + 250),
+                ]);
+
                 $multiRecoverA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[2]) . '/recover-storage-container', $multiHiddenHeaders, json_encode([
                     'objectId' => $multiHiddenObjectIdA,
                     'source' => 'asteroid',
@@ -2509,6 +2712,12 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $test->assertEquals(202, $multiRecoverA->status, 'first hidden container recovery on a shared asteroid is accepted');
                 $test->assertEquals(202, $multiRecoverB->status, 'second hidden container recovery on a shared asteroid is accepted');
                 $test->assertEquals(0, count($sectorRepository->load($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'recovering multiple hidden containers reserves all of them out of sector JSON');
+                $multiInterruptedManny = $mannies->findByUidForProbe($multiHiddenProbe->id, $multiHiddenMannyIds[0]);
+                $test->assertEquals(Manny::TASK_RETURNING, $multiInterruptedManny?->currentTask, 'recovering a target detached container recalls Mannys mining into it');
+                $test->assertEquals('target_container_recovered', $multiInterruptedManny?->taskPayload['reason'] ?? null, 'interrupted mining recall records the recovered target-container reason');
+                $test->assertEquals($multiHiddenObjectIdA, $multiInterruptedManny?->taskPayload['targetContainerId'] ?? null, 'interrupted mining recall records the recovered target container id');
+                $test->assertEquals(0.0, $multiInterruptedManny?->cargoMetals, 'interrupted mining recall drops the Manny mining cargo');
+                $test->assertEquals(0.01, $multiInterruptedManny?->taskPayload['droppedCargo'][0]['resources']['metals'] ?? null, 'interrupted mining recall records the dropped metal cargo');
 
                 foreach ([$multiHiddenMannyIds[2], $multiHiddenMannyIds[3]] as $multiRecoverMannyId) {
                     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
@@ -2697,6 +2906,57 @@ if ($teleportLifeProbe !== null) {
     $test->assertEquals(MissionService::FIRST_CONTACT_SIGNAL, $teleportLifeMessages->body['messages'][0]['body'] ?? null, 'observing current intelligent-life sector creates missing first-contact message');
     $teleportLifeMissions = $kernel->handle('GET', '/api/probe/missions', $teleportLifeHeaders);
     $test->assertEquals('first_contact.return_to_space_program', $teleportLifeMissions->body['missions'][0]['type'] ?? null, 'observing current intelligent-life sector creates missing first-contact mission');
+}
+
+$dormantAlertPlayer = $auth->registerPlayerWithPassword('dormant-alert', 'secret', 'Dormant Alert', 'Dormant alert probe');
+$dormantAlertProbe = $probes->findByPlayerId($dormantAlertPlayer->id);
+$dormantAlertSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'dormant-alert', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$dormantAlertHeaders = ['Authorization' => 'Bearer ' . (string) ($dormantAlertSession->body['token'] ?? '')];
+if ($dormantAlertProbe !== null) {
+    $dormantAlertTarget = $dormantAlertProbe->currentSector->add(2, 0, 0);
+    $sectorRepository->save(new SectorContent($dormantAlertTarget, [
+        new DormantConstruct('dormant-arrival-alert'),
+    ]));
+
+    $dormantAlertMove = $kernel->handle('POST', '/api/probe/move', $dormantAlertHeaders, json_encode([
+        'target' => [
+            'x' => 2,
+            'y' => 0,
+            'z' => 0,
+        ],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $dormantAlertMove->status, 'movement toward a dormant-construct sector starts');
+    $dormantAlertMovement = $movements->findActiveByProbeId($dormantAlertProbe->id);
+    if ($dormantAlertMovement !== null) {
+        $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+            'id' => $dormantAlertMovement->id,
+            'arrival' => gmdate('c', time() - 60),
+        ]);
+        $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $dormantAlertMovement->id, gmdate('c'), ['probeId' => $dormantAlertMovement->probeId, 'phase' => 'arrived']);
+        $dormantSchedulerStats = $scheduler->processDueEvents();
+        $test->assert($dormantSchedulerStats['processed'] >= 1, 'scheduler finalizes movement into dormant-construct sector');
+
+        $dormantAlertsResponse = $kernel->handle('GET', '/api/probe/alerts', $dormantAlertHeaders);
+        $test->assertEquals(200, $dormantAlertsResponse->status, 'GET /api/probe/alerts exposes dormant-construct alerts');
+        $dormantAlerts = array_values(array_filter(
+            $dormantAlertsResponse->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'sector_object_detected'
+                && ($alert['object']['type'] ?? null) === 'dormant_construct',
+        ));
+        $dormantAlert = $dormantAlerts[0] ?? null;
+        $test->assertEquals(1, count($dormantAlerts), 'arrival creates one dormant-construct detection alert');
+        $test->assertEquals('unread', $dormantAlert['status'] ?? null, 'dormant-construct alert starts unread');
+        $test->assertEquals('dormant-arrival-alert', $dormantAlert['object']['id'] ?? null, 'dormant-construct alert exposes the object id');
+        $test->assertEquals('Dormant construct', $dormantAlert['object']['label'] ?? null, 'dormant-construct alert exposes the public label');
+        $test->assertEquals([], $dormantAlert['object']['resourceTypes'] ?? null, 'dormant-construct alert does not invent resource types');
+        $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $dormantAlert['sector']['relative'] ?? null, 'dormant-construct alert exposes the relative sector');
+        $test->assertEquals(
+            'A dormant construct has been detected in this sector. Its origin and purpose are unknown; dispatching a Manny to inspect it is recommended.',
+            $dormantAlert['message'] ?? null,
+            'dormant-construct alert stores the improved English message',
+        );
+        $test->assert(!str_contains(json_encode($dormantAlert, JSON_THROW_ON_ERROR), $dormantAlertTarget->toKey()), 'dormant-construct alert response does not expose absolute sector keys');
+    }
 }
 
 if ($intelligentLifeProbe !== null) {
@@ -3095,11 +3355,115 @@ $test->assertEquals(422, $jettisonDeuteriumTank->status, 'external deuterium tan
 $test->assertEquals('item_not_jettisonable', $jettisonDeuteriumTank->body['error']['code'] ?? null, 'deuterium tank jettison returns an explicit error');
 $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'failed deuterium tank jettison keeps fuel stock unchanged');
 if ($createdProbe !== null) {
+    $sectorWithConstruct = $sectorRepository->load($createdProbe->currentSector);
+    $sectorWithConstruct->addObject(new DormantConstruct('api-current-dormant-construct'));
+    $sectorRepository->save($sectorWithConstruct);
+    $currentConstructScan = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $currentConstructObjects = array_values(array_filter(
+        $currentConstructScan->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct',
+    ));
+    $test->assertEquals(1, count($currentConstructObjects), 'GET /api/probe/sector exposes dormant constructs in detailed scans');
+    $test->assertEquals('Dormant construct', $currentConstructObjects[0]['name'] ?? null, 'detailed dormant construct exposes its public name');
+    $test->assertEquals('unknown', $currentConstructObjects[0]['knownFunction'] ?? null, 'detailed dormant construct keeps its function unknown');
+
     $initialNeighbor = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
     $initialNeighborRelative = $initialNeighbor->subtract($player->homeSector);
     $initialNeighborScan = $kernel->handle('GET', '/api/sector?x=' . $initialNeighborRelative['x'] . '&y=' . $initialNeighborRelative['y'] . '&z=' . $initialNeighborRelative['z'], $headers);
     $test->assertEquals(200, $initialNeighborScan->status, 'initial probe can scan a neighbor without residence delay');
     $test->assertEquals(0, $initialNeighborScan->body['sector']['scan']['requiredResidenceSeconds'] ?? null, 'initial neighbor scan exposes no residence delay');
+}
+
+$dormantInspectionPlayer = $auth->registerPlayerWithPassword('dormant-inspection-user', 'secret', 'Dormant Inspection User');
+$dormantInspectionProbe = $probes->findByPlayerId($dormantInspectionPlayer->id);
+$dormantInspectionHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($dormantInspectionPlayer)['token']];
+if ($dormantInspectionProbe !== null) {
+    $dormantInspectionSector = $sectorRepository->load($dormantInspectionProbe->currentSector);
+    $dormantInspectionSector->addObject(new DormantConstruct(
+        'dormant-report-deuterium',
+        inspectionScenario: ProbeImprovementCatalog::DEUTERIUM_COMPRESSION,
+    ));
+    $dormantInspectionSector->addObject(new DormantConstruct(
+        'dormant-report-couplings',
+        inspectionScenario: ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ));
+    $dormantInspectionSector->addObject(new DormantConstruct('dormant-report-random'));
+    $sectorRepository->save($dormantInspectionSector);
+
+    $dormantInspectionScan = $kernel->handle('GET', '/api/probe/sector', $dormantInspectionHeaders);
+    $dormantInspectionObjects = array_values(array_filter(
+        $dormantInspectionScan->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct'
+            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-random'], true),
+    ));
+    $test->assertEquals(3, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
+    foreach ($dormantInspectionObjects as $dormantInspectionObject) {
+        $test->assert(!array_key_exists('inspectionScenario', $dormantInspectionObject), 'dormant construct inspection scenario is not exposed through sector scans');
+    }
+
+    $dormantInspectionMannies = $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantInspectionMannyId = (string) ($dormantInspectionMannies->body['mannies'][0]['id'] ?? '');
+    $dormantInspectionMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $dormantInspectionMannyRow->execute(['uid' => $dormantInspectionMannyId]);
+    $dormantInspectionMannyDbId = (int) $dormantInspectionMannyRow->fetchColumn();
+
+    $inspectDormantDeuterium = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-deuterium',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantDeuterium->status, 'Manny can inspect a dormant construct with a deuterium-compression scenario');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantDeuteriumAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
+    $dormantDeuteriumReports = array_values(array_filter(
+        $dormantDeuteriumAlerts->body['alerts'] ?? [],
+        static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+            && ($alert['report']['objectId'] ?? null) === 'dormant-report-deuterium'
+    ));
+    $test->assertEquals(1, count($dormantDeuteriumReports), 'completed dormant construct inspection creates a Manny report alert');
+    $test->assertEquals('dormant_construct', $dormantDeuteriumReports[0]['report']['objectType'] ?? null, 'dormant construct Manny report exposes the inspected object type');
+    $test->assert(str_contains((string) ($dormantDeuteriumReports[0]['message'] ?? ''), 'Recovered data: deuterium compression principles.'), 'dormant construct report describes recovered deuterium compression data');
+    $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION)?->available, 'dormant construct deuterium report unlocks deuterium compression');
+
+    $inspectDormantCouplings = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-couplings',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantCouplings->status, 'Manny can inspect a dormant construct with a container-coupling scenario');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantCouplingsAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
+    $dormantCouplingsReports = array_values(array_filter(
+        $dormantCouplingsAlerts->body['alerts'] ?? [],
+        static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+            && ($alert['report']['objectId'] ?? null) === 'dormant-report-couplings'
+    ));
+    $test->assertEquals(1, count($dormantCouplingsReports), 'completed dormant construct coupling inspection creates a Manny report alert');
+    $test->assert(str_contains((string) ($dormantCouplingsReports[0]['message'] ?? ''), 'Recovered data: reinforced container coupling design.'), 'dormant construct report describes recovered container-coupling data');
+    $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS)?->available, 'dormant construct coupling report unlocks reinforced container couplings');
+
+    $inspectDormantRandom = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-random',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantRandom->status, 'Manny can inspect a dormant construct without a stored scenario');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $storedRandomConstruct = $sectorRepository->load($dormantInspectionProbe->currentSector)->findObjectById('dormant-report-random');
+    $storedRandomScenario = $storedRandomConstruct instanceof DormantConstruct ? $storedRandomConstruct->toArray()['inspectionScenario'] ?? null : null;
+    $test->assert(in_array($storedRandomScenario, DormantConstruct::inspectionScenarios(), true), 'dormant construct inspection stores the randomly selected scenario in sector JSON');
+    $dormantInspectionScanAfterRandom = $kernel->handle('GET', '/api/probe/sector', $dormantInspectionHeaders);
+    $storedRandomPublicObject = array_values(array_filter(
+        $dormantInspectionScanAfterRandom->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['id'] ?? null) === 'dormant-report-random',
+    ))[0] ?? [];
+    $test->assert(!array_key_exists('inspectionScenario', $storedRandomPublicObject), 'stored dormant construct inspection scenario remains hidden from sector scans');
 }
 
 $stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');
@@ -3361,9 +3725,11 @@ if ($foreignMannyId !== '') {
         ['POST', $foreignMannyPath . '/detach-storage-container', ['containerId' => 'probe-core', 'mode' => 'drifting'], 'POST /api/probe/mannies/{id}/detach-storage-container'],
         ['POST', $foreignMannyPath . '/drop-storage-container', ['containerId' => 'probe-core', 'planetId' => 'current-habitable-planet'], 'POST /api/probe/mannies/{id}/drop-storage-container'],
         ['POST', $foreignMannyPath . '/drop-manny-cargo', [], 'POST /api/probe/mannies/{id}/drop-manny-cargo'],
+        ['POST', $foreignMannyPath . '/inspect-sector-object', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-sector-object'],
         ['POST', $foreignMannyPath . '/inspect-asteroid', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-asteroid'],
         ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
         ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],
+        ['POST', $foreignMannyPath . '/improve-probe', ['improvement' => 'deuterium_compression'], 'POST /api/probe/mannies/{id}/improve-probe'],
         ['POST', $foreignMannyPath . '/recall', [], 'POST /api/probe/mannies/{id}/recall'],
     ] as [$method, $path, $body, $label]) {
         assertForeignMannyEndpointReturnsNotFound($test, $kernel, $headers, $method, $path, $body, $label);
@@ -3441,6 +3807,125 @@ if ($createdProbe !== null) {
     $refillAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals(null, $refillAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed deuterium refill clears the Manny task');
     $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed deuterium refill fills the probe tank');
+
+    $improvementPlayer = $auth->registerPlayerWithPassword('probe-improvement-user', 'secret', 'Probe Improvement User');
+    $improvementHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($improvementPlayer)['token']];
+    $improvementProbe = $probes->findByPlayerId($improvementPlayer->id) ?? throw new RuntimeException('Expected improvement probe.');
+    $improvementMannyList = $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $improvementMannyId = (string) ($improvementMannyList->body['mannies'][0]['id'] ?? '');
+    $improvementMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $improvementMannyRow->execute(['uid' => $improvementMannyId]);
+    $improvementMannyDbId = (int) $improvementMannyRow->fetchColumn();
+
+    $improvementsUnavailable = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals(200, $improvementsUnavailable->status, 'GET /api/probe/probe-improvements-available is available');
+    $test->assertEquals([], $improvementsUnavailable->body['improvements'] ?? null, 'unavailable probe improvements are hidden by default');
+    $improvementsAll = $kernel->handle('GET', '/api/probe/probe-improvements-available?includeAll=1', $improvementHeaders);
+    $test->assertEquals('deuterium_compression', $improvementsAll->body['improvements'][0]['id'] ?? null, 'probe improvements can expose the full catalog when requested');
+    $test->assertEquals(false, $improvementsAll->body['improvements'][0]['available'] ?? null, 'deuterium compression is unavailable by default');
+    $improveUnavailable = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => 'deuterium_compression',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $improveUnavailable->status, 'unavailable probe improvements cannot be started');
+    $test->assertEquals('probe_improvement_unavailable', $improveUnavailable->body['error']['code'] ?? null, 'unavailable probe improvement returns an explicit error');
+
+    $probeImprovements->markAvailable($improvementProbe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION);
+    $availableImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals('deuterium_compression', $availableImprovements->body['improvements'][0]['id'] ?? null, 'available probe improvements are returned by default');
+    $test->assertEquals(300, $availableImprovements->body['improvements'][0]['durationSeconds'] ?? null, 'deuterium compression exposes its configured duration');
+
+    foreach ($items->findByProbeId($improvementProbe->id) as $item) {
+        if (in_array($item->type, [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::TYPE_STEEL_BAR], true)) {
+            $items->delete($item);
+        }
+    }
+    $missingImprovementIngredients = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => 'deuterium_compression',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingImprovementIngredients->status, 'probe improvements require their configured inventory items');
+    $test->assertEquals('insufficient_improvement_ingredients', $missingImprovementIngredients->body['error']['code'] ?? null, 'missing probe-improvement components return an explicit error');
+
+    $improvementMotor = $storage->addItem($improvementProbe, ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006);
+    $improvementBarA = $storage->addItem($improvementProbe, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01);
+    $improvementBarB = $storage->addItem($improvementProbe, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01);
+    $improveManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => 'deuterium_compression',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $improveManny->status, 'POST /api/probe/mannies/{id}/improve-probe starts a probe improvement task');
+    $test->assertEquals('improving_probe', $improveManny->body['manny']['currentTask'] ?? null, 'probe improvement task is exposed on Manny');
+    $test->assertEquals(300, $improveManny->body['manny']['task']['durationSeconds'] ?? null, 'deuterium compression takes five minutes');
+    $test->assertEquals(3, count($improveManny->body['manny']['task']['consumedItems'] ?? []), 'probe improvement task exposes the consumed components');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementMotor->uid), 'probe improvement consumes its electric motor');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementBarA->uid), 'probe improvement consumes its first steel bar');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementBarB->uid), 'probe improvement consumes its second steel bar');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $improvementMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $improvementAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $test->assertEquals(null, $improvementAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed probe improvement clears the Manny task');
+    $completedImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals(true, $completedImprovements->body['improvements'][0]['done'] ?? null, 'completed probe improvement is persisted as done');
+    $probeAfterImprovement = $kernel->handle('GET', '/api/probe', $improvementHeaders);
+    $test->assertEquals(200.0, $probeAfterImprovement->body['probe']['fuel']['maxDeuterium'] ?? null, 'deuterium compression raises the exposed fuel maximum');
+
+    $probeImprovements->markAvailable($improvementProbe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS);
+    $containerCouplingsImprovement = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $containerCouplingsRows = array_values(array_filter(
+        $containerCouplingsImprovement->body['improvements'] ?? [],
+        static fn(array $improvement): bool => ($improvement['id'] ?? null) === ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ));
+    $test->assertEquals('Reinforced container couplings', $containerCouplingsRows[0]['name'] ?? null, 'reinforced container couplings are exposed when available');
+    $test->assertEquals(300, $containerCouplingsRows[0]['durationSeconds'] ?? null, 'reinforced container couplings use the deuterium-compression duration');
+    $test->assertEquals(5, $containerCouplingsRows[0]['effects']['fragileContainerRiskAdditionalContainerDiscount'] ?? null, 'reinforced container couplings expose their movement-risk effect');
+
+    foreach ($items->findByProbeId($improvementProbe->id) as $item) {
+        if ($item->type === ProbeItem::TYPE_INTEGRATED_CIRCUIT) {
+            $items->delete($item);
+        }
+    }
+    $improvementProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $improvementProbe, ['carbon_compounds' => 0.39]);
+    $missingCouplingsCircuit = $storage->addItem($improvementProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
+    $missingCouplingsIngredients = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingCouplingsIngredients->status, 'reinforced container couplings require enough carbon compounds');
+    $test->assertEquals('insufficient_carbon_compounds', $missingCouplingsIngredients->body['error']['code'] ?? null, 'missing carbon compounds return a resource-specific error');
+    $items->delete($missingCouplingsCircuit);
+
+    $improvementProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $improvementProbe, ['carbon_compounds' => 0.4]);
+    $couplingsCircuit = $storage->addItem($improvementProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
+    $improveCouplings = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $improveCouplings->status, 'POST /api/probe/mannies/{id}/improve-probe starts reinforced container couplings');
+    $test->assertEquals(0.4, $improveCouplings->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'reinforced container couplings reserve carbon compounds');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $couplingsCircuit->uid), 'reinforced container couplings consume an integrated circuit');
+    $test->assertEquals(0.0, $probes->findByPlayerId($improvementPlayer->id)?->organicCompoundsStock, 'reinforced container couplings consume 0.4 ECE of carbon compounds');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $improvementMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $completedCouplingsProbe = $probes->findByPlayerId($improvementPlayer->id) ?? throw new RuntimeException('Expected completed couplings probe.');
+    $riskMethod = new ReflectionMethod(ProbeMovementService::class, 'fragileContainerLossRisk');
+    $riskMethod->setAccessible(true);
+    $test->assertEquals(0.0, $riskMethod->invoke($movementService, $completedCouplingsProbe, 9), 'reinforced container couplings prevent risk at nine additional containers');
+    $test->assertEquals(0.1, $riskMethod->invoke($movementService, $completedCouplingsProbe, 10), 'reinforced container couplings start risk at ten additional containers');
+    $improvedDamageRule = $kernel->handle('GET', '/api/probe/damage-warnings', $improvementHeaders);
+    $test->assertEquals(10, $improvedDamageRule->body['rule']['startsAtAdditionalContainers'] ?? null, 'damage-warning rule reflects reinforced container couplings');
+
+    $sectorRepository->save(new SectorContent($improvementProbe->currentSector, [
+        new DeuteriumRefuelStation('improvement-deuterium-station', 'Deuterium refuel station', 'improvement-planet', null, gmdate('c')),
+    ]));
+    $refillImprovedTank = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/refill-deuterium-tank', $improvementHeaders, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $refillImprovedTank->status, 'improved deuterium tank can be refilled above the default maximum');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $improvementMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $test->assertEquals(200.0, $probes->findByPlayerId($improvementPlayer->id)?->deuteriumStock, 'completed improved tank refill fills the probe to 200 percent');
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);
@@ -4095,10 +4580,18 @@ if ($currentProbe !== null) {
     $neighbors = $grid->getNeighbors($currentProbe->currentSector);
     $visitedNeighbor = $neighbors[0];
     $visitedSectors->markVisited($player, $visitedNeighbor);
+    $sectorRepository->save(new SectorContent($visitedNeighbor, [
+        new DormantConstruct('api-visited-dormant-construct'),
+    ]));
     $visitedRelative = $visitedNeighbor->subtract($player->homeSector);
     $visitedResponse = $kernel->handle('GET', '/api/sector?x=' . $visitedRelative['x'] . '&y=' . $visitedRelative['y'] . '&z=' . $visitedRelative['z'], $headers);
     $test->assertEquals(200, $visitedResponse->status, 'visited sector can be consulted through GET /api/sector');
     $test->assertEquals('detailed', $visitedResponse->body['sector']['knowledgeLevel'] ?? null, 'visited sector returns detailed information');
+    $visitedConstructObjects = array_values(array_filter(
+        $visitedResponse->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct',
+    ));
+    $test->assertEquals(1, count($visitedConstructObjects), 'GET /api/sector exposes dormant constructs for detailed visited-sector scans');
 
     $currentProbe->enteredCurrentSectorAt = gmdate('c', time() - 8 * 3600);
     $probes->save($currentProbe);

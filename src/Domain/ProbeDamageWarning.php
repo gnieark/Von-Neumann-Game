@@ -10,13 +10,14 @@ final class ProbeDamageWarning
     public const TYPE_INTELLIGENT_LIFE = 'intelligent_life';
     public const TYPE_SECTOR_OBJECT_DETECTED = 'sector_object_detected';
     public const TYPE_ANOMALY_DETECTED = 'anomaly_detected';
+    public const TYPE_MANNY_REPORT = 'manny_report';
     public const STATUS_UNREAD = 'unread';
     public const STATUS_READ = 'read';
 
     public function __construct(
         public readonly int $id,
         public readonly int $probeId,
-        public readonly int $movementId,
+        public readonly ?int $movementId,
         public readonly string $type,
         public string $status,
         public readonly string $phase,

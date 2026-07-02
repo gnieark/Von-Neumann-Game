@@ -21,6 +21,7 @@ use VonNeumannGame\Sector\SolarSystem;
 use VonNeumannGame\Sector\Star;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\Asteroid;
+use VonNeumannGame\Sector\DormantConstruct;
 
 /**
  * Simple test runner with assertions.
@@ -418,6 +419,15 @@ $generatedDifferent = $contentGenerator->generate($coord110, $contentWorldSeed);
 $test->assertEquals($generatedA->toArray(), $generatedB->toArray(), 'same seed and coordinates generate the same sector content');
 $test->assert($generatedA->toArray() !== $generatedDifferent->toArray(), 'different coordinates generally produce different sector content or metadata');
 
+$constructGenerator = new SectorContentGenerator(['dormantConstruct' => ['chanceDenominator' => 1]]);
+$constructSector = $constructGenerator->generate(new SectorCoordinates(20, 0, 0), 'dormant_construct_seed');
+$constructObjects = array_values(array_filter(
+    $constructSector->getObjects(),
+    static fn($object): bool => $object instanceof DormantConstruct,
+));
+$test->assertCount(1, $constructObjects, 'configured sector generation can add one dormant construct');
+$test->assertEquals('dormant_construct', $constructObjects[0]->getType()->value, 'dormant construct uses the public object type');
+
 $blackHoleSector = findGeneratedSector(
     $contentGenerator,
     'black_hole_search_seed',
@@ -508,6 +518,14 @@ $repository->save($roundTripSector);
 $loadedRoundTrip = $repository->load($negativeCoordinates);
 $expectedLoadedRoundTrip = SectorContent::fromArray($roundTripSector->toArray(), 'loaded');
 $test->assertEquals($expectedLoadedRoundTrip->toArray(), $loadedRoundTrip->toArray(), 'JSON write then read restores the same sector data');
+
+$constructRoundTripCoordinates = new SectorCoordinates(-4, 0, 0);
+$constructRoundTripSector = new SectorContent($constructRoundTripCoordinates, [
+    new DormantConstruct('roundtrip-dormant-construct'),
+]);
+$repository->save($constructRoundTripSector);
+$loadedConstructRoundTrip = $repository->load($constructRoundTripCoordinates);
+$test->assert($loadedConstructRoundTrip->findObjectById('roundtrip-dormant-construct') instanceof DormantConstruct, 'sector storage preserves dormant construct objects');
 
 $mannySector = new SectorContent($coord000, [
     new SectorManny(SectorManny::objectIdForUid('mny_test'), 'manny-test', 'mny_test', SectorManny::STATE_FORGOTTEN),

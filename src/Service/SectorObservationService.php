@@ -15,6 +15,7 @@ use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\DustCloud;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
@@ -262,6 +263,12 @@ final class SectorObservationService
             $data['planetName'] = $object->getPlanetName();
             $data['resourceTypes'] = [ResourceComposition::DEUTERIUM];
             $data['createdAt'] = $object->getCreatedAt();
+        }
+
+        if ($object instanceof DormantConstruct) {
+            $data['apparentOrigin'] = DormantConstruct::APPARENT_ORIGIN;
+            $data['activityStatus'] = DormantConstruct::ACTIVITY_STATUS;
+            $data['knownFunction'] = DormantConstruct::KNOWN_FUNCTION;
         }
 
         if ($object->getWaypointBookmarks() !== []) {
@@ -623,6 +630,7 @@ final class SectorObservationService
             ),
             $object instanceof SectorDetachedContainer => 'Detached storage container detected.',
             $object instanceof DeuteriumRefuelStation => 'Deuterium refuel station detected in orbit.',
+            $object instanceof DormantConstruct => 'Dormant non-natural construct detected; function unknown.',
             default => 'Unknown astronomical object.',
         };
     }

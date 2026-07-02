@@ -2,6 +2,31 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-01
+
+### Changed
+
+- API v67 : ajout du stockage `probe_improvements`, de `GET /api/probe/probe-improvements-available` et de `POST /api/probe/mannies/{mannyId}/improve-probe`; la première amélioration, `deuterium_compression`, consomme 1 `electric_motor` et 2 `steel_bar`, dure 5 minutes et porte la cuve de deutérium à 200 % une fois terminée.
+- API v68 : `POST /api/probe/mannies/{mannyId}/inspect-sector-object` accepte aussi une Manny inactive dans un secteur distant couvert par le même réseau SCUT que la sonde; l’objet inspecté doit se trouver dans le secteur de cette Manny, qui reste oubliée sur place à la fin de l’inspection.
+- API v69 : ajout de l’amélioration `reinforced_container_couplings` via `GET /api/probe/probe-improvements-available` et `POST /api/probe/mannies/{mannyId}/improve-probe`; elle consomme 1 `integrated_circuit` et 0.4 ECE de `carbon_compounds`, dure 5 minutes et ignore 5 containers supplémentaires dans le calcul du risque de rupture de container au déplacement.
+- API v70 : terminer `POST /api/probe/mannies/{mannyId}/inspect-sector-object` sur un `dormant_construct` crée une alerte `manny_report` avec un message de rapport en anglais et débloque soit `deuterium_compression`, soit `reinforced_container_couplings`; le scénario choisi est persisté dans le JSON du secteur sans être exposé dans les scans API.
+- API v71 : `POST /api/probe/mannies/{mannyId}/recover-storage-container` interrompt les Mannys qui minent vers le container récupéré; elles larguent leur cargo minier éventuel et repassent en tâche `returning` avec la raison `target_container_recovered`.
+- API v64 : ajout des objets de secteur `dormant_construct`, exposés uniquement dans les scans détaillés de `/api/probe/sector` et `/api/sector`.
+- API v65 : `POST /api/probe/mannies/{mannyId}/inspect-sector-object` remplace l’action spécialisée `inspect-asteroid`, désormais dépréciée. L’inspection accepte les astéroïdes, les `dormant_construct` et les containers détachés visibles ou déjà découverts; les rapports de contenu de containers créent une alerte `manny_report`.
+- API v66 : l’arrivée d’une sonde dans un secteur contenant un `dormant_construct` crée une alerte persistante `sector_object_detected` en anglais invitant à envoyer une Manny l’inspecter.
+- Génération : les nouveaux secteurs ont désormais 1 chance sur 200 de contenir un `Dormant construct`; `scripts/add-dormant-construct.php` permet d’en ajouter un à un secteur, et `scripts/backfill-dormant-constructs.php` peut compléter les secteurs JSON non visités déjà générés.
+- Interface : `/mannies` propose l’action générique “Inspecter un objet du secteur” et `/alerts` met les rapports de Manny en évidence avec un style dédié.
+- Interface : une Manny inactive dans un secteur distant joignable via SCUT peut désormais recevoir l’action “Inspect a sector object” depuis `/mannies`; la liste des objets inspectables provient du scan `/api/sector` du secteur de la Manny.
+- Interface : `/mannies` regroupe les ordres Manny en accordéons Probe/Sector/Containers/Craft et ajoute “Improve the probe”, avec sélection des améliorations disponibles et vérification des ressources nécessaires.
+
+### Fixed
+
+- Interface : la page Probe affiche désormais une métrique `Améliorations installées`, chargée une seule fois depuis `/api/probe/probe-improvements-available`, avec un résumé des deux premières améliorations et un `+N` si la liste est plus longue.
+- Interface : la métrique Deuterium de la page Probe affiche désormais en petit le plafond amélioré, par exemple `max 200`, quand `fuel.maxDeuterium` dépasse la valeur standard.
+- API : les rapports d’inspection Manny sont idempotents pour une même fin de tâche, afin d’éviter plusieurs alertes `manny_report` identiques quand la complétion est rafraîchie simultanément.
+- API : les rapports d’inspection Manny créés hors déplacement ne provoquent plus d’erreur 500 sur `/api/probe/sector`, `/api/probe/mannies` ou `/api/probe/alerts`; `probe_damage_warnings.movement_id` accepte désormais `NULL` pour ces alertes autonomes.
+- API : les nouveaux rapports Manny de contenu de container sont désormais générés en anglais, y compris quand aucun contenu n’est détecté.
+
 ## 2026-06-28
 
 ### Changed

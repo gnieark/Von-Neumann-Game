@@ -12,13 +12,17 @@ use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContent;
@@ -65,6 +69,8 @@ final class MannyService
         ?WaypointBookmarkService $bookmarks = null,
         private readonly ?MissionService $missions = null,
         private readonly ?ScutNetworkService $scut = null,
+        private readonly ?ProbeDamageWarningRepository $alerts = null,
+        private readonly ?ProbeImprovementRepository $improvements = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
     }
@@ -81,6 +87,11 @@ final class MannyService
         $this->recoverForgottenManniesInCurrentSector($probe);
 
         return $this->mannies->findByProbeId($probe->id);
+    }
+
+    public function maxDeuteriumPercentForProbe(NeumannProbe $probe): float
+    {
+        return $this->maxDeuteriumPercent($probe);
     }
 
     public function renameManny(NeumannProbe $probe, string $uid, string $name): Manny
@@ -351,6 +362,57 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
+    public function startProbeImprovement(NeumannProbe $probe, string $uid, string $improvement): Manny
+    {
+        if ($this->improvements === null) {
+            throw new MannyActionException(500, 'internal_error', 'Probe improvement storage is unavailable.');
+        }
+
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to improve it.');
+        }
+
+        $improvement = ProbeImprovementCatalog::normalizeId($improvement);
+        $definition = ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig());
+        if ($definition === null) {
+            throw new MannyActionException(400, 'invalid_probe_improvement', 'Unknown probe improvement.');
+        }
+
+        $state = $this->improvements->findForProbe($probe->id, $improvement);
+        if ($state === null || (!$state->available && !$state->done)) {
+            throw new MannyActionException(422, 'probe_improvement_unavailable', 'This probe improvement is not available yet.');
+        }
+        if ($state->done) {
+            throw new MannyActionException(409, 'probe_improvement_already_done', 'This probe improvement has already been completed.');
+        }
+
+        $plan = $this->probeImprovementPlan($probe, $definition);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $this->consumeProbeImprovementPlan($probe, $plan);
+        $this->probes->save($probe);
+
+        $manny->currentTask = Manny::TASK_IMPROVING_PROBE;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . (int) $plan['durationSeconds'] . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'improvement' => $improvement,
+            'improvementName' => (string) ($definition['name'] ?? $improvement),
+            'durationSeconds' => (int) $plan['durationSeconds'],
+            'ingredients' => is_array($definition['ingredients'] ?? null) ? $definition['ingredients'] : [],
+            'resourceCosts' => $plan['resourceCosts'],
+            'consumedItems' => $plan['consumedItems'],
+            'effects' => is_array($definition['effects'] ?? null) ? $definition['effects'] : [],
+        ];
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
     public function startSalvage(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
@@ -497,32 +559,41 @@ final class MannyService
         return $this->requiredManny($probe, $uid);
     }
 
-    public function startInspectAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
+    public function startInspectSectorObject(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
         $this->ensureMannyIdle($manny);
         $this->refreshOtherMannyStates($probe, $manny);
-
-        $target = $this->findObjectInCurrentSector($probe, $objectId);
-        if (!$target instanceof Asteroid) {
-            throw new MannyActionException(422, 'invalid_asteroid_target', 'This object cannot be inspected by a Manny.');
+        $remoteViaScut = !$manny->isInSameSectorAs($probe);
+        if ($remoteViaScut && !$this->canOrderRemoteMannyViaScut($probe, $manny)) {
+            $this->ensureMannyInRange($manny, $probe);
+        } elseif (!$remoteViaScut) {
+            $this->ensureMannyInRange($manny, $probe);
         }
 
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        $detection = $this->hiddenDetachedContainerDetection($sector, $objectId, $probe->playerId);
+        $taskSector = $manny->sector ?? $probe->currentSector;
+        $sector = $this->sectors->getOrCreateSector($taskSector);
+        $target = $this->findInspectableSectorObject($sector, $objectId, $probe->playerId);
+        if ($target === null) {
+            throw new MannyActionException(422, 'invalid_sector_object_target', 'This object cannot be inspected by a Manny.');
+        }
+
+        $detection = $target instanceof Asteroid
+            ? $this->hiddenDetachedContainerDetection($sector, $objectId, $probe->playerId)
+            : null;
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $durationSeconds = $this->miningTravelSeconds() * 2;
         $manny->locationType = Manny::LOCATION_SECTOR;
-        $manny->sector = $probe->currentSector;
-        $manny->currentTask = Manny::TASK_INSPECTING_ASTEROID;
+        $manny->sector = $taskSector;
+        $manny->currentTask = Manny::TASK_INSPECTING_SECTOR_OBJECT;
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
         $manny->taskPayload = [
             'objectId' => $objectId,
             'durationSeconds' => $durationSeconds,
             'target' => $this->bookmarkTargetArray($target),
+            'targetMode' => $target instanceof SectorDetachedContainer ? $target->getMode() : null,
         ] + ($detection !== null ? ['artificialObjectDetected' => $detection] : []);
         $this->storage->releaseMannyFromStorage($manny);
         $this->removeMannyFromSector($manny);
@@ -549,6 +620,7 @@ final class MannyService
         }
 
         $reservedDetachedContainer = $this->reserveDetachedContainerForSalvage($probe, $target);
+        $this->recallMiningManniesTargetingDetachedContainer($probe, $manny->id, $objectId);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $salvageSeconds = $this->salvageSeconds();
         $manny->locationType = Manny::LOCATION_SECTOR;
@@ -568,6 +640,36 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
+    }
+
+    private function recallMiningManniesTargetingDetachedContainer(NeumannProbe $probe, int $recoveringMannyId, string $containerId): void
+    {
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if (
+                $manny->id === $recoveringMannyId
+                || $manny->currentTask !== Manny::TASK_MINING
+                || $this->miningTaskTargetContainerId($manny) !== $containerId
+            ) {
+                continue;
+            }
+
+            $returnDurationSeconds = $this->recallReturnDurationSeconds($manny, $now);
+            $droppedCargo = $this->dropWaitingMannyCargo($manny);
+            $this->clearMannyCargo($manny);
+            $manny->currentTask = Manny::TASK_RETURNING;
+            $manny->taskStartedAt = $now->format('c');
+            $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
+            $manny->taskPayload = [
+                'reason' => 'target_container_recovered',
+                'lastTask' => Manny::TASK_MINING,
+                'result' => 'cancelled',
+                'targetContainerId' => $containerId,
+                'droppedCargo' => $droppedCargo,
+            ];
+            $this->removeMannyFromSector($manny);
+            $this->mannies->save($manny);
+        }
     }
 
     public function startWaypointBookmarkInstallation(NeumannProbe $probe, Player $player, string $uid, string $objectId, string $name): Manny
@@ -623,7 +725,7 @@ final class MannyService
         if (!$this->currentSectorHasDeuteriumRefuelStation($probe)) {
             throw new MannyActionException(422, 'deuterium_refuel_station_not_found', 'No deuterium refuel station is available in the current sector.');
         }
-        if ($probe->deuteriumStock >= $this->maxDeuteriumPercent() - 0.0001) {
+        if ($probe->deuteriumStock >= $this->maxDeuteriumPercent($probe) - 0.0001) {
             throw new MannyActionException(409, 'probe_deuterium_full', 'The probe deuterium tank is already full.');
         }
 
@@ -809,6 +911,13 @@ final class MannyService
 
             return $this->requiredManny($probe, $uid);
         }
+        if ($manny->currentTask === Manny::TASK_IMPROVING_PROBE) {
+            $this->refundProbeImprovementCommitment($probe, $manny);
+            $this->clearTask($manny);
+            $this->mannies->save($manny);
+
+            return $this->requiredManny($probe, $uid);
+        }
         if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
             $consumedItem = is_array($manny->taskPayload['consumedItem'] ?? null) ? $manny->taskPayload['consumedItem'] : null;
             if ($consumedItem !== null) {
@@ -887,6 +996,14 @@ final class MannyService
     {
         return $manny->currentTask === Manny::TASK_MINING
             && $this->miningTaskTargetContainerId($manny) !== null
+            && $manny->sector !== null
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
+    }
+
+    private function canRefreshRemoteInspectViaScut(NeumannProbe $probe, Manny $manny): bool
+    {
+        return $manny->currentTask === Manny::TASK_INSPECTING_SECTOR_OBJECT
             && $manny->sector !== null
             && $this->scut !== null
             && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector);
@@ -1019,7 +1136,11 @@ final class MannyService
         if ($manny->currentTask === null) {
             return $manny;
         }
-        if (!$manny->isInSameSectorAs($probe) && !$this->canRefreshRemoteMiningViaScut($probe, $manny)) {
+        if (
+            !$manny->isInSameSectorAs($probe)
+            && !$this->canRefreshRemoteMiningViaScut($probe, $manny)
+            && !$this->canRefreshRemoteInspectViaScut($probe, $manny)
+        ) {
             return $manny;
         }
 
@@ -1046,8 +1167,8 @@ final class MannyService
         if ($manny->currentTask === Manny::TASK_DROPPING_STORAGE_CONTAINER) {
             return $this->refreshDropStorageContainer($manny, $probe, $now);
         }
-        if ($manny->currentTask === Manny::TASK_INSPECTING_ASTEROID) {
-            return $this->refreshInspectAsteroid($manny, $probe, $now);
+        if ($this->isInspectingSectorObjectTask($manny->currentTask)) {
+            return $this->refreshInspectSectorObject($manny, $probe, $now);
         }
         if ($manny->currentTask === Manny::TASK_REFILLING_DEUTERIUM_TANK) {
             return $this->refreshDeuteriumTankRefill($manny, $probe, $now);
@@ -1063,6 +1184,9 @@ final class MannyService
         }
         if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
             return $this->refreshScutRelayTurnOn($manny, $probe, $now);
+        }
+        if ($manny->currentTask === Manny::TASK_IMPROVING_PROBE) {
+            return $this->refreshProbeImprovement($manny, $probe, $now);
         }
 
         return $manny;
@@ -1287,6 +1411,58 @@ final class MannyService
     }
 
     /**
+     * @param array<string, mixed> $definition
+     * @return array<string, mixed>
+     */
+    private function probeImprovementPlan(NeumannProbe $probe, array $definition): array
+    {
+        $resourceCosts = [];
+        $itemsToConsume = [];
+        $consumedItems = [];
+        $itemsByType = $this->probeItemsByType($probe);
+        $ingredients = is_array($definition['ingredients'] ?? null) ? $definition['ingredients'] : [];
+        foreach ($ingredients as $ingredient) {
+            if (!is_array($ingredient)) {
+                continue;
+            }
+            $type = (string) ($ingredient['type'] ?? '');
+            if ($type === '') {
+                continue;
+            }
+
+            $quantity = max(0.0, (float) ($ingredient['quantity'] ?? 0));
+            if ($this->craftingIngredientKind($ingredient) !== 'item') {
+                $this->addResourceCost($resourceCosts, $this->normalizeCraftResourceType($type), $quantity);
+                continue;
+            }
+
+            $requiredCount = (int) ceil($quantity);
+            $availableItems = $itemsByType[$type] ?? [];
+            if (count($availableItems) < $requiredCount) {
+                throw new MannyActionException(422, 'insufficient_improvement_ingredients', 'Insufficient probe inventory for this improvement.');
+            }
+            for ($index = 0; $index < $requiredCount; $index++) {
+                $item = array_shift($availableItems);
+                if (!$item instanceof ProbeItem) {
+                    continue;
+                }
+                $itemsToConsume[] = $item;
+                $consumedItems[] = $this->consumedItemPayload($item);
+            }
+            $itemsByType[$type] = $availableItems;
+        }
+
+        $this->ensureResourceCostsAvailable($probe, $resourceCosts);
+
+        return [
+            'durationSeconds' => max(1, (int) ($definition['durationSeconds'] ?? 1)),
+            'resourceCosts' => $resourceCosts,
+            'itemsToConsume' => $itemsToConsume,
+            'consumedItems' => $consumedItems,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $recipeDefinition
      * @param array<string, array<ProbeItem>> $itemsByType
      * @param array<ProbeItem> $itemsToConsume
@@ -1497,6 +1673,14 @@ final class MannyService
                 $this->items->delete($item);
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $plan
+     */
+    private function consumeProbeImprovementPlan(NeumannProbe $probe, array $plan): void
+    {
+        $this->consumeCraftingPlan($probe, $plan);
     }
 
     private function subtractResourceFromProbe(NeumannProbe $probe, string $type, float $quantity): void
@@ -1713,6 +1897,11 @@ final class MannyService
         if ($refundedResources) {
             $this->probes->save($probe);
         }
+    }
+
+    private function refundProbeImprovementCommitment(NeumannProbe $probe, Manny $manny): void
+    {
+        $this->refundCraftingCommitment($probe, $manny);
     }
 
     /**
@@ -2042,6 +2231,36 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
+    private function refreshProbeImprovement(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+        if ($this->improvements === null) {
+            throw new MannyActionException(500, 'internal_error', 'Probe improvement storage is unavailable.');
+        }
+
+        $improvement = ProbeImprovementCatalog::normalizeId((string) ($manny->taskPayload['improvement'] ?? ''));
+        $result = [
+            'lastTask' => Manny::TASK_IMPROVING_PROBE,
+            'improvement' => $improvement,
+        ];
+
+        if (ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig()) === null) {
+            $result['result'] = 'failed';
+            $result['failureReason'] = 'invalid_probe_improvement';
+        } else {
+            $this->improvements->markDone($probe->id, $improvement);
+            $result['result'] = 'success';
+            $result['effects'] = is_array($manny->taskPayload['effects'] ?? null) ? $manny->taskPayload['effects'] : [];
+        }
+
+        $this->clearTask($manny, $result);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
     private function refreshWaypointBookmarkInstallation(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
@@ -2196,20 +2415,62 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshInspectAsteroid(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    private function refreshInspectSectorObject(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
         }
 
         $sector = $this->sectors->getOrCreateSector($manny->sector ?? $probe->currentSector);
-        $detection = $this->hiddenDetachedContainerDetection($sector, (string) ($manny->taskPayload['objectId'] ?? ''), $probe->playerId);
+        $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
+        $target = $this->findInspectableSectorObject($sector, $objectId, $probe->playerId);
+        $detection = $target instanceof Asteroid
+            ? $this->hiddenDetachedContainerDetection($sector, $objectId, $probe->playerId)
+            : null;
         $result = [
-            'lastTask' => Manny::TASK_INSPECTING_ASTEROID,
+            'lastTask' => Manny::TASK_INSPECTING_SECTOR_OBJECT,
             'result' => 'success',
-            'objectId' => (string) ($manny->taskPayload['objectId'] ?? ''),
+            'objectId' => $objectId,
             'target' => $manny->taskPayload['target'] ?? null,
         ] + ($detection !== null ? ['artificialObjectDetected' => $detection] : []);
+        $reportScheduledAt = is_string($manny->taskEndsAt) && trim($manny->taskEndsAt) !== ''
+            ? $manny->taskEndsAt
+            : null;
+        if ($target === null) {
+            $result['result'] = 'failed';
+            $result['failureReason'] = 'target_unavailable';
+        } elseif ($target instanceof SectorDetachedContainer) {
+            $report = $this->detachedContainerInspectionReport($target);
+            $result['containerReport'] = $report;
+            $this->alerts?->createMannyReportAlert(
+                $probe->id,
+                $sector->getCoordinates(),
+                $target->getId(),
+                (string) ($target->getName() ?? $target->getId()),
+                $report['message'],
+                scheduledAt: $reportScheduledAt,
+            );
+        } elseif ($target instanceof DormantConstruct) {
+            $report = $this->dormantConstructInspectionReport($probe, $sector, $target);
+            $this->alerts?->createMannyReportAlert(
+                $probe->id,
+                $sector->getCoordinates(),
+                $target->getId(),
+                (string) ($target->getName() ?? $target->getId()),
+                $report['message'],
+                'dormant_construct',
+                $reportScheduledAt,
+            );
+        }
+
+        if (!$manny->isInSameSectorAs($probe)) {
+            $this->clearTask($manny, $result);
+            $manny->locationType = Manny::LOCATION_SECTOR;
+            $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
 
         if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
             $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe'] + $result);
@@ -2227,13 +2488,18 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
+    private function isInspectingSectorObjectTask(?string $task): bool
+    {
+        return $task === Manny::TASK_INSPECTING_SECTOR_OBJECT || $task === 'inspecting_asteroid';
+    }
+
     private function refreshDeuteriumTankRefill(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
         }
 
-        $probe->deuteriumStock = $this->maxDeuteriumPercent();
+        $probe->deuteriumStock = $this->maxDeuteriumPercent($probe);
         $this->probes->save($probe);
         $this->clearTask($manny, [
             'lastTask' => Manny::TASK_REFILLING_DEUTERIUM_TANK,
@@ -2362,6 +2628,24 @@ final class MannyService
     private function findObjectInCurrentSector(NeumannProbe $probe, string $objectId): ?UniverseObject
     {
         return $this->sectors->getOrCreateSector($probe->currentSector)->findObjectById($objectId);
+    }
+
+    private function findInspectableSectorObject(SectorContent $sector, string $objectId, int $playerId): ?UniverseObject
+    {
+        $target = $sector->findObjectById($objectId);
+        if ($target instanceof Asteroid || $target instanceof DormantConstruct) {
+            return $target;
+        }
+        if ($target instanceof SectorDetachedContainer && $target->getMode() === SectorDetachedContainer::MODE_DRIFTING) {
+            return $target;
+        }
+
+        $hidden = $sector->findHiddenDetachedContainerById($objectId);
+        if ($hidden instanceof SectorDetachedContainer && $hidden->isDiscoveredByPlayer($playerId)) {
+            return $hidden;
+        }
+
+        return null;
     }
 
     private function findScutRelayInCurrentSector(NeumannProbe $probe, string $objectId): ?ScutRelay
@@ -2508,6 +2792,130 @@ final class MannyService
             'capacityUnit' => $container->getCapacityUnit(),
             'salvageable' => $container->getMode() === SectorDetachedContainer::MODE_DRIFTING,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function detachedContainerInspectionReport(SectorDetachedContainer $container): array
+    {
+        $payload = $container->getPayload();
+        $resources = [];
+        foreach (is_array($payload['resources'] ?? null) ? $payload['resources'] : [] as $type => $amount) {
+            if (!is_numeric($amount) || (float) $amount <= 0.0) {
+                continue;
+            }
+            $resources[(string) $type] = round((float) $amount, 4);
+        }
+
+        $items = [];
+        foreach (is_array($payload['items'] ?? null) ? $payload['items'] : [] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $type = (string) ($item['type'] ?? '');
+            $name = (string) ($item['name'] ?? $this->itemDisplayName($type));
+            $key = $type . '|' . $name;
+            $items[$key] ??= [
+                'type' => $type,
+                'name' => $name,
+                'quantity' => 0,
+                'containerSpace' => 0.0,
+            ];
+            $items[$key]['quantity']++;
+            $items[$key]['containerSpace'] = round(
+                (float) $items[$key]['containerSpace'] + max(0.0, (float) ($item['containerSpace'] ?? 0.0)),
+                4,
+            );
+        }
+        $items = array_values($items);
+
+        $label = (string) ($container->getName() ?? $container->getId());
+        $messageParts = [];
+        if ($resources !== []) {
+            $messageParts[] = 'resources: ' . implode(', ', array_map(
+                fn(string $type, float $amount): string => $this->resourceReportLabel($type) . ' ' . $this->amountReportLabel($amount),
+                array_keys($resources),
+                array_values($resources),
+            ));
+        }
+        if ($items !== []) {
+            $messageParts[] = 'items: ' . implode(', ', array_map(
+                static fn(array $item): string => (string) ($item['name'] ?? $item['type'] ?? 'item') . ' x' . (int) ($item['quantity'] ?? 0),
+                $items,
+            ));
+        }
+        if ($messageParts === []) {
+            $messageParts[] = 'no contents detected';
+        }
+
+        $message = 'Manny report: contents of ' . $label
+            . ":\n- " . implode("\n- ", $messageParts);
+
+        return [
+            'objectId' => $container->getId(),
+            'mode' => $container->getMode(),
+            'targetObjectId' => $container->getTargetObjectId(),
+            'resources' => $resources,
+            'items' => $items,
+            'message' => $message,
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function dormantConstructInspectionReport(NeumannProbe $probe, SectorContent $sector, DormantConstruct $construct): array
+    {
+        $scenario = $construct->getInspectionScenario();
+        if ($scenario === null) {
+            $scenarios = DormantConstruct::inspectionScenarios();
+            $scenario = $scenarios[random_int(0, count($scenarios) - 1)];
+            $construct = $construct->withInspectionScenario($scenario);
+            if ($sector->replaceObject($construct)) {
+                $this->sectors->saveSector($sector);
+            }
+        }
+
+        $this->improvements?->markAvailable($probe->id, $scenario);
+
+        return [
+            'scenario' => $scenario,
+            'message' => $this->dormantConstructReportMessage($scenario),
+        ];
+    }
+
+    private function dormantConstructReportMessage(string $scenario): string
+    {
+        return match ($scenario) {
+            ProbeImprovementCatalog::DEUTERIUM_COMPRESSION => "Manny report\n\n"
+                . "The structure is artificial. Its geometry faintly echoes our own probe, but the underlying architecture follows a completely different lineage.\n\n"
+                . "Several compartments show the marks of methodical dismantling rather than impact damage. A deuterium storage vessel contains density gradients that should not remain stable under ordinary tank geometry.\n\n"
+                . "Recovered data: deuterium compression principles.\n\n"
+                . "Probe improvement unlocked: Deuterium compression.",
+            ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS => "Manny report\n\n"
+                . "The structure is artificial. Its internal layout resembles a modular warehouse more than a vessel: linked storage bays, load-bearing rails, and repeated coupling sockets.\n\n"
+                . "Manny analysis focused on the module fasteners. The recovered pattern describes a more tolerant coupling geometry for external containers under movement stress.\n\n"
+                . "Recovered data: reinforced container coupling design.\n\n"
+                . "Probe improvement unlocked: Reinforced container couplings.",
+            default => "Manny report\n\nThe structure is artificial, but the recovered data could not be classified.",
+        };
+    }
+
+    private function resourceReportLabel(string $type): string
+    {
+        return match ($type) {
+            ResourceComposition::DEUTERIUM => 'deutérium',
+            ResourceComposition::METALS => 'métaux',
+            ResourceComposition::ICE => 'glace',
+            ResourceComposition::CARBON_COMPOUNDS => 'composés carbonés',
+            default => $type,
+        };
+    }
+
+    private function amountReportLabel(float $amount): string
+    {
+        return rtrim(rtrim(number_format($amount, 4, '.', ''), '0'), '.') . ' ECE';
     }
 
     /**
@@ -3690,9 +4098,28 @@ final class MannyService
         return max(0.0001, Config::float($this->config, 'probe.maxIntegrityPercent', self::MAX_INTEGRITY_PERCENT));
     }
 
-    private function maxDeuteriumPercent(): float
+    private function maxDeuteriumPercent(?NeumannProbe $probe = null): float
     {
-        return max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        $max = max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        if (
+            $probe !== null
+            && $this->improvements !== null
+            && $this->improvements->isDone($probe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION)
+        ) {
+            $definition = ProbeImprovementCatalog::find(ProbeImprovementCatalog::DEUTERIUM_COMPRESSION, $this->probeImprovementConfig());
+            $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
+            $max = max($max, (float) ($effects['maxDeuteriumPercent'] ?? ProbeImprovementCatalog::DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT));
+        }
+
+        return $max;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function probeImprovementConfig(): array
+    {
+        return is_array($this->config['probeImprovements'] ?? null) ? $this->config['probeImprovements'] : [];
     }
 
     private function mannyCargoArray(Manny $manny): array

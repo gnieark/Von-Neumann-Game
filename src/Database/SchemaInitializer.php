@@ -129,6 +129,18 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_probe_id ON probe_items(probe_id)",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_uid ON probe_items(uid)",
+            "CREATE TABLE IF NOT EXISTS probe_improvements (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                improvement $text NOT NULL,
+                available $boolean,
+                done $boolean,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(probe_id, improvement),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_improvements_probe_id ON probe_improvements(probe_id)",
             "CREATE TABLE IF NOT EXISTS storage_containers (
                 id $id,
                 uid $text NOT NULL,
@@ -246,7 +258,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS probe_damage_warnings (
                 id $id,
                 probe_id INTEGER NOT NULL,
-                movement_id INTEGER NOT NULL,
+                movement_id INTEGER NULL,
                 type $text NOT NULL,
                 status $text NOT NULL,
                 phase $text NOT NULL,
@@ -435,6 +447,7 @@ final class SchemaInitializer
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureProbeMessageSchema($pdo);
             $this->ensureScutSchema($pdo);
+            $this->ensureProbeImprovementSchema($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
@@ -462,9 +475,33 @@ final class SchemaInitializer
             $this->ensureMysqlColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER updated_at');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
+            $this->ensureMysqlProbeDamageWarningMovementNullable($pdo);
             $this->ensureProbeMessageSchema($pdo);
             $this->ensureScutSchema($pdo);
+            $this->ensureProbeImprovementSchema($pdo);
         }
+    }
+
+    private function ensureProbeImprovementSchema(PDO $pdo): void
+    {
+        $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
+
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS probe_improvements (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                improvement $text NOT NULL,
+                available $boolean,
+                done $boolean,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(probe_id, improvement),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_improvements_probe_id ON probe_improvements(probe_id)');
     }
 
     private function ensureScutSchema(PDO $pdo): void
@@ -730,7 +767,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS probe_damage_warnings (
                 id $id,
                 probe_id INTEGER NOT NULL,
-                movement_id INTEGER NOT NULL,
+                movement_id INTEGER NULL,
                 type $text NOT NULL,
                 status $text NOT NULL,
                 phase $text NOT NULL,
@@ -754,6 +791,21 @@ final class SchemaInitializer
         );
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_probe_status ON probe_damage_warnings(probe_id, status, created_at)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_movement ON probe_damage_warnings(movement_id)');
+    }
+
+    private function ensureMysqlProbeDamageWarningMovementNullable(PDO $pdo): void
+    {
+        if ($this->driver !== 'mysql') {
+            return;
+        }
+
+        $stmt = $pdo->query("SHOW COLUMNS FROM probe_damage_warnings WHERE Field = 'movement_id'");
+        $column = $stmt !== false ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        if (!is_array($column) || strtoupper((string) ($column['Null'] ?? 'YES')) === 'YES') {
+            return;
+        }
+
+        $pdo->exec('ALTER TABLE probe_damage_warnings MODIFY movement_id INTEGER NULL');
     }
 
     private function ensureStorageSchema(PDO $pdo): void

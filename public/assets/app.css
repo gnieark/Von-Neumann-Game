@@ -1181,7 +1181,8 @@ button.account-menu-item {
 }
 
 .metric > span,
-.metric b {
+.metric b,
+.metric .metric-secondary {
     position: relative;
     z-index: 1;
 }
@@ -1213,6 +1214,16 @@ button.account-menu-item {
     font-weight: 600;
     line-height: 1.35;
     white-space: pre-line;
+}
+
+.metric .metric-secondary {
+    display: block;
+    margin-top: 4px;
+    color: rgba(179, 255, 165, .68);
+    font-size: .72rem;
+    font-weight: 700;
+    line-height: 1.1;
+    text-transform: lowercase;
 }
 
 .interactive-metric {
@@ -1500,6 +1511,7 @@ button.account-menu-item {
 .sector-bookmark-alert,
 .sector-probe-alert,
 .sector-detached-container-alert,
+.sector-manny-report-alert,
 .sector-damage-alert {
     display: flex;
     align-items: center;
@@ -1518,6 +1530,7 @@ button.account-menu-item {
 .sector-bookmark-alert[hidden],
 .sector-probe-alert[hidden],
 .sector-detached-container-alert[hidden],
+.sector-manny-report-alert[hidden],
 .sector-damage-alert[hidden] {
     display: none;
 }
@@ -1526,6 +1539,7 @@ button.account-menu-item {
 .sector-bookmark-alert.acknowledged,
 .sector-probe-alert.acknowledged,
 .sector-detached-container-alert.acknowledged,
+.sector-manny-report-alert.acknowledged,
 .sector-damage-alert.acknowledged {
     animation: none;
     border-color: rgba(143, 182, 189, .28);
@@ -1541,6 +1555,15 @@ button.account-menu-item {
     background: rgba(255, 176, 32, .18);
     color: #ffe4b3;
     box-shadow: 0 0 0 1px rgba(255, 176, 32, .32), 0 0 20px rgba(255, 176, 32, .28);
+}
+
+.sector-manny-report-alert:not(.acknowledged) {
+    animation: none;
+    border-color: #6fd6ff;
+    background: rgba(83, 185, 230, .16);
+    color: #d3f5ff;
+    text-transform: none;
+    box-shadow: 0 0 0 1px rgba(111, 214, 255, .24), 0 0 14px rgba(111, 214, 255, .18);
 }
 
 .sector-alert-message {
@@ -2531,6 +2554,11 @@ button.account-menu-item {
     border-color: rgba(143,182,189,.45);
 }
 
+.manny-action-group > .manny-action-accordion-trigger {
+    background: rgba(143,182,189,.1);
+    font-weight: 700;
+}
+
 .manny-action-accordion-trigger::after {
     content: "+";
     position: absolute;
@@ -2558,6 +2586,14 @@ button.account-menu-item {
     display: none;
 }
 
+.manny-action-group-panel {
+    background: rgba(255,255,255,.025);
+}
+
+.manny-action-group-panel .manny-action-section + .manny-action-section {
+    padding-top: 10px;
+}
+
 .manny-task-panel p {
     margin: 0;
     color: var(--muted);
@@ -2580,11 +2616,13 @@ button.account-menu-item {
 
 .manny-mine-hint,
 .manny-salvage-hint,
-.manny-inspect-asteroid-hint,
+.manny-inspect-sector-object-hint,
 .manny-detach-storage-hint,
 .manny-recover-storage-container-hint,
 .manny-bookmark-hint,
 .manny-craft-description,
+.manny-probe-improvement-description,
+.manny-probe-improvement-empty,
 .printer-craft-hint {
     grid-column: 1 / -1;
     margin: 0;
@@ -2605,6 +2643,10 @@ button.account-menu-item {
     color: var(--muted);
     font-size: .85rem;
     line-height: 1.4;
+}
+
+.manny-probe-improvement-ingredients {
+    grid-column: 1 / -1;
 }
 
 .manny-craft-ingredients-title {

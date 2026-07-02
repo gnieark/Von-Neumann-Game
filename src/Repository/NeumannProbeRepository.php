@@ -251,7 +251,7 @@ final class NeumannProbeRepository
             ProbeStatus::from((string) $row['status']),
             max(0.0, min($this->maxIntegrityPercent(), (float) $row['integrity_percent'])),
             (float) $row['energy_stored'],
-            max(0.0, min($this->maxDeuteriumPercent(), (float) ($row['deuterium_stock'] ?? $this->initialDeuteriumPercent()))),
+            max(0.0, (float) ($row['deuterium_stock'] ?? $this->initialDeuteriumPercent())),
             (float) ($row['metals_stock'] ?? 0),
             (float) ($row['ice_stock'] ?? 0),
             (float) ($row['organic_compounds_stock'] ?? 0),

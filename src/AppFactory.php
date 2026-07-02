@@ -21,6 +21,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
@@ -78,6 +79,7 @@ final class AppFactory
         $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
         $mannies = new MannyRepository($pdo, $gameplayConfig);
         $items = new ProbeItemRepository($pdo);
+        $improvements = new ProbeImprovementRepository($pdo);
         $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
         $messages = new ProbeMessageRepository($pdo);
         $scutRelays = new ScutRelayRepository($pdo);
@@ -96,14 +98,14 @@ final class AppFactory
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig, mannies: $mannies);
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
-        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
+        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
 
-        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig);
+        return new ApiKernel($auth, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService
@@ -125,9 +127,10 @@ final class AppFactory
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
-        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
+        $improvements = new ProbeImprovementRepository($pdo);
+        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, new PlayerRepository($pdo));
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
 
         return new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
     }

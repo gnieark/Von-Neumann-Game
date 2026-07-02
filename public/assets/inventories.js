@@ -93,7 +93,8 @@
             "moving_storage": tr("movingStorage", "Moving storage"),
             "installing_waypoint_bookmark": tr("installingWaypointBookmark", "Installing waypoint bookmark"),
             "detaching_storage_container": tr("detachingStorageContainer", "Detaching storage container"),
-            "inspecting_asteroid": tr("inspectingAsteroid", "Inspecting asteroid"),
+            "inspecting_sector_object": tr("inspectingSectorObject", "Inspecting sector object"),
+            "inspecting_asteroid": tr("inspectingSectorObject", "Inspecting sector object"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
         }[task] || task || tr("noTask", "None");

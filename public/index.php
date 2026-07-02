@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260629-mannies-recover-sector-objects';
+const ASSET_VERSION = '20260702-probe-improvements-metric';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
