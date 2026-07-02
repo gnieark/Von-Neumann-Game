@@ -399,7 +399,9 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-a
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'renderRemoteMannyActionForms'), 'mannies JS renders a limited remote action panel for idle same-SCUT Mannys');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-require-external-storage'), 'mannies JS can require detached-container storage for remote mining forms');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/api/sector?'), 'mannies JS loads remote same-SCUT Manny sector details through relative-sector scans');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-mine'), 'mannies JS exposes only the remote mining action for idle same-SCUT Mannys');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-mine'), 'mannies JS exposes remote mining for idle same-SCUT Mannys');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-inspect-sector-object'), 'mannies JS exposes remote sector-object inspection for idle same-SCUT Mannys');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargetsFromObjects'), 'mannies JS builds remote inspection targets from the Manny sector scan');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'abandonRemoteMannyTask'), 'mannies JS relabels remote SCUT-visible recall actions without changing the endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
@@ -439,7 +441,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260701-manny-sector-object-inspection"), 'asset version is bumped for Manny sector-object inspection UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260702-remote-manny-inspection"), 'asset version is bumped for remote Manny inspection UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

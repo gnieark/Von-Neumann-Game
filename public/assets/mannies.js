@@ -107,6 +107,7 @@
                 "deuteriumRefuelStationAvailable": sectorHasDeuteriumRefuelStation(),
                 "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
                 "remoteSectorMine": remoteMannyMineStateHash(item),
+                "remoteSectorInspect": remoteMannyInspectStateHash(item),
             },
         }));
 
@@ -437,7 +438,7 @@
         });
     }
 
-    function asteroidTargets() {
+    function asteroidTargetsFromObjects(objects) {
         const targets = [];
         const seen = new Set();
         const collect = (object) => {
@@ -455,11 +456,15 @@
             });
         };
 
-        state.currentSectorObjects.forEach(collect);
+        (Array.isArray(objects) ? objects : []).forEach(collect);
         return targets;
     }
 
-    function planetTargets() {
+    function asteroidTargets() {
+        return asteroidTargetsFromObjects(state.currentSectorObjects);
+    }
+
+    function planetTargetsFromObjects(objects) {
         const targets = [];
         const seen = new Set();
         const collect = (object) => {
@@ -477,8 +482,12 @@
             });
         };
 
-        state.currentSectorObjects.forEach(collect);
+        (Array.isArray(objects) ? objects : []).forEach(collect);
         return targets;
+    }
+
+    function planetTargets() {
+        return planetTargetsFromObjects(state.currentSectorObjects);
     }
 
     function sectorHasDeuteriumRefuelStation() {
@@ -572,7 +581,7 @@
         return detachedContainerTargetsFromObjects(state.currentSectorObjects);
     }
 
-    function sectorObjectInspectionTargets() {
+    function sectorObjectInspectionTargetsFromObjects(objects, detachedTargets) {
         const targets = [];
         const seen = new Set();
         const add = (target) => {
@@ -583,13 +592,18 @@
             targets.push(target);
         };
 
-        asteroidTargets().forEach(add);
-        detectedDetachedContainerTargets().forEach((target) => add(Object.assign({"type": "detached_container"}, target)));
-        (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
+        asteroidTargetsFromObjects(objects).forEach(add);
+        (Array.isArray(detachedTargets) ? detachedTargets : detachedContainerTargetsFromObjects(objects))
+            .forEach((target) => add(Object.assign({"type": "detached_container"}, target)));
+        (Array.isArray(objects) ? objects : [])
             .filter((object) => object && object.type === "dormant_construct" && object.id)
             .forEach(add);
 
         return targets;
+    }
+
+    function sectorObjectInspectionTargets() {
+        return sectorObjectInspectionTargetsFromObjects(state.currentSectorObjects, detectedDetachedContainerTargets());
     }
 
     function detachedContainerTargetsFromObjects(objects) {
@@ -1536,6 +1550,31 @@
         });
     }
 
+    function remoteMannyInspectContext(manny) {
+        const key = relativeSectorKey(mannyRelativeSector(manny));
+        const scan = remoteSectorScanForKey(key);
+        const objects = scan && Array.isArray(scan.objects) ? scan.objects : [];
+
+        return {
+            "key": key,
+            "status": scan ? scan.status : "loading",
+            "targets": sectorObjectInspectionTargetsFromObjects(objects),
+        };
+    }
+
+    function remoteMannyInspectStateHash(manny) {
+        if (!mannyRemoteIdleViaScut(manny)) {
+            return "";
+        }
+        const context = remoteMannyInspectContext(manny);
+
+        return stableHashPayload({
+            "key": context.key,
+            "status": context.status,
+            "targets": context.targets.map((target) => target.id),
+        });
+    }
+
     function renderMineFormWithContext(context) {
         const targets = Array.isArray(context && context.targets) ? context.targets : state.currentMannyMineTargets;
         const storageTargets = Array.isArray(context && context.storageTargets) ? context.storageTargets : detectedDetachedContainerTargets();
@@ -1616,8 +1655,7 @@
         )).join("");
     }
 
-    function sectorObjectInspectionTargetOptions(selected) {
-        const targets = sectorObjectInspectionTargets();
+    function sectorObjectInspectionTargetOptionsForTargets(targets, selected) {
         if (targets.length === 0) {
             return "<option value=\"\">-</option>";
         }
@@ -1629,15 +1667,39 @@
         )).join("");
     }
 
-    function renderInspectSectorObjectForm() {
-        const targets = sectorObjectInspectionTargets();
-        const hasTarget = targets.length > 0;
+    function sectorObjectInspectionTargetOptions(selected) {
+        return sectorObjectInspectionTargetOptionsForTargets(sectorObjectInspectionTargets(), selected);
+    }
 
-        return "<form class=\"manny-inspect-sector-object-form manny-form\">"
-            + "<label>" + escaped(tr("sectorObject", "Sector object")) + "<select class=\"manny-inspect-sector-object-target\" name=\"objectId\">" + sectorObjectInspectionTargetOptions("") + "</select></label>"
+    function renderInspectSectorObjectFormWithContext(context) {
+        const targets = Array.isArray(context && context.targets) ? context.targets : sectorObjectInspectionTargets();
+        const sectorKey = context && context.sectorKey ? context.sectorKey : "";
+        const status = context && context.status ? context.status : "loaded";
+        const hasTarget = targets.length > 0;
+        const hint = status === "unavailable"
+            ? tr("remoteMannySectorUnavailable", "Remote sector data is unavailable.")
+            : (hasTarget
+                ? tr("inspectSectorObjectHint", "Inspection can reveal hidden containers or report detached-container contents.")
+                : tr("noSectorObjectInspectionTarget", "No inspectable object available in the current sector."));
+
+        return "<form class=\"manny-inspect-sector-object-form manny-form\" data-sector-key=\"" + escaped(sectorKey) + "\">"
+            + "<label>" + escaped(tr("sectorObject", "Sector object")) + "<select class=\"manny-inspect-sector-object-target\" name=\"objectId\">" + sectorObjectInspectionTargetOptionsForTargets(targets, "") + "</select></label>"
             + "<button class=\"manny-inspect-sector-object-button\" type=\"submit\"" + (hasTarget ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("inspectSectorObject", "Inspect")) + "</button>"
-            + "<p class=\"manny-inspect-sector-object-hint\">" + escaped(hasTarget ? tr("inspectSectorObjectHint", "Inspection can reveal hidden containers or report detached-container contents.") : tr("noSectorObjectInspectionTarget", "No inspectable object available in the current sector.")) + "</p>"
+            + "<p class=\"manny-inspect-sector-object-hint\">" + escaped(hint) + "</p>"
             + "</form>";
+    }
+
+    function renderInspectSectorObjectForm() {
+        return renderInspectSectorObjectFormWithContext({});
+    }
+
+    function renderRemoteInspectSectorObjectForm(manny) {
+        const context = remoteMannyInspectContext(manny);
+        return renderInspectSectorObjectFormWithContext({
+            "targets": context.targets,
+            "sectorKey": context.key,
+            "status": context.status,
+        });
     }
 
     function detachStorageContainerOptions(selected) {
@@ -1859,6 +1921,12 @@
                 tr("miningActionTitle", "Mine the sector"),
                 "remote-mine",
                 renderRemoteMineForm(manny)
+            )
+            + renderMannyActionAccordion(
+                prefix + "-inspect-sector-object",
+                tr("inspectSectorObjectActionTitle", "Inspect a sector object"),
+                "remote-inspect-sector-object",
+                renderRemoteInspectSectorObjectForm(manny)
             )
             + "</div>";
     }
@@ -2278,9 +2346,10 @@
             const button = form.querySelector(".manny-inspect-sector-object-button");
             const hint = form.querySelector(".manny-inspect-sector-object-hint");
             const selected = targetSelect ? targetSelect.value : "";
-            const targets = sectorObjectInspectionTargets();
+            const targets = sectorObjectInspectionTargetsForForm(form);
+            const remoteScan = form.dataset.sectorKey ? remoteSectorScanForKey(form.dataset.sectorKey) : null;
             if (targetSelect) {
-                targetSelect.innerHTML = sectorObjectInspectionTargetOptions(selected);
+                targetSelect.innerHTML = sectorObjectInspectionTargetOptionsForTargets(targets, selected);
                 if (!targets.some((target) => target.id === targetSelect.value)) {
                     targetSelect.value = targets[0] ? targets[0].id : "";
                 }
@@ -2290,11 +2359,22 @@
                 button.setAttribute("aria-disabled", targets.length === 0 ? "true" : "false");
             }
             if (hint) {
-                hint.textContent = targets.length > 0
+                hint.textContent = remoteScan && remoteScan.status === "unavailable"
+                    ? tr("remoteMannySectorUnavailable", "Remote sector data is unavailable.")
+                    : (targets.length > 0
                     ? tr("inspectSectorObjectHint", "Inspection can reveal hidden containers or report detached-container contents.")
-                    : tr("noSectorObjectInspectionTarget", "No inspectable object available in the current sector.");
+                    : tr("noSectorObjectInspectionTarget", "No inspectable object available in the current sector."));
             }
         });
+    }
+
+    function sectorObjectInspectionTargetsForForm(form) {
+        if (form && form.dataset.sectorKey) {
+            const scan = remoteSectorScanForKey(form.dataset.sectorKey || "");
+            return sectorObjectInspectionTargetsFromObjects(scan && Array.isArray(scan.objects) ? scan.objects : []);
+        }
+
+        return sectorObjectInspectionTargets();
     }
 
     function updateMannyDetachStorageContainerForms() {

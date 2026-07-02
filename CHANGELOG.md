@@ -15,6 +15,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v66 : l’arrivée d’une sonde dans un secteur contenant un `dormant_construct` crée une alerte persistante `sector_object_detected` en anglais invitant à envoyer une Manny l’inspecter.
 - Génération : les nouveaux secteurs ont désormais 1 chance sur 200 de contenir un `Dormant construct`; `scripts/add-dormant-construct.php` permet d’en ajouter un à un secteur, et `scripts/backfill-dormant-constructs.php` peut compléter les secteurs JSON non visités déjà générés.
 - Interface : `/mannies` propose l’action générique “Inspecter un objet du secteur” et `/alerts` met les rapports de Manny en évidence avec un style dédié.
+- Interface : une Manny inactive dans un secteur distant joignable via SCUT peut désormais recevoir l’action “Inspect a sector object” depuis `/mannies`; la liste des objets inspectables provient du scan `/api/sector` du secteur de la Manny.
 
 ### Fixed
 
