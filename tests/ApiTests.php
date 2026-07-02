@@ -742,7 +742,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(69, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(70, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -3300,6 +3300,98 @@ if ($createdProbe !== null) {
     $initialNeighborScan = $kernel->handle('GET', '/api/sector?x=' . $initialNeighborRelative['x'] . '&y=' . $initialNeighborRelative['y'] . '&z=' . $initialNeighborRelative['z'], $headers);
     $test->assertEquals(200, $initialNeighborScan->status, 'initial probe can scan a neighbor without residence delay');
     $test->assertEquals(0, $initialNeighborScan->body['sector']['scan']['requiredResidenceSeconds'] ?? null, 'initial neighbor scan exposes no residence delay');
+}
+
+$dormantInspectionPlayer = $auth->registerPlayerWithPassword('dormant-inspection-user', 'secret', 'Dormant Inspection User');
+$dormantInspectionProbe = $probes->findByPlayerId($dormantInspectionPlayer->id);
+$dormantInspectionHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($dormantInspectionPlayer)['token']];
+if ($dormantInspectionProbe !== null) {
+    $dormantInspectionSector = $sectorRepository->load($dormantInspectionProbe->currentSector);
+    $dormantInspectionSector->addObject(new DormantConstruct(
+        'dormant-report-deuterium',
+        inspectionScenario: ProbeImprovementCatalog::DEUTERIUM_COMPRESSION,
+    ));
+    $dormantInspectionSector->addObject(new DormantConstruct(
+        'dormant-report-couplings',
+        inspectionScenario: ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ));
+    $dormantInspectionSector->addObject(new DormantConstruct('dormant-report-random'));
+    $sectorRepository->save($dormantInspectionSector);
+
+    $dormantInspectionScan = $kernel->handle('GET', '/api/probe/sector', $dormantInspectionHeaders);
+    $dormantInspectionObjects = array_values(array_filter(
+        $dormantInspectionScan->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct'
+            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-random'], true),
+    ));
+    $test->assertEquals(3, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
+    foreach ($dormantInspectionObjects as $dormantInspectionObject) {
+        $test->assert(!array_key_exists('inspectionScenario', $dormantInspectionObject), 'dormant construct inspection scenario is not exposed through sector scans');
+    }
+
+    $dormantInspectionMannies = $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantInspectionMannyId = (string) ($dormantInspectionMannies->body['mannies'][0]['id'] ?? '');
+    $dormantInspectionMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $dormantInspectionMannyRow->execute(['uid' => $dormantInspectionMannyId]);
+    $dormantInspectionMannyDbId = (int) $dormantInspectionMannyRow->fetchColumn();
+
+    $inspectDormantDeuterium = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-deuterium',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantDeuterium->status, 'Manny can inspect a dormant construct with a deuterium-compression scenario');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantDeuteriumAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
+    $dormantDeuteriumReports = array_values(array_filter(
+        $dormantDeuteriumAlerts->body['alerts'] ?? [],
+        static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+            && ($alert['report']['objectId'] ?? null) === 'dormant-report-deuterium'
+    ));
+    $test->assertEquals(1, count($dormantDeuteriumReports), 'completed dormant construct inspection creates a Manny report alert');
+    $test->assertEquals('dormant_construct', $dormantDeuteriumReports[0]['report']['objectType'] ?? null, 'dormant construct Manny report exposes the inspected object type');
+    $test->assert(str_contains((string) ($dormantDeuteriumReports[0]['message'] ?? ''), 'Recovered data: deuterium compression principles.'), 'dormant construct report describes recovered deuterium compression data');
+    $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION)?->available, 'dormant construct deuterium report unlocks deuterium compression');
+
+    $inspectDormantCouplings = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-couplings',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantCouplings->status, 'Manny can inspect a dormant construct with a container-coupling scenario');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantCouplingsAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
+    $dormantCouplingsReports = array_values(array_filter(
+        $dormantCouplingsAlerts->body['alerts'] ?? [],
+        static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+            && ($alert['report']['objectId'] ?? null) === 'dormant-report-couplings'
+    ));
+    $test->assertEquals(1, count($dormantCouplingsReports), 'completed dormant construct coupling inspection creates a Manny report alert');
+    $test->assert(str_contains((string) ($dormantCouplingsReports[0]['message'] ?? ''), 'Recovered data: reinforced container coupling design.'), 'dormant construct report describes recovered container-coupling data');
+    $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS)?->available, 'dormant construct coupling report unlocks reinforced container couplings');
+
+    $inspectDormantRandom = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-random',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantRandom->status, 'Manny can inspect a dormant construct without a stored scenario');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $storedRandomConstruct = $sectorRepository->load($dormantInspectionProbe->currentSector)->findObjectById('dormant-report-random');
+    $storedRandomScenario = $storedRandomConstruct instanceof DormantConstruct ? $storedRandomConstruct->toArray()['inspectionScenario'] ?? null : null;
+    $test->assert(in_array($storedRandomScenario, DormantConstruct::inspectionScenarios(), true), 'dormant construct inspection stores the randomly selected scenario in sector JSON');
+    $dormantInspectionScanAfterRandom = $kernel->handle('GET', '/api/probe/sector', $dormantInspectionHeaders);
+    $storedRandomPublicObject = array_values(array_filter(
+        $dormantInspectionScanAfterRandom->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['id'] ?? null) === 'dormant-report-random',
+    ))[0] ?? [];
+    $test->assert(!array_key_exists('inspectionScenario', $storedRandomPublicObject), 'stored dormant construct inspection scenario remains hidden from sector scans');
 }
 
 $stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');

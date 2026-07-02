@@ -190,6 +190,7 @@ final class ProbeDamageWarningRepository
         string $objectId,
         string $objectLabel,
         string $message,
+        string $objectType = 'detached_storage_container',
     ): ProbeDamageWarning {
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
@@ -207,7 +208,7 @@ final class ProbeDamageWarningRepository
             'sector_x' => $sector->getX(),
             'sector_y' => $sector->getY(),
             'sector_z' => $sector->getZ(),
-            'container_id' => 'detached_storage_container',
+            'container_id' => $objectType,
             'container_label' => $objectLabel,
             'object_id' => $objectId,
             'risk_percent' => 0.0,

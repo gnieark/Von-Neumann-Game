@@ -2415,6 +2415,16 @@ final class MannyService
                 (string) ($target->getName() ?? $target->getId()),
                 $report['message'],
             );
+        } elseif ($target instanceof DormantConstruct) {
+            $report = $this->dormantConstructInspectionReport($probe, $sector, $target);
+            $this->alerts?->createMannyReportAlert(
+                $probe->id,
+                $sector->getCoordinates(),
+                $target->getId(),
+                (string) ($target->getName() ?? $target->getId()),
+                $report['message'],
+                'dormant_construct',
+            );
         }
 
         if (!$manny->isInSameSectorAs($probe)) {
@@ -2814,6 +2824,46 @@ final class MannyService
             'items' => $items,
             'message' => $message,
         ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function dormantConstructInspectionReport(NeumannProbe $probe, SectorContent $sector, DormantConstruct $construct): array
+    {
+        $scenario = $construct->getInspectionScenario();
+        if ($scenario === null) {
+            $scenarios = DormantConstruct::inspectionScenarios();
+            $scenario = $scenarios[random_int(0, count($scenarios) - 1)];
+            $construct = $construct->withInspectionScenario($scenario);
+            if ($sector->replaceObject($construct)) {
+                $this->sectors->saveSector($sector);
+            }
+        }
+
+        $this->improvements?->markAvailable($probe->id, $scenario);
+
+        return [
+            'scenario' => $scenario,
+            'message' => $this->dormantConstructReportMessage($scenario),
+        ];
+    }
+
+    private function dormantConstructReportMessage(string $scenario): string
+    {
+        return match ($scenario) {
+            ProbeImprovementCatalog::DEUTERIUM_COMPRESSION => "Manny report\n\n"
+                . "The structure is artificial. Its geometry faintly echoes our own probe, but the underlying architecture follows a completely different lineage.\n\n"
+                . "Several compartments show the marks of methodical dismantling rather than impact damage. A deuterium storage vessel contains density gradients that should not remain stable under ordinary tank geometry.\n\n"
+                . "Recovered data: deuterium compression principles.\n\n"
+                . "Probe improvement unlocked: Deuterium compression.",
+            ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS => "Manny report\n\n"
+                . "The structure is artificial. Its internal layout resembles a modular warehouse more than a vessel: linked storage bays, load-bearing rails, and repeated coupling sockets.\n\n"
+                . "Manny analysis focused on the module fasteners. The recovered pattern describes a more tolerant coupling geometry for external containers under movement stress.\n\n"
+                . "Recovered data: reinforced container coupling design.\n\n"
+                . "Probe improvement unlocked: Reinforced container couplings.",
+            default => "Manny report\n\nThe structure is artificial, but the recovered data could not be classified.",
+        };
     }
 
     private function resourceReportLabel(string $type): string
