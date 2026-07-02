@@ -7,6 +7,8 @@
     let refreshTimer = null;
     let movementTickTimer = null;
     let loadInProgress = false;
+    let probeImprovements = null;
+    let probeImprovementsLoadPromise = null;
 
     function withVng(callback) {
         if (window.VNG) {
@@ -138,6 +140,58 @@
         metric.appendChild(node);
     }
 
+    function loadProbeImprovementsOnce() {
+        if (probeImprovementsLoadPromise === null) {
+            probeImprovementsLoadPromise = window.VNG.apiJson("/api/probe/probe-improvements-available", {"method": "GET"})
+                .then((data) => {
+                    probeImprovements = Array.isArray(data && data.improvements)
+                        ? data.improvements
+                        : [];
+                })
+                .catch(() => {
+                    probeImprovements = [];
+                });
+        }
+
+        return probeImprovementsLoadPromise;
+    }
+
+    function installedProbeImprovements() {
+        return (Array.isArray(probeImprovements) ? probeImprovements : [])
+            .filter((improvement) => improvement && improvement.done === true);
+    }
+
+    function probeImprovementName(improvement) {
+        return String(improvement && (improvement.name || improvement.id) || "");
+    }
+
+    function probeImprovementSummary() {
+        const installed = installedProbeImprovements();
+        if (installed.length === 0) {
+            return translate("noInstalledProbeImprovement", "None");
+        }
+
+        const visibleNames = installed.slice(0, 2)
+            .map(probeImprovementName)
+            .filter(Boolean);
+        const extraCount = installed.length - visibleNames.length;
+        const suffix = extraCount > 0 ? " +" + window.VNG.numberValue(extraCount) : "";
+
+        return (visibleNames.join(", ") || window.VNG.numberValue(installed.length)) + suffix;
+    }
+
+    function probeImprovementDetail() {
+        const installed = installedProbeImprovements();
+        if (installed.length <= 2) {
+            return null;
+        }
+
+        return window.VNG.detailList(installed.map((improvement) => ({
+            "label": probeImprovementName(improvement),
+            "value": String(improvement && improvement.description || improvement && improvement.id || ""),
+        })));
+    }
+
     function renderTerminalAlert(probe) {
         const node = document.getElementById("probe-terminal-alert");
         if (!node) {
@@ -216,6 +270,13 @@
                 "valueId": "probe-metric-deuterium",
             },
             {
+                "name": "probe-improvements",
+                "label": translate("installedProbeImprovements", "Installed upgrades"),
+                "value": probeImprovementSummary(),
+                "valueId": "probe-metric-improvements",
+                "detail": probeImprovementDetail(),
+            },
+            {
                 "name": "sector",
                 "label": translate("sector", "Sector"),
                 "value": sector ? window.VNG.coordinate(sector) : translate("transit", "Transit"),
@@ -260,6 +321,12 @@
                 "label": translate("deuterium", "Deuterium"),
                 "value": "-",
                 "valueId": "probe-metric-deuterium",
+            },
+            {
+                "name": "probe-improvements",
+                "label": translate("installedProbeImprovements", "Installed upgrades"),
+                "value": "-",
+                "valueId": "probe-metric-improvements",
             },
             {
                 "name": "sector",
@@ -336,6 +403,7 @@
 
         withVng(async () => {
             i18n = await window.VNG.loadI18n();
+            await loadProbeImprovementsOnce();
             bindRefreshButton();
             loadProbe();
         });
