@@ -50,7 +50,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 68;
+    public const API_VERSION = 69;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -975,7 +975,7 @@ final class ApiKernel
                 fn(ProbeDamageWarning $warning): array => $this->probeAlertArray($player, $warning),
                 $warnings,
             ),
-            'rule' => $this->storageContainerBreakRule(),
+            'rule' => $this->storageContainerBreakRule($probe),
         ]);
     }
 
@@ -989,7 +989,7 @@ final class ApiKernel
                 fn(ProbeDamageWarning $alert): array => $this->probeAlertArray($player, $alert),
                 $alerts,
             ),
-            'rules' => $this->probeAlertRules(),
+            'rules' => $this->probeAlertRules($probe),
         ]);
     }
 
@@ -1022,25 +1022,46 @@ final class ApiKernel
     /**
      * @return array<string, array<string, mixed>>
      */
-    private function probeAlertRules(): array
+    private function probeAlertRules(NeumannProbe $probe): array
     {
         return [
-            'storageContainerBreak' => $this->storageContainerBreakRule(),
+            'storageContainerBreak' => $this->storageContainerBreakRule($probe),
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function storageContainerBreakRule(): array
+    private function storageContainerBreakRule(?NeumannProbe $probe = null): array
     {
+        $startsAtAdditionalContainers = 5 + $this->fragileContainerRiskDiscount($probe);
+
         return [
             'type' => ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
-            'startsAtAdditionalContainers' => 5,
+            'startsAtAdditionalContainers' => $startsAtAdditionalContainers,
             'riskPerAdditionalContainerAfterFourPercent' => 10,
             'maximumRiskPercent' => 100,
-            'message' => 'From 5 additional containers onward, movement stress can break one container link. Risk is 10% at 5 containers, 20% at 6, and continues up to 100%.',
+            'message' => 'From ' . $startsAtAdditionalContainers . ' additional containers onward, movement stress can break one container link. Risk is 10% at ' . $startsAtAdditionalContainers . ' containers, 20% at ' . ($startsAtAdditionalContainers + 1) . ', and continues up to 100%.',
         ];
+    }
+
+    private function fragileContainerRiskDiscount(?NeumannProbe $probe): int
+    {
+        if (
+            $probe === null
+            || $this->improvements === null
+            || !$this->improvements->isDone($probe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS)
+        ) {
+            return 0;
+        }
+
+        $definition = ProbeImprovementCatalog::find(
+            ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+            $this->gameplayConfig['probeImprovements'] ?? [],
+        );
+        $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
+
+        return max(0, (int) ($effects['fragileContainerRiskAdditionalContainerDiscount'] ?? ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS_CONTAINER_RISK_DISCOUNT));
     }
 
     private function messageRecipientProbeId(mixed $value): ?int
@@ -2242,6 +2263,7 @@ final class ApiKernel
         ];
 
         if ($warning->type === ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK) {
+            $startsAtAdditionalContainers = 5 + $this->fragileContainerRiskDiscount($this->probes->findById($warning->probeId));
             $alert['container'] = [
                 'id' => $warning->containerId,
                 'label' => $warning->containerLabel,
@@ -2250,7 +2272,7 @@ final class ApiKernel
             $alert['risk'] = [
                 'percent' => $warning->riskPercent,
                 'additionalContainerCount' => $warning->additionalContainerCount,
-                'ruleStartsAtAdditionalContainers' => 5,
+                'ruleStartsAtAdditionalContainers' => $startsAtAdditionalContainers,
             ];
             $when = $warning->phase === 'deceleration_start' ? 'arrival sector' : 'origin sector';
             $alert['message'] = 'Fragile storage warning: '
@@ -2258,7 +2280,7 @@ final class ApiKernel
                 . ' may break loose during this jump near the ' . $when
                 . ' (relative sector ' . $this->coordinateLabel($relativeSector) . '). Risk: '
                 . $this->percentLabel($warning->riskPercent)
-                . '. This can happen from 5 additional containers onward.';
+                . '. This can happen from ' . $startsAtAdditionalContainers . ' additional containers onward.';
         }
 
         if ($warning->type === ProbeDamageWarning::TYPE_INTELLIGENT_LIFE) {

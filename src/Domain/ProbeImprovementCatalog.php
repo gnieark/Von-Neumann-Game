@@ -9,9 +9,11 @@ use VonNeumannGame\Config\Config;
 final class ProbeImprovementCatalog
 {
     public const DEUTERIUM_COMPRESSION = 'deuterium_compression';
+    public const REINFORCED_CONTAINER_COUPLINGS = 'reinforced_container_couplings';
 
     public const DEUTERIUM_COMPRESSION_DURATION_SECONDS = 300;
     public const DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT = 200.0;
+    public const REINFORCED_CONTAINER_COUPLINGS_CONTAINER_RISK_DISCOUNT = 5;
 
     /**
      * @return list<array<string, mixed>>
@@ -20,6 +22,7 @@ final class ProbeImprovementCatalog
     {
         return [
             self::deuteriumCompression($config),
+            self::reinforcedContainerCouplings($config),
         ];
     }
 
@@ -61,7 +64,7 @@ final class ProbeImprovementCatalog
                 self::DEUTERIUM_COMPRESSION . '.durationSeconds',
                 self::DEUTERIUM_COMPRESSION_DURATION_SECONDS,
             ),
-            'ingredients' => self::ingredients($config),
+            'ingredients' => self::deuteriumCompressionIngredients($config),
             'effects' => [
                 'maxDeuteriumPercent' => Config::float(
                     $config,
@@ -75,7 +78,7 @@ final class ProbeImprovementCatalog
     /**
      * @return list<array<string, mixed>>
      */
-    private static function ingredients(array $config): array
+    private static function deuteriumCompressionIngredients(array $config): array
     {
         $configured = Config::value($config, self::DEUTERIUM_COMPRESSION . '.ingredients');
         if (is_array($configured)) {
@@ -94,6 +97,61 @@ final class ProbeImprovementCatalog
                 'quantity' => 2,
                 'unit' => 'item',
                 'kind' => 'item',
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function reinforcedContainerCouplings(array $config): array
+    {
+        return [
+            'id' => self::REINFORCED_CONTAINER_COUPLINGS,
+            'name' => (string) Config::value($config, self::REINFORCED_CONTAINER_COUPLINGS . '.name', 'Reinforced container couplings'),
+            'description' => (string) Config::value(
+                $config,
+                self::REINFORCED_CONTAINER_COUPLINGS . '.description',
+                'Reinforces external container couplings so five additional containers are ignored when movement break risk is calculated.',
+            ),
+            'durationSeconds' => Config::int(
+                $config,
+                self::REINFORCED_CONTAINER_COUPLINGS . '.durationSeconds',
+                self::DEUTERIUM_COMPRESSION_DURATION_SECONDS,
+            ),
+            'ingredients' => self::reinforcedContainerCouplingsIngredients($config),
+            'effects' => [
+                'fragileContainerRiskAdditionalContainerDiscount' => Config::int(
+                    $config,
+                    self::REINFORCED_CONTAINER_COUPLINGS . '.fragileContainerRiskAdditionalContainerDiscount',
+                    self::REINFORCED_CONTAINER_COUPLINGS_CONTAINER_RISK_DISCOUNT,
+                ),
+            ],
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private static function reinforcedContainerCouplingsIngredients(array $config): array
+    {
+        $configured = Config::value($config, self::REINFORCED_CONTAINER_COUPLINGS . '.ingredients');
+        if (is_array($configured)) {
+            return array_values(array_filter($configured, 'is_array'));
+        }
+
+        return [
+            [
+                'type' => ProbeItem::TYPE_INTEGRATED_CIRCUIT,
+                'quantity' => 1,
+                'unit' => 'item',
+                'kind' => 'item',
+            ],
+            [
+                'type' => 'carbon_compounds',
+                'quantity' => 0.4,
+                'unit' => 'earth_container_equivalent',
+                'kind' => 'resource',
             ],
         ];
     }

@@ -46,6 +46,28 @@
       "effects": {
         "maxDeuteriumPercent": 200.0
       }
+    },
+    "reinforced_container_couplings": {
+      "name": "Reinforced container couplings",
+      "description": "Reinforces external container couplings so five additional containers are ignored when movement break risk is calculated.",
+      "durationSeconds": 300,
+      "ingredients": [
+        {
+          "type": "integrated_circuit",
+          "quantity": 1,
+          "unit": "item",
+          "kind": "item"
+        },
+        {
+          "type": "carbon_compounds",
+          "quantity": 0.4,
+          "unit": "earth_container_equivalent",
+          "kind": "resource"
+        }
+      ],
+      "effects": {
+        "fragileContainerRiskAdditionalContainerDiscount": 5
+      }
     }
   },
   "manny": {

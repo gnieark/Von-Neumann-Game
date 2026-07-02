@@ -246,6 +246,9 @@ $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafti
 $test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
 $configuredProbeImprovement = ProbeImprovementCatalog::find('deuterium-compression', $loadedGameplayConfig['probeImprovements'] ?? []);
 $test->assertEquals(300, $configuredProbeImprovement['durationSeconds'] ?? null, 'probe improvements expose default gameplay definitions');
+$configuredContainerCouplingsImprovement = ProbeImprovementCatalog::find('reinforced-container-couplings', $loadedGameplayConfig['probeImprovements'] ?? []);
+$test->assertEquals(0.4, $configuredContainerCouplingsImprovement['ingredients'][1]['quantity'] ?? null, 'reinforced container couplings consume carbon compounds');
+$test->assertEquals(5, $configuredContainerCouplingsImprovement['effects']['fragileContainerRiskAdditionalContainerDiscount'] ?? null, 'reinforced container couplings discount five additional containers');
 $test->assertEquals(200.0, $configuredProbeImprovement['effects']['maxDeuteriumPercent'] ?? null, 'deuterium compression raises the tank maximum to 200 percent');
 
 file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks.json', json_encode([], JSON_THROW_ON_ERROR));
@@ -730,7 +733,7 @@ $sectorService = new SectorService($sectorRepository, new SectorContentGenerator
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, worldSeed: 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
@@ -739,7 +742,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(68, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(69, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -3701,6 +3704,52 @@ if ($createdProbe !== null) {
     $test->assertEquals(true, $completedImprovements->body['improvements'][0]['done'] ?? null, 'completed probe improvement is persisted as done');
     $probeAfterImprovement = $kernel->handle('GET', '/api/probe', $improvementHeaders);
     $test->assertEquals(200.0, $probeAfterImprovement->body['probe']['fuel']['maxDeuterium'] ?? null, 'deuterium compression raises the exposed fuel maximum');
+
+    $probeImprovements->markAvailable($improvementProbe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS);
+    $containerCouplingsImprovement = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $containerCouplingsRows = array_values(array_filter(
+        $containerCouplingsImprovement->body['improvements'] ?? [],
+        static fn(array $improvement): bool => ($improvement['id'] ?? null) === ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ));
+    $test->assertEquals('Reinforced container couplings', $containerCouplingsRows[0]['name'] ?? null, 'reinforced container couplings are exposed when available');
+    $test->assertEquals(300, $containerCouplingsRows[0]['durationSeconds'] ?? null, 'reinforced container couplings use the deuterium-compression duration');
+    $test->assertEquals(5, $containerCouplingsRows[0]['effects']['fragileContainerRiskAdditionalContainerDiscount'] ?? null, 'reinforced container couplings expose their movement-risk effect');
+
+    foreach ($items->findByProbeId($improvementProbe->id) as $item) {
+        if ($item->type === ProbeItem::TYPE_INTEGRATED_CIRCUIT) {
+            $items->delete($item);
+        }
+    }
+    $improvementProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $improvementProbe, ['carbon_compounds' => 0.39]);
+    $missingCouplingsCircuit = $storage->addItem($improvementProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
+    $missingCouplingsIngredients = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingCouplingsIngredients->status, 'reinforced container couplings require enough carbon compounds');
+    $test->assertEquals('insufficient_carbon_compounds', $missingCouplingsIngredients->body['error']['code'] ?? null, 'missing carbon compounds return a resource-specific error');
+    $items->delete($missingCouplingsCircuit);
+
+    $improvementProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $improvementProbe, ['carbon_compounds' => 0.4]);
+    $couplingsCircuit = $storage->addItem($improvementProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
+    $improveCouplings = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $improveCouplings->status, 'POST /api/probe/mannies/{id}/improve-probe starts reinforced container couplings');
+    $test->assertEquals(0.4, $improveCouplings->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'reinforced container couplings reserve carbon compounds');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $couplingsCircuit->uid), 'reinforced container couplings consume an integrated circuit');
+    $test->assertEquals(0.0, $probes->findByPlayerId($improvementPlayer->id)?->organicCompoundsStock, 'reinforced container couplings consume 0.4 ECE of carbon compounds');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $improvementMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
+    $completedCouplingsProbe = $probes->findByPlayerId($improvementPlayer->id) ?? throw new RuntimeException('Expected completed couplings probe.');
+    $riskMethod = new ReflectionMethod(ProbeMovementService::class, 'fragileContainerLossRisk');
+    $riskMethod->setAccessible(true);
+    $test->assertEquals(0.0, $riskMethod->invoke($movementService, $completedCouplingsProbe, 9), 'reinforced container couplings prevent risk at nine additional containers');
+    $test->assertEquals(0.1, $riskMethod->invoke($movementService, $completedCouplingsProbe, 10), 'reinforced container couplings start risk at ten additional containers');
+    $improvedDamageRule = $kernel->handle('GET', '/api/probe/damage-warnings', $improvementHeaders);
+    $test->assertEquals(10, $improvedDamageRule->body['rule']['startsAtAdditionalContainers'] ?? null, 'damage-warning rule reflects reinforced container couplings');
 
     $sectorRepository->save(new SectorContent($improvementProbe->currentSector, [
         new DeuteriumRefuelStation('improvement-deuterium-station', 'Deuterium refuel station', 'improvement-planet', null, gmdate('c')),

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '68'
+  version: '69'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 68
+                apiVersion: 69
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -873,6 +873,23 @@ paths:
                         kind: item
                     effects:
                       maxDeuteriumPercent: 200
+                  - id: reinforced_container_couplings
+                    name: Reinforced container couplings
+                    description: Reinforces external container couplings so five additional containers are ignored when movement break risk is calculated.
+                    available: true
+                    done: false
+                    durationSeconds: 300
+                    ingredients:
+                      - type: integrated_circuit
+                        quantity: 1
+                        unit: item
+                        kind: item
+                      - type: carbon_compounds
+                        quantity: 0.4
+                        unit: earth_container_equivalent
+                        kind: resource
+                    effects:
+                      fragileContainerRiskAdditionalContainerDiscount: 5
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe/messages:
@@ -1207,7 +1224,9 @@ paths:
         Returns persistent warnings produced when a fragile chain of additional
         storage containers may lose one container during a sector movement.
         This rule starts at 5 additional containers with a 10% risk, then adds
-        10 percentage points per extra container up to 100%.
+        10 percentage points per extra container up to 100%. Completed probe
+        improvements can raise the effective starting threshold returned in
+        `rule.startsAtAdditionalContainers`.
       responses:
         '200':
           description: Current and past damage warnings for the authenticated probe
@@ -3419,7 +3438,7 @@ components:
       properties:
         id:
           type: string
-          enum: [deuterium_compression]
+          enum: [deuterium_compression, reinforced_container_couplings]
         name:
           type: string
         description:
@@ -3458,6 +3477,9 @@ components:
             maxDeuteriumPercent:
               type: number
               description: Effective deuterium tank maximum after completion.
+            fragileContainerRiskAdditionalContainerDiscount:
+              type: integer
+              description: Number of additional containers ignored before applying the movement break-risk rule.
         createdAt:
           type: string
           format: date-time
@@ -3979,6 +4001,7 @@ components:
           enum: [storage_container_break]
         startsAtAdditionalContainers:
           type: integer
+          description: Effective additional-container count where the first 10% movement break risk applies for the authenticated probe.
           example: 5
         riskPerAdditionalContainerAfterFourPercent:
           type: integer
