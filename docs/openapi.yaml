@@ -3969,7 +3969,7 @@ components:
           properties:
             title:
               type: string
-              example: Rapport de Manny
+              example: Manny report
             objectId:
               type: string
               nullable: true

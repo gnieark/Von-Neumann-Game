@@ -2314,7 +2314,7 @@ final class ApiKernel
 
         if ($warning->type === ProbeDamageWarning::TYPE_MANNY_REPORT) {
             $alert['report'] = [
-                'title' => 'Rapport de Manny',
+                'title' => 'Manny report',
                 'objectId' => $warning->objectId,
                 'objectType' => $warning->containerId !== '' ? $warning->containerId : 'object',
                 'objectLabel' => $warning->containerLabel !== '' ? $warning->containerLabel : null,

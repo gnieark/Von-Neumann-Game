@@ -2797,23 +2797,23 @@ final class MannyService
         $label = (string) ($container->getName() ?? $container->getId());
         $messageParts = [];
         if ($resources !== []) {
-            $messageParts[] = 'ressources: ' . implode(', ', array_map(
+            $messageParts[] = 'resources: ' . implode(', ', array_map(
                 fn(string $type, float $amount): string => $this->resourceReportLabel($type) . ' ' . $this->amountReportLabel($amount),
                 array_keys($resources),
                 array_values($resources),
             ));
         }
         if ($items !== []) {
-            $messageParts[] = 'objets: ' . implode(', ', array_map(
-                static fn(array $item): string => (string) ($item['name'] ?? $item['type'] ?? 'objet') . ' x' . (int) ($item['quantity'] ?? 0),
+            $messageParts[] = 'items: ' . implode(', ', array_map(
+                static fn(array $item): string => (string) ($item['name'] ?? $item['type'] ?? 'item') . ' x' . (int) ($item['quantity'] ?? 0),
                 $items,
             ));
         }
         if ($messageParts === []) {
-            $messageParts[] = 'aucun contenu détecté';
+            $messageParts[] = 'no contents detected';
         }
 
-        $message = 'Rapport de Manny: contenu de ' . $label
+        $message = 'Manny report: contents of ' . $label
             . ":\n- " . implode("\n- ", $messageParts);
 
         return [

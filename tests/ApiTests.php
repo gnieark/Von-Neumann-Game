@@ -2232,7 +2232,8 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 && ($alert['report']['objectId'] ?? null) === $detachedObjectId
         ));
         $test->assertEquals(1, count($driftingReports), 'completed detached-container inspection creates one Manny report alert');
-        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), 'Rapport de Manny'), 'Manny report alert message is labeled as a Manny report');
+        $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), 'Manny report'), 'Manny report alert message is labeled as a Manny report');
+        $test->assertEquals('Manny report', $driftingReports[0]['report']['title'] ?? null, 'Manny report alert exposes an English report title');
         $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), ProbeItem::STEEL_BAR_NAME), 'Manny report alert message includes stored items');
         $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), '0.21'), 'Manny report alert message includes stored resources');
         $storedDriftingReport = $damageWarnings->findById((int) ($driftingReports[0]['id'] ?? 0));
