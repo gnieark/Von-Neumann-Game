@@ -2253,6 +2253,23 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), '0.21'), 'Manny report alert message includes stored resources');
         $storedDriftingReport = $damageWarnings->findById((int) ($driftingReports[0]['id'] ?? 0));
         $test->assertEquals(null, $storedDriftingReport?->movementId, 'Manny report alerts are not linked to fake movements');
+        $duplicateDriftingReport = $damageWarnings->createMannyReportAlert(
+            $detachProbe->id,
+            $detachProbe->currentSector,
+            $detachedObjectId,
+            (string) ($storedDriftingReport?->containerLabel ?? ''),
+            (string) ($storedDriftingReport?->message ?? ''),
+            (string) ($storedDriftingReport?->containerId ?? 'detached_storage_container'),
+            $storedDriftingReport?->scheduledAt,
+        );
+        $test->assertEquals($storedDriftingReport?->id, $duplicateDriftingReport->id, 'Manny report creation is idempotent for one completed inspection task');
+        $containerReportAlertsAfterReplay = $kernel->handle('GET', '/api/probe/alerts', $detachHeaders);
+        $driftingReportsAfterReplay = array_values(array_filter(
+            $containerReportAlertsAfterReplay->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+                && ($alert['report']['objectId'] ?? null) === $detachedObjectId
+        ));
+        $test->assertEquals(1, count($driftingReportsAfterReplay), 'replayed detached-container inspection report keeps one Manny report alert');
 
         $recoverDrifting = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/salvage', $detachHeaders, json_encode([
             'objectId' => $detachedObjectId,

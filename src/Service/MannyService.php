@@ -2402,6 +2402,9 @@ final class MannyService
             'objectId' => $objectId,
             'target' => $manny->taskPayload['target'] ?? null,
         ] + ($detection !== null ? ['artificialObjectDetected' => $detection] : []);
+        $reportScheduledAt = is_string($manny->taskEndsAt) && trim($manny->taskEndsAt) !== ''
+            ? $manny->taskEndsAt
+            : null;
         if ($target === null) {
             $result['result'] = 'failed';
             $result['failureReason'] = 'target_unavailable';
@@ -2414,6 +2417,7 @@ final class MannyService
                 $target->getId(),
                 (string) ($target->getName() ?? $target->getId()),
                 $report['message'],
+                scheduledAt: $reportScheduledAt,
             );
         } elseif ($target instanceof DormantConstruct) {
             $report = $this->dormantConstructInspectionReport($probe, $sector, $target);
@@ -2424,6 +2428,7 @@ final class MannyService
                 (string) ($target->getName() ?? $target->getId()),
                 $report['message'],
                 'dormant_construct',
+                $reportScheduledAt,
             );
         }
 
