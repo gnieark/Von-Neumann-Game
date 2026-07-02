@@ -5,7 +5,7 @@
     const MANNY_MINING_AMOUNT_MAX = 0.55;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe"]);
 
     const state = {
         currentCraftingRecipes: [],
@@ -13,6 +13,7 @@
         currentMannies: [],
         currentMannyMineTargets: [],
         currentMannySalvageTargets: [],
+        currentProbeImprovements: [],
         currentProbeSectorRelative: null,
         currentSectorObjects: [],
         remoteSectorScans: {},
@@ -57,6 +58,15 @@
         state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
 
         return state.currentInventory;
+    }
+
+    async function refreshProbeImprovements() {
+        const data = await window.VNG.apiJson("/api/probe/probe-improvements-available", {"method": "GET"});
+        state.currentProbeImprovements = Array.isArray(data && data.improvements)
+            ? data.improvements
+            : [];
+
+        return state.currentProbeImprovements;
     }
 
     function tr(key, fallback) {
@@ -169,6 +179,7 @@
             "inspecting_asteroid": tr("inspectingSectorObject", "Inspecting sector object"),
             "refilling_deuterium_tank": tr("refillingDeuteriumTank", "Refilling deuterium tank"),
             "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
+            "improving_probe": tr("improvingProbe", "Improving probe"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
             "unknown_too_far": tr("mannyUnknownTooFar", "Status unknown, too far"),
@@ -1108,6 +1119,99 @@
             + "<p class=\"manny-craft-duration\">" + escaped(tr("craftingDuration", "Duration") + " " + window.VNG.duration(availability.durationSeconds, tr)) + "</p>";
     }
 
+    function availableProbeImprovements() {
+        return (Array.isArray(state.currentProbeImprovements) ? state.currentProbeImprovements : [])
+            .filter((improvement) => improvement && improvement.available === true && improvement.done !== true);
+    }
+
+    function probeImprovementById(id) {
+        return availableProbeImprovements().find((improvement) => String(improvement.id || "") === String(id || "")) || null;
+    }
+
+    function probeImprovementAvailability(improvement) {
+        const result = {
+            "canImprove": false,
+            "itemStatuses": [],
+            "resourceStatuses": [],
+        };
+        if (!improvement) {
+            return result;
+        }
+
+        const itemCounts = inventoryItemCounts();
+        let canImprove = true;
+        (Array.isArray(improvement.ingredients) ? improvement.ingredients : []).forEach((ingredient) => {
+            const type = String(ingredient && ingredient.type || "");
+            const required = Number(ingredient && ingredient.quantity) || 0;
+            if (!type || required <= 0) {
+                return;
+            }
+            if (craftIngredientKind(ingredient) === "item") {
+                const requiredItems = Math.ceil(required);
+                const available = Math.max(0, itemCounts[type] || 0);
+                const hasEnough = available >= requiredItems;
+                canImprove = canImprove && hasEnough;
+                result.itemStatuses.push({
+                    type,
+                    "required": requiredItems,
+                    available,
+                    hasEnough,
+                });
+                return;
+            }
+
+            const available = inventoryResourceAmount(type);
+            const hasEnough = available + 0.00001 >= required;
+            canImprove = canImprove && hasEnough;
+            result.resourceStatuses.push({
+                type,
+                "required": required,
+                available,
+                hasEnough,
+            });
+        });
+
+        result.canImprove = canImprove;
+        return result;
+    }
+
+    function renderProbeImprovementIngredients(improvement) {
+        const availability = probeImprovementAvailability(improvement);
+        if (availability.itemStatuses.length === 0 && availability.resourceStatuses.length === 0) {
+            return "<span class=\"manny-craft-ingredients-title\">" + escaped(tr("craftIngredientsRequired", "Required ingredients")) + "</span>"
+                + "<p>" + escaped(tr("noCraftIngredients", "No ingredients required.")) + "</p>";
+        }
+
+        return "<span class=\"manny-craft-ingredients-title\">" + escaped(tr("craftIngredientsRequired", "Required ingredients")) + "</span>"
+            + "<ul>"
+            + availability.itemStatuses.map((status) => {
+                const detail = window.VNG.formatText(tr("ingredientItemStockLine", "{required} required - {available} available"), {
+                    "required": status.required,
+                    "available": status.available,
+                });
+
+                return "<li class=\"" + (status.hasEnough ? "available" : "missing") + "\">"
+                    + "<span>" + escaped(inventoryItemTypeLabel(status.type, status.type)) + "</span>"
+                    + "<b>" + escaped(detail) + "</b>"
+                    + "</li>";
+            }).join("")
+            + availability.resourceStatuses.map((status) => {
+                const detail = window.VNG.formatText(tr("ingredientStockLine", "{required} required - {available} available"), {
+                    "required": window.VNG.numberValue(status.required) + " " + tr("containerUnit", "containers"),
+                    "available": window.VNG.numberValue(status.available) + " " + tr("containerUnit", "containers"),
+                });
+
+                return "<li class=\"" + (status.hasEnough ? "available" : "missing") + "\">"
+                    + "<span>" + escaped(resourceTypeLabel(normalizeResourceType(status.type))) + "</span>"
+                    + "<b>" + escaped(detail) + "</b>"
+                    + "</li>";
+            }).join("")
+            + "</ul>"
+            + (improvement && Number(improvement.durationSeconds) > 0
+                ? "<p class=\"manny-craft-duration\">" + escaped(tr("craftingDuration", "Duration") + " " + window.VNG.duration(Number(improvement.durationSeconds), tr)) + "</p>"
+                : "");
+    }
+
     function updateCraftForm(form) {
         if (!form) {
             return;
@@ -1143,6 +1247,52 @@
 
     function updateMannyCraftForms() {
         document.querySelectorAll(".manny-craft-form, .printer-craft-form").forEach(updateCraftForm);
+    }
+
+    function updateProbeImprovementForm(form) {
+        if (!form) {
+            return;
+        }
+
+        const improvements = availableProbeImprovements();
+        const select = form.querySelector(".manny-probe-improvement");
+        const descriptionNode = form.querySelector(".manny-probe-improvement-description");
+        const ingredientsNode = form.querySelector(".manny-probe-improvement-ingredients");
+        const emptyNode = form.querySelector(".manny-probe-improvement-empty");
+        const button = form.querySelector(".manny-improve-probe-button");
+        if (improvements.length === 0) {
+            if (emptyNode) {
+                emptyNode.textContent = tr("noProbeImprovementAvailable", "Aucune amélioration n'est disponible");
+            }
+            if (button) {
+                button.disabled = true;
+                button.setAttribute("aria-disabled", "true");
+            }
+            return;
+        }
+
+        const selected = select ? select.value : "";
+        if (select) {
+            select.innerHTML = probeImprovementOptions(selected);
+        }
+        const improvement = probeImprovementById(select ? select.value : selected) || improvements[0] || null;
+        const availability = probeImprovementAvailability(improvement);
+        if (descriptionNode) {
+            descriptionNode.textContent = improvement && improvement.description ? improvement.description : "";
+            descriptionNode.hidden = !descriptionNode.textContent;
+        }
+        if (ingredientsNode) {
+            ingredientsNode.innerHTML = renderProbeImprovementIngredients(improvement);
+        }
+        if (button) {
+            button.disabled = !improvement || !availability.canImprove;
+            button.setAttribute("aria-disabled", button.disabled ? "true" : "false");
+            button.title = improvement && !availability.canImprove ? tr("missingProbeImprovementIngredients", "Insufficient resources for this improvement.") : "";
+        }
+    }
+
+    function updateProbeImprovementForms() {
+        document.querySelectorAll(".manny-improve-probe-form").forEach(updateProbeImprovementForm);
     }
 
     function selectedResourceLabels(types) {
@@ -1329,6 +1479,16 @@
                 + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("cancelCrafting", "Cancel crafting")) + "</button>"
                 + "</section>";
         }
+        if (manny.currentTask === "improving_probe") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("improvingProbeInProgress", "Probe improvement in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("improvingProbeTaskDetail", "{improvement} is being installed."), {
+                    "improvement": payload.improvementName || payload.improvement || tr("probeImprovement", "Probe improvement"),
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("cancelCrafting", "Cancel crafting")) + "</button>"
+                + "</section>";
+        }
         if (manny.currentTask === "assisting_atomic_printer") {
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("atomicPrinterAssistanceInProgress", "Atomic printer assistance in progress")) + "</h4>"
@@ -1436,10 +1596,59 @@
             + "</section>";
     }
 
+    function renderMannyActionGroupAccordion(id, title, actions) {
+        const items = Array.isArray(actions) ? actions.filter(Boolean) : [];
+        if (items.length === 0) {
+            return "";
+        }
+
+        return "<section class=\"manny-action-section manny-action-accordion manny-action-group\">"
+            + "<button class=\"manny-action-accordion-trigger manny-action-group-trigger\" type=\"button\" aria-expanded=\"false\" aria-controls=\"" + escaped(id) + "\">"
+            + "<span>" + escaped(title) + "</span>"
+            + "</button>"
+            + "<div id=\"" + escaped(id) + "\" class=\"manny-action-accordion-panel manny-action-group-panel\" hidden>"
+            + items.join("")
+            + "</div>"
+            + "</section>";
+    }
+
     function renderRepairForm() {
         return "<form class=\"manny-repair-form manny-form\">"
             + "<label>" + escaped(tr("repairPercent", "Integrity to restore")) + "<input name=\"integrityPercent\" type=\"number\" min=\"1\" max=\"100\" step=\"1\" value=\"1\"></label>"
             + "<button type=\"submit\">" + escaped(tr("repair", "Repair")) + "</button>"
+            + "</form>";
+    }
+
+    function probeImprovementOptions(selected) {
+        const improvements = availableProbeImprovements();
+        if (improvements.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return improvements.map((improvement, index) => {
+            const id = String(improvement.id || "");
+            const isSelected = id === selected || (!selected && index === 0);
+
+            return "<option value=\"" + escaped(id) + "\"" + (isSelected ? " selected" : "") + ">"
+                + escaped(improvement.name || id)
+                + "</option>";
+        }).join("");
+    }
+
+    function renderImproveProbeForm() {
+        const improvements = availableProbeImprovements();
+        const improvement = improvements[0] || null;
+        const availability = probeImprovementAvailability(improvement);
+        const hasImprovement = improvements.length > 0;
+
+        return "<form class=\"manny-improve-probe-form manny-form\">"
+            + (hasImprovement
+                ? "<label>" + escaped(tr("probeImprovement", "Probe improvement")) + "<select class=\"manny-probe-improvement\" name=\"improvement\">" + probeImprovementOptions("") + "</select></label>"
+                    + "<p class=\"manny-probe-improvement-description\">" + escaped(improvement && improvement.description ? improvement.description : "") + "</p>"
+                    + "<div class=\"manny-probe-improvement-ingredients\" aria-live=\"polite\">" + renderProbeImprovementIngredients(improvement) + "</div>"
+                : "<p class=\"manny-probe-improvement-empty\">" + escaped(tr("noProbeImprovementAvailable", "Aucune amélioration n'est disponible")) + "</p>")
+            + "<button class=\"manny-improve-probe-button\" type=\"submit\"" + (!hasImprovement || !availability.canImprove ? " disabled aria-disabled=\"true\"" : "") + ">"
+            + escaped(tr("improveProbe", "Improve the probe")) + "</button>"
             + "</form>";
     }
 
@@ -1884,50 +2093,64 @@
 
     function renderMannyActionForms(idPrefix) {
         const prefix = String(idPrefix || "manny-actions").replace(/[^a-zA-Z0-9_-]/g, "-");
-        const actionForms = [
-            {"id": "repair", "title": tr("repairActionTitle", "Repair"), "render": renderRepairForm},
-            {"id": "mine", "title": tr("miningActionTitle", "Mine"), "render": renderMineForm},
+        const renderAction = (action) => renderMannyActionAccordion(
+            prefix + "-" + action.id,
+            action.title,
+            action.id,
+            actionNeedsProbeInventory(action.id) ? "" : action.render()
+        );
+        const probeActions = [
+            {"id": "repair", "title": tr("repairActionTitle", "Repair the probe"), "render": renderRepairForm},
+            {"id": "improve-probe", "title": tr("improveProbeActionTitle", "Improve the probe"), "render": renderImproveProbeForm},
+        ];
+        const sectorActions = [
+            {"id": "mine", "title": tr("miningActionTitle", "Mine the sector"), "render": renderMineForm},
             {"id": "salvage", "title": tr("salvageActionTitle", "Recover a drifting object"), "render": renderSalvageForm},
             {"id": "inspect-sector-object", "title": tr("inspectSectorObjectActionTitle", "Inspect a sector object"), "render": renderInspectSectorObjectForm},
+            {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint bookmark"), "render": renderBookmarkForm},
+            {"id": "turn-on-relay", "title": tr("turnOnScutRelayActionTitle", "Activate a SCUT relay"), "render": renderTurnOnRelayForm},
+        ];
+        if (sectorHasDeuteriumRefuelStation()) {
+            sectorActions.unshift({"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
+        }
+        const containerActions = [
             {"id": "detach-storage", "title": tr("detachStorageActionTitle", "Detach a container"), "render": renderDetachStorageContainerForm},
             {"id": "drop-storage", "title": tr("dropStorageActionTitle", "Drop a container on a planet"), "render": renderDropStorageContainerForm},
             {"id": "recover-storage", "title": tr("recoverStorageContainerActionTitle", "Recover a detached container"), "render": renderRecoverStorageContainerForm},
-            {"id": "turn-on-relay", "title": tr("turnOnScutRelayActionTitle", "Activate a SCUT relay"), "render": renderTurnOnRelayForm},
-            {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint-bookmark"), "render": renderBookmarkForm},
+        ];
+        const craftActions = [
             {"id": "craft", "title": tr("craftingActionTitle", "Craft"), "render": renderCraftForm},
         ];
-        if (sectorHasDeuteriumRefuelStation()) {
-            actionForms.splice(1, 0, {"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
-        }
 
         return "<div class=\"manny-action-grid\">"
             + "<h4 class=\"manny-action-heading\">" + escaped(tr("assignMannyTask", "Assign a task to this Manny")) + "</h4>"
-            + actionForms.map((action) => renderMannyActionAccordion(
-                prefix + "-" + action.id,
-                action.title,
-                action.id,
-                actionNeedsProbeInventory(action.id) ? "" : action.render()
-            )).join("")
+            + renderMannyActionGroupAccordion(prefix + "-probe-group", tr("mannyActionGroupProbe", "Probe"), probeActions.map(renderAction))
+            + renderMannyActionGroupAccordion(prefix + "-sector-group", tr("mannyActionGroupSector", "Sector"), sectorActions.map(renderAction))
+            + renderMannyActionGroupAccordion(prefix + "-containers-group", tr("mannyActionGroupContainers", "Containers"), containerActions.map(renderAction))
+            + renderMannyActionGroupAccordion(prefix + "-craft-group", tr("mannyActionGroupCraft", "Craft"), craftActions.map(renderAction))
             + "</div>";
     }
 
     function renderRemoteMannyActionForms(idPrefix, manny) {
         const prefix = String(idPrefix || "manny-remote-actions").replace(/[^a-zA-Z0-9_-]/g, "-");
-
-        return "<div class=\"manny-action-grid\">"
-            + "<h4 class=\"manny-action-heading\">" + escaped(tr("assignMannyTask", "Assign a task to this Manny")) + "</h4>"
-            + renderMannyActionAccordion(
+        const sectorActions = [
+            renderMannyActionAccordion(
                 prefix + "-mine",
                 tr("miningActionTitle", "Mine the sector"),
                 "remote-mine",
                 renderRemoteMineForm(manny)
-            )
-            + renderMannyActionAccordion(
+            ),
+            renderMannyActionAccordion(
                 prefix + "-inspect-sector-object",
                 tr("inspectSectorObjectActionTitle", "Inspect a sector object"),
                 "remote-inspect-sector-object",
                 renderRemoteInspectSectorObjectForm(manny)
-            )
+            ),
+        ];
+
+        return "<div class=\"manny-action-grid\">"
+            + "<h4 class=\"manny-action-heading\">" + escaped(tr("assignMannyTask", "Assign a task to this Manny")) + "</h4>"
+            + renderMannyActionGroupAccordion(prefix + "-sector-group", tr("mannyActionGroupSector", "Sector"), sectorActions)
             + "</div>";
     }
 
@@ -1958,6 +2181,7 @@
             "craft": renderCraftForm,
             "atomic-printer-craft": renderAtomicPrinterCraftForm,
             "turn-on-relay": renderTurnOnRelayForm,
+            "improve-probe": renderImproveProbeForm,
         }[actionId]?.() || "";
     }
 
@@ -2231,6 +2455,7 @@
         if (changed) {
             updateMannyMineForms();
             updateMannyCraftForms();
+            updateProbeImprovementForms();
             updatePrinterCraftForms();
             updateMannyBookmarkForms();
             updateMannyInspectSectorObjectForms();
@@ -2559,6 +2784,9 @@
         if (form.classList.contains("manny-bookmark-form")) {
             updateMannyBookmarkForms();
         }
+        if (form.classList.contains("manny-improve-probe-form")) {
+            updateProbeImprovementForm(form);
+        }
     }
 
     async function openMannyActionAccordion(button, panel) {
@@ -2566,7 +2794,11 @@
             panel.innerHTML = "";
             button.disabled = true;
             try {
-                await refreshProbeInventory();
+                if (panel.dataset.actionId === "improve-probe") {
+                    await Promise.all([refreshProbeInventory(), refreshProbeImprovements()]);
+                } else {
+                    await refreshProbeInventory();
+                }
                 panel.innerHTML = renderLazyActionForm(panel.dataset.actionId || "");
                 updateActionForm(panel);
             } catch (error) {
@@ -2808,6 +3040,25 @@
                 "body": JSON.stringify(body),
             });
         }
+        if (form.classList.contains("manny-improve-probe-form")) {
+            const selected = String(formData.get("improvement") || "");
+            const improvement = probeImprovementById(selected);
+            if (!improvement) {
+                updateProbeImprovementForm(form);
+                setStatus(tr("noProbeImprovementAvailable", "Aucune amélioration n'est disponible"));
+                return null;
+            }
+            if (!probeImprovementAvailability(improvement).canImprove) {
+                updateProbeImprovementForm(form);
+                setStatus(tr("missingProbeImprovementIngredients", "Insufficient resources for this improvement."));
+                return null;
+            }
+
+            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/improve-probe", {
+                "method": "POST",
+                "body": JSON.stringify({"improvement": selected}),
+            });
+        }
         if (form.classList.contains("manny-craft-form")) {
             const recipe = craftingRecipeById(String(formData.get("recipe") || ""), "manny");
             if (!canCraftRecipe(recipe)) {
@@ -2944,6 +3195,9 @@
                 updateCraftForm(event.target.closest(".printer-craft-form"));
                 updatePrinterCraftForms();
             }
+            if (event.target.classList.contains("manny-probe-improvement")) {
+                updateProbeImprovementForm(event.target.closest(".manny-improve-probe-form"));
+            }
         });
 
         mannyList.addEventListener("click", async (event) => {
@@ -2952,7 +3206,7 @@
                 const targetId = accordionButton.getAttribute("aria-controls");
                 const panel = targetId ? document.getElementById(targetId) : null;
                 const willOpen = accordionButton.getAttribute("aria-expanded") !== "true";
-                if (willOpen && accordionButton.classList.contains("manny-action-accordion-trigger")) {
+                if (willOpen && accordionButton.classList.contains("manny-action-accordion-trigger") && !accordionButton.classList.contains("manny-action-group-trigger")) {
                     const canOpen = await openMannyActionAccordion(accordionButton, panel);
                     if (!canOpen) {
                         return;

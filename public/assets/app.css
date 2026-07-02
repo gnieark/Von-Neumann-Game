@@ -2543,6 +2543,11 @@ button.account-menu-item {
     border-color: rgba(143,182,189,.45);
 }
 
+.manny-action-group > .manny-action-accordion-trigger {
+    background: rgba(143,182,189,.1);
+    font-weight: 700;
+}
+
 .manny-action-accordion-trigger::after {
     content: "+";
     position: absolute;
@@ -2568,6 +2573,14 @@ button.account-menu-item {
 
 .manny-action-accordion-panel[hidden] {
     display: none;
+}
+
+.manny-action-group-panel {
+    background: rgba(255,255,255,.025);
+}
+
+.manny-action-group-panel .manny-action-section + .manny-action-section {
+    padding-top: 10px;
 }
 
 .manny-task-panel p {
@@ -2597,6 +2610,8 @@ button.account-menu-item {
 .manny-recover-storage-container-hint,
 .manny-bookmark-hint,
 .manny-craft-description,
+.manny-probe-improvement-description,
+.manny-probe-improvement-empty,
 .printer-craft-hint {
     grid-column: 1 / -1;
     margin: 0;
@@ -2617,6 +2632,10 @@ button.account-menu-item {
     color: var(--muted);
     font-size: .85rem;
     line-height: 1.4;
+}
+
+.manny-probe-improvement-ingredients {
+    grid-column: 1 / -1;
 }
 
 .manny-craft-ingredients-title {
