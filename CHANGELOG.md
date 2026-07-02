@@ -18,6 +18,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Interface : `/mannies` propose l’action générique “Inspecter un objet du secteur” et `/alerts` met les rapports de Manny en évidence avec un style dédié.
 - Interface : une Manny inactive dans un secteur distant joignable via SCUT peut désormais recevoir l’action “Inspect a sector object” depuis `/mannies`; la liste des objets inspectables provient du scan `/api/sector` du secteur de la Manny.
 - Interface : `/mannies` regroupe les ordres Manny en accordéons Probe/Sector/Containers/Craft et ajoute “Improve the probe”, avec sélection des améliorations disponibles et vérification des ressources nécessaires.
+- Outils : ajout de `scripts/generate-sector-openscad.php`, qui exporte trois fichiers OpenSCAD pour visualiser les secteurs générés, les secteurs visités et les secteurs contenant une sonde.
 
 ### Fixed
 

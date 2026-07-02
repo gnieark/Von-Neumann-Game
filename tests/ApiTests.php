@@ -993,6 +993,27 @@ if ($createdProbe !== null) {
     $test->assert($cliSectorRepository->load($backfillUnvisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillUnvisitedCoordinates, 'local-development-world')) instanceof DormantConstruct, 'backfill-dormant-constructs adds dormant constructs to unvisited generated sectors on positive roll');
     $test->assert(!($cliSectorRepository->load($backfillVisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillVisitedCoordinates, 'local-development-world')) instanceof DormantConstruct), 'backfill-dormant-constructs leaves visited generated sectors untouched');
 
+    (new NeumannProbeRepository($backfillPdo))->createForPlayer(1, 'OpenSCAD Probe', $backfillUnvisitedCoordinates);
+    $openScadOutputDir = $tmp . DIRECTORY_SEPARATOR . 'openscad-sector-export';
+    $openScadCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/generate-sector-openscad.php')
+        . ' --database-config=' . escapeshellarg($backfillDbConfig)
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --output-dir=' . escapeshellarg($openScadOutputDir);
+    exec($openScadCommand . ' 2>&1', $openScadOutput, $openScadStatus);
+    $openScadText = implode("\n", $openScadOutput);
+    $test->assertEquals(0, $openScadStatus, 'generate-sector-openscad CLI exits successfully');
+    $test->assert(str_contains($openScadText, 'OpenSCAD sector exports written.'), 'generate-sector-openscad CLI reports completion');
+    $openScadGenerated = file_get_contents($openScadOutputDir . DIRECTORY_SEPARATOR . 'generated-sectors.scad');
+    $openScadVisited = file_get_contents($openScadOutputDir . DIRECTORY_SEPARATOR . 'visited-sectors.scad');
+    $openScadProbes = file_get_contents($openScadOutputDir . DIRECTORY_SEPARATOR . 'probe-sectors.scad');
+    $test->assert(is_string($openScadGenerated) && str_contains($openScadGenerated, 'sphere_diameter_mm = 12;'), 'generated OpenSCAD export uses 12 mm spheres by default');
+    $test->assert(is_string($openScadGenerated) && str_contains($openScadGenerated, 'sector_marker(8, 0, 0);'), 'generated OpenSCAD export includes generated sectors');
+    $test->assert(is_string($openScadVisited) && str_contains($openScadVisited, 'sector_marker(10, 0, 0);'), 'visited OpenSCAD export includes visited sectors');
+    $test->assert(is_string($openScadVisited) && !str_contains($openScadVisited, 'sector_marker(8, 0, 0);'), 'visited OpenSCAD export excludes unvisited sectors');
+    $test->assert(is_string($openScadProbes) && str_contains($openScadProbes, 'sector_marker(8, 0, 0);'), 'probe OpenSCAD export includes sectors containing a probe');
+    $test->assert(is_string($openScadProbes) && !str_contains($openScadProbes, 'sector_marker(10, 0, 0);'), 'probe OpenSCAD export excludes sectors without probes');
+
     $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
     if ($cliInventoryProbe !== null) {
