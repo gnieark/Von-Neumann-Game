@@ -21,6 +21,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- API v72 : `POST /api/probe/storage-moves` soustrait désormais le volume déjà réservé par les autres déplacements Manny vers le même container avant d’accepter un ordre, afin d’éviter de dépasser sa capacité.
 - Interface : la page Probe affiche désormais une métrique `Améliorations installées`, chargée une seule fois depuis `/api/probe/probe-improvements-available`, avec un résumé des deux premières améliorations et un `+N` si la liste est plus longue.
 - Interface : la métrique Deuterium de la page Probe affiche désormais en petit le plafond amélioré, par exemple `max 200`, quand `fuel.maxDeuterium` dépasse la valeur standard.
 - API : les rapports d’inspection Manny sont idempotents pour une même fin de tâche, afin d’éviter plusieurs alertes `manny_report` identiques quand la complétion est rafraîchie simultanément.

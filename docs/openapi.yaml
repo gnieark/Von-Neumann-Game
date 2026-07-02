@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 71
+                apiVersion: 72
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -773,7 +773,9 @@ paths:
       summary: Assign a Manny to move stock between containers
       description: >
         Starts a moving_stockage task on an idle onboard Manny. Unit items take
-        10 seconds; resources take 10 seconds per 0.05 ECE.
+        10 seconds; resources take 10 seconds per 0.05 ECE. Destination free
+        capacity is evaluated after subtracting cargo already reserved by other
+        active storage moves toward the same container.
       requestBody:
         required: true
         content:

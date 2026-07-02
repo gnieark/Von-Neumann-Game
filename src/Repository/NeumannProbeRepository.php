@@ -63,6 +63,37 @@ final class NeumannProbeRepository
     }
 
     /**
+     * @template T
+     * @param callable(): T $callback
+     * @return T
+     */
+    public function withProbeLock(int $probeId, callable $callback): mixed
+    {
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $lock = $this->pdo->prepare('UPDATE neumann_probes SET updated_at = updated_at WHERE id = :id');
+            $lock->execute(['id' => $probeId]);
+            $result = $callback();
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
      * @return array<NeumannProbe>
      */
     public function findBySector(SectorCoordinates $sector, ?int $excludeId = null): array

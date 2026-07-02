@@ -675,9 +675,9 @@ final class ProbeStorageService
         $manny->storageContainerId = null;
     }
 
-    public function moveResource(NeumannProbe $probe, string $type, float $amount, string $fromContainerUid, string $toContainerUid): void
+    public function moveResource(NeumannProbe $probe, string $type, float $amount, string $fromContainerUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
-        $move = $this->assertCanMoveResource($probe, $type, $amount, $fromContainerUid, $toContainerUid);
+        $move = $this->assertCanMoveResource($probe, $type, $amount, $fromContainerUid, $toContainerUid, $ignoredStorageMoveMannyId);
         if ($move['from']->id === $move['to']->id) {
             return;
         }
@@ -687,9 +687,9 @@ final class ProbeStorageService
         $this->syncLegacyResourceTotals($probe);
     }
 
-    public function moveItem(NeumannProbe $probe, string $itemUid, string $toContainerUid): void
+    public function moveItem(NeumannProbe $probe, string $itemUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
-        $move = $this->assertCanMoveItem($probe, $itemUid, $toContainerUid);
+        $move = $this->assertCanMoveItem($probe, $itemUid, $toContainerUid, $ignoredStorageMoveMannyId);
         if ($move['item']->storageContainerId === $move['to']->id) {
             return;
         }
@@ -700,9 +700,9 @@ final class ProbeStorageService
     /**
      * @param array<string> $itemUids
      */
-    public function moveItems(NeumannProbe $probe, array $itemUids, string $toContainerUid): void
+    public function moveItems(NeumannProbe $probe, array $itemUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
-        $move = $this->assertCanMoveItems($probe, $itemUids, $toContainerUid);
+        $move = $this->assertCanMoveItems($probe, $itemUids, $toContainerUid, $ignoredStorageMoveMannyId);
         foreach ($move['items'] as $item) {
             if ($item->storageContainerId === $move['to']->id) {
                 continue;
@@ -711,9 +711,9 @@ final class ProbeStorageService
         }
     }
 
-    public function moveStoredManny(NeumannProbe $probe, string $mannyUid, string $toContainerUid): void
+    public function moveStoredManny(NeumannProbe $probe, string $mannyUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
-        $move = $this->assertCanMoveManny($probe, $mannyUid, $toContainerUid);
+        $move = $this->assertCanMoveManny($probe, $mannyUid, $toContainerUid, $ignoredStorageMoveMannyId);
         if ($move['manny']->storageContainerId === $move['to']->id) {
             return;
         }
@@ -725,9 +725,9 @@ final class ProbeStorageService
     /**
      * @param array<string> $mannyUids
      */
-    public function moveStoredMannies(NeumannProbe $probe, array $mannyUids, string $toContainerUid): void
+    public function moveStoredMannies(NeumannProbe $probe, array $mannyUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
-        $move = $this->assertCanMoveMannies($probe, $mannyUids, $toContainerUid);
+        $move = $this->assertCanMoveMannies($probe, $mannyUids, $toContainerUid, $ignoredStorageMoveMannyId);
         foreach ($move['mannies'] as $manny) {
             if ($manny->storageContainerId === $move['to']->id) {
                 continue;
@@ -740,7 +740,7 @@ final class ProbeStorageService
     /**
      * @return array{type:string, amount:float, from:StorageContainer, to:StorageContainer, available:float}
      */
-    public function assertCanMoveResource(NeumannProbe $probe, string $type, float $amount, string $fromContainerUid, string $toContainerUid): array
+    public function assertCanMoveResource(NeumannProbe $probe, string $type, float $amount, string $fromContainerUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): array
     {
         $type = $this->normalizeResourceType($type);
         if ($type === ResourceComposition::DEUTERIUM) {
@@ -758,7 +758,7 @@ final class ProbeStorageService
         if ($available + self::EPSILON < $amount) {
             throw new MannyActionException(422, 'insufficient_inventory_amount', 'The requested storage move amount is not available.');
         }
-        if ($from->id !== $to->id && $this->freeCapacityForContainer($probe, $to) + self::EPSILON < $amount) {
+        if ($from->id !== $to->id && $this->freeCapacityForContainer($probe, $to, $ignoredStorageMoveMannyId) + self::EPSILON < $amount) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Destination container does not have enough free capacity.');
         }
 
@@ -768,9 +768,9 @@ final class ProbeStorageService
     /**
      * @return array{item:ProbeItem, to:StorageContainer}
      */
-    public function assertCanMoveItem(NeumannProbe $probe, string $itemUid, string $toContainerUid): array
+    public function assertCanMoveItem(NeumannProbe $probe, string $itemUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): array
     {
-        $move = $this->assertCanMoveItems($probe, [$itemUid], $toContainerUid);
+        $move = $this->assertCanMoveItems($probe, [$itemUid], $toContainerUid, $ignoredStorageMoveMannyId);
 
         return ['item' => $move['items'][0], 'to' => $move['to']];
     }
@@ -779,7 +779,7 @@ final class ProbeStorageService
      * @param array<string> $itemUids
      * @return array{items:array<ProbeItem>, to:StorageContainer}
      */
-    public function assertCanMoveItems(NeumannProbe $probe, array $itemUids, string $toContainerUid): array
+    public function assertCanMoveItems(NeumannProbe $probe, array $itemUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): array
     {
         $this->ensureProbeStorage($probe);
         $to = $this->requiredContainer($probe, $toContainerUid);
@@ -805,7 +805,7 @@ final class ProbeStorageService
         if ($items === []) {
             throw new MannyActionException(400, 'bad_request', 'Item storage move requires at least one item.');
         }
-        if ($this->freeCapacityForContainer($probe, $to) + self::EPSILON < $requiredSpace) {
+        if ($this->freeCapacityForContainer($probe, $to, $ignoredStorageMoveMannyId) + self::EPSILON < $requiredSpace) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Destination container does not have enough free capacity.');
         }
 
@@ -815,9 +815,9 @@ final class ProbeStorageService
     /**
      * @return array{manny:Manny, to:StorageContainer}
      */
-    public function assertCanMoveManny(NeumannProbe $probe, string $mannyUid, string $toContainerUid): array
+    public function assertCanMoveManny(NeumannProbe $probe, string $mannyUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): array
     {
-        $move = $this->assertCanMoveMannies($probe, [$mannyUid], $toContainerUid);
+        $move = $this->assertCanMoveMannies($probe, [$mannyUid], $toContainerUid, $ignoredStorageMoveMannyId);
 
         return ['manny' => $move['mannies'][0], 'to' => $move['to']];
     }
@@ -826,7 +826,7 @@ final class ProbeStorageService
      * @param array<string> $mannyUids
      * @return array{mannies:array<Manny>, to:StorageContainer}
      */
-    public function assertCanMoveMannies(NeumannProbe $probe, array $mannyUids, string $toContainerUid): array
+    public function assertCanMoveMannies(NeumannProbe $probe, array $mannyUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): array
     {
         $this->ensureProbeStorage($probe);
         $to = $this->requiredContainer($probe, $toContainerUid);
@@ -852,7 +852,7 @@ final class ProbeStorageService
         if ($mannies === []) {
             throw new MannyActionException(400, 'bad_request', 'Manny storage move requires at least one Manny.');
         }
-        if ($this->freeCapacityForContainer($probe, $to) + self::EPSILON < $requiredSpace) {
+        if ($this->freeCapacityForContainer($probe, $to, $ignoredStorageMoveMannyId) + self::EPSILON < $requiredSpace) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Destination container does not have enough free capacity.');
         }
 
@@ -1139,11 +1139,78 @@ final class ProbeStorageService
         return $stocks;
     }
 
-    private function freeCapacityForContainer(NeumannProbe $probe, StorageContainer $container): float
+    private function freeCapacityForContainer(NeumannProbe $probe, StorageContainer $container, ?int $ignoredStorageMoveMannyId = null): float
     {
         $used = $this->usedCapacityByContainer($probe, [$container], $this->mannies->findByProbeId($probe->id), $this->items->findByProbeId($probe->id));
+        $reservedIncoming = $this->reservedIncomingCapacityForContainer($probe, $container, $ignoredStorageMoveMannyId);
 
-        return round(max(0.0, $container->capacity - (float) ($used[$container->id] ?? 0.0)), 4);
+        return round(max(0.0, $container->capacity - (float) ($used[$container->id] ?? 0.0) - $reservedIncoming), 4);
+    }
+
+    private function reservedIncomingCapacityForContainer(NeumannProbe $probe, StorageContainer $container, ?int $ignoredStorageMoveMannyId = null): float
+    {
+        $reserved = 0.0;
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($ignoredStorageMoveMannyId !== null && $manny->id === $ignoredStorageMoveMannyId) {
+                continue;
+            }
+            if ($manny->currentTask !== Manny::TASK_MOVING_STORAGE) {
+                continue;
+            }
+            if ((string) ($manny->taskPayload['toContainerId'] ?? '') !== $container->uid) {
+                continue;
+            }
+
+            $kind = (string) ($manny->taskPayload['kind'] ?? '');
+            if ($kind === 'resource') {
+                if ((string) ($manny->taskPayload['fromContainerId'] ?? '') !== $container->uid) {
+                    $reserved = round($reserved + max(0.0, (float) ($manny->taskPayload['amount'] ?? 0.0)), 4);
+                }
+                continue;
+            }
+
+            if ($kind === 'item') {
+                foreach ($this->stringList($manny->taskPayload['itemIds'] ?? null, $manny->taskPayload['itemId'] ?? null) as $itemUid) {
+                    $item = $this->items->findByUidForProbe($probe->id, $itemUid);
+                    if ($item !== null && $item->storageContainerId !== $container->id) {
+                        $reserved = round($reserved + max(0.0, $item->containerSpace), 4);
+                    }
+                }
+                continue;
+            }
+
+            if ($kind === 'manny') {
+                foreach ($this->stringList($manny->taskPayload['targetMannyIds'] ?? null, $manny->taskPayload['targetMannyId'] ?? null) as $mannyUid) {
+                    $storedManny = $this->mannies->findByUidForProbe($probe->id, $mannyUid);
+                    if ($storedManny !== null && $storedManny->storageContainerId !== $container->id) {
+                        $reserved = round($reserved + $this->mannyContainerSpace(), 4);
+                    }
+                }
+            }
+        }
+
+        return $reserved;
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function stringList(mixed $list, mixed $single = null): array
+    {
+        $values = [];
+        if (is_array($list)) {
+            foreach ($list as $value) {
+                if (is_string($value) && trim($value) !== '') {
+                    $values[] = trim($value);
+                }
+            }
+        }
+
+        if ($values === [] && is_string($single) && trim($single) !== '') {
+            $values[] = trim($single);
+        }
+
+        return array_values(array_unique($values));
     }
 
     private function placeUnit(NeumannProbe $probe, string $type, float $space): ?StorageContainer

@@ -796,6 +796,16 @@ final class MannyService
      */
     public function startStorageMove(NeumannProbe $probe, string $uid, array $payload): Manny
     {
+        return $this->probes->withProbeLock($probe->id, function () use ($probe, $uid, $payload): Manny {
+            return $this->startStorageMoveLocked($probe, $uid, $payload);
+        });
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function startStorageMoveLocked(NeumannProbe $probe, string $uid, array $payload): Manny
+    {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
         $this->ensureMannyInRange($manny, $probe);
@@ -2160,27 +2170,30 @@ final class MannyService
                     (float) ($manny->taskPayload['amount'] ?? 0.0),
                     (string) ($manny->taskPayload['fromContainerId'] ?? ''),
                     (string) ($manny->taskPayload['toContainerId'] ?? ''),
+                    $manny->id,
                 );
             } elseif ($kind === 'item') {
                 $itemIds = $this->stringListPayload($manny->taskPayload['itemIds'] ?? null);
                 if ($itemIds !== []) {
-                    $this->storage->moveItems($probe, $itemIds, (string) ($manny->taskPayload['toContainerId'] ?? ''));
+                    $this->storage->moveItems($probe, $itemIds, (string) ($manny->taskPayload['toContainerId'] ?? ''), $manny->id);
                 } else {
                     $this->storage->moveItem(
                         $probe,
                         (string) ($manny->taskPayload['itemId'] ?? ''),
                         (string) ($manny->taskPayload['toContainerId'] ?? ''),
+                        $manny->id,
                     );
                 }
             } elseif ($kind === 'manny') {
                 $targetMannyIds = $this->stringListPayload($manny->taskPayload['targetMannyIds'] ?? null);
                 if ($targetMannyIds !== []) {
-                    $this->storage->moveStoredMannies($probe, $targetMannyIds, (string) ($manny->taskPayload['toContainerId'] ?? ''));
+                    $this->storage->moveStoredMannies($probe, $targetMannyIds, (string) ($manny->taskPayload['toContainerId'] ?? ''), $manny->id);
                 } else {
                     $this->storage->moveStoredManny(
                         $probe,
                         (string) ($manny->taskPayload['targetMannyId'] ?? ''),
                         (string) ($manny->taskPayload['toContainerId'] ?? ''),
+                        $manny->id,
                     );
                 }
             }

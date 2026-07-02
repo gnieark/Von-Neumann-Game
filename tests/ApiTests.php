@@ -775,7 +775,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(71, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(72, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2048,6 +2048,42 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemA->uid)?->storageContainerId, 'completed batch move updates the first item container');
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemB->uid)?->storageContainerId, 'completed batch move updates the second item container');
+
+        for ($index = 0; $index < 96; $index++) {
+            $items->create($craftProbeEntity->id, 'test_storage_reservation_filler', 'Reservation filler', 0.01, storageContainerId: $additionalStorageContainerEntity->id);
+        }
+        $reservedMoveItemA = $items->create($craftProbeEntity->id, 'test_storage_reservation_payload', 'Reserved payload A', 0.01, storageContainerId: $coreStorageContainer->id);
+        $reservedMoveItemB = $items->create($craftProbeEntity->id, 'test_storage_reservation_payload', 'Reserved payload B', 0.01, storageContainerId: $coreStorageContainer->id);
+        $secondStorageMoveMannyId = '';
+        foreach ($mannies->findByProbeId($craftProbeEntity->id) as $candidateManny) {
+            if ($candidateManny->uid !== $craftMannyId && $candidateManny->isOnProbe() && $candidateManny->currentTask === null) {
+                $secondStorageMoveMannyId = $candidateManny->uid;
+                break;
+            }
+        }
+        $test->assert($secondStorageMoveMannyId !== '', 'storage move reservation test has a second idle Manny');
+        $reservedStorageMove = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
+            'actorMannyId' => $craftMannyId,
+            'kind' => 'item',
+            'itemId' => $reservedMoveItemA->uid,
+            'toContainerId' => $additionalStorageContainer['id'] ?? '',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $reservedStorageMove->status, 'POST /api/probe/storage-moves accepts an item move that fits remaining capacity');
+        $overReservedStorageMove = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
+            'actorMannyId' => $secondStorageMoveMannyId,
+            'kind' => 'item',
+            'itemId' => $reservedMoveItemB->uid,
+            'toContainerId' => $additionalStorageContainer['id'] ?? '',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(422, $overReservedStorageMove->status, 'POST /api/probe/storage-moves rejects capacity already reserved by another Manny');
+        $test->assertEquals('insufficient_cargo_capacity', $overReservedStorageMove->body['error']['code'] ?? null, 'reserved destination capacity reports insufficient cargo capacity');
+        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+            'id' => $craftMannyDbId,
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+        $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $reservedMoveItemA->uid)?->storageContainerId, 'completed reserved storage move uses the last free destination capacity');
+        $test->assertEquals($coreStorageContainer->id, $items->findByUidForProbe($craftProbeEntity->id, $reservedMoveItemB->uid)?->storageContainerId, 'rejected reserved storage move leaves the second item in its source container');
 
         $pdo->prepare('UPDATE mannies SET current_task = :task, task_started_at = :started, task_ends_at = :ended, task_payload_json = :payload WHERE uid = :uid')->execute([
             'uid' => $craftMannyId,
