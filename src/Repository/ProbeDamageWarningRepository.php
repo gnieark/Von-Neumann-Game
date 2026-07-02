@@ -200,7 +200,7 @@ final class ProbeDamageWarningRepository
         );
         $stmt->execute([
             'probe_id' => $probeId,
-            'movement_id' => 0,
+            'movement_id' => null,
             'type' => ProbeDamageWarning::TYPE_MANNY_REPORT,
             'status' => ProbeDamageWarning::STATUS_UNREAD,
             'phase' => 'manny_report',
@@ -314,7 +314,7 @@ final class ProbeDamageWarningRepository
         return new ProbeDamageWarning(
             (int) $row['id'],
             (int) $row['probe_id'],
-            (int) $row['movement_id'],
+            $row['movement_id'] !== null ? (int) $row['movement_id'] : null,
             (string) $row['type'],
             (string) $row['status'],
             (string) $row['phase'],

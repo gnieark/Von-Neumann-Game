@@ -16,6 +16,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Génération : les nouveaux secteurs ont désormais 1 chance sur 200 de contenir un `Dormant construct`; `scripts/add-dormant-construct.php` permet d’en ajouter un à un secteur, et `scripts/backfill-dormant-constructs.php` peut compléter les secteurs JSON non visités déjà générés.
 - Interface : `/mannies` propose l’action générique “Inspecter un objet du secteur” et `/alerts` met les rapports de Manny en évidence avec un style dédié.
 
+### Fixed
+
+- API : les rapports d’inspection Manny créés hors déplacement ne provoquent plus d’erreur 500 sur `/api/probe/sector`, `/api/probe/mannies` ou `/api/probe/alerts`; `probe_damage_warnings.movement_id` accepte désormais `NULL` pour ces alertes autonomes.
+
 ## 2026-06-28
 
 ### Changed

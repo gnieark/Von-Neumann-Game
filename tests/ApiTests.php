@@ -644,6 +644,15 @@ $damageWarningSchemaColumns = array_map(
 );
 $test->assert(in_array('container_id', $damageWarningSchemaColumns, true), 'Probe damage warning table stores container ids');
 $test->assert(in_array('status', $damageWarningSchemaColumns, true), 'Probe damage warning table stores read status');
+$damageWarningSchemaRows = $pdo->query('PRAGMA table_info(probe_damage_warnings)')->fetchAll(PDO::FETCH_ASSOC);
+$damageWarningMovementColumn = null;
+foreach ($damageWarningSchemaRows as $row) {
+    if (($row['name'] ?? null) === 'movement_id') {
+        $damageWarningMovementColumn = $row;
+        break;
+    }
+}
+$test->assertEquals(0, (int) ($damageWarningMovementColumn['notnull'] ?? 1), 'Probe damage warning movement id is nullable for non-movement alerts');
 $forumCategorySchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(forum_categories)')->fetchAll(PDO::FETCH_ASSOC),
@@ -2226,6 +2235,8 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), 'Rapport de Manny'), 'Manny report alert message is labeled as a Manny report');
         $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), ProbeItem::STEEL_BAR_NAME), 'Manny report alert message includes stored items');
         $test->assert(str_contains((string) ($driftingReports[0]['message'] ?? ''), '0.21'), 'Manny report alert message includes stored resources');
+        $storedDriftingReport = $damageWarnings->findById((int) ($driftingReports[0]['id'] ?? 0));
+        $test->assertEquals(null, $storedDriftingReport?->movementId, 'Manny report alerts are not linked to fake movements');
 
         $recoverDrifting = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/salvage', $detachHeaders, json_encode([
             'objectId' => $detachedObjectId,

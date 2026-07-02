@@ -258,7 +258,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS probe_damage_warnings (
                 id $id,
                 probe_id INTEGER NOT NULL,
-                movement_id INTEGER NOT NULL,
+                movement_id INTEGER NULL,
                 type $text NOT NULL,
                 status $text NOT NULL,
                 phase $text NOT NULL,
@@ -475,6 +475,7 @@ final class SchemaInitializer
             $this->ensureMysqlColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER updated_at');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
+            $this->ensureMysqlProbeDamageWarningMovementNullable($pdo);
             $this->ensureProbeMessageSchema($pdo);
             $this->ensureScutSchema($pdo);
             $this->ensureProbeImprovementSchema($pdo);
@@ -766,7 +767,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS probe_damage_warnings (
                 id $id,
                 probe_id INTEGER NOT NULL,
-                movement_id INTEGER NOT NULL,
+                movement_id INTEGER NULL,
                 type $text NOT NULL,
                 status $text NOT NULL,
                 phase $text NOT NULL,
@@ -790,6 +791,21 @@ final class SchemaInitializer
         );
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_probe_status ON probe_damage_warnings(probe_id, status, created_at)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_movement ON probe_damage_warnings(movement_id)');
+    }
+
+    private function ensureMysqlProbeDamageWarningMovementNullable(PDO $pdo): void
+    {
+        if ($this->driver !== 'mysql') {
+            return;
+        }
+
+        $stmt = $pdo->query("SHOW COLUMNS FROM probe_damage_warnings WHERE Field = 'movement_id'");
+        $column = $stmt !== false ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        if (!is_array($column) || strtoupper((string) ($column['Null'] ?? 'YES')) === 'YES') {
+            return;
+        }
+
+        $pdo->exec('ALTER TABLE probe_damage_warnings MODIFY movement_id INTEGER NULL');
     }
 
     private function ensureStorageSchema(PDO $pdo): void

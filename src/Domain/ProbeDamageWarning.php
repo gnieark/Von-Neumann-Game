@@ -17,7 +17,7 @@ final class ProbeDamageWarning
     public function __construct(
         public readonly int $id,
         public readonly int $probeId,
-        public readonly int $movementId,
+        public readonly ?int $movementId,
         public readonly string $type,
         public string $status,
         public readonly string $phase,
