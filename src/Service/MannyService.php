@@ -620,6 +620,7 @@ final class MannyService
         }
 
         $reservedDetachedContainer = $this->reserveDetachedContainerForSalvage($probe, $target);
+        $this->recallMiningManniesTargetingDetachedContainer($probe, $manny->id, $objectId);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $salvageSeconds = $this->salvageSeconds();
         $manny->locationType = Manny::LOCATION_SECTOR;
@@ -639,6 +640,36 @@ final class MannyService
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
+    }
+
+    private function recallMiningManniesTargetingDetachedContainer(NeumannProbe $probe, int $recoveringMannyId, string $containerId): void
+    {
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if (
+                $manny->id === $recoveringMannyId
+                || $manny->currentTask !== Manny::TASK_MINING
+                || $this->miningTaskTargetContainerId($manny) !== $containerId
+            ) {
+                continue;
+            }
+
+            $returnDurationSeconds = $this->recallReturnDurationSeconds($manny, $now);
+            $droppedCargo = $this->dropWaitingMannyCargo($manny);
+            $this->clearMannyCargo($manny);
+            $manny->currentTask = Manny::TASK_RETURNING;
+            $manny->taskStartedAt = $now->format('c');
+            $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
+            $manny->taskPayload = [
+                'reason' => 'target_container_recovered',
+                'lastTask' => Manny::TASK_MINING,
+                'result' => 'cancelled',
+                'targetContainerId' => $containerId,
+                'droppedCargo' => $droppedCargo,
+            ];
+            $this->removeMannyFromSector($manny);
+            $this->mannies->save($manny);
+        }
     }
 
     public function startWaypointBookmarkInstallation(NeumannProbe $probe, Player $player, string $uid, string $objectId, string $name): Manny

@@ -766,7 +766,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(70, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(71, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2679,6 +2679,19 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $multiHiddenStoredSector = $sectorRepository->load($multiHiddenProbe->currentSector);
                 $test->assertEquals(2, count($multiHiddenStoredSector->hiddenDetachedContainersForObject('multi-cache-rock')), 'multiple hidden containers can coexist on the same asteroid');
 
+                $multiInterruptedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[0]) . '/mine', $multiHiddenHeaders, json_encode([
+                    'objectId' => 'multi-cache-rock',
+                    'resource' => 'metals',
+                    'targetAmount' => 0.02,
+                    'targetContainerId' => $multiHiddenObjectIdA,
+                ], JSON_THROW_ON_ERROR));
+                $test->assertEquals(202, $multiInterruptedMine->status, 'Manny can start mining into a container that will be recovered');
+                $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE uid = :uid')->execute([
+                    'uid' => $multiHiddenMannyIds[0],
+                    'started' => gmdate('c', time() - 350),
+                    'ended' => gmdate('c', time() + 250),
+                ]);
+
                 $multiRecoverA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[2]) . '/recover-storage-container', $multiHiddenHeaders, json_encode([
                     'objectId' => $multiHiddenObjectIdA,
                     'source' => 'asteroid',
@@ -2690,6 +2703,12 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $test->assertEquals(202, $multiRecoverA->status, 'first hidden container recovery on a shared asteroid is accepted');
                 $test->assertEquals(202, $multiRecoverB->status, 'second hidden container recovery on a shared asteroid is accepted');
                 $test->assertEquals(0, count($sectorRepository->load($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'recovering multiple hidden containers reserves all of them out of sector JSON');
+                $multiInterruptedManny = $mannies->findByUidForProbe($multiHiddenProbe->id, $multiHiddenMannyIds[0]);
+                $test->assertEquals(Manny::TASK_RETURNING, $multiInterruptedManny?->currentTask, 'recovering a target detached container recalls Mannys mining into it');
+                $test->assertEquals('target_container_recovered', $multiInterruptedManny?->taskPayload['reason'] ?? null, 'interrupted mining recall records the recovered target-container reason');
+                $test->assertEquals($multiHiddenObjectIdA, $multiInterruptedManny?->taskPayload['targetContainerId'] ?? null, 'interrupted mining recall records the recovered target container id');
+                $test->assertEquals(0.0, $multiInterruptedManny?->cargoMetals, 'interrupted mining recall drops the Manny mining cargo');
+                $test->assertEquals(0.01, $multiInterruptedManny?->taskPayload['droppedCargo'][0]['resources']['metals'] ?? null, 'interrupted mining recall records the dropped metal cargo');
 
                 foreach ([$multiHiddenMannyIds[2], $multiHiddenMannyIds[3]] as $multiRecoverMannyId) {
                     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
