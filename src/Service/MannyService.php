@@ -20,6 +20,10 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Service\Manny\MannyPublicPresenter;
+use VonNeumannGame\Service\Manny\MannyTaskRuntime;
+use VonNeumannGame\Service\Manny\TaskHandlerInterface;
+use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\DormantConstruct;
@@ -32,7 +36,7 @@ use VonNeumannGame\Sector\SectorManny;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\UniverseObject;
 
-final class MannyService
+final class MannyService implements MannyTaskRuntime
 {
     public const REPAIR_SECONDS_PER_INTEGRITY_PERCENT = 600;
     public const REPAIR_METALS_PER_INTEGRITY_PERCENT = 0.01;
@@ -58,6 +62,9 @@ final class MannyService
     public const TASK_VISIBILITY_TOO_FAR = 'too_far';
 
     private readonly WaypointBookmarkService $bookmarks;
+    private readonly MannyPublicPresenter $presenter;
+    /** @var list<TaskHandlerInterface> */
+    private readonly array $taskHandlers;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -71,8 +78,14 @@ final class MannyService
         private readonly ?ScutNetworkService $scut = null,
         private readonly ?ProbeDamageWarningRepository $alerts = null,
         private readonly ?ProbeImprovementRepository $improvements = null,
+        ?array $taskHandlers = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
+        $this->presenter = new MannyPublicPresenter(
+            $this->scut,
+            fn(Manny $manny): array => $this->mannyCargoArray($manny),
+        );
+        $this->taskHandlers = $taskHandlers ?? TaskHandlerRegistry::defaultHandlers();
     }
 
     /**
@@ -1146,121 +1159,31 @@ final class MannyService
         if ($manny->currentTask === null) {
             return $manny;
         }
-        if (
-            !$manny->isInSameSectorAs($probe)
-            && !$this->canRefreshRemoteMiningViaScut($probe, $manny)
-            && !$this->canRefreshRemoteInspectViaScut($probe, $manny)
-        ) {
+        if (!$this->canRefreshMannyTaskFromProbe($probe, $manny)) {
             return $manny;
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
-        if ($manny->currentTask === Manny::TASK_REPAIR) {
-            return $this->refreshRepair($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_MINING) {
-            return $this->refreshMining($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_CRAFTING || $manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
-            return $this->refreshCrafting($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_SALVAGE) {
-            return $this->refreshSalvage($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_INSTALLING_WAYPOINT_BOOKMARK) {
-            return $this->refreshWaypointBookmarkInstallation($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_DETACHING_STORAGE_CONTAINER) {
-            return $this->refreshDetachStorageContainer($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_DROPPING_STORAGE_CONTAINER) {
-            return $this->refreshDropStorageContainer($manny, $probe, $now);
-        }
-        if ($this->isInspectingSectorObjectTask($manny->currentTask)) {
-            return $this->refreshInspectSectorObject($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_REFILLING_DEUTERIUM_TANK) {
-            return $this->refreshDeuteriumTankRefill($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_RETURNING) {
-            return $this->refreshReturning($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE) {
-            return $this->refreshWaitingForSpace($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_MOVING_STORAGE) {
-            return $this->refreshStorageMove($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
-            return $this->refreshScutRelayTurnOn($manny, $probe, $now);
-        }
-        if ($manny->currentTask === Manny::TASK_IMPROVING_PROBE) {
-            return $this->refreshProbeImprovement($manny, $probe, $now);
+        foreach ($this->taskHandlers as $handler) {
+            if ($handler->supports($manny->currentTask)) {
+                return $handler->refresh($this, $manny, $probe, $now);
+            }
         }
 
         return $manny;
     }
 
+    private function canRefreshMannyTaskFromProbe(NeumannProbe $probe, Manny $manny): bool
+    {
+        return $manny->isInSameSectorAs($probe)
+            || $this->canRefreshRemoteMiningViaScut($probe, $manny)
+            || $this->canRefreshRemoteInspectViaScut($probe, $manny);
+    }
+
     public function publicArray(NeumannProbe $probe, Manny $manny, ?array $relativeSector = null): array
     {
-        $taskVisibility = $this->taskVisibilityFor($probe, $manny);
-        $currentTask = $manny->currentTask;
-        $taskProgressPercent = $manny->taskProgressPercent();
-        $taskEstimatedEndTime = $manny->taskEndsAt;
-        $task = $this->publicTaskPayload($manny);
-        if ($manny->currentTask !== null && $taskVisibility === self::TASK_VISIBILITY_TOO_FAR) {
-            $currentTask = self::PUBLIC_TASK_UNKNOWN_TOO_FAR;
-            $taskProgressPercent = 0.0;
-            $taskEstimatedEndTime = null;
-            $task = [];
-        }
-
-        return [
-            'id' => $manny->uid,
-            'name' => $manny->name,
-            'location' => $manny->isOnProbe()
-                ? ['type' => Manny::LOCATION_PROBE]
-                : ['type' => Manny::LOCATION_SECTOR, 'sector' => ['relative' => $relativeSector]],
-            'currentTask' => $currentTask,
-            'taskProgressPercent' => $taskProgressPercent,
-            'taskEstimatedEndTime' => $taskEstimatedEndTime,
-            'task' => $task,
-            'taskVisibility' => $taskVisibility,
-            'cargo' => $this->mannyCargoArray($manny),
-            'canReceiveOrders' => $manny->probeId === $probe->id && $manny->isInSameSectorAs($probe) && $manny->currentTask === null,
-        ];
-    }
-
-    private function taskVisibilityFor(NeumannProbe $probe, Manny $manny): string
-    {
-        if ($manny->isInSameSectorAs($probe)) {
-            return self::TASK_VISIBILITY_LOCAL;
-        }
-        if (
-            $manny->sector !== null
-            && $this->scut !== null
-            && $this->scut->canSectorsCommunicate($probe->currentSector, $manny->sector)
-        ) {
-            return self::TASK_VISIBILITY_SCUT_NETWORK;
-        }
-
-        return self::TASK_VISIBILITY_TOO_FAR;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function publicTaskPayload(Manny $manny): array
-    {
-        $payload = $manny->taskPayload;
-        unset($payload['snapshot'], $payload['consumedKit'], $payload['targetSector']);
-
-        if (is_array($payload['reservedDetachedContainer'] ?? null)) {
-            unset($payload['reservedDetachedContainer']['object']);
-        }
-
-        return $payload;
+        return $this->presenter->present($probe, $manny, $relativeSector);
     }
 
     private function requiredManny(NeumannProbe $probe, string $uid): Manny
@@ -1269,7 +1192,7 @@ final class MannyService
             ?? throw new MannyActionException(404, 'manny_not_found', 'Manny not found.');
     }
 
-    private function refreshRepair(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshRepair(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -1285,7 +1208,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshCrafting(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshCrafting(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -1314,7 +1237,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshSalvage(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshSalvage(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -1934,7 +1857,7 @@ final class MannyService
         );
     }
 
-    private function refreshMining(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshMining(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         return $this->withMannyRefreshLock(
             $manny,
@@ -2089,7 +2012,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshReturning(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshReturning(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2125,7 +2048,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
             return $manny;
@@ -2155,7 +2078,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshStorageMove(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshStorageMove(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2210,7 +2133,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshScutRelayTurnOn(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshScutRelayTurnOn(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2244,7 +2167,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshProbeImprovement(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshProbeImprovement(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2274,7 +2197,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshWaypointBookmarkInstallation(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshWaypointBookmarkInstallation(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2310,7 +2233,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshDetachStorageContainer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshDetachStorageContainer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2371,7 +2294,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshDropStorageContainer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshDropStorageContainer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2428,7 +2351,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function refreshInspectSectorObject(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshInspectSectorObject(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
@@ -2501,12 +2424,7 @@ final class MannyService
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    private function isInspectingSectorObjectTask(?string $task): bool
-    {
-        return $task === Manny::TASK_INSPECTING_SECTOR_OBJECT || $task === 'inspecting_asteroid';
-    }
-
-    private function refreshDeuteriumTankRefill(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    public function refreshDeuteriumTankRefill(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;

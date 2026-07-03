@@ -2,7 +2,7 @@
 
 https://neumann-probe.net/
 
-Prototype PHP 8.2 d'un jeu persistant autour d'une sonde de Von Neumann dans un
+Jeu persistant autour d'une sonde de Von Neumann dans un
 univers procedural. Cette documentation est volontairement technique: elle sert a
 retrouver vite les responsabilites du code, les points d'entree et les
 invariants du domaine.
@@ -280,15 +280,19 @@ puis les tests du moteur de secteurs dans `tests/SectorTests.php`.
 `php tests/SectorTests.php` peut aussi etre lance seul pour verifier les
 coordonnees FCC, le voisinage, la generation et la persistance fichier.
 
-Un scenario manuel contre un serveur lance existe aussi:
 
+Le scheduler est placé dans les tâches cron de l'user php/nginx (www-data dans mon cas) :
 ```bash
-php tests/normalusetest.php http://127.0.0.1:8000 remi secret
+* * * * * /usr/bin/php /<neumannpath>/scripts/scheduler.php
 ```
 
-Le scheduler peut etre lance manuellement:
+Il peut etre lance manuellement:
 
 ```bash
 php scripts/scheduler.php
 php scripts/scheduler.php --limit=25
+```
+La génération des statistiques est aussi "cronifiée"
+```bash
+5 * * * * /usr/bin/php /<neumannpath>/scripts/generate-stats.php >> /<neumannpath>/var/stats/stats-cron.log 2>&1
 ```
