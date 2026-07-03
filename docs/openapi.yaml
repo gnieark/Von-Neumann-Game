@@ -775,7 +775,9 @@ paths:
         Starts a moving_stockage task on an idle onboard Manny. Unit items take
         10 seconds; resources take 10 seconds per 0.05 ECE. Destination free
         capacity is evaluated after subtracting cargo already reserved by other
-        active storage moves toward the same container.
+        active storage moves toward the same container. additional_container
+        items cannot be moved through this endpoint; while onboard, they remain
+        linked to the probe internal storage.
       requestBody:
         required: true
         content:
@@ -3420,10 +3422,10 @@ components:
           description: Required for resource moves, in ECE.
         itemId:
           type: string
-          description: Single item id for item moves. Use itemIds for batch moves.
+          description: Single item id for item moves. Use itemIds for batch moves. additional_container items are rejected.
         itemIds:
           type: array
-          description: Multiple item ids for batch item moves.
+          description: Multiple item ids for batch item moves. additional_container items are rejected.
           items:
             type: string
         targetMannyId:

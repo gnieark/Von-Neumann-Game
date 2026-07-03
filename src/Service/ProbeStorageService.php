@@ -797,6 +797,9 @@ final class ProbeStorageService
             }
             $item = $this->items->findByUidForProbe($probe->id, $itemUid)
                 ?? throw new MannyActionException(404, 'not_found', 'Inventory item not found.');
+            if ($item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
+                throw new MannyActionException(422, 'item_not_movable', 'Additional containers stay linked to the probe storage and cannot be moved into another container.');
+            }
             $items[] = $item;
             if ($item->storageContainerId !== $to->id) {
                 $requiredSpace = round($requiredSpace + max(0.0, $item->containerSpace), 4);
@@ -1283,6 +1286,13 @@ final class ProbeStorageService
     private function placementCandidatesFrom(array $containers, string $type): array
     {
         $type = $this->normalizeItemType($type);
+        if ($type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
+            return array_values(array_filter(
+                $containers,
+                static fn(StorageContainer $container): bool => $container->uid === StorageContainer::CORE_UID,
+            ));
+        }
+
         $priority = [];
         $normal = [];
         $excluded = [];

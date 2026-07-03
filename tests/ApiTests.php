@@ -368,6 +368,7 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"/api/probe/storage-containers/" + encodeURIComponent(containerId)'), 'inventories JS renames containers through the storage-container PATCH endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'container.label !== "Sonde"'), 'inventories JS honors custom probe-core container labels');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'isAdditionalContainer ? "" : iconButton("inventory-line-move"'), 'inventories JS hides the move button for additional containers');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'container.label !== "Sonde"'), 'mannies JS honors custom probe-core container labels');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.targetContainerId = targetContainerId'), 'mannies JS sends targetContainerId for external mining storage');
@@ -463,7 +464,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260702-probe-improvements-metric"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260703-container-move-lock"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -775,7 +776,7 @@ $kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorServ
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(72, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(73, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1042,6 +1043,29 @@ if ($createdProbe !== null) {
             $storageContainers->findByUidForProbe($cliInventoryProbe->id, 'container-' . ($cliContainers[0]->uid ?? 'missing')) !== null,
             'add-inventory-item CLI creates the paired storage container for additional containers',
         );
+        $cliCoreContainer = $storageContainers->findByUidForProbe($cliInventoryProbe->id, 'probe-core');
+        $cliPairedContainer = $storageContainers->findByUidForProbe($cliInventoryProbe->id, 'container-' . ($cliContainers[0]->uid ?? 'missing'));
+        if ($cliCoreContainer !== null && $cliPairedContainer !== null) {
+            $pdo->prepare('UPDATE probe_items SET storage_container_id = :container_id WHERE id = :id')->execute([
+                'container_id' => $cliPairedContainer->id,
+                'id' => $cliContainers[0]->id,
+            ]);
+            $dryRunRelinkCommand = escapeshellarg(PHP_BINARY)
+                . ' ' . escapeshellarg($root . '/scripts/relink-additional-containers-to-core.php')
+                . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+                . ' --dry-run';
+            exec($dryRunRelinkCommand . ' 2>&1', $dryRunRelinkOutput, $dryRunRelinkStatus);
+            $test->assertEquals(0, $dryRunRelinkStatus, 'relink additional containers CLI dry-run exits successfully');
+            $test->assertEquals($cliPairedContainer->id, $items->findByUidForProbe($cliInventoryProbe->id, $cliContainers[0]->uid)?->storageContainerId, 'relink dry-run leaves additional container placement unchanged');
+            $relinkCommand = escapeshellarg(PHP_BINARY)
+                . ' ' . escapeshellarg($root . '/scripts/relink-additional-containers-to-core.php')
+                . ' --database-config=' . escapeshellarg($userinfosDbConfig);
+            exec($relinkCommand . ' 2>&1', $relinkOutput, $relinkStatus);
+            $relinkText = implode("\n", $relinkOutput);
+            $test->assertEquals(0, $relinkStatus, 'relink additional containers CLI exits successfully');
+            $test->assert(str_contains($relinkText, 'Relinked 1 additional container item(s) to probe-core'), 'relink additional containers CLI reports moved rows');
+            $test->assertEquals($cliCoreContainer->id, $items->findByUidForProbe($cliInventoryProbe->id, $cliContainers[0]->uid)?->storageContainerId, 'relink additional containers CLI moves container items back to probe-core');
+        }
 
         $beforeMannyCount = count($mannies->findByProbeId($cliInventoryProbe->id));
         $addMannyCommand = escapeshellarg(PHP_BINARY)
@@ -1827,6 +1851,14 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $storageRules->status, 'PATCH /api/probe/storage-containers/{id}/rules updates routing rules');
     $test->assertEquals(['metals'], $storageRules->body['container']['rules']['priority'] ?? null, 'storage priority rule is persisted');
+    $moveAdditionalContainer = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
+        'actorMannyId' => $craftMannyId,
+        'kind' => 'item',
+        'itemId' => $additionalContainers[0]['id'] ?? '',
+        'toContainerId' => $additionalStorageContainer['id'] ?? '',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $moveAdditionalContainer->status, 'POST /api/probe/storage-moves rejects additional-container item moves');
+    $test->assertEquals('item_not_movable', $moveAdditionalContainer->body['error']['code'] ?? null, 'additional-container storage move reports item_not_movable');
 
     $staleProbeBeforeStorageRace = $probes->findById($craftProbeEntity->id);
     $freshProbeForStorageRace = $probes->findById($craftProbeEntity->id);

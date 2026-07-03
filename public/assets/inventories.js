@@ -309,7 +309,7 @@
             : tr("jettison", "Jettison");
 
         return "<span class=\"inventory-line-controls\">"
-            + iconButton("inventory-line-move", tr("moveStorageLine", "Move"), "move", !flags.canMove)
+            + (isAdditionalContainer ? "" : iconButton("inventory-line-move", tr("moveStorageLine", "Move"), "move", !flags.canMove))
             + iconButton("inventory-line-jettison", jettisonLabel, "jettison", !flags.canJettison, jettisonVisibleLabel)
             + "</span>"
             + "<div class=\"inventory-line-form-slot\"></div>";
