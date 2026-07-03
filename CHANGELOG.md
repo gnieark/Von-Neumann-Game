@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - API : `ApiKernel` utilise désormais un routeur déclaratif, avec les routes Forum déplacées dans un controller dédié et leur sérialisation dans un presenter, sans changement de contrat public.
+- API : les routes `/api/probe/mannies` et `/api/probe/atomic-printer/craft` sont déplacées dans `ProbeManniesApiController`, avec leur présentation dans `ProbeManniesApiPresenter`, sans changement de contrat public.
 - Manny : `MannyService` délègue désormais la présentation publique des Mannys à un presenter dédié et le rafraîchissement des tâches à des handlers typés par tâche, sans changement de contrat API.
 - API v67 : ajout du stockage `probe_improvements`, de `GET /api/probe/probe-improvements-available` et de `POST /api/probe/mannies/{mannyId}/improve-probe`; la première amélioration, `deuterium_compression`, consomme 1 `electric_motor` et 2 `steel_bar`, dure 5 minutes et porte la cuve de deutérium à 200 % une fois terminée.
 - API v68 : `POST /api/probe/mannies/{mannyId}/inspect-sector-object` accepte aussi une Manny inactive dans un secteur distant couvert par le même réseau SCUT que la sonde; l’objet inspecté doit se trouver dans le secteur de cette Manny, qui reste oubliée sur place à la fin de l’inspection.

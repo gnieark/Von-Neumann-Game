@@ -6,13 +6,11 @@ namespace VonNeumannGame\Http;
 
 use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
-use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\MissionStep;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDamageWarning;
-use VonNeumannGame\Domain\ProbeImprovement;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeMessage;
@@ -23,6 +21,8 @@ use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Domain\VisitedSector;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\Controller\ForumApiController;
+use VonNeumannGame\Http\Controller\ProbeManniesApiController;
+use VonNeumannGame\Http\Controller\ProbeManniesApiPresenter;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
@@ -51,6 +51,8 @@ final class ApiKernel
     public const API_VERSION = 72;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
+    private ?ProbeManniesApiController $probeManniesController = null;
+    private ?ProbeManniesApiPresenter $probeManniesPresenter = null;
 
     public function __construct(
         private readonly AuthService $auth,
@@ -119,9 +121,9 @@ final class ApiKernel
                     ? $this->probeStorageContainerRenameResponse($player, $ctx->stringParam(0), $ctx->body)
                     : $this->probeStorageContainerResponse($player, $ctx->stringParam(0)),
             )),
-            ApiRoute::regex('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|improve-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMannyActionResponse($player, $ctx->stringParam(0), $ctx->params[1], $ctx->body))),
+            ApiRoute::regex('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|improve-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(0), $ctx->params[1], $ctx->body))),
             ApiRoute::regex('#^/api/probe/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(0)))),
-            ApiRoute::regex('#^/api/probe/mannies/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMannyRenameResponse($player, $ctx->stringParam(0), $ctx->body))),
+            ApiRoute::regex('#^/api/probe/mannies/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->rename($player, $ctx->stringParam(0), $ctx->body))),
             ApiRoute::regex('#^/api/probe/missions/([^/]+)/abandon$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionAbandonResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/messages/(\d+)/read$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, $ctx->intParam(0)))),
             ApiRoute::regex('#^/api/probe/alerts/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAlertReadResponse($player, $ctx->intParam(0)))),
@@ -152,7 +154,7 @@ final class ApiKernel
             ApiRoute::path('/api/probe/storage-containers', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player))),
             ApiRoute::path('/api/probe/probe-improvements-available', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeImprovementsResponse($player, $ctx->query))),
             ApiRoute::path('/api/probe/storage-moves', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeStorageMoveResponse($player, $ctx->body))),
-            ApiRoute::path('/api/probe/atomic-printer/craft', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAtomicPrinterCraftResponse($player, $ctx->body))),
+            ApiRoute::path('/api/probe/atomic-printer/craft', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->atomicPrinterCraft($player, $ctx->body))),
             ApiRoute::path('/api/probe/messages/sent', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeSentMessagesResponse($player, $ctx->query))),
             ApiRoute::path('/api/probe/messages', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'POST'], $ctx->headers, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->probeMessageSendResponse($player, $ctx->body) : $this->probeMessagesResponse($player, $ctx->query))),
             ApiRoute::path('/api/probe/alerts', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAlertsResponse($player))),
@@ -162,7 +164,7 @@ final class ApiKernel
             ApiRoute::path('/api/probe/mission', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player))),
             ApiRoute::path('/api/probe/missions', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player))),
             ApiRoute::path('/api/probe/move', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $ctx->body))),
-            ApiRoute::path('/api/probe/mannies', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesResponse($player))),
+            ApiRoute::path('/api/probe/mannies', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->list($player))),
             ApiRoute::path('/api/sector', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $ctx->query))),
             ApiRoute::path('/api/forum/categories', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'POST'], $ctx->headers, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->forumController()->createCategory($player, $ctx->body) : $this->forumController()->categories())),
             ApiRoute::path('/api/forum/posts', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'POST'], $ctx->headers, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->forumController()->createPost($player, $ctx->body) : $this->forumController()->posts($ctx->query))),
@@ -172,6 +174,27 @@ final class ApiKernel
     private function forumController(): ForumApiController
     {
         return $this->forumController ??= new ForumApiController($this->forum);
+    }
+
+    private function probeManniesController(): ProbeManniesApiController
+    {
+        return $this->probeManniesController ??= new ProbeManniesApiController(
+            $this->probes,
+            $this->movements,
+            $this->mannies,
+            $this->storage,
+            $this->items,
+            $this->probeManniesPresenter(),
+        );
+    }
+
+    private function probeManniesPresenter(): ProbeManniesApiPresenter
+    {
+        return $this->probeManniesPresenter ??= new ProbeManniesApiPresenter(
+            $this->mannies,
+            $this->improvements,
+            $this->gameplayConfig,
+        );
     }
 
     private function routeApiVersion(string $method): ApiResponse
@@ -289,7 +312,7 @@ final class ApiKernel
         $includeAll = $this->truthyQuery($query['includeAll'] ?? $query['all'] ?? null);
 
         return new ApiResponse(200, [
-            'improvements' => $this->probeImprovementsArray($probe, $includeAll),
+            'improvements' => $this->probeManniesPresenter()->probeImprovements($probe, $includeAll),
         ]);
     }
 
@@ -486,24 +509,7 @@ final class ApiKernel
         $manny = $this->mannies->startStorageMove($probe, $mannyId, $data);
 
         return new ApiResponse(202, [
-            'manny' => $this->mannyArray($player, $probe, $manny),
-            'inventory' => $this->inventoryForProbe($probe)->toArray(),
-        ]);
-    }
-
-    private function probeAtomicPrinterCraftResponse(Player $player, ?string $body): ApiResponse
-    {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $this->movements->ensureProbeOperational($probe);
-        $data = $this->decodeJsonBody($body);
-        if (!is_array($data) || !isset($data['recipe']) || !is_string($data['recipe'])) {
-            return ApiResponse::error(400, 'bad_request', 'JSON body must contain recipe.');
-        }
-
-        $manny = $this->mannies->startAtomicPrinterCrafting($probe, $data['recipe']);
-
-        return new ApiResponse(202, [
-            'manny' => $this->mannyArray($player, $probe, $manny),
+            'manny' => $this->probeManniesPresenter()->manny($player, $probe, $manny),
             'inventory' => $this->inventoryForProbe($probe)->toArray(),
         ]);
     }
@@ -894,7 +900,7 @@ final class ApiKernel
 
                 return new ApiResponse(200, [
                     'inventory' => $this->inventoryForProbe($probe)->toArray(),
-                    'manny' => $this->mannyArray($player, $probe, $manny),
+                    'manny' => $this->probeManniesPresenter()->manny($player, $probe, $manny),
                 ]);
             }
 
@@ -1048,16 +1054,6 @@ final class ApiKernel
         return new ApiResponse(202, ['movement' => $this->movementArray($player, $movement)]);
     }
 
-    private function probeManniesResponse(Player $player): ApiResponse
-    {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $mannies = $this->mannies->manniesForProbe($probe);
-
-        return new ApiResponse(200, [
-            'mannies' => array_map(fn($manny): array => $this->mannyArray($player, $probe, $manny), $mannies),
-        ]);
-    }
-
     private function probeScutNetworkResponse(Player $player, int $networkId): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
@@ -1114,196 +1110,6 @@ final class ApiKernel
         $mission = $this->missions->abandonMission($probe, $missionId);
 
         return new ApiResponse(200, ['mission' => $this->missionArray($player, $mission)]);
-    }
-
-    private function probeMannyRenameResponse(Player $player, string $uid, ?string $body): ApiResponse
-    {
-        $probe = $this->requiredProbe($player);
-        $data = $this->decodeJsonBody($body);
-        if (!is_array($data) || !isset($data['name']) || !is_string($data['name'])) {
-            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a Manny name.');
-        }
-
-        $manny = $this->mannies->renameManny($probe, $uid, $data['name']);
-
-        return new ApiResponse(200, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-    }
-
-    private function probeMannyActionResponse(Player $player, string $uid, string $action, ?string $body): ApiResponse
-    {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $data = $this->decodeJsonBody($body) ?? [];
-
-        if ($action === 'repair') {
-            $repairPercent = $data['integrityPercent'] ?? $data['percent'] ?? null;
-            if (!is_numeric($repairPercent)) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain repair percent.');
-            }
-
-            $manny = $this->mannies->startRepair($probe, $uid, (float) $repairPercent);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'mine') {
-            if (!isset($data['objectId'], $data['targetAmount']) || !is_string($data['objectId']) || !is_numeric($data['targetAmount'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId, resources and targetAmount.');
-            }
-
-            $resources = $data['resources'] ?? $data['resource'] ?? null;
-            if (is_array($resources)) {
-                foreach ($resources as $resource) {
-                    if (!is_string($resource)) {
-                        return ApiResponse::error(400, 'bad_request', 'Mining resources must be strings.');
-                    }
-                }
-            } elseif (!is_string($resources)) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain resources or resource.');
-            }
-
-            $targetContainerId = $data['targetContainerId'] ?? null;
-            if ($targetContainerId !== null && !is_string($targetContainerId)) {
-                return ApiResponse::error(400, 'bad_request', 'targetContainerId must be a string when provided.');
-            }
-
-            $manny = $this->mannies->startMining($probe, $uid, $data['objectId'], $resources, (float) $data['targetAmount'], $targetContainerId);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'craft') {
-            if (!isset($data['recipe']) || !is_string($data['recipe'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain recipe.');
-            }
-
-            $manny = $this->mannies->startCrafting($probe, $uid, $data['recipe']);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'salvage') {
-            if (!isset($data['objectId']) || !is_string($data['objectId'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
-            }
-
-            $manny = $this->mannies->startSalvage($probe, $uid, $data['objectId']);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'detach-storage-container') {
-            $this->movements->ensureProbeOperational($probe);
-            if ($this->movements->activeMovementForProbe($probe) !== null) {
-                return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
-            }
-            if (!isset($data['containerId'], $data['mode']) || !is_string($data['containerId']) || !is_string($data['mode'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain containerId and mode.');
-            }
-            $objectId = isset($data['objectId']) && is_string($data['objectId']) ? $data['objectId'] : null;
-            $manny = $this->mannies->startDetachStorageContainer($probe, $player->id, $uid, $data['containerId'], $data['mode'], $objectId);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'drop-storage-container') {
-            $this->movements->ensureProbeOperational($probe);
-            if ($this->movements->activeMovementForProbe($probe) !== null) {
-                return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
-            }
-            if (!isset($data['containerId'], $data['planetId']) || !is_string($data['containerId']) || !is_string($data['planetId'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain containerId and planetId.');
-            }
-
-            $manny = $this->mannies->startDropStorageContainerOnPlanet($probe, $player->id, $uid, $data['containerId'], $data['planetId']);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'inspect-sector-object' || $action === 'inspect-asteroid') {
-            if (!isset($data['objectId']) || !is_string($data['objectId'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
-            }
-
-            $manny = $this->mannies->startInspectSectorObject($probe, $uid, $data['objectId']);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'recover-storage-container') {
-            if (!isset($data['objectId']) || !is_string($data['objectId'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
-            }
-
-            $manny = $this->mannies->startRecoverDetachedContainer($probe, $uid, $data['objectId']);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'drop-manny-cargo') {
-            $manny = $this->mannies->dropMannyCargo($probe, $uid);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'refill-deuterium-tank') {
-            $manny = $this->mannies->startDeuteriumTankRefill($probe, $uid);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        if ($action === 'improve-probe') {
-            $improvement = $data['improvement'] ?? $data['id'] ?? null;
-            if (!is_string($improvement) || trim($improvement) === '') {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain improvement.');
-            }
-
-            $manny = $this->mannies->startProbeImprovement($probe, $uid, $improvement);
-
-            return new ApiResponse(202, [
-                'manny' => $this->mannyArray($player, $probe, $manny),
-                'improvements' => $this->probeImprovementsArray($probe),
-            ]);
-        }
-
-        if ($action === 'turn-on-relay') {
-            $this->movements->ensureProbeOperational($probe);
-            if ($this->movements->activeMovementForProbe($probe) !== null) {
-                return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
-            }
-            $relayId = $data['relayId'] ?? $data['scutRelayId'] ?? null;
-            if (!is_int($relayId)) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain relayId as an integer.');
-            }
-            $networkName = $data['networkName'] ?? $data['name'] ?? null;
-            if ($networkName !== null && !is_string($networkName)) {
-                return ApiResponse::error(400, 'bad_request', 'networkName must be a string when provided.');
-            }
-
-            $manny = $this->mannies->startScutRelayTurnOn($probe, $uid, $relayId, $networkName);
-
-            return new ApiResponse(202, [
-                'manny' => $this->mannyArray($player, $probe, $manny),
-                'inventory' => $this->inventoryForProbe($probe)->toArray(),
-            ]);
-        }
-
-        if ($action === 'install-bookmark') {
-            $this->movements->ensureProbeOperational($probe);
-            if ($this->movements->activeMovementForProbe($probe) !== null) {
-                return ApiResponse::error(409, 'probe_already_moving', 'The probe is already moving between sectors.');
-            }
-            if (!isset($data['objectId'], $data['name']) || !is_string($data['objectId']) || !is_string($data['name'])) {
-                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId and name.');
-            }
-
-            $manny = $this->mannies->startWaypointBookmarkInstallation($probe, $player, $uid, $data['objectId'], $data['name']);
-
-            return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
-        }
-
-        $manny = $this->mannies->recallManny($probe, $uid);
-
-        return new ApiResponse(202, ['manny' => $this->mannyArray($player, $probe, $manny)]);
     }
 
     private function requiredProbe(Player $player): NeumannProbe
@@ -1467,44 +1273,6 @@ final class ApiKernel
             $this->mannies->manniesForProbe($probe),
             $this->items->findByProbeId($probe->id),
         );
-    }
-
-    private function mannyArray(Player $player, NeumannProbe $probe, Manny $manny): array
-    {
-        $relativeSector = $manny->sector === null
-            ? null
-            : (new PlayerReferenceFrame($player->homeSector))->globalToRelative($manny->sector);
-
-        return $this->mannies->publicArray($probe, $manny, $relativeSector);
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function probeImprovementsArray(NeumannProbe $probe, bool $includeAll = false): array
-    {
-        $definitions = [];
-        foreach (ProbeImprovementCatalog::all($this->gameplayConfig['probeImprovements'] ?? []) as $definition) {
-            $definitions[(string) $definition['id']] = $definition;
-        }
-
-        $rows = [];
-        if ($this->improvements !== null) {
-            foreach ($this->improvements->findByProbeId($probe->id) as $improvement) {
-                $rows[$improvement->improvement] = $improvement;
-            }
-        }
-
-        $result = [];
-        foreach ($definitions as $id => $definition) {
-            $row = $rows[$id] ?? new ProbeImprovement(0, $probe->id, $id, false, false, '', '');
-            if (!$includeAll && !$row->available && !$row->done) {
-                continue;
-            }
-            $result[] = $row->publicArray($definition);
-        }
-
-        return $result;
     }
 
     private function truthyQuery(mixed $value): bool
