@@ -455,10 +455,18 @@
         );
     }
 
+    function storageRulesDetailsOpen() {
+        const node = document.getElementById("storage-rules-panel");
+        const details = node ? node.querySelector(".storage-rules") : null;
+
+        return Boolean(details && details.open);
+    }
+
     function shouldPreserveStorageRules() {
         return Boolean(
             state.storageRulesDirty
             || storageRulesAreActive()
+            || storageRulesDetailsOpen()
             || (state.storageRulesTouchedAt > 0 && Date.now() - state.storageRulesTouchedAt < STORAGE_RULES_IDLE_PRESERVE_MS)
         );
     }
@@ -629,7 +637,7 @@
         if (!state.inventoryContainerFilter) {
             state.inventoryContainerFilter = "all";
         }
-        if (!renderOptions.preserveStorageRules || !shouldPreserveStorageRules()) {
+        if ((!renderOptions.preserveStorageRules && !storageRulesDetailsOpen()) || !shouldPreserveStorageRules()) {
             renderStorageRules(inventory);
         }
         if (!inventory || typeof inventory !== "object") {

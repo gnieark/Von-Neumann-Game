@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Interface : `/inventories` conserve désormais l’accordéon “Manage storage rules by container” ouvert pendant les refreshs, qui ne mettent plus à jour que les métriques et les inventaires quand ce panneau est déplié.
 - Base de données : l’initialisation MySQL ajoute désormais la colonne générée `probe_movements.active_probe_id` avant de créer son index unique, ce qui évite de bloquer l’authentification sur les bases existantes après le passage InnoDB.
 - Interface : `/authbypwd` affiche désormais un message traduit avec un statut 503 quand le stockage d’authentification est indisponible, au lieu d’une erreur 500 vide.
 - API : les mutateurs critiques de sonde/Manny/stockage passent désormais par le verrou transactionnel `withProbeLock`; les complétions Manny ne s’appuient plus sur un `flock` fichier pour le minage, et la base impose un seul mouvement actif par sonde avec tables MySQL créées explicitement en InnoDB.
