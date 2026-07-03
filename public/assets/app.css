@@ -3019,6 +3019,11 @@ button.account-menu-item {
     display: none;
 }
 
+.inventory-icon-button-placeholder {
+    visibility: hidden;
+    pointer-events: none;
+}
+
 .inventory-icon-button::before {
     content: "";
     position: absolute;

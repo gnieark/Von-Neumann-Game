@@ -254,6 +254,10 @@
             + ">" + lineIcon(icon) + "<span class=\"inventory-icon-label\">" + window.VNG.escapeHtml(visibleLabel || label) + "</span></button>";
     }
 
+    function iconButtonPlaceholder(className) {
+        return "<span class=\"inventory-icon-button inventory-icon-button-placeholder " + className + "\" aria-hidden=\"true\"></span>";
+    }
+
     function lineActionFlags(action, placement) {
         if (!action) {
             return {"canMove": false, "canJettison": false};
@@ -309,7 +313,7 @@
             : tr("jettison", "Jettison");
 
         return "<span class=\"inventory-line-controls\">"
-            + (isAdditionalContainer ? "" : iconButton("inventory-line-move", tr("moveStorageLine", "Move"), "move", !flags.canMove))
+            + (isAdditionalContainer ? iconButtonPlaceholder("inventory-line-move-placeholder") : iconButton("inventory-line-move", tr("moveStorageLine", "Move"), "move", !flags.canMove))
             + iconButton("inventory-line-jettison", jettisonLabel, "jettison", !flags.canJettison, jettisonVisibleLabel)
             + "</span>"
             + "<div class=\"inventory-line-form-slot\"></div>";

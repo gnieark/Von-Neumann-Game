@@ -368,7 +368,7 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"/api/probe/storage-containers/" + encodeURIComponent(containerId)'), 'inventories JS renames containers through the storage-container PATCH endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'container.label !== "Sonde"'), 'inventories JS honors custom probe-core container labels');
-$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'isAdditionalContainer ? "" : iconButton("inventory-line-move"'), 'inventories JS hides the move button for additional containers');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'iconButtonPlaceholder("inventory-line-move-placeholder")'), 'inventories JS keeps a non-interactive move placeholder for additional containers');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'container.label !== "Sonde"'), 'mannies JS honors custom probe-core container labels');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.targetContainerId = targetContainerId'), 'mannies JS sends targetContainerId for external mining storage');
@@ -422,6 +422,7 @@ $test->assert(is_string($manniesTemplate) && !str_contains($manniesTemplate, 'da
 $test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'recoverDetectedContainerHint'), 'mannies JS does not render hidden-container detection alerts inside Manny cards');
 $test->assert(is_string($appCss) && !str_contains($appCss, 'manny-detection-alert'), 'mannies CSS no longer includes the removed in-card detection alert');
 $test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-button[hidden]'), 'inventories CSS keeps hidden icon buttons hidden after icon button display rules');
+$test->assert(is_string($appCss) && str_contains($appCss, '.inventory-icon-button-placeholder'), 'inventories CSS keeps hidden placeholders in the controls layout');
 $test->assert(is_string($appCss) && str_contains($appCss, '.stats-podium-rank[hidden]'), 'stats CSS keeps hidden ranking rows hidden after podium display rules');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'fetchVisitedSectors'), 'sensors JS can load visited-sector history');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'visited-sector-history-panel'), 'sensors view exposes the visited-sector history panel');
@@ -464,7 +465,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260703-container-move-lock"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260703-container-move-align"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

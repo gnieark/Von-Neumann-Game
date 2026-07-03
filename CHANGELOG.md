@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-03
+
+### Fixed
+
+- API v73 : `POST /api/probe/storage-moves` refuse désormais de déplacer les items `additional_container`; tant qu’ils ne sont pas détachés ou cachés sur un astéroïde, ils restent liés au stockage interne de la sonde.
+- Interface : `/inventories` masque le bouton “Move” sur les lignes de containers additionnels tout en conservant l’alignement des contrôles.
+- Maintenance : ajout de `scripts/relink-additional-containers-to-core.php` pour remettre les `additional_container` déjà stockés dans un container vers `probe-core` après déploiement.
+
 ## 2026-07-01
 
 ### Changed
@@ -24,9 +32,6 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
-- API v73 : `POST /api/probe/storage-moves` refuse désormais de déplacer les items `additional_container`; tant qu’ils ne sont pas détachés ou cachés sur un astéroïde, ils restent liés au stockage interne de la sonde.
-- Interface : `/inventories` masque le bouton “Move” sur les lignes de containers additionnels.
-- Maintenance : ajout de `scripts/relink-additional-containers-to-core.php` pour remettre les `additional_container` déjà stockés dans un container vers `probe-core` après déploiement.
 - API v72 : `POST /api/probe/storage-moves` soustrait désormais le volume déjà réservé par les autres déplacements Manny vers le même container avant d’accepter un ordre, afin d’éviter de dépasser sa capacité.
 - Interface : la page Probe affiche désormais une métrique `Améliorations installées`, chargée une seule fois depuis `/api/probe/probe-improvements-available`, avec un résumé des deux premières améliorations et un `+N` si la liste est plus longue.
 - Interface : la métrique Deuterium de la page Probe affiche désormais en petit le plafond amélioré, par exemple `max 200`, quand `fuel.maxDeuterium` dépasse la valeur standard.
