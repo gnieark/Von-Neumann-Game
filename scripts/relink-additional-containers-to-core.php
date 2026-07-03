@@ -26,6 +26,8 @@ try {
     $rows = relinkAdditionalContainersAffectedProbes($pdo);
     $moved = 0;
     $probesTouched = 0;
+    $deletedEmptyOrphans = 0;
+    $skippedNonEmptyOrphans = 0;
 
     $pdo->beginTransaction();
     foreach ($rows as $row) {
@@ -54,15 +56,29 @@ try {
             $probesTouched++;
         }
     }
+    foreach (relinkAdditionalContainersOrphanContainers($pdo) as $orphan) {
+        if (
+            (float) $orphan['resource_total'] > 0.0
+            || (int) $orphan['item_count'] > 0
+            || (int) $orphan['manny_count'] > 0
+        ) {
+            $skippedNonEmptyOrphans++;
+            continue;
+        }
+
+        $delete = $pdo->prepare('DELETE FROM storage_containers WHERE id = :id');
+        $delete->execute(['id' => (int) $orphan['id']]);
+        $deletedEmptyOrphans += $delete->rowCount();
+    }
 
     if ($options['dryRun']) {
         $pdo->rollBack();
-        echo "Dry run: {$moved} additional container item(s) would be relinked to probe-core across {$probesTouched} probe(s).\n";
+        echo "Dry run: {$moved} additional container item(s) would be relinked to probe-core across {$probesTouched} probe(s); {$deletedEmptyOrphans} empty orphan container(s) would be removed; {$skippedNonEmptyOrphans} non-empty orphan container(s) would be left for manual review.\n";
         exit(0);
     }
 
     $pdo->commit();
-    echo "Relinked {$moved} additional container item(s) to probe-core across {$probesTouched} probe(s).\n";
+    echo "Relinked {$moved} additional container item(s) to probe-core across {$probesTouched} probe(s); removed {$deletedEmptyOrphans} empty orphan container(s); left {$skippedNonEmptyOrphans} non-empty orphan container(s) for manual review.\n";
     exit(0);
 } catch (InvalidArgumentException | RuntimeException $e) {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
@@ -134,6 +150,60 @@ function relinkAdditionalContainersAffectedProbes(PDO $pdo): array
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/**
+ * @return array<int, array{id:int, probe_id:int, uid:string, label:string, resource_total:float, item_count:int, manny_count:int}>
+ */
+function relinkAdditionalContainersOrphanContainers(PDO $pdo): array
+{
+    $containers = $pdo->query(
+        'SELECT id, probe_id, uid, label
+         FROM storage_containers
+         WHERE kind = \'container\'
+           AND uid LIKE \'container-%\'
+         ORDER BY probe_id ASC, id ASC'
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $itemsByProbeUid = [];
+    $items = $pdo->query(
+        'SELECT probe_id, uid
+         FROM probe_items
+         WHERE type = \'additional_container\''
+    )->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($items as $item) {
+        $itemsByProbeUid[(int) $item['probe_id']][(string) $item['uid']] = true;
+    }
+
+    $orphans = [];
+    foreach ($containers as $container) {
+        $uid = (string) $container['uid'];
+        $probeId = (int) $container['probe_id'];
+        $backingUid = substr($uid, strlen('container-'));
+        if (isset($itemsByProbeUid[$probeId][$backingUid])) {
+            continue;
+        }
+
+        $containerId = (int) $container['id'];
+        $resources = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) FROM storage_container_resources WHERE container_id = :id');
+        $resources->execute(['id' => $containerId]);
+        $items = $pdo->prepare('SELECT COUNT(*) FROM probe_items WHERE storage_container_id = :id');
+        $items->execute(['id' => $containerId]);
+        $mannies = $pdo->prepare('SELECT COUNT(*) FROM mannies WHERE storage_container_id = :id');
+        $mannies->execute(['id' => $containerId]);
+
+        $orphans[] = [
+            'id' => $containerId,
+            'probe_id' => $probeId,
+            'uid' => $uid,
+            'label' => (string) $container['label'],
+            'resource_total' => (float) $resources->fetchColumn(),
+            'item_count' => (int) $items->fetchColumn(),
+            'manny_count' => (int) $mannies->fetchColumn(),
+        ];
+    }
+
+    return $orphans;
+}
+
 function relinkAdditionalContainersUsage(): string
 {
     return <<<TEXT
@@ -142,7 +212,9 @@ Usage:
 
 Moves onboard additional_container items back to the probe internal storage
 container (probe-core). Detached containers and hidden asteroid containers are
-not stored in probe_items and are not changed by this script.
+not stored in probe_items and are not changed by this script. Empty onboard
+storage containers whose backing additional_container item is missing are also
+removed; non-empty orphan containers are reported and left untouched.
 
 Options:
   --database-config=<path>  Use another database config.

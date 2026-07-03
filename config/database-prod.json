@@ -1,0 +1,9 @@
+{
+  "driver": "mysql",
+  "host": "192.168.100.10",
+  "port": 3306,
+  "database": "neumannprod",
+  "username": "neumannprod",
+  "password": "s5mT17vhPWRM",
+  "charset": "utf8mb4"
+}

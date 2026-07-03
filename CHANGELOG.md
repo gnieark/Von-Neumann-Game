@@ -8,7 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - API v73 : `POST /api/probe/storage-moves` refuse désormais de déplacer les items `additional_container`; tant qu’ils ne sont pas détachés ou cachés sur un astéroïde, ils restent liés au stockage interne de la sonde.
 - Interface : `/inventories` masque le bouton “Move” sur les lignes de containers additionnels tout en conservant l’alignement des contrôles.
-- Maintenance : ajout de `scripts/relink-additional-containers-to-core.php` pour remettre les `additional_container` déjà stockés dans un container vers `probe-core` après déploiement.
+- Maintenance : ajout de `scripts/relink-additional-containers-to-core.php` pour remettre les `additional_container` déjà stockés dans un container vers `probe-core` après déploiement, et supprimer les containers orphelins vides dont l’item backing a déjà disparu.
 
 ## 2026-07-01
 

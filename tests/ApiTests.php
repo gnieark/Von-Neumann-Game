@@ -1051,6 +1051,24 @@ if ($createdProbe !== null) {
                 'container_id' => $cliPairedContainer->id,
                 'id' => $cliContainers[0]->id,
             ]);
+            $orphanContainerUid = 'container-itm_missing_backing_for_test';
+            $pdo->prepare(
+                'INSERT INTO storage_containers
+                 (uid, probe_id, kind, label, sort_order, capacity, priority_filter_json, exclusion_filter_json, strict_exclusion_filter_json, created_at, updated_at)
+                 VALUES (:uid, :probe_id, :kind, :label, :sort_order, :capacity, :priority, :exclusion, :strict_exclusion, :created_at, :updated_at)'
+            )->execute([
+                'uid' => $orphanContainerUid,
+                'probe_id' => $cliInventoryProbe->id,
+                'kind' => 'container',
+                'label' => 'Empty orphan',
+                'sort_order' => 99,
+                'capacity' => 1.0,
+                'priority' => '[]',
+                'exclusion' => '[]',
+                'strict_exclusion' => '[]',
+                'created_at' => gmdate('c'),
+                'updated_at' => gmdate('c'),
+            ]);
             $dryRunRelinkCommand = escapeshellarg(PHP_BINARY)
                 . ' ' . escapeshellarg($root . '/scripts/relink-additional-containers-to-core.php')
                 . ' --database-config=' . escapeshellarg($userinfosDbConfig)
@@ -1058,6 +1076,7 @@ if ($createdProbe !== null) {
             exec($dryRunRelinkCommand . ' 2>&1', $dryRunRelinkOutput, $dryRunRelinkStatus);
             $test->assertEquals(0, $dryRunRelinkStatus, 'relink additional containers CLI dry-run exits successfully');
             $test->assertEquals($cliPairedContainer->id, $items->findByUidForProbe($cliInventoryProbe->id, $cliContainers[0]->uid)?->storageContainerId, 'relink dry-run leaves additional container placement unchanged');
+            $test->assert($storageContainers->findByUidForProbe($cliInventoryProbe->id, $orphanContainerUid) !== null, 'relink dry-run leaves empty orphan containers unchanged');
             $relinkCommand = escapeshellarg(PHP_BINARY)
                 . ' ' . escapeshellarg($root . '/scripts/relink-additional-containers-to-core.php')
                 . ' --database-config=' . escapeshellarg($userinfosDbConfig);
@@ -1065,7 +1084,9 @@ if ($createdProbe !== null) {
             $relinkText = implode("\n", $relinkOutput);
             $test->assertEquals(0, $relinkStatus, 'relink additional containers CLI exits successfully');
             $test->assert(str_contains($relinkText, 'Relinked 1 additional container item(s) to probe-core'), 'relink additional containers CLI reports moved rows');
+            $test->assert(str_contains($relinkText, 'removed 1 empty orphan container(s)'), 'relink additional containers CLI reports removed empty orphan containers');
             $test->assertEquals($cliCoreContainer->id, $items->findByUidForProbe($cliInventoryProbe->id, $cliContainers[0]->uid)?->storageContainerId, 'relink additional containers CLI moves container items back to probe-core');
+            $test->assert($storageContainers->findByUidForProbe($cliInventoryProbe->id, $orphanContainerUid) === null, 'relink additional containers CLI removes empty orphan containers');
         }
 
         $beforeMannyCount = count($mannies->findByProbeId($cliInventoryProbe->id));
