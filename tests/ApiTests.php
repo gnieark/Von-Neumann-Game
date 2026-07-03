@@ -319,6 +319,9 @@ $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to
 $scutCoverageMigrationScript = file_get_contents($root . '/scripts/migrate-scut-coverage.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
+$mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
+$probeMovementServiceSource = file_get_contents($root . '/src/Service/ProbeMovementService.php');
+$probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oauth-remember"'), 'OAuth login view exposes the remember-me checkbox');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
@@ -479,10 +482,42 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS scut_covered_sectors'), 'SCUT coverage sectors are stored in a relational table');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'covered_sectors_json'), 'SCUT coverage is no longer stored in JSON columns');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'FOREIGN KEY(created_by_probe_id)'), 'SCUT relay creator ids are stored without a probe foreign key');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'ENGINE=InnoDB'), 'MySQL schema creation declares InnoDB explicitly');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_movements_one_active_per_probe'), 'schema enforces one active movement per probe');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'active_probe_id INTEGER GENERATED ALWAYS'), 'MySQL active movement uniqueness uses a generated indexed column');
+$test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
+$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
+$test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
+$test->assert(is_string($probeStorageServiceSource) && str_contains($probeStorageServiceSource, 'private function moveResourceLocked'), 'resource storage moves run through a locked implementation');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),
     'OAuth service rejects an OpenID token for another client'
+);
+
+$movementConstraintDbPath = $tmp . DIRECTORY_SEPARATOR . 'movement-constraint.sqlite';
+$movementConstraintFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $movementConstraintDbPath), $root);
+$movementConstraintPdo = $movementConstraintFactory->create();
+$movementConstraintFactory->initializeSchema($movementConstraintPdo);
+$movementConstraintIndexes = $movementConstraintPdo->query('PRAGMA index_list(probe_movements)')->fetchAll(PDO::FETCH_ASSOC);
+$movementConstraintIndex = null;
+foreach ($movementConstraintIndexes as $index) {
+    if (($index['name'] ?? null) === 'idx_probe_movements_one_active_per_probe') {
+        $movementConstraintIndex = $index;
+        break;
+    }
+}
+$test->assert(is_array($movementConstraintIndex) && (int) ($movementConstraintIndex['unique'] ?? 0) === 1, 'SQLite schema creates a unique active movement index');
+$movementConstraintPlayers = new PlayerRepository($movementConstraintPdo);
+$movementConstraintProbes = new NeumannProbeRepository($movementConstraintPdo);
+$movementConstraintMovements = new ProbeMovementRepository($movementConstraintPdo);
+$movementConstraintPlayer = $movementConstraintPlayers->createPlayer('movement-constraint', 'Movement Constraint', null, new SectorCoordinates(0, 0, 0));
+$movementConstraintProbe = $movementConstraintProbes->createForPlayer($movementConstraintPlayer->id, 'Constraint Probe', $movementConstraintPlayer->homeSector);
+$movementConstraintTimeline = (new MovementDurationCalculator())->timeline(new DateTimeImmutable('now', new DateTimeZone('UTC')), 1);
+$movementConstraintMovements->create($movementConstraintProbe->id, new SectorCoordinates(0, 0, 0), new SectorCoordinates(2, 0, 0), 1, $movementConstraintTimeline, 1.0);
+$test->assertThrows(
+    fn() => $movementConstraintMovements->create($movementConstraintProbe->id, new SectorCoordinates(0, 0, 0), new SectorCoordinates(0, 2, 0), 1, $movementConstraintTimeline, 1.0),
+    'database rejects a second active movement for the same probe'
 );
 
 $legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';

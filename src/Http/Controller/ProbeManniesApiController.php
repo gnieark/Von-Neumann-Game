@@ -58,6 +58,7 @@ final class ProbeManniesApiController
         }
 
         $manny = $this->mannies->startAtomicPrinterCrafting($probe, $data['recipe']);
+        $probe = $this->freshProbe($probe);
 
         return new ApiResponse(202, [
             'manny' => $this->presenter->manny($player, $probe, $manny),
@@ -77,6 +78,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startRepair($probe, $uid, (float) $repairPercent);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -103,6 +105,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startMining($probe, $uid, $data['objectId'], $resources, (float) $data['targetAmount'], $targetContainerId);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -113,6 +116,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startCrafting($probe, $uid, $data['recipe']);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -123,6 +127,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startSalvage($probe, $uid, $data['objectId']);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -137,6 +142,7 @@ final class ProbeManniesApiController
             }
             $objectId = isset($data['objectId']) && is_string($data['objectId']) ? $data['objectId'] : null;
             $manny = $this->mannies->startDetachStorageContainer($probe, $player->id, $uid, $data['containerId'], $data['mode'], $objectId);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -151,6 +157,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startDropStorageContainerOnPlanet($probe, $player->id, $uid, $data['containerId'], $data['planetId']);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -161,6 +168,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startInspectSectorObject($probe, $uid, $data['objectId']);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -171,18 +179,21 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startRecoverDetachedContainer($probe, $uid, $data['objectId']);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
 
         if ($action === 'drop-manny-cargo') {
             $manny = $this->mannies->dropMannyCargo($probe, $uid);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
 
         if ($action === 'refill-deuterium-tank') {
             $manny = $this->mannies->startDeuteriumTankRefill($probe, $uid);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
@@ -194,6 +205,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startProbeImprovement($probe, $uid, $improvement);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, [
                 'manny' => $this->presenter->manny($player, $probe, $manny),
@@ -216,6 +228,7 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startScutRelayTurnOn($probe, $uid, $relayId, $networkName);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, [
                 'manny' => $this->presenter->manny($player, $probe, $manny),
@@ -233,11 +246,13 @@ final class ProbeManniesApiController
             }
 
             $manny = $this->mannies->startWaypointBookmarkInstallation($probe, $player, $uid, $data['objectId'], $data['name']);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
 
         $manny = $this->mannies->recallManny($probe, $uid);
+        $probe = $this->freshProbe($probe);
 
         return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
     }
@@ -255,6 +270,11 @@ final class ProbeManniesApiController
     private function requiredProbe(Player $player): NeumannProbe
     {
         return $this->probes->findByPlayerId($player->id) ?? throw new \RuntimeException('Probe not found.');
+    }
+
+    private function freshProbe(NeumannProbe $probe): NeumannProbe
+    {
+        return $this->probes->findById($probe->id) ?? $probe;
     }
 
     private function inventoryForProbe(NeumannProbe $probe): ProbeInventory

@@ -31,8 +31,12 @@ final class SchemaInitializer
         $caseSensitiveText = $this->driver === 'mysql' ? 'VARCHAR(255) COLLATE utf8mb4_bin' : 'TEXT';
         $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
         $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
+        $activeMovementColumn = $this->driver === 'mysql'
+            ? ",
+                active_probe_id INTEGER GENERATED ALWAYS AS (CASE WHEN status IN ('preparing','accelerating','cruising','decelerating') THEN probe_id ELSE NULL END) STORED"
+            : '';
 
-        return [
+        $statements = [
             "CREATE TABLE IF NOT EXISTS players (
                 id $id,
                 username $caseSensitiveText NOT NULL UNIQUE,
@@ -190,10 +194,13 @@ final class SchemaInitializer
                 destroyed_at $nullableText,
                 destruction_reason $nullableText,
                 created_at $text NOT NULL,
-                updated_at $text NOT NULL,
+                updated_at $text NOT NULL$activeMovementColumn,
                 FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_movements_probe_status ON probe_movements(probe_id, status)",
+            $this->driver === 'sqlite'
+                ? "CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(probe_id) WHERE status IN ('preparing','accelerating','cruising','decelerating')"
+                : "CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)",
             "CREATE TABLE IF NOT EXISTS probe_messages (
                 id $id,
                 sender_type $text NOT NULL DEFAULT 'probe',
@@ -411,6 +418,25 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_forum_messages_post_recent ON forum_messages(post_id, created_at, id)",
         ];
+
+        if ($this->driver !== 'mysql') {
+            return $statements;
+        }
+
+        return array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements);
+    }
+
+    private function withMysqlEngine(string $statement): string
+    {
+        if (!str_starts_with(strtoupper(ltrim($statement)), 'CREATE TABLE')) {
+            return $statement;
+        }
+
+        if (stripos($statement, 'ENGINE=') !== false) {
+            return $statement;
+        }
+
+        return rtrim($statement) . ' ENGINE=InnoDB';
     }
 
     private function applyLightweightMigrations(PDO $pdo): void
@@ -448,6 +474,7 @@ final class SchemaInitializer
             $this->ensureProbeMessageSchema($pdo);
             $this->ensureScutSchema($pdo);
             $this->ensureProbeImprovementSchema($pdo);
+            $this->ensureProbeMovementActiveConstraint($pdo);
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
@@ -479,7 +506,80 @@ final class SchemaInitializer
             $this->ensureProbeMessageSchema($pdo);
             $this->ensureScutSchema($pdo);
             $this->ensureProbeImprovementSchema($pdo);
+            $this->ensureProbeMovementActiveConstraint($pdo);
         }
+    }
+
+    private function ensureProbeMovementActiveConstraint(PDO $pdo): void
+    {
+        $this->normalizeDuplicateActiveProbeMovements($pdo);
+
+        if ($this->driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe
+                 ON probe_movements(probe_id)
+                 WHERE status IN ('preparing','accelerating','cruising','decelerating')"
+            );
+            return;
+        }
+
+        $this->ensureMysqlColumn(
+            $pdo,
+            'probe_movements',
+            'active_probe_id',
+            "INTEGER GENERATED ALWAYS AS (CASE WHEN status IN ('preparing','accelerating','cruising','decelerating') THEN probe_id ELSE NULL END) STORED AFTER probe_id",
+        );
+        if ($this->mysqlIndexExists($pdo, 'probe_movements', 'idx_probe_movements_one_active_per_probe')) {
+            return;
+        }
+
+        $pdo->exec('CREATE UNIQUE INDEX idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)');
+    }
+
+    private function normalizeDuplicateActiveProbeMovements(PDO $pdo): void
+    {
+        $now = $pdo->quote(gmdate('c'));
+        if ($this->driver === 'sqlite') {
+            $pdo->exec(
+                "UPDATE probe_movements
+                 SET status = 'failed', updated_at = $now
+                 WHERE status IN ('preparing','accelerating','cruising','decelerating')
+                   AND id NOT IN (
+                       SELECT keep_id
+                       FROM (
+                           SELECT MAX(id) AS keep_id
+                           FROM probe_movements
+                           WHERE status IN ('preparing','accelerating','cruising','decelerating')
+                           GROUP BY probe_id
+                       )
+                   )
+                   AND probe_id IN (
+                       SELECT duplicate_probe_id
+                       FROM (
+                           SELECT probe_id AS duplicate_probe_id
+                           FROM probe_movements
+                           WHERE status IN ('preparing','accelerating','cruising','decelerating')
+                           GROUP BY probe_id
+                           HAVING COUNT(*) > 1
+                       )
+                   )"
+            );
+            return;
+        }
+
+        $pdo->exec(
+            "UPDATE probe_movements pm
+             JOIN (
+                 SELECT probe_id, MAX(id) AS keep_id
+                 FROM probe_movements
+                 WHERE status IN ('preparing','accelerating','cruising','decelerating')
+                 GROUP BY probe_id
+                 HAVING COUNT(*) > 1
+             ) keepers ON keepers.probe_id = pm.probe_id
+             SET pm.status = 'failed', pm.updated_at = $now
+             WHERE pm.status IN ('preparing','accelerating','cruising','decelerating')
+               AND pm.id <> keepers.keep_id"
+        );
     }
 
     private function ensureProbeImprovementSchema(PDO $pdo): void
@@ -894,6 +994,24 @@ final class SchemaInitializer
         }
 
         $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+    }
+
+    private function mysqlIndexExists(PDO $pdo, string $table, string $index): bool
+    {
+        $stmt = $pdo->prepare(
+            'SELECT 1
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = :table_name
+               AND INDEX_NAME = :index_name
+             LIMIT 1'
+        );
+        $stmt->execute([
+            'table_name' => $table,
+            'index_name' => $index,
+        ]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     private function ensureMysqlColumnCollation(PDO $pdo, string $table, string $column, string $collation, string $definition): void

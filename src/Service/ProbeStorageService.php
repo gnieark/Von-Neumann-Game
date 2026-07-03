@@ -35,6 +35,18 @@ final class ProbeStorageService
         private readonly ?ProbeImprovementRepository $improvements = null,
     ) {}
 
+    /**
+     * @template T
+     * @param callable(NeumannProbe): T $callback
+     * @return T
+     */
+    private function withProbeLock(NeumannProbe $probe, callable $callback): mixed
+    {
+        return $this->probes->withProbeLock($probe->id, function () use ($probe, $callback): mixed {
+            return $callback($this->probes->findById($probe->id) ?? $probe);
+        });
+    }
+
     public function ensureProbeStorage(NeumannProbe $probe): void
     {
         $existingContainers = $this->containers->findByProbeId($probe->id);
@@ -677,6 +689,13 @@ final class ProbeStorageService
 
     public function moveResource(NeumannProbe $probe, string $type, float $amount, string $fromContainerUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
+        $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($type, $amount, $fromContainerUid, $toContainerUid, $ignoredStorageMoveMannyId): void {
+            $this->moveResourceLocked($lockedProbe, $type, $amount, $fromContainerUid, $toContainerUid, $ignoredStorageMoveMannyId);
+        });
+    }
+
+    private function moveResourceLocked(NeumannProbe $probe, string $type, float $amount, string $fromContainerUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
+    {
         $move = $this->assertCanMoveResource($probe, $type, $amount, $fromContainerUid, $toContainerUid, $ignoredStorageMoveMannyId);
         if ($move['from']->id === $move['to']->id) {
             return;
@@ -688,6 +707,13 @@ final class ProbeStorageService
     }
 
     public function moveItem(NeumannProbe $probe, string $itemUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
+    {
+        $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($itemUid, $toContainerUid, $ignoredStorageMoveMannyId): void {
+            $this->moveItemLocked($lockedProbe, $itemUid, $toContainerUid, $ignoredStorageMoveMannyId);
+        });
+    }
+
+    private function moveItemLocked(NeumannProbe $probe, string $itemUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
         $move = $this->assertCanMoveItem($probe, $itemUid, $toContainerUid, $ignoredStorageMoveMannyId);
         if ($move['item']->storageContainerId === $move['to']->id) {
@@ -702,6 +728,16 @@ final class ProbeStorageService
      */
     public function moveItems(NeumannProbe $probe, array $itemUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
+        $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($itemUids, $toContainerUid, $ignoredStorageMoveMannyId): void {
+            $this->moveItemsLocked($lockedProbe, $itemUids, $toContainerUid, $ignoredStorageMoveMannyId);
+        });
+    }
+
+    /**
+     * @param array<string> $itemUids
+     */
+    private function moveItemsLocked(NeumannProbe $probe, array $itemUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
+    {
         $move = $this->assertCanMoveItems($probe, $itemUids, $toContainerUid, $ignoredStorageMoveMannyId);
         foreach ($move['items'] as $item) {
             if ($item->storageContainerId === $move['to']->id) {
@@ -712,6 +748,13 @@ final class ProbeStorageService
     }
 
     public function moveStoredManny(NeumannProbe $probe, string $mannyUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
+    {
+        $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($mannyUid, $toContainerUid, $ignoredStorageMoveMannyId): void {
+            $this->moveStoredMannyLocked($lockedProbe, $mannyUid, $toContainerUid, $ignoredStorageMoveMannyId);
+        });
+    }
+
+    private function moveStoredMannyLocked(NeumannProbe $probe, string $mannyUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
         $move = $this->assertCanMoveManny($probe, $mannyUid, $toContainerUid, $ignoredStorageMoveMannyId);
         if ($move['manny']->storageContainerId === $move['to']->id) {
@@ -726,6 +769,16 @@ final class ProbeStorageService
      * @param array<string> $mannyUids
      */
     public function moveStoredMannies(NeumannProbe $probe, array $mannyUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
+    {
+        $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($mannyUids, $toContainerUid, $ignoredStorageMoveMannyId): void {
+            $this->moveStoredManniesLocked($lockedProbe, $mannyUids, $toContainerUid, $ignoredStorageMoveMannyId);
+        });
+    }
+
+    /**
+     * @param array<string> $mannyUids
+     */
+    private function moveStoredManniesLocked(NeumannProbe $probe, array $mannyUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
         $move = $this->assertCanMoveMannies($probe, $mannyUids, $toContainerUid, $ignoredStorageMoveMannyId);
         foreach ($move['mannies'] as $manny) {

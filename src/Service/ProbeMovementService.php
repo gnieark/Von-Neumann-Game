@@ -64,7 +64,14 @@ final class ProbeMovementService
 
     public function startMovement(NeumannProbe $probe, SectorCoordinates $target, ?Player $player = null): ProbeMovement
     {
-        $probe = $this->refreshProbeMovementState($probe);
+        return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement {
+            return $this->startMovementLocked($this->probes->findById($probe->id) ?? $probe, $target, $player);
+        });
+    }
+
+    private function startMovementLocked(NeumannProbe $probe, SectorCoordinates $target, ?Player $player = null): ProbeMovement
+    {
+        $probe = $this->refreshProbeMovementStateLocked($probe);
         $this->ensureProbeOperational($probe);
 
         if ($this->movements->findActiveByProbeId($probe->id) !== null) {
@@ -111,6 +118,13 @@ final class ProbeMovementService
     }
 
     public function refreshProbeMovementState(NeumannProbe $probe): NeumannProbe
+    {
+        return $this->probes->withProbeLock($probe->id, function () use ($probe): NeumannProbe {
+            return $this->refreshProbeMovementStateLocked($this->probes->findById($probe->id) ?? $probe);
+        });
+    }
+
+    private function refreshProbeMovementStateLocked(NeumannProbe $probe): NeumannProbe
     {
         $movement = $this->movements->findActiveByProbeId($probe->id);
         if ($movement === null) {
