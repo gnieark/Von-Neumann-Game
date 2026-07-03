@@ -24,6 +24,7 @@ use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
+use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
@@ -196,6 +197,21 @@ class TestFooterFrontRoute extends FrontRoute
     }
 }
 
+class TestUnavailablePasswordAuthRoute extends FrontRouteAuthByPwd
+{
+    public bool $unavailableStatusSet = false;
+
+    protected function authService(): AuthService
+    {
+        throw new PDOException('Database unavailable');
+    }
+
+    protected function setAuthenticationUnavailableStatus(): void
+    {
+        $this->unavailableStatusSet = true;
+    }
+}
+
 $test = new TestRunner();
 $root = dirname(__DIR__);
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_api_tests_' . bin2hex(random_bytes(4));
@@ -277,6 +293,16 @@ $test->assert(
     str_contains($footerHtml, '<a class="footer-link footer-link-external" href="https://ko-fi.com/neumannprobe" rel="noopener noreferrer" target="_blank">Tip the developer</a>'),
     'additional footer links are loaded from local config and rendered as external links'
 );
+
+$_SERVER['REQUEST_URI'] = '/authbypwd';
+$_POST = ['username' => 'test', 'password' => 'secret'];
+$passwordAuthRoute = new TestUnavailablePasswordAuthRoute();
+ob_start();
+$passwordAuthRoute->handle('POST', '/authbypwd', null, 'fr');
+$passwordAuthHtml = (string) ob_get_clean();
+$test->assert($passwordAuthRoute->unavailableStatusSet, 'password auth POST returns 503 when storage is unavailable');
+$test->assert(str_contains($passwordAuthHtml, 'Authentification temporairement indisponible'), 'password auth POST renders a translated outage message');
+$_POST = [];
 
 $oauthConfigPath = $tmp . DIRECTORY_SEPARATOR . 'oauth.json';
 file_put_contents($oauthConfigPath, json_encode([
@@ -485,6 +511,7 @@ $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer,
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'ENGINE=InnoDB'), 'MySQL schema creation declares InnoDB explicitly');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_movements_one_active_per_probe'), 'schema enforces one active movement per probe');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'active_probe_id INTEGER GENERATED ALWAYS'), 'MySQL active movement uniqueness uses a generated indexed column');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)'), 'MySQL active movement index waits for the generated-column migration');
 $test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');

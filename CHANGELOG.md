@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Base de données : l’initialisation MySQL ajoute désormais la colonne générée `probe_movements.active_probe_id` avant de créer son index unique, ce qui évite de bloquer l’authentification sur les bases existantes après le passage InnoDB.
+- Interface : `/authbypwd` affiche désormais un message traduit avec un statut 503 quand le stockage d’authentification est indisponible, au lieu d’une erreur 500 vide.
 - API : les mutateurs critiques de sonde/Manny/stockage passent désormais par le verrou transactionnel `withProbeLock`; les complétions Manny ne s’appuient plus sur un `flock` fichier pour le minage, et la base impose un seul mouvement actif par sonde avec tables MySQL créées explicitement en InnoDB.
 - API v73 : `POST /api/probe/storage-moves` refuse désormais de déplacer les items `additional_container`; tant qu’ils ne sont pas détachés ou cachés sur un astéroïde, ils restent liés au stockage interne de la sonde.
 - Interface : `/inventories` masque le bouton “Move” sur les lignes de containers additionnels tout en conservant l’alignement des contrôles.

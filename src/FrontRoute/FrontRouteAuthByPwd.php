@@ -2,6 +2,7 @@
 namespace VonNeumannGame\FrontRoute;
 
 use DateTimeImmutable;
+use PDOException;
 use VonNeumannGame\AppFactory;
 use VonNeumannGame\Auth\AuthService;
 use VonNeumannGame\Domain\Player;
@@ -30,12 +31,21 @@ class FrontRouteAuthByPwd extends FrontRoute{
             return;
         }
 
-        $factory = $this->factory();
-        $auth = $factory->authService($factory->pdo(initializeSchema: true));
-        $player = $auth->authenticateWithPassword(
-            (string) ($_POST['username'] ?? ''),
-            (string) ($_POST['password'] ?? '')
-        );
+        try {
+            $auth = $this->authService();
+            $player = $auth->authenticateWithPassword(
+                (string) ($_POST['username'] ?? ''),
+                (string) ($_POST['password'] ?? '')
+            );
+        } catch (PDOException) {
+            $this->setAuthenticationUnavailableStatus();
+            echo $this->renderMainPage(
+                $this->renderPasswordAuth($translator, $translator->get('passwordAuthUnavailable')),
+                null,
+                $translator->language()
+            );
+            return;
+        }
 
         if ($player === null) {
             echo $this->renderMainPage(
@@ -115,6 +125,18 @@ class FrontRouteAuthByPwd extends FrontRoute{
             'httponly' => false,
             'samesite' => 'Lax',
         ]);
+    }
+
+    protected function authService(): AuthService
+    {
+        $factory = $this->factory();
+
+        return $factory->authService($factory->pdo(initializeSchema: true));
+    }
+
+    protected function setAuthenticationUnavailableStatus(): void
+    {
+        http_response_code(503);
     }
 
     private function redirect(string $location): void

@@ -200,7 +200,7 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_probe_movements_probe_status ON probe_movements(probe_id, status)",
             $this->driver === 'sqlite'
                 ? "CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(probe_id) WHERE status IN ('preparing','accelerating','cruising','decelerating')"
-                : "CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)",
+                : '',
             "CREATE TABLE IF NOT EXISTS probe_messages (
                 id $id,
                 sender_type $text NOT NULL DEFAULT 'probe',
@@ -418,6 +418,8 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_forum_messages_post_recent ON forum_messages(post_id, created_at, id)",
         ];
+
+        $statements = array_values(array_filter($statements, static fn(string $statement): bool => $statement !== ''));
 
         if ($this->driver !== 'mysql') {
             return $statements;
