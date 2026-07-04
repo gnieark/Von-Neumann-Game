@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 75;
+    public const API_VERSION = 76;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1165,12 +1165,10 @@ final class ApiKernel
 
     private function probeMissionsResponse(Player $player): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-
         return new ApiResponse(200, [
             'missions' => array_map(
                 fn(Mission $mission): array => $this->missionArray($player, $mission),
-                $this->missions->activeMissionsForProbe($probe),
+                $this->missions->activeMissionsForPlayer($player->id),
             ),
         ]);
     }

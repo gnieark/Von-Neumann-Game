@@ -90,8 +90,11 @@ final class AccountDeletionService
             'probeMessagesSent' => 0,
             'probeMessagesReceived' => 0,
             'probeDamageWarnings' => 0,
-            'probeMissions' => 0,
-            'probeMissionSteps' => 0,
+            'playerMissions' => $this->count('SELECT COUNT(*) FROM probe_missions WHERE player_id = :player_id', ['player_id' => $playerId]),
+            'playerMissionSteps' => $this->count(
+                'SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE player_id = :player_id)',
+                ['player_id' => $playerId],
+            ),
             'scheduledEvents' => 0,
         ];
 
@@ -114,11 +117,6 @@ final class AccountDeletionService
             $stats['probeMessagesSent'] += $this->count('SELECT COUNT(*) FROM probe_messages WHERE sender_probe_id = :probe_id', ['probe_id' => $probeId]);
             $stats['probeMessagesReceived'] += $this->count('SELECT COUNT(*) FROM probe_messages WHERE recipient_probe_id = :probe_id', ['probe_id' => $probeId]);
             $stats['probeDamageWarnings'] += $this->count('SELECT COUNT(*) FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-            $stats['probeMissions'] += $this->count('SELECT COUNT(*) FROM probe_missions WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-            $stats['probeMissionSteps'] += $this->count(
-                'SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE probe_id = :probe_id)',
-                ['probe_id' => $probeId],
-            );
             $stats['scheduledEvents'] += $this->countScheduledEvents($probeId);
         }
 
@@ -190,11 +188,6 @@ final class AccountDeletionService
         $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
-            'DELETE FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE probe_id = :probe_id)',
-            ['probe_id' => $probeId],
-        );
-        $this->execute('DELETE FROM probe_missions WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute(
             'DELETE FROM mannies WHERE probe_id = :probe_id',
             ['probe_id' => $probeId],
         );
@@ -218,6 +211,11 @@ final class AccountDeletionService
         $this->execute('DELETE FROM sessions WHERE player_id = :player_id', $params);
         $this->execute('DELETE FROM api_keys WHERE player_id = :player_id', $params);
         $this->execute('DELETE FROM visited_sectors WHERE player_id = :player_id', $params);
+        $this->execute(
+            'DELETE FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE player_id = :player_id)',
+            $params,
+        );
+        $this->execute('DELETE FROM probe_missions WHERE player_id = :player_id', $params);
         $this->execute('DELETE FROM player_auth_methods WHERE player_id = :player_id', $params);
         $this->execute('DELETE FROM players WHERE id = :player_id', $params);
     }

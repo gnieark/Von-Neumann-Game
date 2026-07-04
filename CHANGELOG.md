@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v76 : les missions sont désormais rattachées au joueur (`probe_missions.player_id`) et restent visibles depuis `/api/probe/missions` après un changement de sonde par défaut; le script `scripts/migrate-probe-missions-to-player.php` migre les bases existantes depuis `probe_id`.
 - API v75 : `PATCH /api/probe/{probeId}` permet de définir la sonde par défaut si la sonde par défaut actuelle et la sonde cible sont dans le même secteur ou dans des secteurs couverts par le même réseau SCUT.
 - API v74 : `GET /api/probe` retourne désormais explicitement la sonde par défaut, `GET /api/probes` liste les sondes du joueur avec `defaultProbeId` et `isDefault`, et `GET /api/probe/{probeId}` retourne une sonde possédée ou `404` sinon.
 - Base de données : préparation interne du modèle multi-sondes avec `players.default_probe_id` et un lien one-to-many de `players` vers `neumann_probes`.

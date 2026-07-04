@@ -343,6 +343,7 @@ $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
 $scutCoverageMigrationScript = file_get_contents($root . '/scripts/migrate-scut-coverage.php');
+$missionOwnershipMigrationScript = file_get_contents($root . '/scripts/migrate-probe-missions-to-player.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
@@ -508,6 +509,8 @@ $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigra
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database.json.old'), 'SQLite to MySQL migration script backs up the active database config');
 $test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'scut_covered_sectors'), 'SCUT coverage migration script fills the relational coverage table');
 $test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'DROP COLUMN'), 'SCUT coverage migration script removes legacy JSON columns');
+$test->assert(is_string($missionOwnershipMigrationScript) && str_contains($missionOwnershipMigrationScript, 'probe_missions_new'), 'mission ownership migration script rebuilds SQLite mission ownership');
+$test->assert(is_string($missionOwnershipMigrationScript) && str_contains($missionOwnershipMigrationScript, 'DROP COLUMN probe_id'), 'mission ownership migration script removes the legacy probe mission link');
 $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.php');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
@@ -521,6 +524,7 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_movements_one_active_per_probe'), 'schema enforces one active movement per probe');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'active_probe_id INTEGER GENERATED ALWAYS'), 'MySQL active movement uniqueness uses a generated indexed column');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)'), 'MySQL active movement index waits for the generated-column migration');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_missions_player_status'), 'schema indexes missions by player and status');
 $test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
@@ -637,6 +641,102 @@ $legacySecondProbe = $legacySingleProbeProbes->createForPlayer($legacySingleProb
 $test->assertEquals(2, count($legacySingleProbeProbes->findAllByPlayerId($legacySingleProbeOwner->id)), 'migrated legacy schema accepts a second probe for the same player');
 $test->assertEquals(1, $legacySingleProbePlayers->findById($legacySingleProbeOwner->id)?->defaultProbeId, 'second probe creation does not overwrite a valid migrated default probe');
 $test->assertEquals(2, $legacySecondProbe->id, 'second probe is inserted after legacy migration');
+
+$legacyMissionDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-mission-schema.sqlite';
+$legacyMissionFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMissionDbPath), $root);
+$legacyMissionPdo = $legacyMissionFactory->create();
+$legacyMissionPdo->exec(
+    'CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NULL,
+        password_hash TEXT NULL,
+        home_sector_x INTEGER NOT NULL,
+        home_sector_y INTEGER NOT NULL,
+        home_sector_z INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec(
+    'CREATE TABLE neumann_probes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        entered_current_sector_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec(
+    'CREATE TABLE probe_missions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid TEXT NOT NULL UNIQUE,
+        probe_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NULL,
+        status TEXT NOT NULL,
+        step_order TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        created_by_event_json TEXT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT NULL,
+        failed_at TEXT NULL,
+        abandoned_at TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec(
+    'CREATE TABLE probe_mission_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid TEXT NOT NULL UNIQUE,
+        mission_id INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NULL,
+        status TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        completed_at TEXT NULL,
+        failed_at TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec("INSERT INTO players (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at) VALUES ('legacy-mission-owner', 'Legacy Mission Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionPdo->exec("INSERT INTO neumann_probes (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at) VALUES (1, 'Legacy mission probe', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionPdo->exec("INSERT INTO probe_missions (uid, probe_id, type, title, description, status, step_order, metadata_json, created_by_event_json, started_at, created_at, updated_at) VALUES ('mis_legacy_player_owner', 1, 'legacy_test', 'Legacy mission', NULL, 'active', 'free', '{}', NULL, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionPdo->exec("INSERT INTO probe_mission_steps (uid, mission_id, sort_order, title, description, status, metadata_json, created_at, updated_at) VALUES ('mst_legacy_player_owner', 1, 1, 'Legacy step', NULL, 'pending', '{}', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionConfig = $tmp . DIRECTORY_SEPARATOR . 'legacy-mission-database.json';
+file_put_contents($legacyMissionConfig, json_encode([
+    'driver' => 'sqlite',
+    'path' => $legacyMissionDbPath,
+], JSON_THROW_ON_ERROR));
+$missionOwnershipDryRunCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-missions-to-player.php')
+    . ' --database-config=' . escapeshellarg($legacyMissionConfig)
+    . ' --dry-run';
+exec($missionOwnershipDryRunCommand . ' 2>&1', $missionOwnershipDryRunOutput, $missionOwnershipDryRunStatus);
+$test->assertEquals(0, $missionOwnershipDryRunStatus, 'mission ownership migration dry-run exits successfully');
+$test->assert(str_contains(implode("\n", $missionOwnershipDryRunOutput), '1 mission(s) can be migrated'), 'mission ownership migration dry-run reports migratable missions');
+$missionOwnershipCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-missions-to-player.php')
+    . ' --database-config=' . escapeshellarg($legacyMissionConfig);
+exec($missionOwnershipCommand . ' 2>&1', $missionOwnershipOutput, $missionOwnershipStatus);
+$test->assertEquals(0, $missionOwnershipStatus, 'mission ownership migration exits successfully');
+$migratedMissionColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacyMissionPdo->query('PRAGMA table_info(probe_missions)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('player_id', $migratedMissionColumns, true), 'mission ownership migration adds player_id');
+$test->assert(!in_array('probe_id', $migratedMissionColumns, true), 'mission ownership migration drops probe_id');
+$test->assertEquals(1, (int) $legacyMissionPdo->query("SELECT player_id FROM probe_missions WHERE uid = 'mis_legacy_player_owner'")->fetchColumn(), 'mission ownership migration maps probe missions to the owning player');
+$test->assertEquals(1, (int) $legacyMissionPdo->query('SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id = 1')->fetchColumn(), 'mission ownership migration preserves mission steps');
 
 $legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
 $legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
@@ -870,7 +970,8 @@ $missionSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_missions)')->fetchAll(PDO::FETCH_ASSOC),
 );
-$test->assert(in_array('probe_id', $missionSchemaColumns, true), 'Mission table assigns missions to probes');
+$test->assert(in_array('player_id', $missionSchemaColumns, true), 'Mission table assigns missions to players');
+$test->assert(!in_array('probe_id', $missionSchemaColumns, true), 'Mission table no longer assigns missions to probes');
 $test->assert(in_array('status', $missionSchemaColumns, true), 'Mission table stores mission status');
 $test->assert(in_array('step_order', $missionSchemaColumns, true), 'Mission table stores step ordering mode');
 $missionStepSchemaColumns = array_map(
@@ -1006,12 +1107,15 @@ foreach (($sameSectorDefaultProbe->body['probes'] ?? []) as $listedProbe) {
 }
 $test->assertEquals(true, $sameSectorListById[$sameSectorProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} marks the selected same-sector probe as default');
 $test->assertEquals(false, $sameSectorListById[$secondaryProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} clears the previous default marker');
+$multiProbeMission = $missionService->startMission($sameSectorProbe, 'multi_probe_default_switch', 'Multi-probe mission', steps: [['title' => 'Switch default probe']]);
 $scutDefaultRelay = $scut->createOffRelay($sameSectorProbe->currentSector, $sameSectorProbe->id);
 $scut->turnOnRelay($scutDefaultRelay->id);
 $sameScutDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
 $test->assertEquals(200, $sameScutDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts an owned probe inside the same SCUT network');
 $test->assertEquals($primaryProbe->id, $sameScutDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the SCUT-reachable default probe id');
 $test->assertEquals($primaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-SCUT default probe switch');
+$multiProbeMissionsAfterDefaultSwitch = $kernel->handle('GET', '/api/probe/missions', $multiProbeHeaders);
+$test->assertEquals($multiProbeMission->uid, $multiProbeMissionsAfterDefaultSwitch->body['missions'][0]['id'] ?? null, 'player missions stay visible after switching the default probe');
 $foreignDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders);
 $test->assertEquals(404, $foreignDefaultProbe->status, 'PATCH /api/probe/{probeId} hides probes owned by another player');
 $missingDefaultProbe = $kernel->handle('PATCH', '/api/probe/999999999', $multiProbeHeaders);
@@ -1019,7 +1123,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(75, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(76, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1662,15 +1766,15 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assertEquals(2, $deleteStats['probes'] ?? null, 'account deletion reports all deleted probes');
     $test->assertEquals(1, $deleteStats['probeMessagesSent'] ?? null, 'account deletion reports sent probe messages');
     $test->assertEquals(1, $deleteStats['probeMessagesReceived'] ?? null, 'account deletion reports received probe messages');
-    $test->assertEquals(1, $deleteStats['probeMissions'] ?? null, 'account deletion reports probe missions');
-    $test->assertEquals(2, $deleteStats['probeMissionSteps'] ?? null, 'account deletion reports probe mission steps');
+    $test->assertEquals(1, $deleteStats['playerMissions'] ?? null, 'account deletion reports player missions');
+    $test->assertEquals(2, $deleteStats['playerMissionSteps'] ?? null, 'account deletion reports player mission steps');
     $test->assertEquals(1, $deleteStats['manniesDetachedAsAbandoned'] ?? null, 'account deletion detaches outside Mannys as abandoned');
     $test->assert($players->findById($deletePlayer->id) === null, 'account deletion removes the player row');
     $test->assert($probes->findByPlayerId($deletePlayer->id) === null, 'account deletion removes the player probe');
     $test->assert($probes->findById($deleteSecondaryProbe->id) === null, 'account deletion removes secondary player probes');
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
-    $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
+    $test->assert($missions->findByUidForPlayer($deletePlayer->id, $deleteMission->uid) === null, 'account deletion removes player missions');
     $test->assertEquals($deleteProbe->id, $scutRelays->findById($deleteRelay->id)?->createdByProbeId, 'account deletion keeps SCUT relays with their historical creator id');
     $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
     $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
@@ -3548,7 +3652,7 @@ if ($intelligentLifeProbe !== null) {
                         $test->assertEquals('pending', $activeFirstContactBeforeStation->body['missions'][0]['steps'][4]['status'] ?? null, 'first-contact mission waits for the deuterium station step');
 
                         $completedFirstContactMissions = array_values(array_filter(
-                            $missions->findForProbe($intelligentLifeProbeForFinalDrop->id, [Mission::STATUS_COMPLETED]),
+                            $missions->findForPlayer($intelligentLifeProbeForFinalDrop->playerId, [Mission::STATUS_COMPLETED]),
                             static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
                         ));
                         $test->assertEquals(0, count($completedFirstContactMissions), 'first-contact mission is not completed before the station is ready');
@@ -3592,13 +3696,13 @@ if ($intelligentLifeProbe !== null) {
                         $test->assert(is_string($stationReadyMessage['body'] ?? null) && str_contains((string) $stationReadyMessage['body'], 'deuterium refuel station'), 'final station-ready message announces the station');
 
                         $completedFirstContactMissions = array_values(array_filter(
-                            $missions->findForProbe($intelligentLifeProbeForFinalDrop->id, [Mission::STATUS_COMPLETED]),
+                            $missions->findForPlayer($intelligentLifeProbeForFinalDrop->playerId, [Mission::STATUS_COMPLETED]),
                             static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
                         ));
                         $test->assertEquals(1, count($completedFirstContactMissions), 'first-contact mission completes when the deuterium station is ready');
                         if ($fellowContributorProbe !== null) {
                             $fellowCompletedMissions = array_values(array_filter(
-                                $missions->findForProbe($fellowContributorProbe->id, [Mission::STATUS_COMPLETED]),
+                                $missions->findForPlayer($fellowContributorProbe->playerId, [Mission::STATUS_COMPLETED]),
                                 static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
                             ));
                             $test->assertEquals(1, count($fellowCompletedMissions), 'first-contact mission success is persisted for a contributing player');
@@ -5250,7 +5354,7 @@ if ($riskProbe !== null) {
         $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $reassignedProbe->body['probe']['sector']['relative'] ?? null, 'reassigned probe starts at a fresh relative origin');
         $test->assertEquals('idle', $reassignedProbe->body['probe']['status'] ?? null, 'reassigned probe is operational');
         $test->assert($probes->findById($riskProbe->id) === null, 'mind snapshot reassignment deletes the terminal probe');
-        $test->assert($missions->findByUidForProbe($riskProbe->id, $reassignmentMission->uid) === null, 'mind snapshot reassignment deletes terminal probe missions');
+        $test->assert($missions->findByUidForPlayer($riskPlayer->id, $reassignmentMission->uid) !== null, 'mind snapshot reassignment keeps player missions');
         $test->assert($reassignmentWarning === null || $damageWarnings->findById($reassignmentWarning->id) === null, 'mind snapshot reassignment deletes terminal probe damage warnings before movements');
         $test->assertEquals($riskProbe->id, $scutRelays->findById($reassignmentRelay->id)?->createdByProbeId, 'mind snapshot reassignment keeps SCUT relays with their historical creator id');
         $newRiskProbe = $probes->findByPlayerId($riskPlayer->id);

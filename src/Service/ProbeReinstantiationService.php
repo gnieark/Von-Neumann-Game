@@ -129,11 +129,6 @@ final class ProbeReinstantiationService
         );
         $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute(
-            'DELETE FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE probe_id = :probe_id)',
-            ['probe_id' => $probeId],
-        );
-        $this->execute('DELETE FROM probe_missions WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM mannies WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM probe_messages WHERE sender_probe_id = :probe_id OR recipient_probe_id = :probe_id',

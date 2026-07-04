@@ -22,7 +22,7 @@ final class Mission
     public function __construct(
         public readonly int $id,
         public readonly string $uid,
-        public readonly int $probeId,
+        public readonly int $playerId,
         public readonly string $type,
         public readonly string $title,
         public readonly ?string $description,

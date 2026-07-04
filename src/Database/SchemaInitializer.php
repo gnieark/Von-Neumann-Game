@@ -228,7 +228,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS probe_missions (
                 id $id,
                 uid $text NOT NULL UNIQUE,
-                probe_id INTEGER NOT NULL,
+                player_id INTEGER NOT NULL,
                 type $text NOT NULL,
                 title $text NOT NULL,
                 description TEXT NULL,
@@ -242,9 +242,9 @@ final class SchemaInitializer
                 abandoned_at $nullableText,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
-                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+                FOREIGN KEY(player_id) REFERENCES players(id)
             )",
-            "CREATE INDEX IF NOT EXISTS idx_probe_missions_probe_status ON probe_missions(probe_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_probe_missions_player_status ON probe_missions(player_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_probe_missions_uid ON probe_missions(uid)",
             "CREATE TABLE IF NOT EXISTS probe_mission_steps (
                 id $id,

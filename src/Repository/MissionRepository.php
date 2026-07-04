@@ -15,18 +15,18 @@ final class MissionRepository
     /**
      * @return array<Mission>
      */
-    public function activeForProbe(int $probeId): array
+    public function activeForPlayer(int $playerId): array
     {
-        return $this->findForProbe($probeId, [Mission::STATUS_ACTIVE]);
+        return $this->findForPlayer($playerId, [Mission::STATUS_ACTIVE]);
     }
 
     /**
      * @param array<string>|null $statuses
      * @return array<Mission>
      */
-    public function findForProbe(int $probeId, ?array $statuses = null): array
+    public function findForPlayer(int $playerId, ?array $statuses = null): array
     {
-        $params = ['probe_id' => $probeId];
+        $params = ['player_id' => $playerId];
         $statusSql = '';
         if ($statuses !== null) {
             $placeholders = [];
@@ -40,7 +40,7 @@ final class MissionRepository
 
         $stmt = $this->pdo->prepare(
             'SELECT * FROM probe_missions
-             WHERE probe_id = :probe_id' . $statusSql . '
+             WHERE player_id = :player_id' . $statusSql . '
              ORDER BY created_at ASC, id ASC'
         );
         $stmt->execute($params);
@@ -48,10 +48,10 @@ final class MissionRepository
         return array_map(fn(array $row): Mission => $this->hydrateMission($row, true), $stmt->fetchAll());
     }
 
-    public function findByUidForProbe(int $probeId, string $uid): ?Mission
+    public function findByUidForPlayer(int $playerId, string $uid): ?Mission
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM probe_missions WHERE probe_id = :probe_id AND uid = :uid');
-        $stmt->execute(['probe_id' => $probeId, 'uid' => $uid]);
+        $stmt = $this->pdo->prepare('SELECT * FROM probe_missions WHERE player_id = :player_id AND uid = :uid');
+        $stmt->execute(['player_id' => $playerId, 'uid' => $uid]);
         $row = $stmt->fetch();
 
         return $row ? $this->hydrateMission($row, true) : null;
@@ -63,7 +63,7 @@ final class MissionRepository
      * @param list<array{uid?:string,title:string,description?:?string,metadata?:array<string,mixed>}> $steps
      */
     public function create(
-        int $probeId,
+        int $playerId,
         string $type,
         string $title,
         ?string $description = null,
@@ -77,12 +77,12 @@ final class MissionRepository
         $uid ??= $this->uniqueUid('mis_', 'probe_missions');
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_missions
-             (uid, probe_id, type, title, description, status, step_order, metadata_json, created_by_event_json, started_at, completed_at, failed_at, abandoned_at, created_at, updated_at)
-             VALUES (:uid, :probe_id, :type, :title, :description, :status, :step_order, :metadata_json, :created_by_event_json, :started_at, NULL, NULL, NULL, :created_at, :updated_at)'
+             (uid, player_id, type, title, description, status, step_order, metadata_json, created_by_event_json, started_at, completed_at, failed_at, abandoned_at, created_at, updated_at)
+             VALUES (:uid, :player_id, :type, :title, :description, :status, :step_order, :metadata_json, :created_by_event_json, :started_at, NULL, NULL, NULL, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
-            'probe_id' => $probeId,
+            'player_id' => $playerId,
             'type' => $type,
             'title' => $title,
             'description' => $description,
@@ -106,7 +106,7 @@ final class MissionRepository
             );
         }
 
-        return $this->findByUidForProbe($probeId, $uid) ?? throw new \RuntimeException('Mission creation failed.');
+        return $this->findByUidForPlayer($playerId, $uid) ?? throw new \RuntimeException('Mission creation failed.');
     }
 
     public function markAbandoned(Mission $mission): Mission
@@ -124,7 +124,7 @@ final class MissionRepository
             'updated_at' => $now,
         ]);
 
-        return $this->findByUidForProbe($mission->probeId, $mission->uid) ?? throw new \RuntimeException('Mission abandon failed.');
+        return $this->findByUidForPlayer($mission->playerId, $mission->uid) ?? throw new \RuntimeException('Mission abandon failed.');
     }
 
     public function markCompleted(Mission $mission): Mission
@@ -142,7 +142,7 @@ final class MissionRepository
             'updated_at' => $now,
         ]);
 
-        return $this->findByUidForProbe($mission->probeId, $mission->uid) ?? throw new \RuntimeException('Mission completion failed.');
+        return $this->findByUidForPlayer($mission->playerId, $mission->uid) ?? throw new \RuntimeException('Mission completion failed.');
     }
 
     public function markFailed(Mission $mission): Mission
@@ -160,7 +160,7 @@ final class MissionRepository
             'updated_at' => $now,
         ]);
 
-        return $this->findByUidForProbe($mission->probeId, $mission->uid) ?? throw new \RuntimeException('Mission failure update failed.');
+        return $this->findByUidForPlayer($mission->playerId, $mission->uid) ?? throw new \RuntimeException('Mission failure update failed.');
     }
 
     /**
@@ -264,7 +264,7 @@ final class MissionRepository
         return new Mission(
             (int) $row['id'],
             (string) $row['uid'],
-            (int) $row['probe_id'],
+            (int) $row['player_id'],
             (string) $row['type'],
             (string) $row['title'],
             $row['description'] !== null ? (string) $row['description'] : null,

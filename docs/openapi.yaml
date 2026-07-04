@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '75'
+  version: '76'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 75
+                apiVersion: 76
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -667,7 +667,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/mission:
     get:
-      summary: List active probe missions
+      summary: List active player missions
       description: Alias of /api/probe/missions kept for clients that use a singular mission route.
       responses:
         '200':
@@ -680,8 +680,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/missions:
     get:
-      summary: List active probe missions
-      description: Returns missions currently assigned to the authenticated probe. New probes return an empty list.
+      summary: List active player missions
+      description: Returns missions currently assigned to the authenticated player.
       responses:
         '200':
           description: Active missions
