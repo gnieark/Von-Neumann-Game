@@ -10,9 +10,12 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
+use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorFileRepository;
+use VonNeumannGame\Sector\SolarSystem;
+use VonNeumannGame\Sector\UniverseObject;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -44,9 +47,19 @@ try {
     $sector = $sectorExisted
         ? $sectorRepository->load($probe->currentSector)
         : $generator->generate($probe->currentSector, $worldSeed, []);
+    $relative = (new PlayerReferenceFrame($player->homeSector))->globalToRelative($probe->currentSector);
+
+    if (deuteriumAsteroidSectorHasDeuteriumAsteroid($sector)) {
+        echo ($options['dryRun'] ? '[dry-run] ' : '') . "Sector already contains a deuterium asteroid for {$player->username}; skipped.\n";
+        echo '- probe id: ' . $probe->id . "\n";
+        echo '- relative sector: ' . deuteriumAsteroidFormatVector($relative) . "\n";
+        echo '- sector existed: ' . ($sectorExisted ? 'yes' : 'no') . "\n";
+        exit(0);
+    }
+
     $objectId = deuteriumAsteroidObjectId($probe);
     $label = 'Astéroïde contenant du Deutérium';
-    $message = "Un nouvel objet vient d'être détecté dans le secteur : astéroïde contenant du deutérium. Il n'avait pas été détecté lors de votre arrivée dans ce secteur.";
+    $message = 'A new object has been detected in this sector: an asteroid containing deuterium. It was not detected when you entered the sector.';
     $asteroid = new Asteroid(
         $objectId,
         $label,
@@ -63,7 +76,6 @@ try {
             ResourceComposition::CARBON_COMPOUNDS => 0.0,
         ],
     );
-    $relative = (new PlayerReferenceFrame($player->homeSector))->globalToRelative($probe->currentSector);
 
     if ($options['dryRun']) {
         echo "[dry-run] A deuterium asteroid would be added for {$player->username}.\n";
@@ -302,6 +314,36 @@ function deuteriumAsteroidAbsolutePath(string $root, string $path): string
     }
 
     return rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $path;
+}
+
+function deuteriumAsteroidSectorHasDeuteriumAsteroid(SectorContent $sector): bool
+{
+    foreach ($sector->getObjects() as $object) {
+        if (deuteriumAsteroidObjectIsDeuteriumAsteroid($object)) {
+            return true;
+        }
+
+        if (!$object instanceof SolarSystem) {
+            continue;
+        }
+
+        foreach ($object->getOrbitalBodies() as $body) {
+            if (deuteriumAsteroidObjectIsDeuteriumAsteroid($body->getObject())) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function deuteriumAsteroidObjectIsDeuteriumAsteroid(UniverseObject $object): bool
+{
+    if (!$object instanceof Asteroid) {
+        return false;
+    }
+
+    return (float) ($object->getResourceAmounts()[ResourceComposition::DEUTERIUM] ?? 0.0) > 0.0;
 }
 
 /**

@@ -3,6 +3,14 @@
 declare(strict_types=1);
 
 use VonNeumannGame\AppFactory;
+use VonNeumannGame\Domain\ResourceComposition;
+use VonNeumannGame\Sector\Asteroid;
+use VonNeumannGame\Sector\SectorContent;
+use VonNeumannGame\Sector\SectorContentGenerator;
+use VonNeumannGame\Sector\SectorCoordinates;
+use VonNeumannGame\Sector\SectorFileRepository;
+use VonNeumannGame\Sector\SolarSystem;
+use VonNeumannGame\Sector\UniverseObject;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -16,13 +24,24 @@ try {
     $root = dirname(__DIR__);
     $factory = new AppFactory($root);
     $pdo = $factory->pdo($options['databaseConfig'], initializeSchema: true);
+    $appConfig = $factory->appConfig();
+    $universePath = lowFuelAsteroidsAbsolutePath(
+        $root,
+        $options['universePath'] ?? (string) ($appConfig['universePath'] ?? 'data/universe'),
+    );
+    $sectorRepository = new SectorFileRepository($universePath);
+    $generator = new SectorContentGenerator($factory->universeConfig());
+    $worldSeed = (string) ($appConfig['worldSeed'] ?? 'default-world');
     $rows = lowFuelAsteroidsRows($pdo, $options['threshold']);
+    [$eligibleRows, $skippedRows] = lowFuelAsteroidsRowsWithoutDeuteriumAsteroid($rows, $sectorRepository, $generator, $worldSeed);
     $script = __DIR__ . '/add-deuterium-asteroid-alert.php';
     $successes = 0;
     $failures = 0;
 
     echo 'Players below ' . $options['threshold'] . "% deuterium: " . count($rows) . "\n";
-    foreach ($rows as $row) {
+    echo 'Players eligible without existing deuterium asteroid: ' . count($eligibleRows) . "\n";
+    echo 'skipped existing deuterium asteroid: ' . count($skippedRows) . "\n";
+    foreach ($eligibleRows as $row) {
         $username = (string) $row['username'];
         $command = lowFuelAsteroidsBuildCommand($script, $username, $options);
         $output = [];
@@ -152,7 +171,7 @@ function lowFuelAsteroidsPositiveFloat(string $value, string $label): float
 function lowFuelAsteroidsRows(PDO $pdo, float $threshold): array
 {
     $stmt = $pdo->prepare(
-        'SELECT p.username, np.deuterium_stock
+        'SELECT p.username, np.deuterium_stock, np.sector_x, np.sector_y, np.sector_z
          FROM players p
          INNER JOIN neumann_probes np ON np.player_id = p.id
          WHERE np.deuterium_stock < :threshold
@@ -161,6 +180,73 @@ function lowFuelAsteroidsRows(PDO $pdo, float $threshold): array
     $stmt->execute(['threshold' => $threshold]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * @param list<array<string, mixed>> $rows
+ * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>}
+ */
+function lowFuelAsteroidsRowsWithoutDeuteriumAsteroid(
+    array $rows,
+    SectorFileRepository $sectorRepository,
+    SectorContentGenerator $generator,
+    string $worldSeed,
+): array {
+    $eligibleRows = [];
+    $skippedRows = [];
+
+    foreach ($rows as $row) {
+        $coordinates = lowFuelAsteroidsSectorCoordinatesFromRow($row);
+        $sector = $sectorRepository->exists($coordinates)
+            ? $sectorRepository->load($coordinates)
+            : $generator->generate($coordinates, $worldSeed, []);
+        if (lowFuelAsteroidsSectorHasDeuteriumAsteroid($sector)) {
+            $skippedRows[] = $row;
+            continue;
+        }
+
+        $eligibleRows[] = $row;
+    }
+
+    return [$eligibleRows, $skippedRows];
+}
+
+/**
+ * @param array<string, mixed> $row
+ */
+function lowFuelAsteroidsSectorCoordinatesFromRow(array $row): SectorCoordinates
+{
+    return new SectorCoordinates((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z']);
+}
+
+function lowFuelAsteroidsSectorHasDeuteriumAsteroid(SectorContent $sector): bool
+{
+    foreach ($sector->getObjects() as $object) {
+        if (lowFuelAsteroidsObjectIsDeuteriumAsteroid($object)) {
+            return true;
+        }
+
+        if (!$object instanceof SolarSystem) {
+            continue;
+        }
+
+        foreach ($object->getOrbitalBodies() as $body) {
+            if (lowFuelAsteroidsObjectIsDeuteriumAsteroid($body->getObject())) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function lowFuelAsteroidsObjectIsDeuteriumAsteroid(UniverseObject $object): bool
+{
+    if (!$object instanceof Asteroid) {
+        return false;
+    }
+
+    return (float) ($object->getResourceAmounts()[ResourceComposition::DEUTERIUM] ?? 0.0) > 0.0;
 }
 
 /**
@@ -185,4 +271,13 @@ function lowFuelAsteroidsBuildCommand(string $script, string $username, array $o
     }
 
     return implode(' ', $parts);
+}
+
+function lowFuelAsteroidsAbsolutePath(string $root, string $path): string
+{
+    if (str_starts_with($path, DIRECTORY_SEPARATOR)) {
+        return $path;
+    }
+
+    return rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $path;
 }

@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-04
+
+### Fixed
+
+- Debug : `scripts/add-deuterium-asteroid-alert.php` et `scripts/add-deuterium-asteroid-alerts-for-low-fuel.php` n’ajoutent plus d’astéroïde ni d’alerte dans les secteurs qui contiennent déjà un astéroïde avec du deutérium, et l’alerte injectée est désormais rédigée en anglais.
+
 ## 2026-07-03
 
 ### Fixed

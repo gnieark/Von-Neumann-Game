@@ -1203,9 +1203,17 @@ if ($createdProbe !== null) {
     if ($deuteriumAlert !== null) {
         $test->assertEquals('asteroid', $deuteriumAlert['object']['type'] ?? null, 'object-detection alert exposes the object type');
         $test->assertEquals(['deuterium'], $deuteriumAlert['object']['resourceTypes'] ?? null, 'object-detection alert exposes deuterium resources');
-        $test->assert(str_contains((string) ($deuteriumAlert['message'] ?? ''), 'deut'), 'object-detection alert stores the detection message');
+        $test->assertEquals('A new object has been detected in this sector: an asteroid containing deuterium. It was not detected when you entered the sector.', $deuteriumAlert['message'] ?? null, 'object-detection alert stores the English detection message');
         $test->assert(!str_contains(json_encode($deuteriumAlert, JSON_THROW_ON_ERROR), $createdProbe->currentSector->toKey()), 'object-detection alert response does not expose absolute sector keys');
     }
+    $deuteriumAlertCount = (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'sector_object_detected'")->fetchColumn();
+    $secondDeuteriumAsteroidOutput = [];
+    exec($deuteriumAsteroidCommand . ' 2>&1', $secondDeuteriumAsteroidOutput, $secondDeuteriumAsteroidStatus);
+    $secondDeuteriumAsteroidText = implode("\n", $secondDeuteriumAsteroidOutput);
+    $test->assertEquals(0, $secondDeuteriumAsteroidStatus, 'deuterium asteroid CLI exits successfully when the sector already has one');
+    $test->assert(str_contains($secondDeuteriumAsteroidText, 'already contains a deuterium asteroid'), 'deuterium asteroid CLI skips sectors that already contain a deuterium asteroid');
+    $test->assert(!str_contains($secondDeuteriumAsteroidText, 'alert id:'), 'deuterium asteroid CLI does not create a second alert for an existing deuterium asteroid');
+    $test->assertEquals($deuteriumAlertCount, (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'sector_object_detected'")->fetchColumn(), 'deuterium asteroid CLI does not persist a duplicate object-detection alert');
     $legacyDamageWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $missionHeaders);
     $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
@@ -1223,7 +1231,9 @@ if ($createdProbe !== null) {
     exec($lowFuelCommand . ' 2>&1', $lowFuelOutput, $lowFuelStatus);
     $lowFuelText = implode("\n", $lowFuelOutput);
     $test->assertEquals(0, $lowFuelStatus, 'low-fuel deuterium asteroid CLI exits successfully');
-    $test->assert(str_contains($lowFuelText, 'processed: 1'), 'low-fuel CLI calls the per-player script for matching players');
+    $test->assert(str_contains($lowFuelText, 'Players below 10% deuterium: 1'), 'low-fuel CLI counts low-fuel players before sector filtering');
+    $test->assert(str_contains($lowFuelText, 'skipped existing deuterium asteroid: 1'), 'low-fuel CLI skips low-fuel players already in sectors with a deuterium asteroid');
+    $test->assert(str_contains($lowFuelText, 'processed: 0'), 'low-fuel CLI does not call the per-player script for skipped sectors');
     $anomalyPlayer = $auth->registerPlayerWithPassword('origin-anomaly', 'secret', 'Origin Anomaly', 'Origin anomaly probe');
     $anomalyProbe = $probes->findByPlayerId($anomalyPlayer->id);
     $test->assert($anomalyProbe !== null, 'origin anomaly test probe is created');
