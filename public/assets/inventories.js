@@ -362,7 +362,6 @@
         "waypoint_bookmark",
         "steel_bar",
         "steel_plate",
-        "additional_container",
         "micro_conductor",
         "ceramic_insulator",
         "crystal_substrate",
@@ -372,6 +371,10 @@
         "battery_pack",
         "linear_actuator",
     ];
+    const excludedStorageRuleTypes = new Set([
+        "atomic_3d_printer",
+        "additional_container",
+    ]);
 
     function storageRuleTypeLabel(type, fallback) {
         if (["metals", "ice", "carbon_compounds"].includes(type)) {
@@ -383,7 +386,7 @@
 
     function addStorageRuleOption(options, type, label) {
         const value = String(type || "").trim();
-        if (!value || options.has(value)) {
+        if (!value || excludedStorageRuleTypes.has(value) || options.has(value)) {
             return;
         }
         options.set(value, label || storageRuleTypeLabel(value));
