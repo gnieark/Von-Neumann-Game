@@ -26,15 +26,18 @@ final class AccountDeletionService
      */
     public function deletePlayer(Player $player, bool $dryRun = false): array
     {
-        $probe = $this->probes->findByPlayerId($player->id);
-        $probeId = $probe?->id;
-        $probeMannies = $probeId === null ? [] : $this->mannies->findByProbeId($probeId);
+        $ownedProbes = $this->probes->findAllByPlayerId($player->id);
+        $probeIds = array_map(static fn($probe): int => $probe->id, $ownedProbes);
+        $probeMannies = [];
+        foreach ($probeIds as $probeId) {
+            array_push($probeMannies, ...$this->mannies->findByProbeId($probeId));
+        }
         $detachedMannies = array_values(array_filter(
             $probeMannies,
             static fn(Manny $manny): bool => !$manny->isOnProbe() && $manny->sector !== null,
         ));
 
-        $stats = $this->deletionStats($player->id, $probeId, count($detachedMannies));
+        $stats = $this->deletionStats($player->id, $probeIds, count($detachedMannies));
         if ($dryRun) {
             return $stats;
         }
@@ -49,7 +52,7 @@ final class AccountDeletionService
                 $this->detachManny($manny);
             }
 
-            if ($probeId !== null) {
+            foreach ($probeIds as $probeId) {
                 $this->deleteProbeData($probeId);
             }
 
@@ -67,8 +70,9 @@ final class AccountDeletionService
 
     /**
      * @return array<string, int>
+     * @param array<int> $probeIds
      */
-    private function deletionStats(int $playerId, ?int $probeId, int $detachedMannyCount): array
+    private function deletionStats(int $playerId, array $probeIds, int $detachedMannyCount): array
     {
         $stats = [
             'players' => $this->count('SELECT COUNT(*) FROM players WHERE id = :player_id', ['player_id' => $playerId]),
@@ -76,7 +80,7 @@ final class AccountDeletionService
             'sessions' => $this->count('SELECT COUNT(*) FROM sessions WHERE player_id = :player_id', ['player_id' => $playerId]),
             'apiKeys' => $this->count('SELECT COUNT(*) FROM api_keys WHERE player_id = :player_id', ['player_id' => $playerId]),
             'visitedSectors' => $this->count('SELECT COUNT(*) FROM visited_sectors WHERE player_id = :player_id', ['player_id' => $playerId]),
-            'probes' => $probeId === null ? 0 : 1,
+            'probes' => count($probeIds),
             'manniesDetachedAsAbandoned' => $detachedMannyCount,
             'manniesDeleted' => 0,
             'probeItems' => 0,
@@ -91,30 +95,32 @@ final class AccountDeletionService
             'scheduledEvents' => 0,
         ];
 
-        if ($probeId === null) {
+        if ($probeIds === []) {
             return $stats;
         }
 
-        $stats['manniesDeleted'] = $this->count(
-            'SELECT COUNT(*) FROM mannies WHERE probe_id = :probe_id AND NOT (location_type = :sector_location AND sector_x IS NOT NULL AND sector_y IS NOT NULL AND sector_z IS NOT NULL)',
-            ['probe_id' => $probeId, 'sector_location' => Manny::LOCATION_SECTOR],
-        );
-        $stats['probeItems'] = $this->count('SELECT COUNT(*) FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $stats['storageContainers'] = $this->count('SELECT COUNT(*) FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $stats['storageContainerResources'] = $this->count(
-            'SELECT COUNT(*) FROM storage_container_resources WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)',
-            ['probe_id' => $probeId],
-        );
-        $stats['probeMovements'] = $this->count('SELECT COUNT(*) FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $stats['probeMessagesSent'] = $this->count('SELECT COUNT(*) FROM probe_messages WHERE sender_probe_id = :probe_id', ['probe_id' => $probeId]);
-        $stats['probeMessagesReceived'] = $this->count('SELECT COUNT(*) FROM probe_messages WHERE recipient_probe_id = :probe_id', ['probe_id' => $probeId]);
-        $stats['probeDamageWarnings'] = $this->count('SELECT COUNT(*) FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $stats['probeMissions'] = $this->count('SELECT COUNT(*) FROM probe_missions WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $stats['probeMissionSteps'] = $this->count(
-            'SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE probe_id = :probe_id)',
-            ['probe_id' => $probeId],
-        );
-        $stats['scheduledEvents'] = $this->countScheduledEvents($probeId);
+        foreach ($probeIds as $probeId) {
+            $stats['manniesDeleted'] += $this->count(
+                'SELECT COUNT(*) FROM mannies WHERE probe_id = :probe_id AND NOT (location_type = :sector_location AND sector_x IS NOT NULL AND sector_y IS NOT NULL AND sector_z IS NOT NULL)',
+                ['probe_id' => $probeId, 'sector_location' => Manny::LOCATION_SECTOR],
+            );
+            $stats['probeItems'] += $this->count('SELECT COUNT(*) FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+            $stats['storageContainers'] += $this->count('SELECT COUNT(*) FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+            $stats['storageContainerResources'] += $this->count(
+                'SELECT COUNT(*) FROM storage_container_resources WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)',
+                ['probe_id' => $probeId],
+            );
+            $stats['probeMovements'] += $this->count('SELECT COUNT(*) FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+            $stats['probeMessagesSent'] += $this->count('SELECT COUNT(*) FROM probe_messages WHERE sender_probe_id = :probe_id', ['probe_id' => $probeId]);
+            $stats['probeMessagesReceived'] += $this->count('SELECT COUNT(*) FROM probe_messages WHERE recipient_probe_id = :probe_id', ['probe_id' => $probeId]);
+            $stats['probeDamageWarnings'] += $this->count('SELECT COUNT(*) FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+            $stats['probeMissions'] += $this->count('SELECT COUNT(*) FROM probe_missions WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+            $stats['probeMissionSteps'] += $this->count(
+                'SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE probe_id = :probe_id)',
+                ['probe_id' => $probeId],
+            );
+            $stats['scheduledEvents'] += $this->countScheduledEvents($probeId);
+        }
 
         return $stats;
     }

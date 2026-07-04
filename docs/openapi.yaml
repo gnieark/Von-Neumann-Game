@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '71'
+  version: '75'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 72
+                apiVersion: 75
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -583,10 +583,10 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe:
     get:
-      summary: Get current Neumann probe
+      summary: Get default Neumann probe
       responses:
         '200':
-          description: Current probe
+          description: Default probe
           content:
             application/json:
               schema:
@@ -595,6 +595,74 @@ paths:
                 properties:
                   probe:
                     $ref: '#/components/schemas/Probe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/probe/{probeId}:
+    get:
+      summary: Get a Neumann probe by id
+      description: Returns the requested probe only when it belongs to the authenticated player.
+      parameters:
+        - name: probeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Requested probe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [probe]
+                properties:
+                  probe:
+                    $ref: '#/components/schemas/Probe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Set the default Neumann probe
+      description: >
+        Sets the requested owned probe as the player's default probe. The
+        current default probe and the requested probe must be in the same
+        sector, or both sectors must be covered by the same active SCUT network.
+      parameters:
+        - name: probeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Default probe updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Target probe is outside same-sector and same-SCUT reach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probes:
+    get:
+      summary: List player Neumann probes
+      responses:
+        '200':
+          description: Player probes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe/mission:
@@ -3253,6 +3321,32 @@ components:
               nullable: true
         inventory:
           $ref: '#/components/schemas/ProbeInventory'
+    ProbeSummary:
+      type: object
+      required: [id, name, status, isDefault]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, dead, trapped_by_black_hole]
+        isDefault:
+          type: boolean
+          description: True for the probe returned by GET /api/probe.
+    ProbeListResponse:
+      type: object
+      required: [defaultProbeId, probes]
+      properties:
+        defaultProbeId:
+          type: integer
+          nullable: true
+          description: Identifier of the player's default probe.
+        probes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeSummary'
     ProbeTerminalAlert:
       type: object
       required: [type, severity, title, message, action]

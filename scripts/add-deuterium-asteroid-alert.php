@@ -250,6 +250,7 @@ function deuteriumAsteroidResolvePlayerAndProbe(PDO $pdo, NeumannProbeRepository
         (int) $row['id'],
         (string) $row['username'],
         $row['display_name'] !== null ? (string) $row['display_name'] : null,
+        isset($row['default_probe_id']) ? (int) $row['default_probe_id'] : null,
         new SectorCoordinates((int) $row['home_sector_x'], (int) $row['home_sector_y'], (int) $row['home_sector_z']),
         (string) $row['created_at'],
         (string) $row['updated_at'],

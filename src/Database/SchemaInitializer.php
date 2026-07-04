@@ -42,6 +42,7 @@ final class SchemaInitializer
                 username $caseSensitiveText NOT NULL UNIQUE,
                 display_name $nullableText,
                 password_hash $nullableText,
+                default_probe_id INTEGER NULL,
                 home_sector_x INTEGER NOT NULL DEFAULT 0,
                 home_sector_y INTEGER NOT NULL DEFAULT 0,
                 home_sector_z INTEGER NOT NULL DEFAULT 0,
@@ -65,7 +66,7 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_player_auth_provider ON player_auth_methods(provider, provider_user_id)",
             "CREATE TABLE IF NOT EXISTS neumann_probes (
                 id $id,
-                player_id INTEGER NOT NULL UNIQUE,
+                player_id INTEGER NOT NULL,
                 name $text NOT NULL,
                 sector_x INTEGER NOT NULL,
                 sector_y INTEGER NOT NULL,
@@ -446,6 +447,7 @@ final class SchemaInitializer
         if ($this->driver === 'sqlite') {
             $this->ensureSqliteColumn($pdo, 'players', 'forum_admin', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureSqliteColumn($pdo, 'players', 'forum_moderator', 'INTEGER NOT NULL DEFAULT 0');
+            $this->ensurePlayerDefaultProbeSchema($pdo);
             $this->ensureSqliteColumn($pdo, 'sessions', 'remember_me', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureSqliteColumn($pdo, 'forum_posts', 'first_message_id', 'INTEGER NULL');
             $this->ensureSqliteColumn($pdo, 'forum_messages', 'edited_at', 'TEXT NULL');
@@ -470,6 +472,7 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
             $this->ensureSqliteProbeResourceStockColumns($pdo);
+            $this->ensureProbePlayerOneToManySchema($pdo);
             $this->ensureSqliteColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
@@ -480,6 +483,7 @@ final class SchemaInitializer
         } elseif ($this->driver === 'mysql') {
             $this->ensureMysqlColumn($pdo, 'players', 'forum_admin', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER home_sector_z');
             $this->ensureMysqlColumn($pdo, 'players', 'forum_moderator', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER forum_admin');
+            $this->ensurePlayerDefaultProbeSchema($pdo);
             $this->ensureMysqlColumn($pdo, 'sessions', 'remember_me', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER last_used_at');
             $this->ensureMysqlColumnCollation($pdo, 'players', 'username', 'utf8mb4_bin', 'VARCHAR(255) COLLATE utf8mb4_bin NOT NULL');
             $this->ensureMysqlColumn($pdo, 'forum_posts', 'first_message_id', 'INTEGER NULL AFTER pinned');
@@ -501,6 +505,7 @@ final class SchemaInitializer
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
             $this->ensureMysqlProbeResourceStockColumns($pdo);
+            $this->ensureProbePlayerOneToManySchema($pdo);
             $this->ensureMysqlColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER updated_at');
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
@@ -988,6 +993,137 @@ final class SchemaInitializer
         );
     }
 
+    private function ensurePlayerDefaultProbeSchema(PDO $pdo): void
+    {
+        if ($this->driver === 'sqlite') {
+            $this->ensureSqliteColumn($pdo, 'players', 'default_probe_id', 'INTEGER NULL');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_players_default_probe_id ON players(default_probe_id)');
+        } else {
+            $this->ensureMysqlColumn($pdo, 'players', 'default_probe_id', 'INTEGER NULL AFTER password_hash');
+            if (!$this->mysqlIndexExists($pdo, 'players', 'idx_players_default_probe_id')) {
+                $pdo->exec('CREATE INDEX idx_players_default_probe_id ON players(default_probe_id)');
+            }
+        }
+
+        $this->backfillDefaultProbeIds($pdo);
+    }
+
+    private function backfillDefaultProbeIds(PDO $pdo): void
+    {
+        $pdo->exec(
+            'UPDATE players
+             SET default_probe_id = (
+                 SELECT MIN(neumann_probes.id)
+                 FROM neumann_probes
+                 WHERE neumann_probes.player_id = players.id
+             )
+             WHERE (
+                   default_probe_id IS NULL
+                   OR NOT EXISTS (
+                       SELECT 1
+                       FROM neumann_probes
+                       WHERE neumann_probes.id = players.default_probe_id
+                         AND neumann_probes.player_id = players.id
+                   )
+               )
+               AND EXISTS (
+                   SELECT 1
+                   FROM neumann_probes
+                   WHERE neumann_probes.player_id = players.id
+               )'
+        );
+    }
+
+    private function ensureProbePlayerOneToManySchema(PDO $pdo): void
+    {
+        if ($this->driver === 'sqlite') {
+            if ($this->sqliteHasSingleColumnUniqueIndex($pdo, 'neumann_probes', 'player_id')) {
+                $this->rebuildSqliteNeumannProbesWithoutUniquePlayerId($pdo);
+            }
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)');
+            return;
+        }
+
+        $uniqueIndexes = $this->mysqlSingleColumnUniqueIndexes($pdo, 'neumann_probes', 'player_id');
+        if ($uniqueIndexes !== [] && !$this->mysqlNonUniqueSingleColumnIndexExists($pdo, 'neumann_probes', 'player_id')) {
+            if (!$this->mysqlIndexExists($pdo, 'neumann_probes', 'idx_neumann_probes_player_id_lookup')) {
+                $pdo->exec('CREATE INDEX idx_neumann_probes_player_id_lookup ON neumann_probes(player_id)');
+            }
+        }
+        foreach ($uniqueIndexes as $indexName) {
+            $escaped = str_replace('`', '``', $indexName);
+            $pdo->exec("ALTER TABLE neumann_probes DROP INDEX `$escaped`");
+        }
+        if (!$this->mysqlIndexExists($pdo, 'neumann_probes', 'idx_neumann_probes_player_id')) {
+            $pdo->exec('CREATE INDEX idx_neumann_probes_player_id ON neumann_probes(player_id)');
+        }
+    }
+
+    private function sqliteHasSingleColumnUniqueIndex(PDO $pdo, string $table, string $column): bool
+    {
+        $indexes = $pdo->query('PRAGMA index_list(' . $table . ')')->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($indexes as $index) {
+            if ((int) ($index['unique'] ?? 0) !== 1) {
+                continue;
+            }
+            $name = (string) ($index['name'] ?? '');
+            if ($name === '') {
+                continue;
+            }
+            $columns = $pdo->query('PRAGMA index_info(' . $pdo->quote($name) . ')')->fetchAll(PDO::FETCH_ASSOC);
+            $columnNames = array_map(static fn(array $row): string => (string) $row['name'], $columns);
+            if ($columnNames === [$column]) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function mysqlSingleColumnUniqueIndexes(PDO $pdo, string $table, string $column): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT INDEX_NAME
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = :table_name
+               AND NON_UNIQUE = 0
+               AND INDEX_NAME <> :primary_index
+             GROUP BY INDEX_NAME
+             HAVING GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR \',\') = :column_name'
+        );
+        $stmt->execute([
+            'table_name' => $table,
+            'primary_index' => 'PRIMARY',
+            'column_name' => $column,
+        ]);
+
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    private function mysqlNonUniqueSingleColumnIndexExists(PDO $pdo, string $table, string $column): bool
+    {
+        $stmt = $pdo->prepare(
+            'SELECT 1
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = :table_name
+               AND NON_UNIQUE = 1
+             GROUP BY INDEX_NAME
+             HAVING GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR \',\') = :column_name
+             LIMIT 1'
+        );
+        $stmt->execute([
+            'table_name' => $table,
+            'column_name' => $column,
+        ]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     private function ensureMysqlColumn(PDO $pdo, string $table, string $column, string $definition): void
     {
         $stmt = $pdo->query("SHOW COLUMNS FROM $table WHERE Field = '$column'");
@@ -1047,7 +1183,7 @@ final class SchemaInitializer
             $pdo->exec(
                 "CREATE TABLE neumann_probes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    player_id INTEGER NOT NULL UNIQUE,
+                    player_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     sector_x INTEGER NOT NULL,
                     sector_y INTEGER NOT NULL,
@@ -1113,6 +1249,90 @@ final class SchemaInitializer
             }
 
             $pdo->exec('DROP TABLE neumann_probes_resource_backup');
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            $pdo->exec('PRAGMA foreign_keys=ON');
+            throw $e;
+        }
+
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_sector ON neumann_probes(sector_x, sector_y, sector_z)');
+        $pdo->exec('PRAGMA foreign_keys=ON');
+    }
+
+    private function rebuildSqliteNeumannProbesWithoutUniquePlayerId(PDO $pdo): void
+    {
+        $rows = $pdo->query('SELECT * FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
+        $pdo->exec('PRAGMA foreign_keys=OFF');
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec('ALTER TABLE neumann_probes RENAME TO neumann_probes_player_unique_backup');
+            $pdo->exec(
+                "CREATE TABLE neumann_probes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    sector_x INTEGER NOT NULL,
+                    sector_y INTEGER NOT NULL,
+                    sector_z INTEGER NOT NULL,
+                    velocity_c REAL NOT NULL DEFAULT 0,
+                    acceleration_c_per_day REAL NOT NULL DEFAULT 0,
+                    direction_x REAL NOT NULL DEFAULT 0,
+                    direction_y REAL NOT NULL DEFAULT 0,
+                    direction_z REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL,
+                    integrity_percent REAL NOT NULL DEFAULT 100,
+                    energy_stored REAL NOT NULL DEFAULT 0,
+                    deuterium_stock REAL NOT NULL DEFAULT 100,
+                    metals_stock REAL NOT NULL DEFAULT 0,
+                    ice_stock REAL NOT NULL DEFAULT 0,
+                    organic_compounds_stock REAL NOT NULL DEFAULT 0,
+                    internal_clock_rate REAL NOT NULL DEFAULT 1,
+                    current_task TEXT NULL,
+                    entered_current_sector_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    exclude_from_stats INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(player_id) REFERENCES players(id)
+                )"
+            );
+
+            $insert = $pdo->prepare(
+                'INSERT INTO neumann_probes
+                 (id, player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at, exclude_from_stats)
+                 VALUES (:id, :player_id, :name, :sector_x, :sector_y, :sector_z, :velocity_c, :acceleration_c_per_day, :direction_x, :direction_y, :direction_z, :status, :integrity_percent, :energy_stored, :deuterium_stock, :metals_stock, :ice_stock, :organic_compounds_stock, :internal_clock_rate, :current_task, :entered_current_sector_at, :created_at, :updated_at, :exclude_from_stats)'
+            );
+            foreach ($rows as $row) {
+                $insert->execute([
+                    'id' => (int) $row['id'],
+                    'player_id' => (int) $row['player_id'],
+                    'name' => (string) $row['name'],
+                    'sector_x' => (int) $row['sector_x'],
+                    'sector_y' => (int) $row['sector_y'],
+                    'sector_z' => (int) $row['sector_z'],
+                    'velocity_c' => (float) ($row['velocity_c'] ?? 0.0),
+                    'acceleration_c_per_day' => (float) ($row['acceleration_c_per_day'] ?? 0.0),
+                    'direction_x' => (float) ($row['direction_x'] ?? 0.0),
+                    'direction_y' => (float) ($row['direction_y'] ?? 0.0),
+                    'direction_z' => (float) ($row['direction_z'] ?? 0.0),
+                    'status' => (string) $row['status'],
+                    'integrity_percent' => max(0.0, min(100.0, (float) ($row['integrity_percent'] ?? 100.0))),
+                    'energy_stored' => (float) ($row['energy_stored'] ?? 0.0),
+                    'deuterium_stock' => (float) ($row['deuterium_stock'] ?? 100.0),
+                    'metals_stock' => (float) ($row['metals_stock'] ?? 0.0),
+                    'ice_stock' => (float) ($row['ice_stock'] ?? 0.0),
+                    'organic_compounds_stock' => (float) ($row['organic_compounds_stock'] ?? 0.0),
+                    'internal_clock_rate' => (float) ($row['internal_clock_rate'] ?? 1.0),
+                    'current_task' => $row['current_task'] !== null ? (string) $row['current_task'] : null,
+                    'entered_current_sector_at' => (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
+                    'created_at' => (string) $row['created_at'],
+                    'updated_at' => (string) $row['updated_at'],
+                    'exclude_from_stats' => (int) ($row['exclude_from_stats'] ?? 0) === 1 ? 1 : 0,
+                ]);
+            }
+
+            $pdo->exec('DROP TABLE neumann_probes_player_unique_backup');
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();

@@ -24,6 +24,7 @@ use VonNeumannGame\Http\Controller\ForumApiController;
 use VonNeumannGame\Http\Controller\ProbeManniesApiController;
 use VonNeumannGame\Http\Controller\ProbeManniesApiPresenter;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
@@ -48,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 73;
+    public const API_VERSION = 75;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -56,6 +57,7 @@ final class ApiKernel
 
     public function __construct(
         private readonly AuthService $auth,
+        private readonly PlayerRepository $players,
         private readonly NeumannProbeRepository $probes,
         private readonly SectorObservationService $observations,
         private readonly ProbeMovementService $movements,
@@ -149,6 +151,7 @@ final class ApiKernel
             ApiRoute::path('/api/me', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => new ApiResponse(200, ['player' => $player->publicArray()]))),
             ApiRoute::path('/api/me/api-key', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->apiKeyResponse($player))),
             ApiRoute::path('/api/crafting-recipes', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $_player): ApiResponse => $this->craftingRecipesResponse())),
+            ApiRoute::path('/api/probes', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeListResponse($player))),
             ApiRoute::path('/api/probe', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeResponse($player))),
             ApiRoute::path('/api/probe/mind-snapshot/reassign', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMindSnapshotReassignResponse($player))),
             ApiRoute::path('/api/probe/storage-containers', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player))),
@@ -165,6 +168,14 @@ final class ApiKernel
             ApiRoute::path('/api/probe/missions', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player))),
             ApiRoute::path('/api/probe/move', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $ctx->body))),
             ApiRoute::path('/api/probe/mannies', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->list($player))),
+            ApiRoute::regex('#^/api/probe/(\d+)$#', ['GET', 'PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute(
+                $ctx->method,
+                ['GET', 'PATCH'],
+                $ctx->headers,
+                fn(Player $player): ApiResponse => $ctx->method === 'PATCH'
+                    ? $this->probeDefaultSelectionResponse($player, $ctx->intParam(0))
+                    : $this->probeByIdResponse($player, $ctx->intParam(0)),
+            )),
             ApiRoute::path('/api/sector', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $ctx->query))),
             ApiRoute::path('/api/forum/categories', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'POST'], $ctx->headers, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->forumController()->createCategory($player, $ctx->body) : $this->forumController()->categories())),
             ApiRoute::path('/api/forum/posts', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'POST'], $ctx->headers, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->forumController()->createPost($player, $ctx->body) : $this->forumController()->posts($ctx->query))),
@@ -257,7 +268,41 @@ final class ApiKernel
 
     private function probeResponse(Player $player): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        return $this->probeDetailsResponse($player, $this->requiredProbe($player));
+    }
+
+    private function probeByIdResponse(Player $player, int $probeId): ApiResponse
+    {
+        $probe = $this->probes->findById($probeId);
+        if ($probe === null || $probe->playerId !== $player->id) {
+            return ApiResponse::error(404, 'not_found', 'Probe not found.');
+        }
+
+        return $this->probeDetailsResponse($player, $probe);
+    }
+
+    private function probeDefaultSelectionResponse(Player $player, int $probeId): ApiResponse
+    {
+        $targetProbe = $this->probes->findById($probeId);
+        if ($targetProbe === null || $targetProbe->playerId !== $player->id) {
+            return ApiResponse::error(404, 'not_found', 'Probe not found.');
+        }
+
+        $currentProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $targetProbe = $this->movements->refreshProbeMovementState($targetProbe);
+        if (!$this->scut->canSectorsCommunicate($currentProbe->currentSector, $targetProbe->currentSector)) {
+            return ApiResponse::error(422, 'probe_not_in_same_sector', 'Default probe can only be changed when both probes are in the same sector or inside the same SCUT network coverage.');
+        }
+
+        $player->defaultProbeId = $targetProbe->id;
+        $this->players->save($player);
+
+        return $this->probeListResponse($player);
+    }
+
+    private function probeDetailsResponse(Player $player, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
         if ($probe->status === ProbeStatus::TrappedByBlackHole) {
             return new ApiResponse(200, [
                 'probe' => [
@@ -304,6 +349,32 @@ final class ApiKernel
         )->globalToRelative($probe->currentSector);
 
         return new ApiResponse(200, ['probe' => $this->probeArray($player, $probe, $relative)]);
+    }
+
+    private function probeListResponse(Player $player): ApiResponse
+    {
+        return new ApiResponse(200, [
+            'defaultProbeId' => $player->defaultProbeId,
+            'probes' => array_map(
+                fn(NeumannProbe $probe): array => $this->probeSummaryArray($player, $probe),
+                $this->probes->findAllByPlayerId($player->id),
+            ),
+        ]);
+    }
+
+    /**
+     * @return array{id:int, name:string, status:string, isDefault:bool}
+     */
+    private function probeSummaryArray(Player $player, NeumannProbe $probe): array
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+
+        return [
+            'id' => $probe->id,
+            'name' => $probe->name,
+            'status' => $probe->status->value,
+            'isDefault' => $player->defaultProbeId === $probe->id,
+        ];
     }
 
     private function probeImprovementsResponse(Player $player, array $query): ApiResponse

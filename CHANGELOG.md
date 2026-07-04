@@ -4,6 +4,12 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-07-04
 
+### Changed
+
+- API v75 : `PATCH /api/probe/{probeId}` permet de définir la sonde par défaut si la sonde par défaut actuelle et la sonde cible sont dans le même secteur ou dans des secteurs couverts par le même réseau SCUT.
+- API v74 : `GET /api/probe` retourne désormais explicitement la sonde par défaut, `GET /api/probes` liste les sondes du joueur avec `defaultProbeId` et `isDefault`, et `GET /api/probe/{probeId}` retourne une sonde possédée ou `404` sinon.
+- Base de données : préparation interne du modèle multi-sondes avec `players.default_probe_id` et un lien one-to-many de `players` vers `neumann_probes`.
+
 ### Fixed
 
 - Interface : `/inventories` ne propose plus l’imprimante atomique ni les containers additionnels dans les items filtrables de “Manage storage rules by container”.

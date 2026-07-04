@@ -388,6 +388,9 @@ $test->assert(str_contains($openApi, 'description: Present only for SCUT relay o
 $test->assert(str_contains($openApi, '$ref: \'#/components/schemas/ScutNetworkReference\''), 'OpenAPI documents SCUT relay SectorObject network references');
 $test->assert(str_contains($openApi, 'dormant_construct'), 'OpenAPI documents dormant construct sector objects');
 $test->assert(str_contains($openApi, 'knownFunction'), 'OpenAPI documents dormant construct function ambiguity');
+$test->assert(str_contains($openApi, '/api/probes'), 'OpenAPI documents the player probe list endpoint');
+$test->assert(str_contains($openApi, '/api/probe/{probeId}'), 'OpenAPI documents the owned probe detail endpoint');
+$test->assert(str_contains($openApi, 'summary: Set the default Neumann probe'), 'OpenAPI documents the default probe selection endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
@@ -509,6 +512,8 @@ $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'default_probe_id INTEGER NULL'), 'Player table stores a default probe id for future multi-probe ownership');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'player_id INTEGER NOT NULL UNIQUE'), 'Probe table allows several probes for the same player');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS scut_covered_sectors'), 'SCUT coverage sectors are stored in a relational table');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'covered_sectors_json'), 'SCUT coverage is no longer stored in JSON columns');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'FOREIGN KEY(created_by_probe_id)'), 'SCUT relay creator ids are stored without a probe foreign key');
@@ -550,6 +555,88 @@ $test->assertThrows(
     fn() => $movementConstraintMovements->create($movementConstraintProbe->id, new SectorCoordinates(0, 0, 0), new SectorCoordinates(0, 2, 0), 1, $movementConstraintTimeline, 1.0),
     'database rejects a second active movement for the same probe'
 );
+
+$legacySingleProbeDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-single-probe.sqlite';
+$legacySingleProbeFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacySingleProbeDbPath), $root);
+$legacySingleProbePdo = $legacySingleProbeFactory->create();
+$legacySingleProbePdo->exec(
+    'CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NULL,
+        password_hash TEXT NULL,
+        home_sector_x INTEGER NOT NULL DEFAULT 0,
+        home_sector_y INTEGER NOT NULL DEFAULT 0,
+        home_sector_z INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacySingleProbePdo->exec(
+    'CREATE TABLE neumann_probes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        velocity_c REAL NOT NULL DEFAULT 0,
+        acceleration_c_per_day REAL NOT NULL DEFAULT 0,
+        direction_x REAL NOT NULL DEFAULT 0,
+        direction_y REAL NOT NULL DEFAULT 0,
+        direction_z REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        integrity_percent REAL NOT NULL DEFAULT 100,
+        energy_stored REAL NOT NULL DEFAULT 0,
+        deuterium_stock REAL NOT NULL DEFAULT 100,
+        metals_stock REAL NOT NULL DEFAULT 0,
+        internal_clock_rate REAL NOT NULL DEFAULT 1,
+        current_task TEXT NULL,
+        entered_current_sector_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(player_id) REFERENCES players(id)
+    )'
+);
+$legacySingleProbePdo->exec(
+    "INSERT INTO players
+     (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
+     VALUES ('legacy-single-probe-owner', 'Legacy Single Probe Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+);
+$legacySingleProbePdo->exec(
+    "INSERT INTO neumann_probes
+     (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at)
+     VALUES (1, 'Legacy primary probe', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+);
+$legacySingleProbeFactory->initializeSchema($legacySingleProbePdo);
+$legacySingleProbePlayerColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacySingleProbePdo->query('PRAGMA table_info(players)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('default_probe_id', $legacySingleProbePlayerColumns, true), 'legacy player schema gains default_probe_id');
+$test->assertEquals(1, (int) $legacySingleProbePdo->query('SELECT default_probe_id FROM players WHERE id = 1')->fetchColumn(), 'legacy player default probe is backfilled');
+$legacySingleProbeIndexes = $legacySingleProbePdo->query('PRAGMA index_list(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
+$legacyUniqueProbePlayerIndexes = [];
+foreach ($legacySingleProbeIndexes as $index) {
+    if ((int) ($index['unique'] ?? 0) !== 1) {
+        continue;
+    }
+    $columns = array_map(
+        static fn(array $row): string => (string) $row['name'],
+        $legacySingleProbePdo->query('PRAGMA index_info(' . $legacySingleProbePdo->quote((string) $index['name']) . ')')->fetchAll(PDO::FETCH_ASSOC),
+    );
+    if ($columns === ['player_id']) {
+        $legacyUniqueProbePlayerIndexes[] = (string) $index['name'];
+    }
+}
+$test->assertEquals([], $legacyUniqueProbePlayerIndexes, 'legacy probe schema drops the one-probe-per-player uniqueness');
+$legacySingleProbePlayers = new PlayerRepository($legacySingleProbePdo);
+$legacySingleProbeProbes = new NeumannProbeRepository($legacySingleProbePdo);
+$legacySingleProbeOwner = $legacySingleProbePlayers->findById(1) ?? throw new RuntimeException('Legacy single-probe owner missing.');
+$legacySecondProbe = $legacySingleProbeProbes->createForPlayer($legacySingleProbeOwner->id, 'Legacy second probe', new SectorCoordinates(2, 0, 0));
+$test->assertEquals(2, count($legacySingleProbeProbes->findAllByPlayerId($legacySingleProbeOwner->id)), 'migrated legacy schema accepts a second probe for the same player');
+$test->assertEquals(1, $legacySingleProbePlayers->findById($legacySingleProbeOwner->id)?->defaultProbeId, 'second probe creation does not overwrite a valid migrated default probe');
+$test->assertEquals(2, $legacySecondProbe->id, 'second probe is inserted after legacy migration');
 
 $legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
 $legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
@@ -725,6 +812,22 @@ $playerSchemaColumns = array_map(
 );
 $test->assert(in_array('forum_admin', $playerSchemaColumns, true), 'Player table stores forum admin flag');
 $test->assert(in_array('forum_moderator', $playerSchemaColumns, true), 'Player table stores forum moderator flag');
+$test->assert(in_array('default_probe_id', $playerSchemaColumns, true), 'Player table stores the default probe id');
+$probeSchemaIndexes = $pdo->query('PRAGMA index_list(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
+$uniqueProbePlayerIndexes = [];
+foreach ($probeSchemaIndexes as $index) {
+    if ((int) ($index['unique'] ?? 0) !== 1) {
+        continue;
+    }
+    $indexColumns = array_map(
+        static fn(array $row): string => (string) $row['name'],
+        $pdo->query('PRAGMA index_info(' . $pdo->quote((string) $index['name']) . ')')->fetchAll(PDO::FETCH_ASSOC),
+    );
+    if ($indexColumns === ['player_id']) {
+        $uniqueProbePlayerIndexes[] = (string) $index['name'];
+    }
+}
+$test->assertEquals([], $uniqueProbePlayerIndexes, 'Probe table does not enforce one probe per player');
 $sessionSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(sessions)')->fetchAll(PDO::FETCH_ASSOC),
@@ -839,11 +942,84 @@ $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
+$kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
+
+$multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
+$primaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Primary future probe', $multiProbePlayer->homeSector);
+$secondaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Secondary future probe', new SectorCoordinates(22, 0, 0));
+$multiProbePlayer = $players->findById($multiProbePlayer->id) ?? throw new RuntimeException('Multi-probe player not found.');
+$test->assertEquals($primaryProbe->id, $multiProbePlayer->defaultProbeId, 'first created probe becomes the player default probe');
+$test->assertEquals(2, count($probes->findAllByPlayerId($multiProbePlayer->id)), 'repository allows several probes for one player');
+$test->assertEquals($primaryProbe->id, $probes->findByPlayerId($multiProbePlayer->id)?->id, 'legacy player probe lookup uses the default probe');
+$multiProbePlayer->defaultProbeId = $secondaryProbe->id;
+$players->save($multiProbePlayer);
+$test->assertEquals($secondaryProbe->id, $probes->findByPlayerId($multiProbePlayer->id)?->id, 'legacy player probe lookup follows the player default probe');
+$tertiaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Tertiary future probe', new SectorCoordinates(24, 0, 0));
+$test->assertEquals(3, count($probes->findAllByPlayerId($multiProbePlayer->id)), 'creating a later probe keeps the one-to-many relationship open');
+$test->assertEquals($secondaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'creating another probe does not overwrite an existing valid default');
+$test->assert($tertiaryProbe->id > $secondaryProbe->id, 'third future probe is persisted normally');
+foreach ([$primaryProbe, $secondaryProbe, $tertiaryProbe] as $futureProbe) {
+    $futureProbe->excludeFromStats = true;
+    $probes->save($futureProbe);
+}
+$foreignProbeOwner = $players->createPlayer('foreign-probe-owner', 'Foreign Probe Owner', null, new SectorCoordinates(30, 0, 0));
+$foreignProbe = $probes->createForPlayer($foreignProbeOwner->id, 'Foreign future probe', $foreignProbeOwner->homeSector);
+$foreignProbe->excludeFromStats = true;
+$probes->save($foreignProbe);
+$multiProbeHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($multiProbePlayer)['token']];
+$defaultProbeResponse = $kernel->handle('GET', '/api/probe', $multiProbeHeaders);
+$test->assertEquals(200, $defaultProbeResponse->status, 'GET /api/probe returns the player default probe');
+$test->assertEquals($secondaryProbe->id, $defaultProbeResponse->body['probe']['id'] ?? null, 'GET /api/probe keeps returning the configured default probe');
+$probeListResponse = $kernel->handle('GET', '/api/probes', $multiProbeHeaders);
+$test->assertEquals(200, $probeListResponse->status, 'GET /api/probes lists player probes');
+$test->assertEquals($secondaryProbe->id, $probeListResponse->body['defaultProbeId'] ?? null, 'GET /api/probes exposes the default probe id');
+$listedProbes = $probeListResponse->body['probes'] ?? [];
+$test->assertEquals(3, count($listedProbes), 'GET /api/probes returns every probe owned by the player');
+$listedById = [];
+foreach ($listedProbes as $listedProbe) {
+    $listedById[$listedProbe['id'] ?? 0] = $listedProbe;
+}
+$test->assert(isset($listedById[$primaryProbe->id], $listedById[$secondaryProbe->id], $listedById[$tertiaryProbe->id]), 'GET /api/probes includes all owned probe ids');
+$test->assertEquals(false, $listedById[$primaryProbe->id]['isDefault'] ?? null, 'GET /api/probes marks non-default probes');
+$test->assertEquals(true, $listedById[$secondaryProbe->id]['isDefault'] ?? null, 'GET /api/probes marks the default probe');
+$probeByIdResponse = $kernel->handle('GET', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
+$test->assertEquals(200, $probeByIdResponse->status, 'GET /api/probe/{probeId} returns an owned probe');
+$test->assertEquals($primaryProbe->id, $probeByIdResponse->body['probe']['id'] ?? null, 'GET /api/probe/{probeId} returns the requested owned probe');
+$foreignProbeResponse = $kernel->handle('GET', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders);
+$test->assertEquals(404, $foreignProbeResponse->status, 'GET /api/probe/{probeId} hides probes owned by another player');
+$missingProbeResponse = $kernel->handle('GET', '/api/probe/999999999', $multiProbeHeaders);
+$test->assertEquals(404, $missingProbeResponse->status, 'GET /api/probe/{probeId} returns 404 for a missing probe');
+$unreachableDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
+$test->assertEquals(422, $unreachableDefaultProbe->status, 'PATCH /api/probe/{probeId} refuses an owned probe outside same-sector or same-SCUT reach');
+$test->assertEquals('probe_not_in_same_sector', $unreachableDefaultProbe->body['error']['code'] ?? null, 'PATCH /api/probe/{probeId} returns an explicit reachability error');
+$test->assertEquals($secondaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'refused default probe switch keeps the existing default probe');
+$sameSectorProbe = $probes->createForPlayer($multiProbePlayer->id, 'Same sector future probe', $secondaryProbe->currentSector);
+$sameSectorProbe->excludeFromStats = true;
+$probes->save($sameSectorProbe);
+$sameSectorDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders);
+$test->assertEquals(200, $sameSectorDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts a same-sector owned probe');
+$test->assertEquals($sameSectorProbe->id, $sameSectorDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the new default probe id');
+$test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-sector default probe switch');
+$sameSectorListById = [];
+foreach (($sameSectorDefaultProbe->body['probes'] ?? []) as $listedProbe) {
+    $sameSectorListById[$listedProbe['id'] ?? 0] = $listedProbe;
+}
+$test->assertEquals(true, $sameSectorListById[$sameSectorProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} marks the selected same-sector probe as default');
+$test->assertEquals(false, $sameSectorListById[$secondaryProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} clears the previous default marker');
+$scutDefaultRelay = $scut->createOffRelay($sameSectorProbe->currentSector, $sameSectorProbe->id);
+$scut->turnOnRelay($scutDefaultRelay->id);
+$sameScutDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
+$test->assertEquals(200, $sameScutDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts an owned probe inside the same SCUT network');
+$test->assertEquals($primaryProbe->id, $sameScutDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the SCUT-reachable default probe id');
+$test->assertEquals($primaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-SCUT default probe switch');
+$foreignDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders);
+$test->assertEquals(404, $foreignDefaultProbe->status, 'PATCH /api/probe/{probeId} hides probes owned by another player');
+$missingDefaultProbe = $kernel->handle('PATCH', '/api/probe/999999999', $multiProbeHeaders);
+$test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeId} returns 404 for a missing probe');
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(73, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(75, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -869,7 +1045,7 @@ $sectorRepository->save(new SectorContent($privacySector, [
     ),
 ]));
 $privacyObservation = (new SectorObservationService($sectorService, $visitedSectors))->observe(
-    new Player(424242, 'privacy-observer', 'Privacy Observer', $privacyHome, gmdate('c'), gmdate('c')),
+    new Player(424242, 'privacy-observer', 'Privacy Observer', null, $privacyHome, gmdate('c'), gmdate('c')),
     new NeumannProbe(424242, 424242, 'Privacy probe', $privacySector, 0.0, 0.0, new ProbeDirection(), ProbeStatus::Idle, 100.0, 0.0, 100.0, 0.0, 0.0, 0.0, 1.0, null, gmdate('c'), gmdate('c'), gmdate('c'), false),
     $privacySector,
 )->toArray();
@@ -1444,6 +1620,7 @@ $deleteMannies = $deleteProbe === null ? [] : $mannies->findByProbeId($deletePro
 $deleteSession = $auth->createSessionForPlayer($deletePlayer);
 $auth->createApiKeyForPlayer($deletePlayer);
 if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 2) {
+    $deleteSecondaryProbe = $probes->createForPlayer($deletePlayer->id, 'Delete secondary probe', new SectorCoordinates(30, 0, 0));
     $deleteSentMessage = $messages->create($deleteProbe->id, $createdProbe->id, $deleteProbe->currentSector, 'Deleting sender ping');
     $deleteReceivedMessage = $messages->create($createdProbe->id, $deleteProbe->id, $deleteProbe->currentSector, 'Deleting recipient ping');
     $deleteRelay = $scutRelays->create($deleteProbe->id, $deleteProbe->currentSector);
@@ -1482,7 +1659,7 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
 
     $deleteStats = (new AccountDeletionService($pdo, $probes, $mannies, $sectorService))->deletePlayer($deletePlayer);
     $test->assertEquals(1, $deleteStats['players'] ?? null, 'account deletion reports the deleted player');
-    $test->assertEquals(1, $deleteStats['probes'] ?? null, 'account deletion reports the deleted probe');
+    $test->assertEquals(2, $deleteStats['probes'] ?? null, 'account deletion reports all deleted probes');
     $test->assertEquals(1, $deleteStats['probeMessagesSent'] ?? null, 'account deletion reports sent probe messages');
     $test->assertEquals(1, $deleteStats['probeMessagesReceived'] ?? null, 'account deletion reports received probe messages');
     $test->assertEquals(1, $deleteStats['probeMissions'] ?? null, 'account deletion reports probe missions');
@@ -1490,6 +1667,7 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assertEquals(1, $deleteStats['manniesDetachedAsAbandoned'] ?? null, 'account deletion detaches outside Mannys as abandoned');
     $test->assert($players->findById($deletePlayer->id) === null, 'account deletion removes the player row');
     $test->assert($probes->findByPlayerId($deletePlayer->id) === null, 'account deletion removes the player probe');
+    $test->assert($probes->findById($deleteSecondaryProbe->id) === null, 'account deletion removes secondary player probes');
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
     $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
@@ -5142,6 +5320,9 @@ if ($escapeProbe !== null) {
 foreach ([
     'GET /api/me',
     'GET /api/probe',
+    'GET /api/probe/1',
+    'PATCH /api/probe/1',
+    'GET /api/probes',
     'POST /api/probe/mind-snapshot/reassign',
     'POST /api/probe/atomic-printer/craft',
     'GET /api/probe/messages',
