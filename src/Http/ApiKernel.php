@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 76;
+    public const API_VERSION = 77;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -112,9 +112,20 @@ final class ApiKernel
     private function routes(): array
     {
         return [
+            ApiRoute::regex('#^/api/probe/(\d+)/inventory/([^/]+)/jettison$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeInventoryJettisonResponse($player, $ctx->stringParam(1), $ctx->body, probe: $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/inventory/([^/]+)/jettison$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeInventoryJettisonResponse($player, $ctx->stringParam(0), $ctx->body))),
+            ApiRoute::regex('#^/api/probe/(\d+)/inventory/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeInventoryItemResponse($player, $ctx->stringParam(1), $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/inventory/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeInventoryItemResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/storage-containers/([^/]+)/rules$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageContainerRulesResponse($player, $ctx->stringParam(1), $ctx->body, $probe), $ctx->intParam(0), ['PATCH'])),
             ApiRoute::regex('#^/api/probe/storage-containers/([^/]+)/rules$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeStorageContainerRulesResponse($player, $ctx->stringParam(0), $ctx->body))),
+            ApiRoute::regex('#^/api/probe/(\d+)/storage-containers/([^/]+)$#', ['GET', 'PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => $ctx->method === 'PATCH'
+                    ? $this->probeStorageContainerRenameResponse($player, $ctx->stringParam(1), $ctx->body, $probe)
+                    : $this->probeStorageContainerResponse($player, $ctx->stringParam(1), $probe),
+                $ctx->intParam(0),
+                ['GET', 'PATCH'],
+            )),
             ApiRoute::regex('#^/api/probe/storage-containers/([^/]+)$#', ['GET', 'PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute(
                 $ctx->method,
                 ['GET', 'PATCH'],
@@ -123,12 +134,18 @@ final class ApiKernel
                     ? $this->probeStorageContainerRenameResponse($player, $ctx->stringParam(0), $ctx->body)
                     : $this->probeStorageContainerResponse($player, $ctx->stringParam(0)),
             )),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|improve-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(1), $ctx->params[2], $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|improve-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(0), $ctx->params[1], $ctx->body))),
+            ApiRoute::regex('#^/api/probe/(\d+)/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->rename($player, $ctx->stringParam(1), $ctx->body, $probe), $ctx->intParam(0), ['PATCH'])),
             ApiRoute::regex('#^/api/probe/mannies/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->rename($player, $ctx->stringParam(0), $ctx->body))),
             ApiRoute::regex('#^/api/probe/missions/([^/]+)/abandon$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionAbandonResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/messages/(\d+)/read$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMessageReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
             ApiRoute::regex('#^/api/probe/messages/(\d+)/read$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, $ctx->intParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/alerts/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeAlertReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
             ApiRoute::regex('#^/api/probe/alerts/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAlertReadResponse($player, $ctx->intParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeDamageWarningReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
             ApiRoute::regex('#^/api/probe/damage-warnings/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeDamageWarningReadResponse($player, $ctx->intParam(0)))),
             ApiRoute::regex('#^/api/forum/categories/(\d+)$#', ['GET', 'PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'PATCH', 'DELETE'], $ctx->headers, fn(Player $player): ApiResponse => match ($ctx->method) {
                 'GET' => $this->forumController()->category($ctx->intParam(0)),
@@ -168,6 +185,24 @@ final class ApiKernel
             ApiRoute::path('/api/probe/missions', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionsResponse($player))),
             ApiRoute::path('/api/probe/move', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMoveResponse($player, $ctx->body))),
             ApiRoute::path('/api/probe/mannies', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->list($player))),
+            ApiRoute::regex('#^/api/probe/(\d+)/storage-containers$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageContainersResponse($player, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/probe-improvements-available$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeImprovementsResponse($player, $ctx->query, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/storage-moves$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageMoveResponse($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/atomic-printer/craft$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->atomicPrinterCraft($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/messages$#', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => $ctx->method === 'POST'
+                    ? $this->probeMessageSendResponse($player, $ctx->body, $probe)
+                    : $this->probeMessagesResponse($player, $ctx->query, $probe),
+                $ctx->intParam(0),
+                ['GET', 'POST'],
+            )),
+            ApiRoute::regex('#^/api/probe/(\d+)/alerts$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeAlertsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeDamageWarningsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/visited-sectors$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeVisitedSectorsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/sector$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeSectorResponse($player, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/move$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMoveResponse($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->list($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)$#', ['GET', 'PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute(
                 $ctx->method,
                 ['GET', 'PATCH'],
@@ -254,6 +289,43 @@ final class ApiKernel
         }
 
         return $handler($player);
+    }
+
+    private function protectedProbeRoute(ApiRouteContext $ctx, callable $handler, int $probeId, array $allowedMethods): ApiResponse
+    {
+        return $this->protectedRoute(
+            $ctx->method,
+            $allowedMethods,
+            $ctx->headers,
+            function (Player $player) use ($handler, $probeId): ApiResponse {
+                $probe = $this->routeProbe($player, $probeId);
+                if ($probe instanceof ApiResponse) {
+                    return $probe;
+                }
+
+                return $handler($player, $probe);
+            },
+        );
+    }
+
+    private function routeProbe(Player $player, int $probeId): NeumannProbe|ApiResponse
+    {
+        $defaultProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        if ($probeId === $defaultProbe->id) {
+            return $defaultProbe;
+        }
+
+        $probe = $this->probes->findById($probeId);
+        if ($probe === null || $probe->playerId !== $player->id) {
+            return ApiResponse::error(404, 'not_found', 'Probe not found.');
+        }
+
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        if (!$this->scut->canSectorsCommunicate($defaultProbe->currentSector, $probe->currentSector)) {
+            return ApiResponse::error(422, 'probe_not_in_same_sector', 'This probe can only be controlled when it is in the same sector as the default probe or inside the same SCUT network coverage.');
+        }
+
+        return $probe;
     }
 
     private function apiKeyResponse(Player $player): ApiResponse
@@ -377,9 +449,9 @@ final class ApiKernel
         ];
     }
 
-    private function probeImprovementsResponse(Player $player, array $query): ApiResponse
+    private function probeImprovementsResponse(Player $player, array $query, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->requiredProbe($player);
+        $probe ??= $this->requiredProbe($player);
         $includeAll = $this->truthyQuery($query['includeAll'] ?? $query['all'] ?? null);
 
         return new ApiResponse(200, [
@@ -424,9 +496,9 @@ final class ApiKernel
         ];
     }
 
-    private function probeVisitedSectorsResponse(Player $player): ApiResponse
+    private function probeVisitedSectorsResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
-        $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $frame = new PlayerReferenceFrame($player->homeSector);
 
         return new ApiResponse(200, [
@@ -442,9 +514,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeSectorResponse(Player $player): ApiResponse
+    private function probeSectorResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $movement = $this->movements->activeMovementForProbe($probe);
         $sensorMode = $this->movements->sensorModeFor($movement, $probe->status);
@@ -494,9 +566,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeInventoryItemResponse(Player $player, string $itemId): ApiResponse
+    private function probeInventoryItemResponse(Player $player, string $itemId, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->requiredProbe($player);
+        $probe ??= $this->requiredProbe($player);
         $this->movements->ensureProbeOperational($probe);
         $item = $this->inventoryForProbe($probe)->findItem($itemId);
 
@@ -507,25 +579,25 @@ final class ApiKernel
         return new ApiResponse(200, ['item' => $item->taskArray()]);
     }
 
-    private function probeStorageContainersResponse(Player $player): ApiResponse
+    private function probeStorageContainersResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
 
         return new ApiResponse(200, ['containers' => $this->storage->containersForProbe($probe)]);
     }
 
-    private function probeStorageContainerResponse(Player $player, string $containerId): ApiResponse
+    private function probeStorageContainerResponse(Player $player, string $containerId, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
 
         return new ApiResponse(200, $this->storage->containerInventory($probe, $containerId));
     }
 
-    private function probeStorageContainerRenameResponse(Player $player, string $containerId, ?string $body): ApiResponse
+    private function probeStorageContainerRenameResponse(Player $player, string $containerId, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $data = $this->decodeJsonBody($body);
         if (!is_array($data) || !isset($data['label']) || !is_string($data['label'])) {
@@ -538,9 +610,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeStorageContainerRulesResponse(Player $player, string $containerId, ?string $body): ApiResponse
+    private function probeStorageContainerRulesResponse(Player $player, string $containerId, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $data = $this->decodeJsonBody($body);
         if (!is_array($data)) {
@@ -564,9 +636,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeStorageMoveResponse(Player $player, ?string $body): ApiResponse
+    private function probeStorageMoveResponse(Player $player, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $data = $this->decodeJsonBody($body);
         if (!is_array($data)) {
@@ -585,9 +657,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeMessageSendResponse(Player $player, ?string $body): ApiResponse
+    private function probeMessageSendResponse(Player $player, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $data = $this->decodeJsonBody($body);
         if (!is_array($data)) {
@@ -660,19 +732,19 @@ final class ApiKernel
         return new ApiResponse(201, ['message' => $this->probeMessageArray($player, $message)]);
     }
 
-    private function probeMessagesResponse(Player $player, array $query): ApiResponse
+    private function probeMessagesResponse(Player $player, array $query, ?NeumannProbe $probe = null): ApiResponse
     {
-        return $this->probeMessageListResponse($player, $query, false);
+        return $this->probeMessageListResponse($player, $query, false, $probe);
     }
 
-    private function probeSentMessagesResponse(Player $player, array $query): ApiResponse
+    private function probeSentMessagesResponse(Player $player, array $query, ?NeumannProbe $probe = null): ApiResponse
     {
-        return $this->probeMessageListResponse($player, $query, true);
+        return $this->probeMessageListResponse($player, $query, true, $probe);
     }
 
-    private function probeMessageListResponse(Player $player, array $query, bool $sent): ApiResponse
+    private function probeMessageListResponse(Player $player, array $query, bool $sent, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $limit = $this->messagePaginationParameter($query, 'limit', 50, 1, 200);
         if ($limit instanceof ApiResponse) {
@@ -705,9 +777,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeMessageReadResponse(Player $player, int $messageId): ApiResponse
+    private function probeMessageReadResponse(Player $player, int $messageId, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $message = $this->messages->findById($messageId);
         if ($message === null || $message->recipientType !== ProbeMessage::ENDPOINT_PROBE || $message->recipientProbeId !== $probe->id) {
@@ -717,9 +789,9 @@ final class ApiKernel
         return new ApiResponse(200, ['message' => $this->probeMessageArray($player, $this->messages->markRead($message))]);
     }
 
-    private function probeDamageWarningsResponse(Player $player): ApiResponse
+    private function probeDamageWarningsResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $warnings = array_values(array_filter(
             $this->damageWarnings->findByProbeId($probe->id),
             static fn(ProbeDamageWarning $warning): bool => $warning->type === ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
@@ -734,9 +806,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeAlertsResponse(Player $player): ApiResponse
+    private function probeAlertsResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $alerts = $this->damageWarnings->findByProbeId($probe->id);
 
         return new ApiResponse(200, [
@@ -748,9 +820,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeAlertReadResponse(Player $player, int $alertId): ApiResponse
+    private function probeAlertReadResponse(Player $player, int $alertId, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $alert = $this->damageWarnings->findByIdForProbe($alertId, $probe->id);
         if ($alert === null) {
             return ApiResponse::error(404, 'not_found', 'Alert not found.');
@@ -761,9 +833,9 @@ final class ApiKernel
         ]);
     }
 
-    private function probeDamageWarningReadResponse(Player $player, int $warningId): ApiResponse
+    private function probeDamageWarningReadResponse(Player $player, int $warningId, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $warning = $this->damageWarnings->findByIdForProbe($warningId, $probe->id);
         if ($warning === null) {
             return ApiResponse::error(404, 'not_found', 'Damage warning not found.');
@@ -940,9 +1012,9 @@ final class ApiKernel
         return sprintf('Query parameter %s must be an integer between %d and %d.', $name, $min, $max);
     }
 
-    private function probeInventoryJettisonResponse(Player $player, string $itemId, ?string $body): ApiResponse
+    private function probeInventoryJettisonResponse(Player $player, string $itemId, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $data = $this->decodeJsonBody($body) ?? [];
         if (isset($data['amount']) && !is_numeric($data['amount'])) {
@@ -967,7 +1039,7 @@ final class ApiKernel
             if ($item->type === 'manny') {
                 $manny = $this->mannies->jettisonMannyFromProbe($probe, $itemId);
                 $this->mannies->manniesForProbe($probe);
-                $probe = $this->requiredProbe($player);
+                $probe = $this->freshProbe($probe);
 
                 return new ApiResponse(200, [
                     'inventory' => $this->inventoryForProbe($probe)->toArray(),
@@ -977,7 +1049,7 @@ final class ApiKernel
 
             $jettisoned = $this->mannies->jettisonProbeItemFromProbe($probe, $itemId);
             $this->mannies->manniesForProbe($probe);
-            $probe = $this->requiredProbe($player);
+            $probe = $this->freshProbe($probe);
             return new ApiResponse(200, [
                 'inventory' => $this->inventoryForProbe($probe)->toArray(),
                 'jettisoned' => $jettisoned,
@@ -1000,7 +1072,7 @@ final class ApiKernel
                 $this->storage->consumeResource($probe, $resourceType, $discarded);
             }
             $this->mannies->manniesForProbe($probe);
-            $probe = $this->requiredProbe($player);
+            $probe = $this->freshProbe($probe);
 
             return new ApiResponse(200, [
                 'inventory' => $this->inventoryForProbe($probe)->toArray(),
@@ -1103,9 +1175,9 @@ final class ApiKernel
         return new ApiResponse(200, ['sector' => $observation]);
     }
 
-    private function probeMoveResponse(Player $player, ?string $body): ApiResponse
+    private function probeMoveResponse(Player $player, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $data = $this->decodeJsonBody($body);
         if (!is_array($data) || !isset($data['target']) || !is_array($data['target'])) {
             return ApiResponse::error(400, 'bad_request', 'JSON body must contain target coordinates.');
@@ -1125,9 +1197,9 @@ final class ApiKernel
         return new ApiResponse(202, ['movement' => $this->movementArray($player, $movement)]);
     }
 
-    private function probeScutNetworkResponse(Player $player, int $networkId): ApiResponse
+    private function probeScutNetworkResponse(Player $player, int $networkId, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $network = $this->scut->networkById($networkId);
         if ($network === null) {
@@ -1184,6 +1256,11 @@ final class ApiKernel
     private function requiredProbe(Player $player): NeumannProbe
     {
         return $this->probes->findByPlayerId($player->id) ?? throw new \RuntimeException('Probe not found.');
+    }
+
+    private function freshProbe(NeumannProbe $probe): NeumannProbe
+    {
+        return $this->probes->findById($probe->id) ?? $probe;
     }
 
     private function withObservedProbePresence(array $observation, NeumannProbe $probe, SectorCoordinates $observableSector): array

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '76'
+  version: '77'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 76
+                apiVersion: 77
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -715,6 +715,180 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/storage-containers:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1storage-containers/get'
+  /api/probe/{probeId}/storage-containers/{containerId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D/get'
+    patch:
+      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D/patch'
+  /api/probe/{probeId}/storage-containers/{containerId}/rules:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D~1rules/patch'
+  /api/probe/{probeId}/storage-moves:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1storage-moves/post'
+  /api/probe/{probeId}/probe-improvements-available:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1probe-improvements-available/get'
+  /api/probe/{probeId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1messages/get'
+    post:
+      $ref: '#/paths/~1api~1probe~1messages/post'
+  /api/probe/{probeId}/scut-network/{scutNetworkId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1scut-network~1%7BscutNetworkId%7D/get'
+  /api/probe/{probeId}/messages/{messageId}/read:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1messages~1%7BmessageId%7D~1read/patch'
+  /api/probe/{probeId}/alerts:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1alerts/get'
+  /api/probe/{probeId}/alerts/{alertId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1alerts~1%7BalertId%7D/patch'
+  /api/probe/{probeId}/damage-warnings:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1damage-warnings/get'
+  /api/probe/{probeId}/damage-warnings/{damageWarningId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/patch'
+  /api/probe/{probeId}/visited-sectors:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1visited-sectors/get'
+  /api/probe/{probeId}/sector:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1sector/get'
+  /api/probe/{probeId}/move:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1move/post'
+  /api/probe/{probeId}/inventory/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D/get'
+  /api/probe/{probeId}/inventory/{itemId}/jettison:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D~1jettison/post'
+  /api/probe/{probeId}/mannies:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1mannies/get'
+  /api/probe/{probeId}/mannies/{mannyId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D/patch'
+  /api/probe/{probeId}/mannies/{mannyId}/repair:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1repair/post'
+  /api/probe/{probeId}/mannies/{mannyId}/mine:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1mine/post'
+  /api/probe/{probeId}/mannies/{mannyId}/craft:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1craft/post'
+  /api/probe/{probeId}/mannies/{mannyId}/improve-probe:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1improve-probe/post'
+  /api/probe/{probeId}/atomic-printer/craft:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1atomic-printer~1craft/post'
+  /api/probe/{probeId}/mannies/{mannyId}/salvage:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1salvage/post'
+  /api/probe/{probeId}/mannies/{mannyId}/detach-storage-container:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1detach-storage-container/post'
+  /api/probe/{probeId}/mannies/{mannyId}/drop-storage-container:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-storage-container/post'
+  /api/probe/{probeId}/mannies/{mannyId}/inspect-sector-object:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1inspect-sector-object/post'
+  /api/probe/{probeId}/mannies/{mannyId}/recover-storage-container:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recover-storage-container/post'
+  /api/probe/{probeId}/mannies/{mannyId}/install-bookmark:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1install-bookmark/post'
+  /api/probe/{probeId}/mannies/{mannyId}/recall:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recall/post'
+  /api/probe/{probeId}/mannies/{mannyId}/drop-manny-cargo:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-manny-cargo/post'
+  /api/probe/{probeId}/mannies/{mannyId}/refill-deuterium-tank:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1refill-deuterium-tank/post'
+  /api/probe/{probeId}/mannies/{mannyId}/turn-on-relay:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1turn-on-relay/post'
   /api/probe/mind-snapshot/reassign:
     post:
       summary: Reassign a terminal probe mind snapshot
@@ -2712,6 +2886,18 @@ components:
       scheme: bearer
       description: Use a session token from /api/session or an API key generated from /api/me/api-key.
   parameters:
+    ProbeId:
+      name: probeId
+      in: path
+      required: true
+      description: >
+        Owned probe id. When it is not the player's default probe, the default
+        probe and this probe must be in the same sector or in sectors covered
+        by the same active SCUT network.
+      schema:
+        type: integer
+        minimum: 1
+      example: 2
     MannyId:
       name: mannyId
       in: path

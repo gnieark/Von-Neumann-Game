@@ -1116,6 +1116,107 @@ $test->assertEquals($primaryProbe->id, $sameScutDefaultProbe->body['defaultProbe
 $test->assertEquals($primaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-SCUT default probe switch');
 $multiProbeMissionsAfterDefaultSwitch = $kernel->handle('GET', '/api/probe/missions', $multiProbeHeaders);
 $test->assertEquals($multiProbeMission->uid, $multiProbeMissionsAfterDefaultSwitch->body['missions'][0]['id'] ?? null, 'player missions stay visible after switching the default probe');
+$farOwnedProbe = $probes->createForPlayer($multiProbePlayer->id, 'Far future probe', new SectorCoordinates(100, 0, 0));
+$farOwnedProbe->excludeFromStats = true;
+$probes->save($farOwnedProbe);
+$unreachableProbeStorage = $kernel->handle('GET', '/api/probe/' . $farOwnedProbe->id . '/storage-containers', $multiProbeHeaders);
+$test->assertEquals(422, $unreachableProbeStorage->status, 'probe-scoped endpoints refuse owned probes outside default-probe reach');
+$test->assertEquals('probe_not_in_same_sector', $unreachableProbeStorage->body['error']['code'] ?? null, 'probe-scoped endpoints return the SCUT reachability error');
+$foreignProbeStorage = $kernel->handle('GET', '/api/probe/' . $foreignProbe->id . '/storage-containers', $multiProbeHeaders);
+$test->assertEquals(404, $foreignProbeStorage->status, 'probe-scoped endpoints hide probes owned by another player');
+$mannies->ensureDefaultsForProbe($sameSectorProbe);
+$sameSectorProbeManny = $mannies->findByProbeId($sameSectorProbe->id)[0] ?? throw new RuntimeException('Expected same-SCUT probe Manny.');
+$sameScutProbeStorage = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/storage-containers', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeStorage->status, 'GET /api/probe/{probeId}/storage-containers lists a same-SCUT owned probe storage containers');
+$sameScutProbeContainers = $sameScutProbeStorage->body['containers'] ?? [];
+$sameScutProbeCoreContainer = $sameScutProbeContainers[0] ?? null;
+$test->assert(is_string($sameScutProbeCoreContainer['id'] ?? null), 'probe-scoped storage container list exposes container ids');
+$sameScutProbeContainer = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/storage-containers/' . rawurlencode((string) ($sameScutProbeCoreContainer['id'] ?? 'missing')), $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeContainer->status, 'GET /api/probe/{probeId}/storage-containers/{containerId} returns a same-SCUT owned probe container');
+$sameScutProbeRenameContainer = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/storage-containers/' . rawurlencode((string) ($sameScutProbeCoreContainer['id'] ?? 'missing')), $multiProbeHeaders, json_encode([
+    'label' => 'Remote core',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeRenameContainer->status, 'PATCH /api/probe/{probeId}/storage-containers/{containerId} renames a same-SCUT owned probe container');
+$test->assertEquals('Remote core', $sameScutProbeRenameContainer->body['container']['label'] ?? null, 'probe-scoped container rename targets the requested probe');
+$sameScutProbeContainerRules = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/storage-containers/' . rawurlencode((string) ($sameScutProbeCoreContainer['id'] ?? 'missing')) . '/rules', $multiProbeHeaders, json_encode([
+    'priority' => ['metals'],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeContainerRules->status, 'PATCH /api/probe/{probeId}/storage-containers/{containerId}/rules updates a same-SCUT owned probe container');
+$test->assertEquals(['metals'], $sameScutProbeContainerRules->body['container']['rules']['priority'] ?? null, 'probe-scoped container rules target the requested probe');
+$sameScutProbeImprovements = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/probe-improvements-available?includeAll=1', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeImprovements->status, 'GET /api/probe/{probeId}/probe-improvements-available reads same-SCUT owned probe improvements');
+$sameScutProbeStorageMove = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/storage-moves', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeStorageMove->status, 'POST /api/probe/{probeId}/storage-moves routes to same-SCUT owned probe validation');
+$sameScutProbeMannies = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/mannies', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeMannies->status, 'GET /api/probe/{probeId}/mannies lists same-SCUT owned probe Mannys');
+$sameScutProbeRenameManny = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/mannies/' . rawurlencode($sameSectorProbeManny->uid), $multiProbeHeaders, json_encode([
+    'name' => 'remote-manny',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeRenameManny->status, 'PATCH /api/probe/{probeId}/mannies/{mannyId} renames a same-SCUT owned probe Manny');
+$test->assertEquals('remote-manny', $sameScutProbeRenameManny->body['manny']['name'] ?? null, 'probe-scoped Manny rename targets the requested probe');
+$sameScutProbeMannyRepair = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/mannies/' . rawurlencode($sameSectorProbeManny->uid) . '/repair', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeMannyRepair->status, 'POST /api/probe/{probeId}/mannies/{mannyId}/repair routes to same-SCUT owned probe validation');
+$sameScutProbeAtomicPrinter = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/atomic-printer/craft', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeAtomicPrinter->status, 'POST /api/probe/{probeId}/atomic-printer/craft routes to same-SCUT owned probe validation');
+$sameScutProbeMessages = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/messages', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeMessages->status, 'GET /api/probe/{probeId}/messages lists same-SCUT owned probe messages');
+$sameScutProbeSentMessage = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/messages', $multiProbeHeaders, json_encode([
+    'recipient' => ['type' => 'probe', 'id' => $primaryProbe->id],
+    'body' => 'Message from a same-SCUT controlled probe.',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $sameScutProbeSentMessage->status, 'POST /api/probe/{probeId}/messages sends from a same-SCUT owned probe');
+$test->assertEquals($sameSectorProbe->id, $sameScutProbeSentMessage->body['message']['sender']['probeId'] ?? null, 'probe-scoped message send uses the requested probe as sender');
+$messageToSameScutProbe = $kernel->handle('POST', '/api/probe/messages', $multiProbeHeaders, json_encode([
+    'recipient' => ['type' => 'probe', 'id' => $sameSectorProbe->id],
+    'body' => 'Message to a same-SCUT controlled probe.',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $messageToSameScutProbe->status, 'default probe can send a message to a same-SCUT owned probe');
+$sameScutProbeReadMessage = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/messages/' . (int) ($messageToSameScutProbe->body['message']['id'] ?? 0) . '/read', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeReadMessage->status, 'PATCH /api/probe/{probeId}/messages/{messageId}/read marks same-SCUT owned probe messages read');
+$sameScutProbeAlert = $damageWarnings->createMannyReportAlert($sameSectorProbe->id, $sameSectorProbe->currentSector, 'remote-report', 'Remote report', 'Remote report ready.');
+$sameScutProbeAlerts = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeAlerts->status, 'GET /api/probe/{probeId}/alerts lists same-SCUT owned probe alerts');
+$sameScutProbeReadAlert = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/alerts/' . $sameScutProbeAlert->id, $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeReadAlert->status, 'PATCH /api/probe/{probeId}/alerts/{alertId} marks same-SCUT owned probe alerts read');
+$nowForSameScutWarning = gmdate('c');
+$pdo->prepare(
+    'INSERT INTO probe_damage_warnings
+     (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, read_at, resolved_at, created_at, updated_at)
+     VALUES (:probe_id, NULL, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, :risk_percent, :additional_container_count, :message, NULL, NULL, :created_at, :updated_at)'
+)->execute([
+    'probe_id' => $sameSectorProbe->id,
+    'type' => \VonNeumannGame\Domain\ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
+    'status' => \VonNeumannGame\Domain\ProbeDamageWarning::STATUS_UNREAD,
+    'phase' => 'api_probe_scoped_test',
+    'scheduled_at' => $nowForSameScutWarning,
+    'sector_x' => $sameSectorProbe->currentSector->getX(),
+    'sector_y' => $sameSectorProbe->currentSector->getY(),
+    'sector_z' => $sameSectorProbe->currentSector->getZ(),
+    'container_id' => (string) ($sameScutProbeCoreContainer['id'] ?? 'probe-core'),
+    'container_label' => 'Remote core',
+    'object_id' => 'remote-core-drift',
+    'risk_percent' => 10,
+    'additional_container_count' => 5,
+    'message' => 'Probe-scoped damage warning.',
+    'created_at' => $nowForSameScutWarning,
+    'updated_at' => $nowForSameScutWarning,
+]);
+$sameScutProbeWarningId = (int) $pdo->lastInsertId();
+$sameScutProbeDamageWarnings = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeDamageWarnings->status, 'GET /api/probe/{probeId}/damage-warnings lists same-SCUT owned probe damage warnings');
+$sameScutProbeReadDamageWarning = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings/' . $sameScutProbeWarningId, $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeReadDamageWarning->status, 'PATCH /api/probe/{probeId}/damage-warnings/{damageWarningId} marks same-SCUT owned probe damage warnings read');
+$sameScutProbeVisitedSectors = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/visited-sectors', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeVisitedSectors->status, 'GET /api/probe/{probeId}/visited-sectors accepts same-SCUT owned probes');
+$sameScutProbeSector = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/sector', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeSector->status, 'GET /api/probe/{probeId}/sector observes same-SCUT owned probes');
+$sameScutProbeMove = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/move', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeMove->status, 'POST /api/probe/{probeId}/move routes to same-SCUT owned probe validation');
+$sameScutProbeBookmark = $items->create($sameSectorProbe->id, 'waypoint_bookmark', 'Remote bookmark', 0.01, uid: 'same-scut-probe-bookmark');
+$sameScutProbeInventoryItem = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/inventory/' . rawurlencode($sameScutProbeBookmark->uid), $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeInventoryItem->status, 'GET /api/probe/{probeId}/inventory/{itemId} reads same-SCUT owned probe inventory items');
+$sameScutProbeJettison = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/inventory/' . rawurlencode($sameScutProbeBookmark->uid) . '/jettison', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeJettison->status, 'POST /api/probe/{probeId}/inventory/{itemId}/jettison acts on same-SCUT owned probe inventory items');
 $foreignDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders);
 $test->assertEquals(404, $foreignDefaultProbe->status, 'PATCH /api/probe/{probeId} hides probes owned by another player');
 $missingDefaultProbe = $kernel->handle('PATCH', '/api/probe/999999999', $multiProbeHeaders);
@@ -1123,7 +1224,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(76, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(77, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
