@@ -208,7 +208,7 @@ final class ApiKernel
                 ['GET', 'PATCH'],
                 $ctx->headers,
                 fn(Player $player): ApiResponse => $ctx->method === 'PATCH'
-                    ? $this->probeDefaultSelectionResponse($player, $ctx->intParam(0))
+                    ? $this->probeDefaultSelectionResponse($player, $ctx->intParam(0), $ctx->body)
                     : $this->probeByIdResponse($player, $ctx->intParam(0)),
             )),
             ApiRoute::path('/api/sector', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->sectorResponse($player, $ctx->query))),
@@ -353,21 +353,59 @@ final class ApiKernel
         return $this->probeDetailsResponse($player, $probe);
     }
 
-    private function probeDefaultSelectionResponse(Player $player, int $probeId): ApiResponse
+    private function probeDefaultSelectionResponse(Player $player, int $probeId, ?string $body = null): ApiResponse
     {
         $targetProbe = $this->probes->findById($probeId);
         if ($targetProbe === null || $targetProbe->playerId !== $player->id) {
             return ApiResponse::error(404, 'not_found', 'Probe not found.');
         }
 
-        $currentProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
-        $targetProbe = $this->movements->refreshProbeMovementState($targetProbe);
-        if (!$this->scut->canSectorsCommunicate($currentProbe->currentSector, $targetProbe->currentSector)) {
-            return ApiResponse::error(422, 'probe_not_in_same_sector', 'Default probe can only be changed when both probes are in the same sector or inside the same SCUT network coverage.');
+        $data = null;
+        if ($body !== null && trim($body) !== '') {
+            $decoded = $this->decodeJsonBody($body);
+            if (!is_array($decoded)) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body is invalid.');
+            }
+
+            $data = $decoded;
         }
 
-        $player->defaultProbeId = $targetProbe->id;
-        $this->players->save($player);
+        $modified = false;
+
+        // Handle renaming when provided in JSON body
+        if (is_array($data) && array_key_exists('name', $data)) {
+            if (!is_string($data['name'])) {
+                return ApiResponse::error(400, 'bad_request', 'Probe name must be a string.');
+            }
+
+            $targetProbe->name = $data['name'];
+            $this->probes->save($targetProbe);
+            $modified = true;
+        }
+
+        // Determine whether we should perform the default selection.
+        // Backwards compatibility: a PATCH with no body (legacy clients) should still switch the default probe.
+        $shouldSetDefault = false;
+        if ($body === null || trim((string) $body) === '') {
+            // legacy behavior: empty body => set as default
+            $shouldSetDefault = true;
+        } elseif (is_array($data) && array_key_exists('isDefault', $data)) {
+            // explicit isDefault field controls default selection
+            $isDefaultVal = $data['isDefault'];
+            $shouldSetDefault = ($isDefaultVal === true || $isDefaultVal === 1 || $isDefaultVal === '1');
+        }
+
+        if ($shouldSetDefault) {
+            $currentProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+            $targetProbe = $this->movements->refreshProbeMovementState($targetProbe);
+            if (!$this->scut->canSectorsCommunicate($currentProbe->currentSector, $targetProbe->currentSector)) {
+                return ApiResponse::error(422, 'probe_not_in_same_sector', 'Default probe can only be changed when both probes are in the same sector or inside the same SCUT network coverage.');
+            }
+
+            $player->defaultProbeId = $targetProbe->id;
+            $this->players->save($player);
+            $modified = true;
+        }
 
         return $this->probeListResponse($player);
     }

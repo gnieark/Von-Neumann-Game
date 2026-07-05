@@ -1090,14 +1090,14 @@ $foreignProbeResponse = $kernel->handle('GET', '/api/probe/' . $foreignProbe->id
 $test->assertEquals(404, $foreignProbeResponse->status, 'GET /api/probe/{probeId} hides probes owned by another player');
 $missingProbeResponse = $kernel->handle('GET', '/api/probe/999999999', $multiProbeHeaders);
 $test->assertEquals(404, $missingProbeResponse->status, 'GET /api/probe/{probeId} returns 404 for a missing probe');
-$unreachableDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
+$unreachableDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
 $test->assertEquals(422, $unreachableDefaultProbe->status, 'PATCH /api/probe/{probeId} refuses an owned probe outside same-sector or same-SCUT reach');
 $test->assertEquals('probe_not_in_same_sector', $unreachableDefaultProbe->body['error']['code'] ?? null, 'PATCH /api/probe/{probeId} returns an explicit reachability error');
 $test->assertEquals($secondaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'refused default probe switch keeps the existing default probe');
 $sameSectorProbe = $probes->createForPlayer($multiProbePlayer->id, 'Same sector future probe', $secondaryProbe->currentSector);
 $sameSectorProbe->excludeFromStats = true;
 $probes->save($sameSectorProbe);
-$sameSectorDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders);
+$sameSectorDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $sameSectorDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts a same-sector owned probe');
 $test->assertEquals($sameSectorProbe->id, $sameSectorDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the new default probe id');
 $test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-sector default probe switch');
@@ -1110,12 +1110,24 @@ $test->assertEquals(false, $sameSectorListById[$secondaryProbe->id]['isDefault']
 $multiProbeMission = $missionService->startMission($sameSectorProbe, 'multi_probe_default_switch', 'Multi-probe mission', steps: [['title' => 'Switch default probe']]);
 $scutDefaultRelay = $scut->createOffRelay($sameSectorProbe->currentSector, $sameSectorProbe->id);
 $scut->turnOnRelay($scutDefaultRelay->id);
-$sameScutDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
+$sameScutDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $sameScutDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts an owned probe inside the same SCUT network');
 $test->assertEquals($primaryProbe->id, $sameScutDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the SCUT-reachable default probe id');
 $test->assertEquals($primaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-SCUT default probe switch');
 $multiProbeMissionsAfterDefaultSwitch = $kernel->handle('GET', '/api/probe/missions', $multiProbeHeaders);
 $test->assertEquals($multiProbeMission->uid, $multiProbeMissionsAfterDefaultSwitch->body['missions'][0]['id'] ?? null, 'player missions stay visible after switching the default probe');
+// Rename the same-sector probe using PATCH payload
+$renameProbe = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders, json_encode(['name' => 'Renamed Probe'], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $renameProbe->status, 'PATCH /api/probe/{probeId} allows renaming a probe');
+$test->assertEquals('Renamed Probe', $probes->findById($sameSectorProbe->id)?->name ?? null, 'Probe rename is persisted in the repository');
+$probeByIdRenamed = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders);
+$test->assertEquals('Renamed Probe', $probeByIdRenamed->body['probe']['name'] ?? null, 'GET /api/probe/{probeId} reflects the renamed probe');
+
+// Rename and set as default in a single PATCH payload
+$renameAndDefault = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders, json_encode(['name' => 'Renamed And Default', 'isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $renameAndDefault->status, 'PATCH /api/probe/{probeId} accepts combined name + isDefault payload');
+$test->assertEquals('Renamed And Default', $probes->findById($sameSectorProbe->id)?->name ?? null, 'Combined PATCH persists the new probe name');
+$test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'Combined PATCH persists default probe selection when permitted');
 $farOwnedProbe = $probes->createForPlayer($multiProbePlayer->id, 'Far future probe', new SectorCoordinates(100, 0, 0));
 $farOwnedProbe->excludeFromStats = true;
 $probes->save($farOwnedProbe);
@@ -1166,6 +1178,10 @@ $sameScutProbeSentMessage = $kernel->handle('POST', '/api/probe/' . $sameSectorP
 ], JSON_THROW_ON_ERROR));
 $test->assertEquals(201, $sameScutProbeSentMessage->status, 'POST /api/probe/{probeId}/messages sends from a same-SCUT owned probe');
 $test->assertEquals($sameSectorProbe->id, $sameScutProbeSentMessage->body['message']['sender']['probeId'] ?? null, 'probe-scoped message send uses the requested probe as sender');
+// Ensure default probe can reach the target via SCUT before sending
+$ensureDefaultForMessage = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $ensureDefaultForMessage->status, 'Ensure default probe is set for sending a message to same-SCUT probe');
+
 $messageToSameScutProbe = $kernel->handle('POST', '/api/probe/messages', $multiProbeHeaders, json_encode([
     'recipient' => ['type' => 'probe', 'id' => $sameSectorProbe->id],
     'body' => 'Message to a same-SCUT controlled probe.',
@@ -1217,7 +1233,7 @@ $sameScutProbeInventoryItem = $kernel->handle('GET', '/api/probe/' . $sameSector
 $test->assertEquals(200, $sameScutProbeInventoryItem->status, 'GET /api/probe/{probeId}/inventory/{itemId} reads same-SCUT owned probe inventory items');
 $sameScutProbeJettison = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/inventory/' . rawurlencode($sameScutProbeBookmark->uid) . '/jettison', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $sameScutProbeJettison->status, 'POST /api/probe/{probeId}/inventory/{itemId}/jettison acts on same-SCUT owned probe inventory items');
-$foreignDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders);
+$foreignDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
 $test->assertEquals(404, $foreignDefaultProbe->status, 'PATCH /api/probe/{probeId} hides probes owned by another player');
 $missingDefaultProbe = $kernel->handle('PATCH', '/api/probe/999999999', $multiProbeHeaders);
 $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeId} returns 404 for a missing probe');

@@ -636,6 +636,15 @@ paths:
           schema:
             type: integer
             minimum: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbePatchRequest'
+            example:
+              name: New probe name
+              isDefault: true
       responses:
         '200':
           description: Default probe updated
@@ -643,6 +652,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProbeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3521,6 +3532,17 @@ components:
         isDefault:
           type: boolean
           description: True for the probe returned by GET /api/probe.
+    ProbePatchRequest:
+      type: object
+      description: Optional fields to modify a probe. Any omitted field is left unchanged.
+      properties:
+        name:
+          type: string
+          description: New probe name.
+        isDefault:
+          type: boolean
+          description: When true, attempt to set this probe as the player's default probe.
+      additionalProperties: false
     ProbeListResponse:
       type: object
       required: [defaultProbeId, probes]
