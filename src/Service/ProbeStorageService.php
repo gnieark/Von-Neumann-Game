@@ -460,11 +460,18 @@ final class ProbeStorageService
      * @param array<string, float> $resources
      * @param list<array{type:string, space:float}> $units
      */
-    public function canStoreIncoming(NeumannProbe $probe, array $resources = [], array $units = []): bool
+    public function canStoreIncoming(NeumannProbe $probe, array $resources = [], array $units = [], ?string $ignoredStoredMannyUid = null): bool
     {
         $this->ensureProbeStorage($probe);
         $containers = $this->containers->findByProbeId($probe->id);
-        $used = $this->usedCapacityByContainer($probe, $containers, $this->mannies->findByProbeId($probe->id), $this->items->findByProbeId($probe->id));
+        $mannies = $this->mannies->findByProbeId($probe->id);
+        if ($ignoredStoredMannyUid !== null) {
+            $mannies = array_values(array_filter(
+                $mannies,
+                static fn(Manny $manny): bool => $manny->uid !== $ignoredStoredMannyUid,
+            ));
+        }
+        $used = $this->usedCapacityByContainer($probe, $containers, $mannies, $this->items->findByProbeId($probe->id));
         foreach ($resources as $type => $amount) {
             $type = $this->normalizeResourceType((string) $type);
             if ($type === ResourceComposition::DEUTERIUM || (float) $amount <= 0.0) {

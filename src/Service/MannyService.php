@@ -261,7 +261,7 @@ final class MannyService implements MannyTaskRuntime
             ? $this->hiddenDetachedContainerDetection($sector, $target->getId(), $probe->playerId)
             : null;
         $probeIncomingResources = $targetContainer === null ? $this->resourceAmountsForTotal($targetAmount, $resourceProfile) : [];
-        if (!$this->storage->canStoreIncoming($probe, $probeIncomingResources, [['type' => 'manny', 'space' => $this->mannyContainerSpace()]])) {
+        if (!$this->storage->canStoreIncoming($probe, $probeIncomingResources, [['type' => 'manny', 'space' => $this->mannyContainerSpace()]], $manny->uid)) {
             throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for this mining target.');
         }
 
