@@ -17,6 +17,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Interface : les liens du nav-panel pour les sondes non défaut ne dupliquent plus l’ID de sonde (`/sensors/537/537`).
 - Interface : `/inventories` ne propose plus l’imprimante atomique ni les containers additionnels dans les items filtrables de “Manage storage rules by container”.
 - Debug : `scripts/add-deuterium-asteroid-alert.php` et `scripts/add-deuterium-asteroid-alerts-for-low-fuel.php` n’ajoutent plus d’astéroïde ni d’alerte dans les secteurs qui contiennent déjà un astéroïde avec du deutérium, et l’alerte injectée est désormais rédigée en anglais.
 

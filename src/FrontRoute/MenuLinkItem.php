@@ -8,13 +8,13 @@ class MenuLinkItem {
     private bool $external;
     private string $baseHref;
 
-    public function __construct(string $title, string $href, bool $active = false, bool $external = false)
+    public function __construct(string $title, string $href, bool $active = false, bool $external = false, ?string $baseHref = null)
     {
         $this->title = $title;
         $this->href = $href;
         $this->active = $active;
         $this->external = $external;
-        $this->baseHref = $href;
+        $this->baseHref = $baseHref ?? $href;
     }
     public function getTitle(): string
     {

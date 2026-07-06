@@ -373,13 +373,27 @@ function loadProbeList() {
 
 function routeHrefForProbe(baseHref, probeId) {
     if (!probeId) {
-        return baseHref || "/";
+        return routeBaseHref(baseHref);
     }
-    if (baseHref === "/") {
+    const routeBase = routeBaseHref(baseHref);
+    if (routeBase === "/") {
         return "/" + encodeURIComponent(String(probeId));
     }
 
-    return String(baseHref || "/").replace(/\/$/, "") + "/" + encodeURIComponent(String(probeId));
+    return routeBase.replace(/\/$/, "") + "/" + encodeURIComponent(String(probeId));
+}
+
+function routeBaseHref(href) {
+    const normalized = (String(href || "/").replace(/\/$/, "") || "/");
+    const probeAwareRoute = normalized.match(/^\/(sensors|inventories|mannies|movement|scut|messaging|alerts)(?:\/\d+)?$/);
+    if (probeAwareRoute) {
+        return "/" + probeAwareRoute[1];
+    }
+    if (/^\/\d+$/.test(normalized)) {
+        return "/";
+    }
+
+    return normalized;
 }
 
 function currentRouteParts() {
@@ -438,7 +452,8 @@ function syncProbeAwareNavigation(defaultProbeId) {
     const nonDefaultProbeId = selectedId && String(selectedId) !== String(defaultProbeId || "") ? selectedId : "";
 
     document.querySelectorAll(".nav-panel a.panel-tab").forEach((node) => {
-        const baseHref = node.dataset.navLink || node.getAttribute("href") || "/";
+        const baseHref = routeBaseHref(node.dataset.navLink || node.getAttribute("href") || "/");
+        node.dataset.navLink = baseHref;
         node.setAttribute("href", nonDefaultProbeId ? routeHrefForProbe(baseHref, nonDefaultProbeId) : baseHref);
     });
 }

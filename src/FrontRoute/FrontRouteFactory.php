@@ -67,7 +67,9 @@ class FrontRouteFactory{
                     new MenuLinkItem(
                     $route['name'],
                     $href,
-                    $active
+                    $active,
+                    false,
+                    $route['linkUri']
                 ));
 
             }

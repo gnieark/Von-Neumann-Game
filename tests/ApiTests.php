@@ -26,6 +26,7 @@ use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
 use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
+use VonNeumannGame\FrontRoute\MenuLinkItem;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\MissionRepository;
@@ -195,6 +196,11 @@ class TestFooterFrontRoute extends FrontRoute
     {
         return '<p>Test route</p>';
     }
+
+    public function renderMainPageForTest(?string $bearer, string $language): string
+    {
+        return $this->renderMainPage('<p>Test route</p>', $bearer, $language);
+    }
 }
 
 class TestUnavailablePasswordAuthRoute extends FrontRouteAuthByPwd
@@ -294,6 +300,15 @@ $test->assert(
     'additional footer links are loaded from local config and rendered as external links'
 );
 
+$probeNavRoute = new TestFooterFrontRoute();
+$probeNavRoute->configureRequestContext('/sensors/537', 537);
+$probeNavRoute->addLeftMenuItem(new MenuLinkItem('Sensors', '/sensors/537', true, false, '/sensors'));
+$probeNavHtml = $probeNavRoute->renderMainPageForTest('token', 'en');
+$test->assert(
+    str_contains($probeNavHtml, 'href="/sensors/537" data-nav-link="/sensors"'),
+    'selected-probe nav links keep a canonical base href for client-side resync'
+);
+
 $_SERVER['REQUEST_URI'] = '/authbypwd';
 $_POST = ['username' => 'test', 'password' => 'secret'];
 $passwordAuthRoute = new TestUnavailablePasswordAuthRoute();
@@ -362,6 +377,7 @@ $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, '<h2>Subsp
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
 $test->assert(is_string($mainTemplate) && str_contains($mainTemplate, 'id="nav-probe-select"'), 'main template exposes the active probe selector');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function probeApiPath'), 'main JS builds selected-probe API endpoints');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'function routeBaseHref'), 'main JS normalizes selected-probe route links before adding a probe id');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/sector")'), 'SCUT page reads selected probe current sector coverage');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/scut-network/"'), 'SCUT page reads selected probe network details');
@@ -506,7 +522,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-probe-selector"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-nav-probe-links"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
