@@ -2845,6 +2845,14 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(true, $observedDetached['salvageable'] ?? null, 'drifting detached containers are visible as salvageable sector objects');
         $test->assert(!array_key_exists('payload', $observedDetached ?? []), 'sector observation does not expose detached container contents');
 
+        $detachCoreContainer = $storageContainers->findByUidForProbe($detachProbe->id, 'probe-core');
+        $detachProbe = $probes->findById($detachProbe->id) ?? $detachProbe;
+        $freeBeforeDetachedTargetMining = $storage->freeCargoCapacity($detachProbe);
+        if ($detachCoreContainer !== null && $freeBeforeDetachedTargetMining > 0.0) {
+            $items->create($detachProbe->id, 'test_full_probe_filler', 'Full probe filler', $freeBeforeDetachedTargetMining, storageContainerId: $detachCoreContainer->id);
+        }
+        $test->assertEquals(0.0, $storage->freeCargoCapacity($detachProbe), 'detached-container mining regression starts with a full probe cargo');
+
         $driftingMineSector = $sectorRepository->load($detachProbe->currentSector);
         $driftingMineSector->addObject(new Asteroid('drifting-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001));
         $sectorRepository->save($driftingMineSector);
@@ -2854,7 +2862,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'targetAmount' => 0.01,
             'targetContainerId' => $detachedObjectId,
         ], JSON_THROW_ON_ERROR));
-        $test->assertEquals(202, $mineDriftingContainer->status, 'Manny mining can target a drifting detached container');
+        $test->assertEquals(202, $mineDriftingContainer->status, 'Manny mining can target a drifting detached container even when probe cargo is full');
         $test->assertEquals($detachedObjectId, $mineDriftingContainer->body['manny']['task']['targetContainer']['id'] ?? null, 'mining task exposes its target detached container id');
         $test->assertEquals(900, $mineDriftingContainer->body['manny']['task']['miningTravelSeconds'] ?? null, 'drifting target container mining keeps normal travel time');
         $activeDriftingTargetContainerMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
