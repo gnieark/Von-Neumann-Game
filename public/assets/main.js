@@ -116,6 +116,7 @@ function escapeHtml(value) {
 let i18nPromise = null;
 let navigationWarningTimer = null;
 const sectorAlertAcknowledgementsStorageKey = "vng:sector-alert-acknowledgements:v1";
+let probeListPromise = null;
 
 function loadI18n() {
     if (window.VNG_I18N && typeof window.VNG_I18N === "object") {
@@ -346,6 +347,179 @@ function navLinkNodes(path) {
     });
 }
 
+function selectedProbeId() {
+    const value = document.body.dataset.selectedProbeId || "";
+    return /^\d+$/.test(value) ? value : "";
+}
+
+function probeApiPath(suffix) {
+    const normalizedSuffix = suffix ? (String(suffix).startsWith("/") ? String(suffix) : "/" + String(suffix)) : "";
+    const probeId = selectedProbeId();
+
+    return probeId
+        ? "/api/probe/" + encodeURIComponent(probeId) + normalizedSuffix
+        : "/api/probe" + normalizedSuffix;
+}
+
+function loadProbeList() {
+    if (probeListPromise) {
+        return probeListPromise;
+    }
+
+    probeListPromise = apiJson("/api/probes", {"method": "GET"}).catch(() => ({"defaultProbeId": null, "probes": []}));
+
+    return probeListPromise;
+}
+
+function routeHrefForProbe(baseHref, probeId) {
+    if (!probeId) {
+        return baseHref || "/";
+    }
+    if (baseHref === "/") {
+        return "/" + encodeURIComponent(String(probeId));
+    }
+
+    return String(baseHref || "/").replace(/\/$/, "") + "/" + encodeURIComponent(String(probeId));
+}
+
+function currentRouteParts() {
+    const path = window.location.pathname || "/";
+    const movementWithProbeAndTarget = path.match(/^\/movement\/(\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)$/);
+    if (movementWithProbeAndTarget) {
+        return {
+            "baseHref": "/movement",
+            "coordinates": movementWithProbeAndTarget.slice(2, 5),
+        };
+    }
+    const movementTargetOnly = path.match(/^\/movement\/(-?\d+)\/(-?\d+)\/(-?\d+)$/);
+    if (movementTargetOnly) {
+        return {
+            "baseHref": "/movement",
+            "coordinates": movementTargetOnly.slice(1, 4),
+        };
+    }
+    if (/^\/movement\/\d+$/.test(path)) {
+        return {
+            "baseHref": "/movement",
+            "coordinates": [],
+        };
+    }
+    const withProbe = path.match(/^\/(sensors|inventories|mannies|scut|messaging|alerts)\/\d+$/);
+    if (withProbe) {
+        return {
+            "baseHref": "/" + withProbe[1],
+            "coordinates": [],
+        };
+    }
+    if (/^\/\d+$/.test(path)) {
+        return {
+            "baseHref": "/",
+            "coordinates": [],
+        };
+    }
+
+    return {
+        "baseHref": path || "/",
+        "coordinates": [],
+    };
+}
+
+function pageHrefForProbe(baseHref, probeId, coordinates) {
+    const basePath = probeId ? routeHrefForProbe(baseHref, probeId) : (baseHref || "/");
+    const suffix = Array.isArray(coordinates) && coordinates.length === 3
+        ? "/" + coordinates.map((part) => encodeURIComponent(String(part))).join("/")
+        : "";
+
+    return (basePath.replace(/\/$/, "") + suffix) || "/";
+}
+
+function syncProbeAwareNavigation(defaultProbeId) {
+    const selectedId = selectedProbeId();
+    const nonDefaultProbeId = selectedId && String(selectedId) !== String(defaultProbeId || "") ? selectedId : "";
+
+    document.querySelectorAll(".nav-panel a.panel-tab").forEach((node) => {
+        const baseHref = node.dataset.navLink || node.getAttribute("href") || "/";
+        node.setAttribute("href", nonDefaultProbeId ? routeHrefForProbe(baseHref, nonDefaultProbeId) : baseHref);
+    });
+}
+
+function probeUnreachableText(messages) {
+    return t(
+        messages,
+        "probeOutOfScutRangeExplanation",
+        "This probe is outside the default probe sector and outside shared SCUT coverage. Only coarse telemetry is reachable."
+    );
+}
+
+async function renderUnreachableProbeTelemetry(error, options) {
+    if (!error || error.errorCode !== "probe_not_in_same_sector" || !selectedProbeId()) {
+        return false;
+    }
+
+    const messages = await loadI18n();
+    const data = await apiJson(probeApiPath(""), {"method": "GET"}).catch(() => null);
+    const probe = data && data.probe ? data.probe : null;
+    if (!probe || probe.status !== "out_of_scut_range") {
+        return false;
+    }
+
+    const statusNode = options && options.statusId ? document.getElementById(options.statusId) : null;
+    if (statusNode) {
+        statusNode.textContent = probeUnreachableText(messages);
+    }
+    const metricsNode = options && options.metricsId ? document.getElementById(options.metricsId) : null;
+    if (metricsNode) {
+        renderMetrics(metricsNode, [
+            {
+                "label": t(messages, "status", "Status"),
+                "value": t(messages, "probeOutOfScutRangeStatus", "Outside SCUT"),
+            },
+            {
+                "label": t(messages, "sector", "Sector"),
+                "value": coordinate(probe.sector && probe.sector.relative),
+            },
+        ]);
+    }
+
+    return true;
+}
+
+async function bindProbeSelector() {
+    if (document.body.dataset.authenticated !== "1") {
+        return;
+    }
+
+    const select = document.getElementById("nav-probe-select");
+    if (!select || select.dataset.probeSelectorBound === "1") {
+        return;
+    }
+    select.dataset.probeSelectorBound = "1";
+
+    const data = await loadProbeList();
+    const probes = Array.isArray(data && data.probes) ? data.probes : [];
+    const defaultProbeId = data && data.defaultProbeId ? String(data.defaultProbeId) : "";
+    const currentProbeId = selectedProbeId() || defaultProbeId;
+
+    syncProbeAwareNavigation(defaultProbeId);
+    select.innerHTML = probes.map((probe) => {
+        const id = String(probe && probe.id ? probe.id : "");
+        const name = probe && probe.name ? probe.name : ("Probe #" + id);
+        const suffix = String(id) === defaultProbeId ? " *" : "";
+
+        return "<option value=\"" + escapeHtml(id) + "\"" + (id === currentProbeId ? " selected" : "") + ">"
+            + escapeHtml(name + suffix)
+            + "</option>";
+    }).join("");
+
+    select.addEventListener("change", () => {
+        const nextProbeId = select.value || "";
+        const route = currentRouteParts();
+        const explicitProbeId = nextProbeId && String(nextProbeId) !== String(defaultProbeId) ? nextProbeId : "";
+
+        window.location.assign(pageHrefForProbe(route.baseHref, explicitProbeId, route.coordinates));
+    });
+}
+
 function setNavigationWarning(path, active, warning) {
     navLinkNodes(path).forEach((node) => {
         node.classList.toggle("alerts-pending", Boolean(active));
@@ -507,9 +681,9 @@ async function syncNavigationWarnings() {
 
     const messages = await loadI18n();
     const [messageData, sectorData, alertData] = await Promise.all([
-        apiJson("/api/probe/messages?limit=50&offset=0", {"method": "GET"}).catch(() => null),
-        apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
-        apiJson("/api/probe/alerts", {"method": "GET"}).catch(() => null),
+        apiJson(probeApiPath("/messages") + "?limit=50&offset=0", {"method": "GET"}).catch(() => null),
+        apiJson(probeApiPath("/sector"), {"method": "GET"}).catch(() => null),
+        apiJson(probeApiPath("/alerts"), {"method": "GET"}).catch(() => null),
     ]);
 
     const persistentAlerts = Array.isArray(alertData && alertData.alerts) ? alertData.alerts : [];
@@ -556,6 +730,8 @@ window.VNG = {
     nextRefreshDelay,
     numberValue,
     openDisclosureIds,
+    probeApiPath,
+    renderUnreachableProbeTelemetry,
     renderMetrics,
     restoreDisclosureIds,
     sectorAlerts,
@@ -973,6 +1149,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!header || header.querySelector(".sessionbar")) {
         const closeAccountMenus = bindAccountMenus();
         bindTutorialDialog(closeAccountMenus);
+        bindProbeSelector();
         return;
     }
 
@@ -981,6 +1158,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const closeAccountMenus = bindAccountMenus();
     bindTutorialDialog(closeAccountMenus);
     bindApiKeyButton(apiKeyButton, closeAccountMenus);
+    bindProbeSelector();
     loadCurrentPlayer(spanOperator);
     startNavigationWarningSync();
 });

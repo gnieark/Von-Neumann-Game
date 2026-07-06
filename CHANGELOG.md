@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v78 : `GET /api/probe/{probeId}` limite désormais une sonde possédée hors secteur courant et hors réseau SCUT partagé à `id`, `name`, `status: out_of_scut_range` et `sector` relatif.
+- Interface : les pages principales acceptent un ID de sonde dans l’URL, le nav-panel propose un sélecteur de sonde active, et les liens de navigation conservent cet ID pour les sondes non défaut.
 - API v77 : les endpoints opérationnels de sonde acceptent désormais des variantes `/api/probe/{probeId}/...` pour agir sur une sonde possédée non défaut, à condition qu’elle soit dans le même secteur que la sonde par défaut ou joignable par le même réseau SCUT.
 - API v76 : les missions sont désormais rattachées au joueur (`probe_missions.player_id`) et restent visibles depuis `/api/probe/missions` après un changement de sonde par défaut; le script `scripts/migrate-probe-missions-to-player.php` migre les bases existantes depuis `probe_id`.
 - API v75 : `PATCH /api/probe/{probeId}` permet de définir la sonde par défaut si la sonde par défaut actuelle et la sonde cible sont dans le même secteur ou dans des secteurs couverts par le même réseau SCUT.

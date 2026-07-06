@@ -67,6 +67,14 @@ class FrontRouteMovement extends FrontRoute{
      */
     private function coordinatesFromRoutePath(string $routePath): ?array
     {
+        if (preg_match('#^/movement/\d+/(-?\d+)/(-?\d+)/(-?\d+)$#', $routePath, $matches) === 1) {
+            return [
+                'x' => (int) $matches[1],
+                'y' => (int) $matches[2],
+                'z' => (int) $matches[3],
+            ];
+        }
+
         if (preg_match('#^/movement/(-?\d+)/(-?\d+)/(-?\d+)$#', $routePath, $matches) !== 1) {
             return null;
         }

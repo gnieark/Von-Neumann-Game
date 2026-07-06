@@ -6,7 +6,7 @@
     const state = {
         currentMannies: [],
         currentProbeSectorRelative: null,
-        hasExplicitRouteTarget: /^\/movement\/-?\d+\/-?\d+\/-?\d+$/.test(window.location.pathname),
+        hasExplicitRouteTarget: /^\/movement(?:\/\d+)?\/-?\d+\/-?\d+\/-?\d+$/.test(window.location.pathname),
         probeAlreadyMoving: false,
         probeDeuteriumSufficient: false,
         syncedDefaultTarget: false,
@@ -216,7 +216,7 @@
     }
 
     async function loadProbe() {
-        const data = await window.VNG.apiJson("/api/probe", {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"});
         const probe = data.probe || {};
         const movement = probe.movement || null;
         const sector = probe.sector && probe.sector.relative ? probe.sector.relative : null;
@@ -230,7 +230,7 @@
     }
 
     async function loadMannies() {
-        const data = await window.VNG.apiJson("/api/probe/mannies", {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/mannies"), {"method": "GET"});
         state.currentMannies = Array.isArray(data.mannies) ? data.mannies : [];
 
         return data;
@@ -267,7 +267,9 @@
             applyMoveButtonState();
             scheduleRefresh({"probe": probeData.probe, "mannies": mannyData.mannies});
         } catch (error) {
-            setText("action-status", error.message || tr("requestDenied", "Request denied"));
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "action-status"})) {
+                setText("action-status", error.message || tr("requestDenied", "Request denied"));
+            }
             renderJumpChecklist();
             applyMoveButtonState();
             scheduleRefresh(null);
@@ -321,7 +323,7 @@
         setText("action-status", tr("orderSent", "Order transmitted..."));
 
         try {
-            await window.VNG.apiJson("/api/probe/move", {
+            await window.VNG.apiJson(window.VNG.probeApiPath("/move"), {
                 "method": "POST",
                 "body": JSON.stringify({"target": target}),
             });

@@ -52,7 +52,7 @@
     }
 
     async function refreshProbeInventory() {
-        const probeData = await window.VNG.apiJson("/api/probe", {"method": "GET"});
+        const probeData = await window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"});
         const probe = probeData && probeData.probe ? probeData.probe : {};
         state.currentInventory = probe.inventory || null;
         state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
@@ -61,7 +61,7 @@
     }
 
     async function refreshProbeImprovements() {
-        const data = await window.VNG.apiJson("/api/probe/probe-improvements-available", {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/probe-improvements-available"), {"method": "GET"});
         state.currentProbeImprovements = Array.isArray(data && data.improvements)
             ? data.improvements
             : [];
@@ -2855,9 +2855,9 @@
 
         try {
             const [probeData, mannyData, sectorData] = await Promise.all([
-                window.VNG.apiJson("/api/probe", {"method": "GET"}),
-                window.VNG.apiJson("/api/probe/mannies", {"method": "GET"}),
-                window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
+                window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"}),
+                window.VNG.apiJson(window.VNG.probeApiPath("/mannies"), {"method": "GET"}),
+                window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}).catch(() => null),
             ]);
             const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
@@ -2872,7 +2872,9 @@
             renderMannyList(state.currentMannies);
         } catch (error) {
             renderMannyList([]);
-            setStatus(error.message || tr("requestDenied", "Request denied"));
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "manny-status"})) {
+                setStatus(error.message || tr("requestDenied", "Request denied"));
+            }
         } finally {
             loadInProgress = false;
             if (loadRequestedWhileInProgress) {
@@ -2885,13 +2887,13 @@
 
     async function submitMannyForm(form, mannyId, formData) {
         if (form.classList.contains("manny-rename-form")) {
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId), {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId)), {
                 "method": "PATCH",
                 "body": JSON.stringify({"name": formData.get("name")}),
             });
         }
         if (form.classList.contains("manny-repair-form")) {
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/repair", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/repair"), {
                 "method": "POST",
                 "body": JSON.stringify({"integrityPercent": Number.parseFloat(formData.get("integrityPercent"))}),
             });
@@ -2926,7 +2928,7 @@
                 body.targetContainerId = targetContainerId;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/mine", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/mine"), {
                 "method": "POST",
                 "body": JSON.stringify(body),
             });
@@ -2938,7 +2940,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/salvage", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/salvage"), {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": formData.get("objectId")}),
             });
@@ -2949,7 +2951,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/refill-deuterium-tank", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refill-deuterium-tank"), {
                 "method": "POST",
                 "body": JSON.stringify({}),
             });
@@ -2962,7 +2964,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/inspect-sector-object", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/inspect-sector-object"), {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": formData.get("objectId")}),
             });
@@ -2977,7 +2979,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/detach-storage-container", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/detach-storage-container"), {
                 "method": "POST",
                 "body": JSON.stringify({
                     containerId,
@@ -2995,7 +2997,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/drop-storage-container", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/drop-storage-container"), {
                 "method": "POST",
                 "body": JSON.stringify({containerId, planetId}),
             });
@@ -3010,7 +3012,7 @@
             const selectedOption = targetSelect.selectedOptions[0] || null;
             const source = selectedOption && selectedOption.dataset.source ? selectedOption.dataset.source : undefined;
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/recover-storage-container", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/recover-storage-container"), {
                 "method": "POST",
                 "body": JSON.stringify({
                     "objectId": formData.get("objectId"),
@@ -3035,7 +3037,7 @@
                 body.networkName = networkName;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/turn-on-relay", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/turn-on-relay"), {
                 "method": "POST",
                 "body": JSON.stringify(body),
             });
@@ -3054,7 +3056,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/improve-probe", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/improve-probe"), {
                 "method": "POST",
                 "body": JSON.stringify({"improvement": selected}),
             });
@@ -3067,7 +3069,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/craft", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/craft"), {
                 "method": "POST",
                 "body": JSON.stringify({"recipe": formData.get("recipe")}),
             });
@@ -3091,7 +3093,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/atomic-printer/craft", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/atomic-printer/craft"), {
                 "method": "POST",
                 "body": JSON.stringify({"recipe": formData.get("recipe")}),
             });
@@ -3109,7 +3111,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/install-bookmark", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/install-bookmark"), {
                 "method": "POST",
                 "body": JSON.stringify({
                     "objectId": formData.get("objectId"),
@@ -3241,7 +3243,7 @@
                 }
                 setStatus(tr("orderSent", "Order transmitted..."));
                 try {
-                    await window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/drop-manny-cargo", {
+                    await window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/drop-manny-cargo"), {
                         "method": "POST",
                         "body": JSON.stringify({}),
                     });
@@ -3265,7 +3267,7 @@
             }
             setStatus(tr("orderSent", "Order transmitted..."));
             try {
-                await window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/recall", {
+                await window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/recall"), {
                     "method": "POST",
                     "body": JSON.stringify({}),
                 });

@@ -142,7 +142,7 @@
 
     function loadProbeImprovementsOnce() {
         if (probeImprovementsLoadPromise === null) {
-            probeImprovementsLoadPromise = window.VNG.apiJson("/api/probe/probe-improvements-available", {"method": "GET"})
+            probeImprovementsLoadPromise = window.VNG.apiJson(window.VNG.probeApiPath("/probe-improvements-available"), {"method": "GET"})
                 .then((data) => {
                     probeImprovements = Array.isArray(data && data.improvements)
                         ? data.improvements
@@ -379,7 +379,7 @@
         clearMovementTimer();
 
         try {
-            const data = await window.VNG.apiJson("/api/probe", {"method": "GET"});
+            const data = await window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"});
             renderProbeMetrics(data);
             scheduleRefresh(window.VNG.nextRefreshDelay(data, DEFAULT_REFRESH_MS, MIN_REFRESH_MS, REFRESH_CUSHION_MS));
         } catch (error) {

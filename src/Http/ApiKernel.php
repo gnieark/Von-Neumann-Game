@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 77;
+    public const API_VERSION = 78;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -348,6 +348,25 @@ final class ApiKernel
         $probe = $this->probes->findById($probeId);
         if ($probe === null || $probe->playerId !== $player->id) {
             return ApiResponse::error(404, 'not_found', 'Probe not found.');
+        }
+
+        $defaultProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        if ($probe->id !== $defaultProbe->id && !$this->scut->canSectorsCommunicate($defaultProbe->currentSector, $probe->currentSector)) {
+            $relative = PlayerReferenceFrame::atGlobalCoordinates(
+                $player->homeSector->getX(),
+                $player->homeSector->getY(),
+                $player->homeSector->getZ(),
+            )->globalToRelative($probe->currentSector);
+
+            return new ApiResponse(200, [
+                'probe' => [
+                    'id' => $probe->id,
+                    'name' => $probe->name,
+                    'status' => 'out_of_scut_range',
+                    'sector' => ['relative' => $relative],
+                ],
+            ]);
         }
 
         return $this->probeDetailsResponse($player, $probe);

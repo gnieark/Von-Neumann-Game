@@ -323,6 +323,7 @@ $test->assertEquals(
     'OAuth service extracts the OpenID subject without profile data'
 );
 $loginTemplate = file_get_contents($root . '/templates/loginview.html');
+$mainTemplate = file_get_contents($root . '/templates/main.html');
 $frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
 $probeScript = file_get_contents($root . '/public/assets/probe.js');
@@ -353,14 +354,17 @@ $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oau
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'url.searchParams.set("remember", "1")'), 'main JS sends remember=1 when OAuth remember-me is checked');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut$#'"), 'front routes expose the SCUT Network page');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut(?:/\\d+)?$#'"), 'front routes expose the SCUT Network page with optional probe id');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT'"), 'SCUT route keeps the requested short nav title');
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js'), 'SCUT front route loads the SCUT page script');
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, 'Subspace Communications Universal Transceiver'), 'SCUT route uses the expanded page title');
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, '<h2>Subspace Communications Universal Transceiver</h2>'), 'SCUT template exposes the expanded visible heading');
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
-$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/sector'), 'SCUT page reads current sector coverage');
-$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/scut-network/'), 'SCUT page reads existing network details');
+$test->assert(is_string($mainTemplate) && str_contains($mainTemplate, 'id="nav-probe-select"'), 'main template exposes the active probe selector');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'function probeApiPath'), 'main JS builds selected-probe API endpoints');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/sector")'), 'SCUT page reads selected probe current sector coverage');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/scut-network/"'), 'SCUT page reads selected probe network details');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigationScutCoverage'), 'main JS can set SCUT nav LED state');
 $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
@@ -369,7 +373,7 @@ $test->assert(is_string($movementScript) && str_contains($movementScript, 'curre
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.fuel.maxDeuterium'), 'probe JS reads the max deuterium fuel cap');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeImprovementsOnce'), 'probe JS loads probe improvements once');
-$test->assert(is_string($probeScript) && str_contains($probeScript, '/api/probe/probe-improvements-available'), 'probe JS reads installed probe improvements');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPath("/probe-improvements-available")'), 'probe JS reads installed probe improvements for the selected probe');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'improvement.done === true'), 'probe JS lists completed probe improvements only');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'installed.slice(0, 2)'), 'probe JS summarizes installed probe improvements after two entries');
 $test->assert(is_string($appCss) && str_contains($appCss, '.metric .metric-secondary'), 'probe metric CSS styles secondary metric text');
@@ -403,7 +407,7 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"atomic_3d_printer",') && str_contains($inventoriesScript, '"additional_container",'), 'inventories JS excludes atomic printers and additional containers from storage-rule filters');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
-$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"/api/probe/storage-containers/" + encodeURIComponent(containerId)'), 'inventories JS renames containers through the storage-container PATCH endpoint');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'probeApiPath("/storage-containers/" + encodeURIComponent(containerId))'), 'inventories JS renames containers through the selected-probe storage-container PATCH endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'container.label !== "Sonde"'), 'inventories JS honors custom probe-core container labels');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'iconButtonPlaceholder("inventory-line-move-placeholder")'), 'inventories JS keeps a non-interactive move placeholder for additional containers');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
@@ -449,7 +453,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargetsFromObjects'), 'mannies JS builds remote inspection targets from the Manny sector scan');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'abandonRemoteMannyTask'), 'mannies JS relabels remote SCUT-visible recall actions without changing the endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
-$test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, 'probeApiPath("/scut-network/"'), 'messaging JS loads selected-probe SCUT network probe contacts');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'String(probe.id) !== String(state.currentProbeId'), 'messaging JS excludes the current probe from SCUT network recipients');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'scutNetworkRecipientLabel'), 'messaging JS labels SCUT network recipients');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"printer": atomicPrinterItem() ? "available" : null'), 'mannies JS excludes atomic-printer inventory details from the card refresh hash');
@@ -480,7 +484,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyAc
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupSector'), 'mannies JS renders the sector action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupContainers'), 'mannies JS renders the containers action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupCraft'), 'mannies JS renders the craft action group');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/api/probe/probe-improvements-available'), 'mannies JS loads available probe improvements');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeApiPath("/probe-improvements-available")'), 'mannies JS loads selected-probe available probe improvements');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-improve-probe-form'), 'mannies JS renders the probe improvement form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/improve-probe'), 'mannies JS posts probe improvement orders');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeImprovementAvailability'), 'mannies JS checks improvement ingredient availability');
@@ -502,7 +506,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260704-storage-rule-filterable-items"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-probe-selector"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1086,6 +1090,9 @@ $test->assertEquals(true, $listedById[$secondaryProbe->id]['isDefault'] ?? null,
 $probeByIdResponse = $kernel->handle('GET', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
 $test->assertEquals(200, $probeByIdResponse->status, 'GET /api/probe/{probeId} returns an owned probe');
 $test->assertEquals($primaryProbe->id, $probeByIdResponse->body['probe']['id'] ?? null, 'GET /api/probe/{probeId} returns the requested owned probe');
+$test->assertEquals('out_of_scut_range', $probeByIdResponse->body['probe']['status'] ?? null, 'GET /api/probe/{probeId} reports owned probes outside same-sector and same-SCUT reach as outside SCUT');
+$test->assertEquals(['id', 'name', 'status', 'sector'], array_keys($probeByIdResponse->body['probe'] ?? []), 'GET /api/probe/{probeId} limits telemetry for owned probes outside same-sector and same-SCUT reach');
+$test->assert(isset($probeByIdResponse->body['probe']['sector']['relative']), 'GET /api/probe/{probeId} keeps only relative sector telemetry for unreachable owned probes');
 $foreignProbeResponse = $kernel->handle('GET', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders);
 $test->assertEquals(404, $foreignProbeResponse->status, 'GET /api/probe/{probeId} hides probes owned by another player');
 $missingProbeResponse = $kernel->handle('GET', '/api/probe/999999999', $multiProbeHeaders);
@@ -1240,7 +1247,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(77, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(78, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1616,7 +1623,7 @@ if ($createdProbe !== null) {
     $legacyDamageWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $missionHeaders);
     $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
-    $test->assert(is_string($alertsScript) && str_contains($alertsScript, '/api/probe/alerts'), 'alerts page uses the generic persistent-alert endpoint');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'probeApiPath("/alerts"'), 'alerts page uses the selected-probe persistent-alert endpoint');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'replace(/\\r?\\n/g, "<br>")'), 'alerts page renders message line breaks');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'type === "manny_report"'), 'alerts page recognizes Manny report alerts');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alertPriority'), 'alerts page prioritizes Manny reports above regular unread alerts');

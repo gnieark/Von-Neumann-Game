@@ -259,7 +259,10 @@
     }
 
     function movementUrl(target) {
-        return "/movement/" + encodeURIComponent(String(target.x)) + "/" + encodeURIComponent(String(target.y)) + "/" + encodeURIComponent(String(target.z));
+        const probeId = document.body.dataset.selectedProbeId || "";
+        const probeSegment = /^\d+$/.test(probeId) ? "/" + encodeURIComponent(probeId) : "";
+
+        return "/movement" + probeSegment + "/" + encodeURIComponent(String(target.x)) + "/" + encodeURIComponent(String(target.y)) + "/" + encodeURIComponent(String(target.z));
     }
 
     function numericCount(value) {
@@ -1123,7 +1126,7 @@
     }
 
     async function fetchVisitedSectors() {
-        const data = await window.VNG.apiJson("/api/probe/visited-sectors", {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/visited-sectors"), {"method": "GET"});
         return (Array.isArray(data.visitedSectors) ? data.visitedSectors : []).filter((entry) => (
             !sameRelativeCoordinates(entry && entry.relativeCoordinates, currentProbeSectorRelative)
         ));
@@ -1205,7 +1208,7 @@
     }
 
     async function fetchProbeSectorRelative() {
-        const data = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"});
         currentProbeSectorRelative = relativeCoordinates(data.sector && data.sector.relativeCoordinates);
 
         return currentProbeSectorRelative;
@@ -1301,7 +1304,7 @@
 
         try {
             const data = await window.VNG.apiJson(path, {"method": "GET"});
-            if (path === "/api/probe/sector") {
+            if (path === window.VNG.probeApiPath("/sector")) {
                 currentProbeSectorRelative = relativeCoordinates(data.sector && data.sector.relativeCoordinates);
             }
             syncSectorForm(data.sector);
@@ -1313,7 +1316,9 @@
         } catch (error) {
             renderSectorObjects(null);
             syncPrepareJumpButton(null);
-            setText("sector-context", scanErrorMessage(error));
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "sector-context"})) {
+                setText("sector-context", scanErrorMessage(error));
+            }
             applySectorScanButtonState();
             scheduleRefresh(null);
             return null;
@@ -1324,7 +1329,7 @@
 
     function loadCurrentSector() {
         currentScanTarget = null;
-        return loadSector("/api/probe/sector");
+        return loadSector(window.VNG.probeApiPath("/sector"));
     }
 
     function loadDisplayedSector() {
@@ -1368,7 +1373,7 @@
                 return;
             }
 
-            window.location.assign("/movement/" + encodeURIComponent(String(target.x)) + "/" + encodeURIComponent(String(target.y)) + "/" + encodeURIComponent(String(target.z)));
+            window.location.assign(movementUrl(target));
         });
         document.querySelector("[data-refresh=\"sector\"]")?.addEventListener("click", () => {
             loadCurrentSector();

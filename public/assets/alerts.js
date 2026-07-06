@@ -150,13 +150,13 @@
 
         try {
             const [sectorData, alertData] = await Promise.all([
-                window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch((error) => ({"sector": {}, "error": error})),
-                window.VNG.apiJson("/api/probe/alerts", {"method": "GET"}).catch(() => ({"alerts": []})),
+                window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}).catch((error) => ({"sector": {}, "error": error})),
+                window.VNG.apiJson(window.VNG.probeApiPath("/alerts"), {"method": "GET"}).catch(() => ({"alerts": []})),
             ]);
             renderAlerts(sectorData.sector || {}, alertData.alerts || []);
             if (sectorData.error && (alertData.alerts || []).length === 0) {
                 const empty = document.getElementById("console-alerts-empty");
-                if (empty) {
+                if (!await window.VNG.renderUnreachableProbeTelemetry(sectorData.error, {"statusId": "console-alerts-empty"}) && empty) {
                     empty.hidden = false;
                     empty.textContent = sectorData.error.message || tr("sectorContextUnavailable", "Displayed sector: observation unavailable.");
                 }
@@ -194,7 +194,7 @@
             if (alert.kind === "persistent-alert") {
                 button.disabled = true;
                 button.setAttribute("aria-disabled", "true");
-                window.VNG.apiJson("/api/probe/alerts/" + encodeURIComponent(String(alert.id)), {
+                window.VNG.apiJson(window.VNG.probeApiPath("/alerts/" + encodeURIComponent(String(alert.id))), {
                     "method": "PATCH",
                     "body": JSON.stringify({}),
                 }).then(refreshAlertsPage).then(window.VNG.syncNavigationWarnings).catch(() => {

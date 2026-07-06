@@ -901,6 +901,28 @@ button.account-menu-item {
     font-size: 1.35rem;
 }
 
+.probe-selector {
+    display: grid;
+    gap: 6px;
+    margin: -10px 0 16px;
+    color: #b8c9ce;
+    font-size: .76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.probe-selector select {
+    width: 100%;
+    min-height: 36px;
+    border: 1px solid #657276;
+    border-radius: 3px;
+    background: #121719;
+    color: #f3dfa0;
+    font: inherit;
+    padding: 6px 8px;
+    text-transform: none;
+}
+
 .panel-tab {
     display: flex;
     align-items: center;

@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 77
+                apiVersion: 78
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -600,7 +600,12 @@ paths:
   /api/probe/{probeId}:
     get:
       summary: Get a Neumann probe by id
-      description: Returns the requested probe only when it belongs to the authenticated player.
+      description: >
+        Returns the requested probe only when it belongs to the authenticated
+        player. When the requested owned probe is neither in the same sector as
+        the default probe nor inside shared SCUT network coverage, the response
+        is limited to id, name, status `out_of_scut_range`, and relative sector
+        telemetry.
       parameters:
         - name: probeId
           in: path
@@ -618,7 +623,9 @@ paths:
                 required: [probe]
                 properties:
                   probe:
-                    $ref: '#/components/schemas/Probe'
+                    oneOf:
+                      - $ref: '#/components/schemas/Probe'
+                      - $ref: '#/components/schemas/ProbeLimitedTelemetry'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3518,6 +3525,24 @@ components:
               nullable: true
         inventory:
           $ref: '#/components/schemas/ProbeInventory'
+    ProbeLimitedTelemetry:
+      type: object
+      required: [id, name, status, sector]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [out_of_scut_range]
+        sector:
+          type: object
+          required: [relative]
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
     ProbeSummary:
       type: object
       required: [id, name, status, isDefault]
