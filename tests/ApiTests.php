@@ -303,10 +303,19 @@ $test->assert(
 $probeNavRoute = new TestFooterFrontRoute();
 $probeNavRoute->configureRequestContext('/sensors/537', 537);
 $probeNavRoute->addLeftMenuItem(new MenuLinkItem('Sensors', '/sensors/537', true, false, '/sensors'));
+$probeNavRoute->addLeftMenuItem(new MenuLinkItem('Mannys & printer', '/mannies/537', false, false, '/mannies'));
 $probeNavHtml = $probeNavRoute->renderMainPageForTest('token', 'en');
 $test->assert(
     str_contains($probeNavHtml, 'href="/sensors/537" data-nav-link="/sensors"'),
     'selected-probe nav links keep a canonical base href for client-side resync'
+);
+$test->assert(
+    str_contains($probeNavHtml, '>Mannys &amp; printer</a>'),
+    'nav panel escapes ampersands exactly once'
+);
+$test->assert(
+    !str_contains($probeNavHtml, 'Mannys &amp;amp; printer'),
+    'nav panel does not double-escape ampersands'
 );
 
 $_SERVER['REQUEST_URI'] = '/authbypwd';
@@ -379,8 +388,11 @@ $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-
 $test->assert(is_string($mainTemplate) && str_contains($mainTemplate, 'id="nav-probe-select"'), 'main template exposes the active probe selector');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function probeApiPath'), 'main JS builds selected-probe API endpoints');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function routeBaseHref'), 'main JS normalizes selected-probe route links before adding a probe id');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'probeSelectorUnreachableLabel'), 'main JS labels unreachable probes in the active-probe selector');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'inaccessible'"), 'French translations include the unreachable probe selector suffix');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'unreachable'"), 'English translations include the unreachable probe selector suffix');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'This probe is unreachable. It is too far away and outside the area covered by SCUT. Only its estimated coordinates are available.'), 'English translations include the unreachable selected-probe warning');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'Cette sonde est injoignable. Elle est trop éloignée et hors de la zone couverte par SCUT. Seules ses coordonnées estimées sont disponibles.'), 'French translations include the unreachable selected-probe warning');
 $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="sector-context" class="sector-context"'), 'Probe template exposes the unreachable selected-probe warning');
@@ -527,7 +539,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-unreachable-probe-warning"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-nav-label-html-entities"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

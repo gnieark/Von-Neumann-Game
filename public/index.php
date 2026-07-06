@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260706-unreachable-probe-warning';
+const ASSET_VERSION = '20260706-nav-label-html-entities';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -99,7 +99,7 @@ function refreshRememberedSessionCookie(AppFactory $factory, ?PDO $pdo = null): 
 
 function translatedRouteName(Translator $translator, string $key): string
 {
-    return htmlspecialchars($translator->get($key), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    return $translator->get($key);
 }
 
 $language = selectedLanguage();

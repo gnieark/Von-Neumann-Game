@@ -145,6 +145,13 @@ function t(messages, key, fallback) {
         : fallback;
 }
 
+function probeSelectorUnreachableLabel() {
+    const messages = window.VNG_I18N && typeof window.VNG_I18N === "object" ? window.VNG_I18N : {};
+    const fallback = document.documentElement.lang === "fr" ? "inaccessible" : "unreachable";
+
+    return t(messages, "probeSelectorUnreachable", fallback);
+}
+
 function formatText(template, values) {
     return Object.entries(values || {}).reduce(
         (text, [key, value]) => text.replaceAll("{" + key + "}", String(value)),
@@ -386,9 +393,12 @@ function renderProbeSelector(select, data) {
         const id = String(probe && probe.id ? probe.id : "");
         const name = probe && probe.name ? probe.name : ("Probe #" + id);
         const suffix = String(id) === defaultProbeId ? " *" : "";
+        const reachabilitySuffix = probe && probe.isReachable === false
+            ? " (" + probeSelectorUnreachableLabel() + ")"
+            : "";
 
         return "<option value=\"" + escapeHtml(id) + "\"" + (id === currentProbeId ? " selected" : "") + ">"
-            + escapeHtml(name + suffix)
+            + escapeHtml(name + suffix + reachabilitySuffix)
             + "</option>";
     }).join("");
 }
@@ -803,6 +813,7 @@ window.VNG = {
     nextRefreshDelay,
     numberValue,
     openDisclosureIds,
+    probeSelectorUnreachableLabel,
     probeApiPath,
     refreshProbeSelector,
     renderUnreachableProbeTelemetry,
