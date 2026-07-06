@@ -1574,6 +1574,35 @@ if ($createdProbe !== null) {
             static fn($manny): bool => str_starts_with($manny->name, 'manny-debug-'),
         ));
         $test->assert($debugMannies !== [] && $debugMannies[0]->storageContainerId !== null, 'add-inventory-item CLI places created Mannys in storage');
+
+        $beforeDroneProbeCount = count($probes->findAllByPlayerId($cliInventoryPlayer->id));
+        $dryRunDroneProbeCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-drone-probe.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --dry-run'
+            . ' ' . $cliInventoryPlayer->id;
+        exec($dryRunDroneProbeCommand . ' 2>&1', $dryRunDroneProbeOutput, $dryRunDroneProbeStatus);
+        $test->assertEquals(0, $dryRunDroneProbeStatus, 'add-drone-probe CLI dry-run exits successfully');
+        $test->assertEquals($beforeDroneProbeCount, count($probes->findAllByPlayerId($cliInventoryPlayer->id)), 'add-drone-probe CLI dry-run leaves probes unchanged');
+
+        $addDroneProbeCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-drone-probe.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --player=' . escapeshellarg($cliInventoryPlayer->username);
+        exec($addDroneProbeCommand . ' 2>&1', $addDroneProbeOutput, $addDroneProbeStatus);
+        $addDroneProbeText = implode("\n", $addDroneProbeOutput);
+        $test->assertEquals(0, $addDroneProbeStatus, 'add-drone-probe CLI exits successfully');
+        $test->assert(str_contains($addDroneProbeText, 'Created probe #'), 'add-drone-probe CLI reports the created probe');
+        $droneProbes = array_values(array_filter(
+            $probes->findAllByPlayerId($cliInventoryPlayer->id),
+            static fn(NeumannProbe $probe): bool => $probe->name === 'drone',
+        ));
+        $test->assertEquals(1, count($droneProbes), 'add-drone-probe CLI creates exactly one drone probe for the player');
+        $test->assertEquals(true, $droneProbes[0]->excludeFromStats, 'add-drone-probe CLI excludes the debug probe from public stats');
+        $droneMannies = $droneProbes === [] ? [] : $mannies->findByProbeId($droneProbes[0]->id);
+        $test->assertEquals(1, count($droneMannies), 'add-drone-probe CLI puts one Manny in the drone probe');
+        $test->assert($droneMannies !== [] && $droneMannies[0]->name === 'manny-drone' && $droneMannies[0]->storageContainerId !== null, 'add-drone-probe CLI stores the Manny inside the drone probe');
+        $test->assertEquals($cliInventoryProbe->id, $players->findById($cliInventoryPlayer->id)?->defaultProbeId, 'add-drone-probe CLI keeps the existing default probe');
     }
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 9 WHERE id = :id')->execute(['id' => $createdProbe->id]);
