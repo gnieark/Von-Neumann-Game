@@ -411,7 +411,7 @@ $test->assert(str_contains($openApi, 'dormant_construct'), 'OpenAPI documents do
 $test->assert(str_contains($openApi, 'knownFunction'), 'OpenAPI documents dormant construct function ambiguity');
 $test->assert(str_contains($openApi, '/api/probes'), 'OpenAPI documents the player probe list endpoint');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}'), 'OpenAPI documents the owned probe detail endpoint');
-$test->assert(str_contains($openApi, 'summary: Set the default Neumann probe'), 'OpenAPI documents the default probe selection endpoint');
+$test->assert(str_contains($openApi, 'summary: Update a Neumann probe'), 'OpenAPI documents the probe update endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
@@ -522,7 +522,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-nav-probe-links"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-probe-identity-panel"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1103,6 +1103,9 @@ foreach ($listedProbes as $listedProbe) {
 $test->assert(isset($listedById[$primaryProbe->id], $listedById[$secondaryProbe->id], $listedById[$tertiaryProbe->id]), 'GET /api/probes includes all owned probe ids');
 $test->assertEquals(false, $listedById[$primaryProbe->id]['isDefault'] ?? null, 'GET /api/probes marks non-default probes');
 $test->assertEquals(true, $listedById[$secondaryProbe->id]['isDefault'] ?? null, 'GET /api/probes marks the default probe');
+$test->assertEquals(false, $listedById[$primaryProbe->id]['isReachable'] ?? null, 'GET /api/probes marks owned probes outside same-sector and same-SCUT reach as unreachable');
+$test->assertEquals(true, $listedById[$secondaryProbe->id]['isReachable'] ?? null, 'GET /api/probes marks the default probe as reachable');
+$test->assertEquals(false, $listedById[$tertiaryProbe->id]['isReachable'] ?? null, 'GET /api/probes marks another distant owned probe as unreachable');
 $probeByIdResponse = $kernel->handle('GET', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
 $test->assertEquals(200, $probeByIdResponse->status, 'GET /api/probe/{probeId} returns an owned probe');
 $test->assertEquals($primaryProbe->id, $probeByIdResponse->body['probe']['id'] ?? null, 'GET /api/probe/{probeId} returns the requested owned probe');
@@ -1130,6 +1133,8 @@ foreach (($sameSectorDefaultProbe->body['probes'] ?? []) as $listedProbe) {
 }
 $test->assertEquals(true, $sameSectorListById[$sameSectorProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} marks the selected same-sector probe as default');
 $test->assertEquals(false, $sameSectorListById[$secondaryProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} clears the previous default marker');
+$test->assertEquals(true, $sameSectorListById[$sameSectorProbe->id]['isReachable'] ?? null, 'PATCH /api/probe/{probeId} returns the new default probe as reachable');
+$test->assertEquals(true, $sameSectorListById[$secondaryProbe->id]['isReachable'] ?? null, 'PATCH /api/probe/{probeId} marks same-sector drones as reachable');
 $multiProbeMission = $missionService->startMission($sameSectorProbe, 'multi_probe_default_switch', 'Multi-probe mission', steps: [['title' => 'Switch default probe']]);
 $scutDefaultRelay = $scut->createOffRelay($sameSectorProbe->currentSector, $sameSectorProbe->id);
 $scut->turnOnRelay($scutDefaultRelay->id);
@@ -1137,6 +1142,11 @@ $sameScutDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->
 $test->assertEquals(200, $sameScutDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts an owned probe inside the same SCUT network');
 $test->assertEquals($primaryProbe->id, $sameScutDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the SCUT-reachable default probe id');
 $test->assertEquals($primaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-SCUT default probe switch');
+$sameScutListById = [];
+foreach (($sameScutDefaultProbe->body['probes'] ?? []) as $listedProbe) {
+    $sameScutListById[$listedProbe['id'] ?? 0] = $listedProbe;
+}
+$test->assertEquals(true, $sameScutListById[$sameSectorProbe->id]['isReachable'] ?? null, 'PATCH /api/probe/{probeId} marks same-SCUT drones as reachable');
 $multiProbeMissionsAfterDefaultSwitch = $kernel->handle('GET', '/api/probe/missions', $multiProbeHeaders);
 $test->assertEquals($multiProbeMission->uid, $multiProbeMissionsAfterDefaultSwitch->body['missions'][0]['id'] ?? null, 'player missions stay visible after switching the default probe');
 // Rename the same-sector probe using PATCH payload
@@ -1263,7 +1273,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(78, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(79, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 

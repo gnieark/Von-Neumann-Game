@@ -1106,6 +1106,105 @@ button.account-menu-item {
     margin-bottom: 16px;
 }
 
+.probe-identity {
+    margin-top: -2px;
+}
+
+.probe-identity-block {
+    display: grid;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(143, 182, 189, .18);
+}
+
+.probe-identity-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.probe-identity-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: #f1f7f7;
+    font-size: 1.05rem;
+}
+
+.probe-settings-button {
+    flex: 0 0 auto;
+}
+
+.probe-inline-form,
+.probe-instance-form {
+    display: grid;
+    gap: 10px;
+}
+
+.probe-inline-form {
+    grid-template-columns: minmax(180px, 1fr) auto;
+    align-items: end;
+}
+
+.probe-inline-form[hidden] {
+    display: none;
+}
+
+.probe-inline-form label,
+.probe-instance-form label {
+    display: grid;
+    gap: 5px;
+}
+
+.probe-inline-form input,
+.probe-instance-form select {
+    min-height: 34px;
+}
+
+.probe-inline-form button,
+.probe-instance-form button {
+    min-height: 34px;
+    white-space: nowrap;
+}
+
+.probe-type-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: var(--muted);
+}
+
+.probe-type-line b {
+    color: var(--text);
+}
+
+.probe-identity-notice {
+    margin: 0;
+    padding: 8px 10px;
+    border-left: 3px solid var(--cold);
+    background: rgba(143, 182, 189, .08);
+}
+
+.probe-identity-notice-error {
+    border-left-color: var(--error);
+    background: rgba(209, 139, 117, .1);
+}
+
+.probe-instance-accordion {
+    display: grid;
+    gap: 0;
+}
+
+.probe-instance-accordion-panel[hidden] {
+    display: none;
+}
+
+.probe-instance-form p {
+    margin: 0;
+    color: var(--text);
+}
+
 .probe-terminal-alert {
     display: flex;
     align-items: center;
@@ -3420,6 +3519,11 @@ button.account-menu-item {
         flex-basis: 100%;
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .probe-inline-form {
+        grid-template-columns: 1fr;
+        align-items: stretch;
     }
 
     .inventory-move-form,

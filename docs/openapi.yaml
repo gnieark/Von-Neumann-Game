@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '77'
+  version: '79'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 78
+                apiVersion: 79
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -631,11 +631,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
-      summary: Set the default Neumann probe
+      summary: Update a Neumann probe
       description: >
-        Sets the requested owned probe as the player's default probe. The
-        current default probe and the requested probe must be in the same
-        sector, or both sectors must be covered by the same active SCUT network.
+        Renames the requested owned probe when `name` is provided. When
+        `isDefault` is true, sets the requested owned probe as the player's
+        default probe. The current default probe and the requested probe must
+        be in the same sector, or both sectors must be covered by the same
+        active SCUT network, before the default probe can be changed.
       parameters:
         - name: probeId
           in: path
@@ -3545,7 +3547,7 @@ components:
               $ref: '#/components/schemas/Vector'
     ProbeSummary:
       type: object
-      required: [id, name, status, isDefault]
+      required: [id, name, status, isDefault, isReachable]
       properties:
         id:
           type: integer
@@ -3557,6 +3559,9 @@ components:
         isDefault:
           type: boolean
           description: True for the probe returned by GET /api/probe.
+        isReachable:
+          type: boolean
+          description: True when the probe is the default probe, in the same sector as the default probe, or inside shared active SCUT network coverage.
     ProbePatchRequest:
       type: object
       description: Optional fields to modify a probe. Any omitted field is left unchanged.

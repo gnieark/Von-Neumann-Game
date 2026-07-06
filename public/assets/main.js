@@ -371,6 +371,48 @@ function loadProbeList() {
     return probeListPromise;
 }
 
+function resetProbeListCache() {
+    probeListPromise = null;
+}
+
+function renderProbeSelector(select, data) {
+    const probes = Array.isArray(data && data.probes) ? data.probes : [];
+    const defaultProbeId = data && data.defaultProbeId ? String(data.defaultProbeId) : "";
+    const currentProbeId = selectedProbeId() || defaultProbeId;
+
+    syncProbeAwareNavigation(defaultProbeId);
+    select.dataset.defaultProbeId = defaultProbeId;
+    select.innerHTML = probes.map((probe) => {
+        const id = String(probe && probe.id ? probe.id : "");
+        const name = probe && probe.name ? probe.name : ("Probe #" + id);
+        const suffix = String(id) === defaultProbeId ? " *" : "";
+
+        return "<option value=\"" + escapeHtml(id) + "\"" + (id === currentProbeId ? " selected" : "") + ">"
+            + escapeHtml(name + suffix)
+            + "</option>";
+    }).join("");
+}
+
+async function refreshProbeSelector(data) {
+    if (document.body.dataset.authenticated !== "1") {
+        return data || {"defaultProbeId": null, "probes": []};
+    }
+
+    if (data && Array.isArray(data.probes)) {
+        probeListPromise = Promise.resolve(data);
+    } else {
+        resetProbeListCache();
+        data = await loadProbeList();
+    }
+
+    const select = document.getElementById("nav-probe-select");
+    if (select) {
+        renderProbeSelector(select, data);
+    }
+
+    return data;
+}
+
 function routeHrefForProbe(baseHref, probeId) {
     if (!probeId) {
         return routeBaseHref(baseHref);
@@ -511,23 +553,11 @@ async function bindProbeSelector() {
     select.dataset.probeSelectorBound = "1";
 
     const data = await loadProbeList();
-    const probes = Array.isArray(data && data.probes) ? data.probes : [];
-    const defaultProbeId = data && data.defaultProbeId ? String(data.defaultProbeId) : "";
-    const currentProbeId = selectedProbeId() || defaultProbeId;
-
-    syncProbeAwareNavigation(defaultProbeId);
-    select.innerHTML = probes.map((probe) => {
-        const id = String(probe && probe.id ? probe.id : "");
-        const name = probe && probe.name ? probe.name : ("Probe #" + id);
-        const suffix = String(id) === defaultProbeId ? " *" : "";
-
-        return "<option value=\"" + escapeHtml(id) + "\"" + (id === currentProbeId ? " selected" : "") + ">"
-            + escapeHtml(name + suffix)
-            + "</option>";
-    }).join("");
+    renderProbeSelector(select, data);
 
     select.addEventListener("change", () => {
         const nextProbeId = select.value || "";
+        const defaultProbeId = select.dataset.defaultProbeId || "";
         const route = currentRouteParts();
         const explicitProbeId = nextProbeId && String(nextProbeId) !== String(defaultProbeId) ? nextProbeId : "";
 
@@ -741,15 +771,19 @@ window.VNG = {
     formatText,
     labels,
     loadI18n,
+    loadProbeList,
     metricHtml,
     nextRefreshDelay,
     numberValue,
     openDisclosureIds,
     probeApiPath,
+    refreshProbeSelector,
     renderUnreachableProbeTelemetry,
     renderMetrics,
+    resetProbeListCache,
     restoreDisclosureIds,
     sectorAlerts,
+    selectedProbeId,
     setNavigationScutCoverage,
     setNavigationWarning,
     startNavigationWarningSync,

@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 78;
+    public const API_VERSION = 79;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -482,27 +482,31 @@ final class ApiKernel
 
     private function probeListResponse(Player $player): ApiResponse
     {
+        $defaultProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+
         return new ApiResponse(200, [
             'defaultProbeId' => $player->defaultProbeId,
             'probes' => array_map(
-                fn(NeumannProbe $probe): array => $this->probeSummaryArray($player, $probe),
+                fn(NeumannProbe $probe): array => $this->probeSummaryArray($player, $probe, $defaultProbe),
                 $this->probes->findAllByPlayerId($player->id),
             ),
         ]);
     }
 
     /**
-     * @return array{id:int, name:string, status:string, isDefault:bool}
+     * @return array{id:int, name:string, status:string, isDefault:bool, isReachable:bool}
      */
-    private function probeSummaryArray(Player $player, NeumannProbe $probe): array
+    private function probeSummaryArray(Player $player, NeumannProbe $probe, NeumannProbe $defaultProbe): array
     {
         $probe = $this->movements->refreshProbeMovementState($probe);
+        $isDefault = $player->defaultProbeId === $probe->id;
 
         return [
             'id' => $probe->id,
             'name' => $probe->name,
             'status' => $probe->status->value,
-            'isDefault' => $player->defaultProbeId === $probe->id,
+            'isDefault' => $isDefault,
+            'isReachable' => $isDefault || $this->scut->canSectorsCommunicate($defaultProbe->currentSector, $probe->currentSector),
         ];
     }
 
