@@ -314,6 +314,21 @@
         });
     }
 
+    function renderProbeUnreachableContext(probe) {
+        const node = document.getElementById("sector-context");
+        if (!node) {
+            return;
+        }
+        const unreachable = probe && probe.status === "out_of_scut_range";
+        node.hidden = !unreachable;
+        node.textContent = unreachable
+            ? translate(
+                "probeOutOfScutRangeExplanation",
+                "This probe is unreachable. It is too far away and outside the area covered by SCUT. Only its estimated coordinates are available."
+            )
+            : "";
+    }
+
     function renderTerminalAlert(probe) {
         const node = document.getElementById("probe-terminal-alert");
         if (!node) {
@@ -372,6 +387,7 @@
 
         renderTerminalAlert(probe);
         renderProbeIdentity(data);
+        renderProbeUnreachableContext(probe);
         window.VNG.renderMetrics(document.getElementById("probe-summary"), [
             {
                 "name": "status",
@@ -427,6 +443,7 @@
     function renderProbeError(error) {
         renderTerminalAlert(null);
         renderProbeIdentity(null);
+        renderProbeUnreachableContext(null);
         window.VNG.renderMetrics(document.getElementById("probe-summary"), [
             {
                 "name": "status",

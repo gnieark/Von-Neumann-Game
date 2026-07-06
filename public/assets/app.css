@@ -1599,6 +1599,36 @@ button.account-menu-item {
     text-shadow: 0 0 5px rgba(140, 255, 129, .2);
 }
 
+#actions-panel.probe-unreachable-panel > :not(.panel-heading):not(#action-status),
+#scut-panel.probe-unreachable-panel > :not(.panel-heading):not(#scut-status),
+#messages-panel.probe-unreachable-panel > :not(.panel-heading):not(#message-status),
+#alerts-panel.probe-unreachable-panel > :not(.panel-heading):not(#console-alerts-empty) {
+    display: none;
+}
+
+#actions-panel.probe-unreachable-panel > #action-status,
+#scut-panel.probe-unreachable-panel > #scut-status,
+#messages-panel.probe-unreachable-panel > #message-status,
+#alerts-panel.probe-unreachable-panel > #console-alerts-empty {
+    display: block;
+    margin-top: 0;
+}
+
+#environment-panel.probe-unreachable-panel .sector-scan-separator,
+#environment-panel.probe-unreachable-panel .sector-neighbor-scan,
+#environment-panel.probe-unreachable-panel .sector-visited-history {
+    display: none;
+}
+
+#environment-panel.probe-unreachable-panel .sector-scan-section > :not(#sector-context) {
+    display: none;
+}
+
+#environment-panel.probe-unreachable-panel #sector-context {
+    display: block;
+    margin-top: 0;
+}
+
 .sector-summary {
     margin: 0;
     padding: 8px 14px 12px;

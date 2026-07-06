@@ -262,12 +262,14 @@
         clearRefreshTimer();
 
         try {
+            window.VNG.setProbeUnreachablePanel?.("actions-panel", false);
             const [probeData, mannyData] = await Promise.all([loadProbe(), loadMannies()]);
             renderJumpChecklist();
             applyMoveButtonState();
             scheduleRefresh({"probe": probeData.probe, "mannies": mannyData.mannies});
         } catch (error) {
-            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "action-status"})) {
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "action-status", "panelId": "actions-panel"})) {
+                window.VNG.setProbeUnreachablePanel?.("actions-panel", false);
                 setText("action-status", error.message || tr("requestDenied", "Request denied"));
             }
             renderJumpChecklist();

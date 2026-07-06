@@ -1303,6 +1303,7 @@
         clearCountdownTimer();
 
         try {
+            window.VNG.setProbeUnreachablePanel?.("environment-panel", false);
             const data = await window.VNG.apiJson(path, {"method": "GET"});
             if (path === window.VNG.probeApiPath("/sector")) {
                 currentProbeSectorRelative = relativeCoordinates(data.sector && data.sector.relativeCoordinates);
@@ -1316,7 +1317,8 @@
         } catch (error) {
             renderSectorObjects(null);
             syncPrepareJumpButton(null);
-            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "sector-context"})) {
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "sector-context", "panelId": "environment-panel"})) {
+                window.VNG.setProbeUnreachablePanel?.("environment-panel", false);
                 setText("sector-context", scanErrorMessage(error));
             }
             applySectorScanButtonState();

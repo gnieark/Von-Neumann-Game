@@ -339,6 +339,7 @@ $test->assertEquals(
 );
 $loginTemplate = file_get_contents($root . '/templates/loginview.html');
 $mainTemplate = file_get_contents($root . '/templates/main.html');
+$probeTemplate = file_get_contents($root . '/templates/Probe.html');
 $frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
 $probeScript = file_get_contents($root . '/public/assets/probe.js');
@@ -379,6 +380,10 @@ $test->assert(is_string($mainTemplate) && str_contains($mainTemplate, 'id="nav-p
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function probeApiPath'), 'main JS builds selected-probe API endpoints');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function routeBaseHref'), 'main JS normalizes selected-probe route links before adding a probe id');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'This probe is unreachable. It is too far away and outside the area covered by SCUT. Only its estimated coordinates are available.'), 'English translations include the unreachable selected-probe warning');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'Cette sonde est injoignable. Elle est trop éloignée et hors de la zone couverte par SCUT. Seules ses coordonnées estimées sont disponibles.'), 'French translations include the unreachable selected-probe warning');
+$test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="sector-context" class="sector-context"'), 'Probe template exposes the unreachable selected-probe warning');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/sector")'), 'SCUT page reads selected probe current sector coverage');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/scut-network/"'), 'SCUT page reads selected probe network details');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
@@ -522,7 +527,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-probe-identity-panel"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-unreachable-probe-warning"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

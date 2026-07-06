@@ -375,6 +375,7 @@
 
     async function loadCurrentSector() {
         try {
+            window.VNG.setProbeUnreachablePanel?.("messages-panel", false);
             const [probeData, sectorData] = await Promise.all([
                 window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"}).catch(() => null),
                 window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}),
@@ -390,7 +391,10 @@
             state.currentSectorObjects = [];
             state.currentSectorScutNetworks = [];
             state.scutNetworkProbes = [];
-            await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "message-status"});
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "message-status", "panelId": "messages-panel"})) {
+                window.VNG.setProbeUnreachablePanel?.("messages-panel", false);
+                setText("message-status", error.message || tr("requestDenied", "Request denied"));
+            }
         }
         renderMessageRecipients();
     }

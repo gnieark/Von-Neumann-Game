@@ -175,6 +175,7 @@
         refreshTimer = null;
 
         try {
+            window.VNG.setProbeUnreachablePanel?.("scut-panel", false);
             const sectorData = await window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"});
             const networks = Array.isArray(sectorData && sectorData.sector && sectorData.sector.scutNetworks)
                 ? sectorData.sector.scutNetworks
@@ -198,7 +199,8 @@
             state.networks = [];
             state.network = null;
             renderPage();
-            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "scut-status", "metricsId": "scut-summary"})) {
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "scut-status", "panelId": "scut-panel"})) {
+                window.VNG.setProbeUnreachablePanel?.("scut-panel", false);
                 setStatus(error.message || tr("requestDenied", "Request denied"));
             }
         } finally {

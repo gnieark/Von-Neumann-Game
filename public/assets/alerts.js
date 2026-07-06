@@ -153,6 +153,17 @@
                 window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}).catch((error) => ({"sector": {}, "error": error})),
                 window.VNG.apiJson(window.VNG.probeApiPath("/alerts"), {"method": "GET"}).catch(() => ({"alerts": []})),
             ]);
+            if (sectorData.error && await window.VNG.renderUnreachableProbeTelemetry(sectorData.error, {"statusId": "console-alerts-empty", "panelId": "alerts-panel"})) {
+                currentSector = {};
+                currentAlerts = [];
+                const list = document.getElementById("console-alerts-list");
+                if (list) {
+                    list.innerHTML = "";
+                }
+                scheduleRefresh({"sector": sectorData, "alerts": []});
+                return;
+            }
+            window.VNG.setProbeUnreachablePanel?.("alerts-panel", false);
             renderAlerts(sectorData.sector || {}, alertData.alerts || []);
             if (sectorData.error && (alertData.alerts || []).length === 0) {
                 const empty = document.getElementById("console-alerts-empty");
@@ -172,6 +183,7 @@
                 empty.hidden = false;
                 empty.textContent = error.message || tr("sectorContextUnavailable", "Displayed sector: observation unavailable.");
             }
+            window.VNG.setProbeUnreachablePanel?.("alerts-panel", false);
             scheduleRefresh({});
         } finally {
             loadInProgress = false;

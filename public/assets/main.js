@@ -504,8 +504,26 @@ function probeUnreachableText(messages) {
     return t(
         messages,
         "probeOutOfScutRangeExplanation",
-        "This probe is outside the default probe sector and outside shared SCUT coverage. Only coarse telemetry is reachable."
+        "This probe is unreachable. It is too far away and outside the area covered by SCUT. Only its estimated coordinates are available."
     );
+}
+
+function setProbeUnreachablePanel(panelId, active) {
+    const panel = panelId ? document.getElementById(panelId) : null;
+    if (!panel) {
+        return;
+    }
+
+    panel.classList.toggle("probe-unreachable-panel", Boolean(active));
+    if (!active) {
+        panel.querySelectorAll("[data-unreachable-status=\"1\"]").forEach((node) => {
+            if (node.dataset.unreachableAddedSectorContext === "1") {
+                node.classList.remove("sector-context");
+            }
+            delete node.dataset.unreachableStatus;
+            delete node.dataset.unreachableAddedSectorContext;
+        });
+    }
 }
 
 async function renderUnreachableProbeTelemetry(error, options) {
@@ -523,6 +541,15 @@ async function renderUnreachableProbeTelemetry(error, options) {
     const statusNode = options && options.statusId ? document.getElementById(options.statusId) : null;
     if (statusNode) {
         statusNode.textContent = probeUnreachableText(messages);
+        statusNode.hidden = false;
+        if (!statusNode.classList.contains("sector-context")) {
+            statusNode.dataset.unreachableAddedSectorContext = "1";
+        }
+        statusNode.classList.add("sector-context");
+        statusNode.dataset.unreachableStatus = "1";
+    }
+    if (options && options.panelId) {
+        setProbeUnreachablePanel(options.panelId, true);
     }
     const metricsNode = options && options.metricsId ? document.getElementById(options.metricsId) : null;
     if (metricsNode) {
@@ -784,6 +811,7 @@ window.VNG = {
     restoreDisclosureIds,
     sectorAlerts,
     selectedProbeId,
+    setProbeUnreachablePanel,
     setNavigationScutCoverage,
     setNavigationWarning,
     startNavigationWarningSync,

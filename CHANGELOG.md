@@ -8,6 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - API v79 : `GET /api/probes` expose `isReachable` pour chaque sonde, vrai quand elle est la sonde par défaut, dans le même secteur, ou joignable via une couverture SCUT partagée.
 - Interface : la page Sonde affiche le nom et le type de la sonde, permet de la renommer quand elle est joignable, et propose depuis la sonde principale une bascule d’instance vers un drone joignable.
+- Interface : les pages ciblant une sonde injoignable harmonisent leur avertissement hors portée et réduisent les pages Capteurs, Mouvement, SCUT, Messagerie et Alertes à leur titre, rafraîchissement et message d’avertissement.
 
 ## 2026-07-04
 
