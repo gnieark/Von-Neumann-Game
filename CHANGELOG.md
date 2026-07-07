@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-07
+
+### Changed
+
+- API v80 : ajout des recettes `atomic_printer_part` et `deuterium_engine`; la pièce d’imprimante atomique se fabrique via l’imprimante atomique en 45 minutes, et le moteur au deutérium s’assemble via Manny en 2 heures avec 0.5 ECE de deutérium direct.
+- Interface : ajout des libellés et descriptions FR/EN pour les pièces d’imprimante atomique et moteurs au deutérium dans les pages Mannys et Inventaires.
+
 ## 2026-07-06
 
 ### Changed

@@ -77,6 +77,8 @@
             "electric_motor": tr("electricMotor", "Electric motor"),
             "battery_pack": tr("batteryPack", "Battery pack"),
             "linear_actuator": tr("linearActuator", "Linear actuator"),
+            "atomic_printer_part": tr("atomicPrinterPart", "Atomic printer part"),
+            "deuterium_engine": tr("deuteriumEngine", "Deuterium engine"),
             "manny": tr("mannyObject", "Manny"),
         }[type] || fallback || type || "-";
     }
@@ -224,10 +226,12 @@
             "crystal_substrate",
             "dopant_matrix",
             "integrated_circuit",
+            "atomic_printer_part",
             "scut_relay",
             "electric_motor",
             "battery_pack",
             "linear_actuator",
+            "deuterium_engine",
         ].includes(item.type);
     }
 
@@ -367,9 +371,11 @@
         "crystal_substrate",
         "dopant_matrix",
         "integrated_circuit",
+        "atomic_printer_part",
         "electric_motor",
         "battery_pack",
         "linear_actuator",
+        "deuterium_engine",
     ];
     const excludedStorageRuleTypes = new Set([
         "atomic_3d_printer",

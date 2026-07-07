@@ -67,6 +67,22 @@ final class CraftingRecipeCatalog
     public const LINEAR_ACTUATOR_METALS_COST = 0.01;
     public const LINEAR_ACTUATOR_CONTAINER_SPACE = 0.01;
     public const LINEAR_ACTUATOR_CRAFTING_SECONDS = 1200;
+    public const ATOMIC_PRINTER_PART_MICRO_CONDUCTORS = 2;
+    public const ATOMIC_PRINTER_PART_CERAMIC_INSULATORS = 1;
+    public const ATOMIC_PRINTER_PART_CRYSTAL_SUBSTRATES = 1;
+    public const ATOMIC_PRINTER_PART_DOPANT_MATRICES = 1;
+    public const ATOMIC_PRINTER_PART_DEUTERIUM_COST = 0.05;
+    public const ATOMIC_PRINTER_PART_CONTAINER_SPACE = 0.01;
+    public const ATOMIC_PRINTER_PART_CRAFTING_SECONDS = 2700;
+    public const DEUTERIUM_ENGINE_ATOMIC_PRINTER_PARTS = 1;
+    public const DEUTERIUM_ENGINE_INTEGRATED_CIRCUITS = 1;
+    public const DEUTERIUM_ENGINE_ELECTRIC_MOTORS = 2;
+    public const DEUTERIUM_ENGINE_BATTERY_PACKS = 1;
+    public const DEUTERIUM_ENGINE_LINEAR_ACTUATORS = 1;
+    public const DEUTERIUM_ENGINE_STEEL_PLATES = 4;
+    public const DEUTERIUM_ENGINE_DEUTERIUM_COST = 0.5;
+    public const DEUTERIUM_ENGINE_CONTAINER_SPACE = 0.06;
+    public const DEUTERIUM_ENGINE_CRAFTING_SECONDS = 7200;
     public const SOLAR_PANEL_MICRO_CONDUCTORS = 2;
     public const SOLAR_PANEL_CRYSTAL_SUBSTRATES = 1;
     public const SOLAR_PANEL_CERAMIC_INSULATORS = 1;
@@ -131,6 +147,8 @@ final class CraftingRecipeCatalog
         'electric_motor' => 'A compact rotary actuator that converts stored electrical energy into mechanical motion.',
         'battery_pack' => 'A rechargeable power pack for mobile tools, actuators, and autonomous Manny systems.',
         'linear_actuator' => 'A precise push-pull mechanism used wherever a Manny needs controlled force.',
+        'atomic_printer_part' => 'A precision replacement block printed at atomic scale for high-energy fabrication systems.',
+        'deuterium_engine' => 'A compact propulsion module that channels stored deuterium through printed control parts.',
         'solar_panel' => 'A foldable photovoltaic panel with printed conductors, crystal substrate, and a reinforced mounting plate.',
         'scut_relay' => 'A long-range SCUT communication relay module with its own solar power array, buffer batteries, control circuits, and deployable structure.',
         'thermal_protection_shell' => 'A disposable ablative shell that protects a storage container during atmospheric entry.',
@@ -158,6 +176,8 @@ final class CraftingRecipeCatalog
             self::electricMotor($config),
             self::batteryPack($config),
             self::linearActuator($config),
+            self::atomicPrinterPart($config),
+            self::deuteriumEngine($config),
             self::solarPanel($config),
             self::scutRelay($config),
             self::thermalProtectionShell($config),
@@ -499,6 +519,60 @@ final class CraftingRecipeCatalog
                 ProbeItem::TYPE_LINEAR_ACTUATOR,
                 ProbeItem::LINEAR_ACTUATOR_NAME,
                 Config::float($config, 'linear_actuator.containerSpace', self::LINEAR_ACTUATOR_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function atomicPrinterPart(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_ATOMIC_PRINTER_PART,
+            'name' => ProbeItem::ATOMIC_PRINTER_PART_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_ATOMIC_PRINTER_PART),
+            'craftableBy' => [self::FABRICATOR_ATOMIC_PRINTER],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_MICRO_CONDUCTOR, Config::int($config, 'atomic_printer_part.microConductorCount', self::ATOMIC_PRINTER_PART_MICRO_CONDUCTORS)),
+                self::itemIngredient(ProbeItem::TYPE_CERAMIC_INSULATOR, Config::int($config, 'atomic_printer_part.ceramicInsulatorCount', self::ATOMIC_PRINTER_PART_CERAMIC_INSULATORS)),
+                self::itemIngredient(ProbeItem::TYPE_CRYSTAL_SUBSTRATE, Config::int($config, 'atomic_printer_part.crystalSubstrateCount', self::ATOMIC_PRINTER_PART_CRYSTAL_SUBSTRATES)),
+                self::itemIngredient(ProbeItem::TYPE_DOPANT_MATRIX, Config::int($config, 'atomic_printer_part.dopantMatrixCount', self::ATOMIC_PRINTER_PART_DOPANT_MATRICES)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'atomic_printer_part.deuteriumCost', self::ATOMIC_PRINTER_PART_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'atomic_printer_part.durationSeconds', self::ATOMIC_PRINTER_PART_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_ATOMIC_PRINTER_PART,
+                ProbeItem::ATOMIC_PRINTER_PART_NAME,
+                Config::float($config, 'atomic_printer_part.containerSpace', self::ATOMIC_PRINTER_PART_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function deuteriumEngine(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_DEUTERIUM_ENGINE,
+            'name' => ProbeItem::DEUTERIUM_ENGINE_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_DEUTERIUM_ENGINE),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_ATOMIC_PRINTER_PART, Config::int($config, 'deuterium_engine.atomicPrinterPartCount', self::DEUTERIUM_ENGINE_ATOMIC_PRINTER_PARTS)),
+                self::itemIngredient(ProbeItem::TYPE_INTEGRATED_CIRCUIT, Config::int($config, 'deuterium_engine.integratedCircuitCount', self::DEUTERIUM_ENGINE_INTEGRATED_CIRCUITS)),
+                self::itemIngredient(ProbeItem::TYPE_ELECTRIC_MOTOR, Config::int($config, 'deuterium_engine.electricMotorCount', self::DEUTERIUM_ENGINE_ELECTRIC_MOTORS)),
+                self::itemIngredient(ProbeItem::TYPE_BATTERY_PACK, Config::int($config, 'deuterium_engine.batteryPackCount', self::DEUTERIUM_ENGINE_BATTERY_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_LINEAR_ACTUATOR, Config::int($config, 'deuterium_engine.linearActuatorCount', self::DEUTERIUM_ENGINE_LINEAR_ACTUATORS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'deuterium_engine.steelPlateCount', self::DEUTERIUM_ENGINE_STEEL_PLATES)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'deuterium_engine.deuteriumCost', self::DEUTERIUM_ENGINE_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'deuterium_engine.durationSeconds', self::DEUTERIUM_ENGINE_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_DEUTERIUM_ENGINE,
+                ProbeItem::DEUTERIUM_ENGINE_NAME,
+                Config::float($config, 'deuterium_engine.containerSpace', self::DEUTERIUM_ENGINE_CONTAINER_SPACE),
             ),
         ];
     }

@@ -259,6 +259,28 @@
       "containerSpace": 0.01,
       "durationSeconds": 1200
     },
+    "atomic_printer_part": {
+      "description": "A precision replacement block printed at atomic scale for high-energy fabrication systems.",
+      "microConductorCount": 2,
+      "ceramicInsulatorCount": 1,
+      "crystalSubstrateCount": 1,
+      "dopantMatrixCount": 1,
+      "deuteriumCost": 0.05,
+      "containerSpace": 0.01,
+      "durationSeconds": 2700
+    },
+    "deuterium_engine": {
+      "description": "A compact propulsion module that channels stored deuterium through printed control parts.",
+      "atomicPrinterPartCount": 1,
+      "integratedCircuitCount": 1,
+      "electricMotorCount": 2,
+      "batteryPackCount": 1,
+      "linearActuatorCount": 1,
+      "steelPlateCount": 4,
+      "deuteriumCost": 0.5,
+      "containerSpace": 0.06,
+      "durationSeconds": 7200
+    },
     "solar_panel": {
       "description": "A foldable photovoltaic panel with printed conductors, crystal substrate, and a reinforced mounting plate.",
       "microConductorCount": 2,

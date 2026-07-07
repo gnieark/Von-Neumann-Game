@@ -539,7 +539,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260706-nav-label-html-entities"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260707-deuterium-engine-recipes"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1290,7 +1290,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(79, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(80, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2312,6 +2312,25 @@ $test->assert(isset($recipesById['battery_pack']), 'crafting recipes expose batt
 $test->assertEquals('carbon_compounds', $recipesById['battery_pack']['ingredients'][2]['type'] ?? null, 'battery pack uses organic compounds');
 $test->assert(isset($recipesById['linear_actuator']), 'crafting recipes expose linear actuators');
 $test->assertEquals('electric_motor', $recipesById['linear_actuator']['ingredients'][2]['type'] ?? null, 'linear actuator requires an electric motor');
+$test->assert(isset($recipesById['atomic_printer_part']), 'crafting recipes expose atomic printer parts');
+$test->assertEquals(['atomic_3d_printer'], $recipesById['atomic_printer_part']['craftableBy'] ?? null, 'atomic printer parts are printed by the atomic printer');
+$test->assertEquals('micro_conductor', $recipesById['atomic_printer_part']['ingredients'][0]['type'] ?? null, 'atomic printer parts require micro conductors');
+$test->assertEquals(2700, $recipesById['atomic_printer_part']['durationSeconds'] ?? null, 'atomic printer part print takes forty-five real minutes');
+$test->assertEquals(0.01, $recipesById['atomic_printer_part']['output']['containerSpace'] ?? null, 'atomic printer parts occupy 0.01 containers');
+$test->assert(isset($recipesById['deuterium_engine']), 'crafting recipes expose deuterium engines');
+$test->assertEquals(['manny'], $recipesById['deuterium_engine']['craftableBy'] ?? null, 'deuterium engines are assembled by Manny');
+$deuteriumEngineIngredients = [];
+foreach ($recipesById['deuterium_engine']['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $deuteriumEngineIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(1, $deuteriumEngineIngredients['atomic_printer_part']['quantity'] ?? null, 'deuterium engines require one atomic printer part');
+$test->assertEquals(1, $deuteriumEngineIngredients['integrated_circuit']['quantity'] ?? null, 'deuterium engines require one integrated circuit');
+$test->assertEquals(2, $deuteriumEngineIngredients['electric_motor']['quantity'] ?? null, 'deuterium engines require two electric motors');
+$test->assertEquals(0.5, $deuteriumEngineIngredients['deuterium']['quantity'] ?? null, 'deuterium engines directly consume 0.5 ECE of deuterium');
+$test->assert($recipesById['deuterium_engine']['durationSeconds'] <= 86400, 'deuterium engine assembly stays under twenty-four hours');
+$test->assertEquals(0.06, $recipesById['deuterium_engine']['output']['containerSpace'] ?? null, 'deuterium engines occupy 0.06 containers');
 $test->assert(isset($recipesById['solar_panel']), 'crafting recipes expose solar panels');
 $test->assertEquals(['manny'], $recipesById['solar_panel']['craftableBy'] ?? null, 'solar panels are assembled by Manny');
 $test->assertEquals('micro_conductor', $recipesById['solar_panel']['ingredients'][0]['type'] ?? null, 'solar panel requires micro conductors');

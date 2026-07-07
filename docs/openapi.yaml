@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 79
+                apiVersion: 80
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -187,6 +187,64 @@ paths:
                       type: solar_panel
                       name: Solar panel
                       containerSpace: 0.015
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: atomic_printer_part
+                    name: Atomic printer part
+                    description: A precision replacement block printed at atomic scale for high-energy fabrication systems.
+                    craftableBy: [atomic_3d_printer]
+                    ingredients:
+                      - type: micro_conductor
+                        quantity: 2
+                        unit: item
+                      - type: ceramic_insulator
+                        quantity: 1
+                        unit: item
+                      - type: crystal_substrate
+                        quantity: 1
+                        unit: item
+                      - type: dopant_matrix
+                        quantity: 1
+                        unit: item
+                      - type: deuterium
+                        quantity: 0.05
+                        unit: earth_container_equivalent
+                    durationSeconds: 2700
+                    output:
+                      type: atomic_printer_part
+                      name: Atomic printer part
+                      containerSpace: 0.01
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: deuterium_engine
+                    name: Deuterium engine
+                    description: A compact propulsion module that channels stored deuterium through printed control parts.
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: atomic_printer_part
+                        quantity: 1
+                        unit: item
+                      - type: integrated_circuit
+                        quantity: 1
+                        unit: item
+                      - type: electric_motor
+                        quantity: 2
+                        unit: item
+                      - type: battery_pack
+                        quantity: 1
+                        unit: item
+                      - type: linear_actuator
+                        quantity: 1
+                        unit: item
+                      - type: steel_plate
+                        quantity: 4
+                        unit: item
+                      - type: deuterium
+                        quantity: 0.5
+                        unit: earth_container_equivalent
+                    durationSeconds: 7200
+                    output:
+                      type: deuterium_engine
+                      name: Deuterium engine
+                      containerSpace: 0.06
                       containerSpaceUnit: earth_container_equivalent
                   - id: scut_relay
                     name: SCUT relay
@@ -3117,7 +3175,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         description:
@@ -3145,7 +3203,7 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, thermal_protection_shell, parachute_pack, descent_guidance_module]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, thermal_protection_shell, parachute_pack, descent_guidance_module]
         quantity:
           type: number
           minimum: 0
@@ -3162,7 +3220,7 @@ components:
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         containerSpace:
@@ -4491,7 +4549,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
             amount:
               type: number
               description: Present for discarded resources and deuterium.
@@ -4534,7 +4592,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         containerSpace:
@@ -4566,7 +4624,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         currentTask:
@@ -4672,7 +4730,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
           description: >
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
@@ -4691,7 +4749,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, atomic_printer_part]
           description: Atomic-printer recipe to start. An available Manny aboard the probe is automatically reserved as assistant.
     MannySalvageRequest:
       type: object
@@ -5222,7 +5280,7 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         itemType:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
           description: Present only for drifting item stacks.
         quantity:
           type: integer
