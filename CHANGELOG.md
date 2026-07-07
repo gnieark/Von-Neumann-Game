@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v81 : ajout de `POST /api/probe/mannies/{mannyId}/assemble-probe`, une tâche Manny extérieure de 3 heures qui consomme 2 containers vides, 1 `deuterium_engine`, 1 `scut_relay`, 5 `electric_motor`, 2 `atomic_printer_part` et 4 `solar_panel`, puis crée une sonde `drone-N` appartenant au joueur et y transfère la Manny.
+- Interface : l’accordéon Fabrication des Mannys propose “Assemble a new probe”, avec description, liste des composants et sélection de deux containers vides.
 - API v80 : ajout des recettes `atomic_printer_part` et `deuterium_engine`; la pièce d’imprimante atomique se fabrique via l’imprimante atomique en 45 minutes, et le moteur au deutérium s’assemble via Manny en 2 heures avec 0.5 ECE de deutérium direct.
 - Interface : ajout des libellés et descriptions FR/EN pour les pièces d’imprimante atomique et moteurs au deutérium dans les pages Mannys et Inventaires.
 

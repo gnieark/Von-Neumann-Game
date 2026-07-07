@@ -26,6 +26,7 @@ final class TaskHandlerRegistry
             new StorageMoveTaskHandler(),
             new ScutRelayTurnOnTaskHandler(),
             new ProbeImprovementTaskHandler(),
+            new ProbeAssemblyTaskHandler(),
         ];
     }
 }

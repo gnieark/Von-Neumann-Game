@@ -213,6 +213,30 @@ final class ProbeManniesApiController
             ]);
         }
 
+        if ($action === 'assemble-probe') {
+            $containerIds = $data['containerIds'] ?? $data['containers'] ?? null;
+            if ($containerIds === null && isset($data['containerIdA'], $data['containerIdB'])) {
+                $containerIds = [$data['containerIdA'], $data['containerIdB']];
+            }
+            if (!is_array($containerIds)) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain containerIds.');
+            }
+            $containerIds = array_values($containerIds);
+            foreach ($containerIds as $containerId) {
+                if (!is_string($containerId)) {
+                    return ApiResponse::error(400, 'bad_request', 'containerIds must contain strings.');
+                }
+            }
+
+            $manny = $this->mannies->startProbeAssembly($probe, $uid, $containerIds);
+            $probe = $this->freshProbe($probe);
+
+            return new ApiResponse(202, [
+                'manny' => $this->presenter->manny($player, $probe, $manny),
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+            ]);
+        }
+
         if ($action === 'turn-on-relay') {
             $blocked = $this->probeMovementOrderError($probe);
             if ($blocked instanceof ApiResponse) {

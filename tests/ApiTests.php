@@ -430,6 +430,7 @@ $test->assert(str_contains($openApi, '/api/probes'), 'OpenAPI documents the play
 $test->assert(str_contains($openApi, '/api/probe/{probeId}'), 'OpenAPI documents the owned probe detail endpoint');
 $test->assert(str_contains($openApi, 'summary: Update a Neumann probe'), 'OpenAPI documents the probe update endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
+$test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
@@ -539,7 +540,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260707-deuterium-engine-recipes"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260707-assemble-probe"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1290,7 +1291,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(80, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(81, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -4401,6 +4402,7 @@ if ($foreignMannyId !== '') {
         ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
         ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],
         ['POST', $foreignMannyPath . '/improve-probe', ['improvement' => 'deuterium_compression'], 'POST /api/probe/mannies/{id}/improve-probe'],
+        ['POST', $foreignMannyPath . '/assemble-probe', ['containerIds' => ['container-a', 'container-b']], 'POST /api/probe/mannies/{id}/assemble-probe'],
         ['POST', $foreignMannyPath . '/recall', [], 'POST /api/probe/mannies/{id}/recall'],
     ] as [$method, $path, $body, $label]) {
         assertForeignMannyEndpointReturnsNotFound($test, $kernel, $headers, $method, $path, $body, $label);
@@ -4597,6 +4599,83 @@ if ($createdProbe !== null) {
     ]);
     $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
     $test->assertEquals(200.0, $probes->findByPlayerId($improvementPlayer->id)?->deuteriumStock, 'completed improved tank refill fills the probe to 200 percent');
+
+    $assemblyPlayer = $auth->registerPlayerWithPassword('probe-assembly-user', 'secret', 'Probe Assembly User');
+    $assemblyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($assemblyPlayer)['token']];
+    $assemblyProbe = $probes->findByPlayerId($assemblyPlayer->id) ?? throw new RuntimeException('Expected assembly probe.');
+    $assemblyMannyList = $kernel->handle('GET', '/api/probe/mannies', $assemblyHeaders);
+    $assemblyMannyId = (string) ($assemblyMannyList->body['mannies'][0]['id'] ?? '');
+    $assemblyMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $assemblyMannyRow->execute(['uid' => $assemblyMannyId]);
+    $assemblyMannyDbId = (int) $assemblyMannyRow->fetchColumn();
+    $assemblyContainerItemA = $storage->addItem($assemblyProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $assemblyContainerItemB = $storage->addItem($assemblyProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $assemblyContainerIdA = 'container-' . $assemblyContainerItemA->uid;
+    $assemblyContainerIdB = 'container-' . $assemblyContainerItemB->uid;
+    $missingAssemblyComponents = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyMannyId) . '/assemble-probe', $assemblyHeaders, json_encode([
+        'containerIds' => [$assemblyContainerIdA, $assemblyContainerIdB],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingAssemblyComponents->status, 'probe assembly requires all configured components');
+    $test->assertEquals('insufficient_probe_assembly_components', $missingAssemblyComponents->body['error']['code'] ?? null, 'missing probe assembly components return an explicit error');
+
+    $assemblyComponents = [
+        [ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::DEUTERIUM_ENGINE_NAME, 0.06, 1],
+        [ProbeItem::TYPE_SCUT_RELAY, ProbeItem::SCUT_RELAY_NAME, 0.12, 1],
+        [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006, 5],
+        [ProbeItem::TYPE_ATOMIC_PRINTER_PART, ProbeItem::ATOMIC_PRINTER_PART_NAME, 0.01, 2],
+        [ProbeItem::TYPE_SOLAR_PANEL, ProbeItem::SOLAR_PANEL_NAME, 0.015, 4],
+    ];
+    foreach ($assemblyComponents as [$type, $name, $space, $count]) {
+        for ($index = 0; $index < $count; $index++) {
+            $storage->addItem($assemblyProbe, $type, $name, $space);
+        }
+    }
+
+    $assemblyContainerA = $storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdA);
+    if ($assemblyContainerA !== null) {
+        $storageContainers->setResourceAmount($assemblyContainerA->id, ResourceComposition::METALS, 0.01);
+    }
+    $nonEmptyAssemblyContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyMannyId) . '/assemble-probe', $assemblyHeaders, json_encode([
+        'containerIds' => [$assemblyContainerIdA, $assemblyContainerIdB],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $nonEmptyAssemblyContainer->status, 'probe assembly refuses a non-empty selected container');
+    $test->assertEquals('storage_container_not_empty', $nonEmptyAssemblyContainer->body['error']['code'] ?? null, 'non-empty selected assembly containers return an explicit error');
+    if ($assemblyContainerA !== null) {
+        $storageContainers->setResourceAmount($assemblyContainerA->id, ResourceComposition::METALS, 0.0);
+    }
+    $assemblyProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $assemblyProbe, []);
+
+    $assembleProbe = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyMannyId) . '/assemble-probe', $assemblyHeaders, json_encode([
+        'containerIds' => [$assemblyContainerIdA, $assemblyContainerIdB],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $assembleProbe->status, 'POST /api/probe/mannies/{id}/assemble-probe starts probe assembly');
+    $test->assertEquals('assembling_probe', $assembleProbe->body['manny']['currentTask'] ?? null, 'probe assembly task is exposed on Manny');
+    $test->assertEquals('sector', $assembleProbe->body['manny']['location']['type'] ?? null, 'probe assembly moves the Manny outside the probe');
+    $test->assertEquals(10800, $assembleProbe->body['manny']['task']['durationSeconds'] ?? null, 'probe assembly lasts three hours');
+    $test->assertEquals(13, count($assembleProbe->body['manny']['task']['consumedItems'] ?? []), 'probe assembly consumes all required components');
+    $test->assertEquals(2, count($assembleProbe->body['manny']['task']['consumedContainers'] ?? []), 'probe assembly consumes the two selected containers');
+    $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdA) === null, 'accepted probe assembly removes the first ingredient container immediately');
+    $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdB) === null, 'accepted probe assembly removes the second ingredient container immediately');
+    $test->assertEquals(null, $items->findByUidForProbe($assemblyProbe->id, $assemblyContainerItemA->uid), 'accepted probe assembly consumes the first backing container item');
+    $test->assertEquals(null, $items->findByUidForProbe($assemblyProbe->id, $assemblyContainerItemB->uid), 'accepted probe assembly consumes the second backing container item');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $assemblyMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $assemblyHeaders);
+    $assemblyProbes = $probes->findAllByPlayerId($assemblyPlayer->id);
+    $assemblyDrones = array_values(array_filter(
+        $assemblyProbes,
+        static fn(NeumannProbe $probe): bool => $probe->name === 'drone-1',
+    ));
+    $test->assertEquals(1, count($assemblyDrones), 'completed probe assembly creates drone-1 for the player');
+    $assemblyDrone = $assemblyDrones[0] ?? null;
+    $test->assert($assemblyDrone instanceof NeumannProbe && $assemblyDrone->currentSector->equals($assemblyProbe->currentSector), 'assembled drone is created in the assembly sector');
+    $test->assertEquals($assemblyProbe->id, $players->findById($assemblyPlayer->id)?->defaultProbeId, 'completed probe assembly keeps the original default probe');
+    $assemblyMannyAfterCompletion = $mannies->findByUid($assemblyMannyId);
+    $test->assertEquals($assemblyDrone?->id, $assemblyMannyAfterCompletion?->probeId, 'completed probe assembly transfers the Manny to the new drone');
+    $test->assertEquals(Manny::LOCATION_PROBE, $assemblyMannyAfterCompletion?->locationType, 'transferred assembly Manny is aboard the new drone');
+    $test->assert($assemblyMannyAfterCompletion?->storageContainerId !== null, 'transferred assembly Manny is stored in the new drone cargo');
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);
