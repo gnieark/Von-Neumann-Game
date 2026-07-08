@@ -25,9 +25,9 @@ final class ProbeManniesApiController
         private readonly ProbeManniesApiPresenter $presenter,
     ) {}
 
-    public function list(Player $player): ApiResponse
+    public function list(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $mannies = $this->mannies->manniesForProbe($probe);
 
         return new ApiResponse(200, [
@@ -35,9 +35,9 @@ final class ProbeManniesApiController
         ]);
     }
 
-    public function rename(Player $player, string $uid, ?string $body): ApiResponse
+    public function rename(Player $player, string $uid, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->requiredProbe($player);
+        $probe ??= $this->requiredProbe($player);
         $data = $this->decodeJsonBody($body);
         if (!is_array($data) || !isset($data['name']) || !is_string($data['name'])) {
             return ApiResponse::error(400, 'bad_request', 'JSON body must contain a Manny name.');
@@ -48,9 +48,9 @@ final class ProbeManniesApiController
         return new ApiResponse(200, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
     }
 
-    public function atomicPrinterCraft(Player $player, ?string $body): ApiResponse
+    public function atomicPrinterCraft(Player $player, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $data = $this->decodeJsonBody($body);
         if (!is_array($data) || !isset($data['recipe']) || !is_string($data['recipe'])) {
@@ -66,9 +66,9 @@ final class ProbeManniesApiController
         ]);
     }
 
-    public function action(Player $player, string $uid, string $action, ?string $body): ApiResponse
+    public function action(Player $player, string $uid, string $action, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
-        $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $data = $this->decodeJsonBody($body) ?? [];
 
         if ($action === 'repair') {
@@ -210,6 +210,30 @@ final class ProbeManniesApiController
             return new ApiResponse(202, [
                 'manny' => $this->presenter->manny($player, $probe, $manny),
                 'improvements' => $this->presenter->probeImprovements($probe),
+            ]);
+        }
+
+        if ($action === 'assemble-probe') {
+            $containerIds = $data['containerIds'] ?? $data['containers'] ?? null;
+            if ($containerIds === null && isset($data['containerIdA'], $data['containerIdB'])) {
+                $containerIds = [$data['containerIdA'], $data['containerIdB']];
+            }
+            if (!is_array($containerIds)) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain containerIds.');
+            }
+            $containerIds = array_values($containerIds);
+            foreach ($containerIds as $containerId) {
+                if (!is_string($containerId)) {
+                    return ApiResponse::error(400, 'bad_request', 'containerIds must contain strings.');
+                }
+            }
+
+            $manny = $this->mannies->startProbeAssembly($probe, $uid, $containerIds);
+            $probe = $this->freshProbe($probe);
+
+            return new ApiResponse(202, [
+                'manny' => $this->presenter->manny($player, $probe, $manny),
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
             ]);
         }
 

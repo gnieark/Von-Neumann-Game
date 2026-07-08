@@ -77,6 +77,8 @@
             "electric_motor": tr("electricMotor", "Electric motor"),
             "battery_pack": tr("batteryPack", "Battery pack"),
             "linear_actuator": tr("linearActuator", "Linear actuator"),
+            "atomic_printer_part": tr("atomicPrinterPart", "Atomic printer part"),
+            "deuterium_engine": tr("deuteriumEngine", "Deuterium engine"),
             "manny": tr("mannyObject", "Manny"),
         }[type] || fallback || type || "-";
     }
@@ -224,10 +226,12 @@
             "crystal_substrate",
             "dopant_matrix",
             "integrated_circuit",
+            "atomic_printer_part",
             "scut_relay",
             "electric_motor",
             "battery_pack",
             "linear_actuator",
+            "deuterium_engine",
         ].includes(item.type);
     }
 
@@ -367,9 +371,11 @@
         "crystal_substrate",
         "dopant_matrix",
         "integrated_circuit",
+        "atomic_printer_part",
         "electric_motor",
         "battery_pack",
         "linear_actuator",
+        "deuterium_engine",
     ];
     const excludedStorageRuleTypes = new Set([
         "atomic_3d_printer",
@@ -969,7 +975,7 @@
     async function jettisonInventoryLine(line) {
         const kind = line.dataset.lineKind || "";
         if (kind === "resource") {
-            return window.VNG.apiJson("/api/probe/inventory/" + encodeURIComponent(line.dataset.stockId || line.dataset.resourceType || "") + "/jettison", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/inventory/" + encodeURIComponent(line.dataset.stockId || line.dataset.resourceType || "") + "/jettison"), {
                 "method": "POST",
                 "body": JSON.stringify({
                     "amount": Number.parseFloat(line.dataset.maxAmount || "0"),
@@ -980,7 +986,7 @@
 
         let latest = null;
         for (const itemId of splitLineIds(line.dataset.itemIds)) {
-            latest = await window.VNG.apiJson("/api/probe/inventory/" + encodeURIComponent(itemId) + "/jettison", {
+            latest = await window.VNG.apiJson(window.VNG.probeApiPath("/inventory/" + encodeURIComponent(itemId) + "/jettison"), {
                 "method": "POST",
                 "body": JSON.stringify({}),
             });
@@ -990,14 +996,14 @@
     }
 
     async function loadMannies() {
-        const data = await window.VNG.apiJson("/api/probe/mannies", {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/mannies"), {"method": "GET"});
         state.currentMannies = Array.isArray(data.mannies) ? data.mannies : [];
         return data;
     }
 
     async function loadCurrentSectorObjects() {
         try {
-            const data = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
+            const data = await window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"});
             state.currentSectorObjects = Array.isArray(data.sector && data.sector.objects) ? data.sector.objects : [];
             return data;
         } catch (error) {
@@ -1033,7 +1039,7 @@
 
         try {
             const [probeData, mannyData, sectorData] = await Promise.all([
-                window.VNG.apiJson("/api/probe", {"method": "GET"}),
+                window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"}),
                 loadMannies(),
                 loadCurrentSectorObjects(),
             ]);
@@ -1042,8 +1048,10 @@
             renderInventory(probe.inventory || {}, refreshOptions);
             scheduleRefresh({"probe": probe, "mannies": mannyData.mannies, "sector": sectorData && sectorData.sector});
         } catch (error) {
-            setText("inventory-status", error.message || tr("requestDenied", "Request denied"));
-            renderSystemsSummary(null);
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "inventory-status", "metricsId": "systems-summary"})) {
+                setText("inventory-status", error.message || tr("requestDenied", "Request denied"));
+                renderSystemsSummary(null);
+            }
             renderInventory(null, refreshOptions);
             scheduleRefresh(null);
         } finally {
@@ -1113,7 +1121,7 @@
         await runApiOrder(
             "inventory-status",
             tr("orderSent", "Order transmitted..."),
-            () => window.VNG.apiJson("/api/probe/storage-containers/" + encodeURIComponent(containerId), {
+            () => window.VNG.apiJson(window.VNG.probeApiPath("/storage-containers/" + encodeURIComponent(containerId)), {
                 "method": "PATCH",
                 "body": JSON.stringify({"label": trimmedLabel}),
             }),
@@ -1206,7 +1214,7 @@
             await runApiOrder(
                 "inventory-status",
                 tr("orderSent", "Order transmitted..."),
-                () => window.VNG.apiJson("/api/probe/storage-containers/" + encodeURIComponent(containerId) + "/rules", {
+                () => window.VNG.apiJson(window.VNG.probeApiPath("/storage-containers/" + encodeURIComponent(containerId) + "/rules"), {
                     "method": "PATCH",
                     "body": JSON.stringify({
                         "priority": storageRuleValues(formData, "priority"),
@@ -1238,7 +1246,7 @@
             await runApiOrder(
                 "inventory-status",
                 tr("orderSent", "Order transmitted..."),
-                () => window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(order.mannyId) + "/detach-storage-container", {
+                () => window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(order.mannyId) + "/detach-storage-container"), {
                     "method": "POST",
                     "body": JSON.stringify(order.payload),
                 }),
@@ -1261,7 +1269,7 @@
             await runApiOrder(
                 "inventory-status",
                 tr("orderSent", "Order transmitted..."),
-                () => window.VNG.apiJson("/api/probe/storage-moves", {
+                () => window.VNG.apiJson(window.VNG.probeApiPath("/storage-moves"), {
                     "method": "POST",
                     "body": JSON.stringify(payload),
                 }),

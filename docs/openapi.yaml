@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '71'
+  version: '81'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 72
+                apiVersion: 81
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -187,6 +187,64 @@ paths:
                       type: solar_panel
                       name: Solar panel
                       containerSpace: 0.015
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: atomic_printer_part
+                    name: Atomic printer part
+                    description: A precision replacement block printed at atomic scale for high-energy fabrication systems.
+                    craftableBy: [atomic_3d_printer]
+                    ingredients:
+                      - type: micro_conductor
+                        quantity: 2
+                        unit: item
+                      - type: ceramic_insulator
+                        quantity: 1
+                        unit: item
+                      - type: crystal_substrate
+                        quantity: 1
+                        unit: item
+                      - type: dopant_matrix
+                        quantity: 1
+                        unit: item
+                      - type: deuterium
+                        quantity: 0.05
+                        unit: earth_container_equivalent
+                    durationSeconds: 2700
+                    output:
+                      type: atomic_printer_part
+                      name: Atomic printer part
+                      containerSpace: 0.01
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: deuterium_engine
+                    name: Deuterium engine
+                    description: A compact propulsion module that channels stored deuterium through printed control parts.
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: atomic_printer_part
+                        quantity: 1
+                        unit: item
+                      - type: integrated_circuit
+                        quantity: 1
+                        unit: item
+                      - type: electric_motor
+                        quantity: 2
+                        unit: item
+                      - type: battery_pack
+                        quantity: 1
+                        unit: item
+                      - type: linear_actuator
+                        quantity: 1
+                        unit: item
+                      - type: steel_plate
+                        quantity: 4
+                        unit: item
+                      - type: deuterium
+                        quantity: 0.5
+                        unit: earth_container_equivalent
+                    durationSeconds: 7200
+                    output:
+                      type: deuterium_engine
+                      name: Deuterium engine
+                      containerSpace: 0.06
                       containerSpaceUnit: earth_container_equivalent
                   - id: scut_relay
                     name: SCUT relay
@@ -583,10 +641,10 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe:
     get:
-      summary: Get current Neumann probe
+      summary: Get default Neumann probe
       responses:
         '200':
-          description: Current probe
+          description: Default probe
           content:
             application/json:
               schema:
@@ -597,9 +655,97 @@ paths:
                     $ref: '#/components/schemas/Probe'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/probe/{probeId}:
+    get:
+      summary: Get a Neumann probe by id
+      description: >
+        Returns the requested probe only when it belongs to the authenticated
+        player. When the requested owned probe is neither in the same sector as
+        the default probe nor inside shared SCUT network coverage, the response
+        is limited to id, name, status `out_of_scut_range`, and relative sector
+        telemetry.
+      parameters:
+        - name: probeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Requested probe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [probe]
+                properties:
+                  probe:
+                    oneOf:
+                      - $ref: '#/components/schemas/Probe'
+                      - $ref: '#/components/schemas/ProbeLimitedTelemetry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update a Neumann probe
+      description: >
+        Renames the requested owned probe when `name` is provided. When
+        `isDefault` is true, sets the requested owned probe as the player's
+        default probe. The current default probe and the requested probe must
+        be in the same sector, or both sectors must be covered by the same
+        active SCUT network, before the default probe can be changed.
+      parameters:
+        - name: probeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbePatchRequest'
+            example:
+              name: New probe name
+              isDefault: true
+      responses:
+        '200':
+          description: Default probe updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Target probe is outside same-sector and same-SCUT reach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probes:
+    get:
+      summary: List player Neumann probes
+      responses:
+        '200':
+          description: Player probes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/probe/mission:
     get:
-      summary: List active probe missions
+      summary: List active player missions
       description: Alias of /api/probe/missions kept for clients that use a singular mission route.
       responses:
         '200':
@@ -612,8 +758,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/missions:
     get:
-      summary: List active probe missions
-      description: Returns missions currently assigned to the authenticated probe. New probes return an empty list.
+      summary: List active player missions
+      description: Returns missions currently assigned to the authenticated player.
       responses:
         '200':
           description: Active missions
@@ -647,6 +793,185 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/storage-containers:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1storage-containers/get'
+  /api/probe/{probeId}/storage-containers/{containerId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D/get'
+    patch:
+      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D/patch'
+  /api/probe/{probeId}/storage-containers/{containerId}/rules:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D~1rules/patch'
+  /api/probe/{probeId}/storage-moves:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1storage-moves/post'
+  /api/probe/{probeId}/probe-improvements-available:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1probe-improvements-available/get'
+  /api/probe/{probeId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1messages/get'
+    post:
+      $ref: '#/paths/~1api~1probe~1messages/post'
+  /api/probe/{probeId}/scut-network/{scutNetworkId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1scut-network~1%7BscutNetworkId%7D/get'
+  /api/probe/{probeId}/messages/{messageId}/read:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1messages~1%7BmessageId%7D~1read/patch'
+  /api/probe/{probeId}/alerts:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1alerts/get'
+  /api/probe/{probeId}/alerts/{alertId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1alerts~1%7BalertId%7D/patch'
+  /api/probe/{probeId}/damage-warnings:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1damage-warnings/get'
+  /api/probe/{probeId}/damage-warnings/{damageWarningId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/patch'
+  /api/probe/{probeId}/visited-sectors:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1visited-sectors/get'
+  /api/probe/{probeId}/sector:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1sector/get'
+  /api/probe/{probeId}/move:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1move/post'
+  /api/probe/{probeId}/inventory/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D/get'
+  /api/probe/{probeId}/inventory/{itemId}/jettison:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D~1jettison/post'
+  /api/probe/{probeId}/mannies:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    get:
+      $ref: '#/paths/~1api~1probe~1mannies/get'
+  /api/probe/{probeId}/mannies/{mannyId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    patch:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D/patch'
+  /api/probe/{probeId}/mannies/{mannyId}/repair:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1repair/post'
+  /api/probe/{probeId}/mannies/{mannyId}/mine:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1mine/post'
+  /api/probe/{probeId}/mannies/{mannyId}/craft:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1craft/post'
+  /api/probe/{probeId}/mannies/{mannyId}/improve-probe:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1improve-probe/post'
+  /api/probe/{probeId}/mannies/{mannyId}/assemble-probe:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1assemble-probe/post'
+  /api/probe/{probeId}/atomic-printer/craft:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1atomic-printer~1craft/post'
+  /api/probe/{probeId}/mannies/{mannyId}/salvage:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1salvage/post'
+  /api/probe/{probeId}/mannies/{mannyId}/detach-storage-container:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1detach-storage-container/post'
+  /api/probe/{probeId}/mannies/{mannyId}/drop-storage-container:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-storage-container/post'
+  /api/probe/{probeId}/mannies/{mannyId}/inspect-sector-object:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1inspect-sector-object/post'
+  /api/probe/{probeId}/mannies/{mannyId}/recover-storage-container:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recover-storage-container/post'
+  /api/probe/{probeId}/mannies/{mannyId}/install-bookmark:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1install-bookmark/post'
+  /api/probe/{probeId}/mannies/{mannyId}/recall:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recall/post'
+  /api/probe/{probeId}/mannies/{mannyId}/drop-manny-cargo:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-manny-cargo/post'
+  /api/probe/{probeId}/mannies/{mannyId}/refill-deuterium-tank:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1refill-deuterium-tank/post'
+  /api/probe/{probeId}/mannies/{mannyId}/turn-on-relay:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1turn-on-relay/post'
   /api/probe/mind-snapshot/reassign:
     post:
       summary: Reassign a terminal probe mind snapshot
@@ -1901,6 +2226,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/assemble-probe:
+    post:
+      summary: Assemble a new drone probe with a Manny
+      description: >
+        Starts a three-hour exterior Manny task that consumes two selected
+        empty additional containers plus one deuterium engine, one SCUT relay,
+        five electric motors, two atomic printer parts, and four solar panels.
+        When the task completes, a new owned drone probe is created in the
+        assembly sector and the Manny is transferred from the old probe to the
+        new one. If the original probe leaves the sector before completion, the
+        exterior Manny can be left behind as a forgotten Manny.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyProbeAssemblyRequest'
+            example:
+              containerIds:
+                - container-itm_aaaaaaaaaaaaaaaaaaaaaaaa
+                - container-itm_bbbbbbbbbbbbbbbbbbbbbbbb
+      responses:
+        '202':
+          description: Probe assembly task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Containers not empty or required components missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/atomic-printer/craft:
     post:
       summary: Start crafting an atomic-printer item
@@ -2644,6 +3021,18 @@ components:
       scheme: bearer
       description: Use a session token from /api/session or an API key generated from /api/me/api-key.
   parameters:
+    ProbeId:
+      name: probeId
+      in: path
+      required: true
+      description: >
+        Owned probe id. When it is not the player's default probe, the default
+        probe and this probe must be in the same sector or in sectors covered
+        by the same active SCUT network.
+      schema:
+        type: integer
+        minimum: 1
+      example: 2
     MannyId:
       name: mannyId
       in: path
@@ -2843,7 +3232,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         description:
@@ -2871,7 +3260,7 @@ components:
       properties:
         type:
           type: string
-          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, thermal_protection_shell, parachute_pack, descent_guidance_module]
+          enum: [deuterium, metals, ice, carbon_compounds, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, thermal_protection_shell, parachute_pack, descent_guidance_module]
         quantity:
           type: number
           minimum: 0
@@ -2888,7 +3277,7 @@ components:
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         containerSpace:
@@ -3253,6 +3642,64 @@ components:
               nullable: true
         inventory:
           $ref: '#/components/schemas/ProbeInventory'
+    ProbeLimitedTelemetry:
+      type: object
+      required: [id, name, status, sector]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [out_of_scut_range]
+        sector:
+          type: object
+          required: [relative]
+          properties:
+            relative:
+              $ref: '#/components/schemas/Vector'
+    ProbeSummary:
+      type: object
+      required: [id, name, status, isDefault, isReachable]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, dead, trapped_by_black_hole]
+        isDefault:
+          type: boolean
+          description: True for the probe returned by GET /api/probe.
+        isReachable:
+          type: boolean
+          description: True when the probe is the default probe, in the same sector as the default probe, or inside shared active SCUT network coverage.
+    ProbePatchRequest:
+      type: object
+      description: Optional fields to modify a probe. Any omitted field is left unchanged.
+      properties:
+        name:
+          type: string
+          description: New probe name.
+        isDefault:
+          type: boolean
+          description: When true, attempt to set this probe as the player's default probe.
+      additionalProperties: false
+    ProbeListResponse:
+      type: object
+      required: [defaultProbeId, probes]
+      properties:
+        defaultProbeId:
+          type: integer
+          nullable: true
+          description: Identifier of the player's default probe.
+        probes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeSummary'
     ProbeTerminalAlert:
       type: object
       required: [type, severity, title, message, action]
@@ -4159,7 +4606,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
             amount:
               type: number
               description: Present for discarded resources and deuterium.
@@ -4202,7 +4649,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         containerSpace:
@@ -4234,7 +4681,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         currentTask:
@@ -4340,7 +4787,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
           description: >
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
@@ -4353,13 +4800,26 @@ components:
           type: string
           enum: [deuterium_compression]
           description: Probe improvement id to install.
+    MannyProbeAssemblyRequest:
+      type: object
+      required: [containerIds]
+      properties:
+        containerIds:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          description: Two empty additional storage container ids to consume as probe assembly ingredients.
+          items:
+            type: string
+            example: container-itm_aaaaaaaaaaaaaaaaaaaaaaaa
     AtomicPrinterCraftRequest:
       type: object
       required: [recipe]
       properties:
         recipe:
           type: string
-          enum: [micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit]
+          enum: [micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, atomic_printer_part]
           description: Atomic-printer recipe to start. An available Manny aboard the probe is automatically reserved as assistant.
     MannySalvageRequest:
       type: object
@@ -4543,7 +5003,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, improving_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -4890,7 +5350,7 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         itemType:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
           description: Present only for drifting item stacks.
         quantity:
           type: integer

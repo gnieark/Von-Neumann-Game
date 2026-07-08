@@ -504,6 +504,84 @@ final class ProbeStorageService
     }
 
     /**
+     * @param list<string> $containerUids
+     * @return list<array<string, mixed>>
+     */
+    public function consumeEmptyAdditionalContainers(NeumannProbe $probe, array $containerUids): array
+    {
+        $this->ensureProbeStorage($probe);
+        $containerUids = array_values(array_unique(array_map(
+            static fn(string $uid): string => trim($uid),
+            $containerUids,
+        )));
+        if (count($containerUids) !== 2 || in_array('', $containerUids, true)) {
+            throw new MannyActionException(400, 'bad_request', 'Exactly two distinct storage containers are required.');
+        }
+
+        $containers = [];
+        $containerItems = [];
+        foreach ($containerUids as $containerUid) {
+            $container = $this->containers->findByUidForProbe($probe->id, $containerUid)
+                ?? throw new MannyActionException(404, 'invalid_storage_container', 'Storage container not found.');
+            if ($container->kind !== StorageContainer::KIND_CONTAINER || !str_starts_with($container->uid, 'container-')) {
+                throw new MannyActionException(422, 'storage_container_not_consumable', 'Only additional storage containers can be consumed.');
+            }
+
+            $containerItemUid = substr($container->uid, strlen('container-'));
+            $containerItem = $this->items->findByUidForProbe($probe->id, $containerItemUid)
+                ?? throw new MannyActionException(422, 'storage_container_not_consumable', 'The backing additional container item is missing.');
+            if ($containerItem->type !== ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
+                throw new MannyActionException(422, 'storage_container_not_consumable', 'Only additional storage containers can be consumed.');
+            }
+
+            $containers[] = $container;
+            $containerItems[$containerItem->uid] = $containerItem;
+        }
+
+        $selectedContainerIds = array_map(static fn(StorageContainer $container): int => $container->id, $containers);
+        $selectedItemUids = array_keys($containerItems);
+        foreach ($containers as $container) {
+            foreach ($this->containers->resourceAmounts($container->id) as $amount) {
+                if ((float) $amount > self::EPSILON) {
+                    throw new MannyActionException(422, 'storage_container_not_empty', 'Selected storage containers must be empty.');
+                }
+            }
+        }
+        foreach ($this->items->findByProbeId($probe->id) as $item) {
+            if (!in_array((int) $item->storageContainerId, $selectedContainerIds, true)) {
+                continue;
+            }
+            if (in_array($item->uid, $selectedItemUids, true)) {
+                continue;
+            }
+            throw new MannyActionException(422, 'storage_container_not_empty', 'Selected storage containers must be empty.');
+        }
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->isOnProbe() && in_array((int) $manny->storageContainerId, $selectedContainerIds, true)) {
+                throw new MannyActionException(422, 'storage_container_not_empty', 'Selected storage containers must be empty.');
+            }
+        }
+
+        $consumed = [];
+        foreach ($containers as $container) {
+            $containerItemUid = substr($container->uid, strlen('container-'));
+            $containerItem = $containerItems[$containerItemUid];
+            $consumed[] = [
+                'id' => $container->uid,
+                'label' => $container->label,
+                'capacity' => $container->capacity,
+                'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
+                'item' => $this->probeItemPayload($containerItem),
+            ];
+            $this->items->delete($containerItem);
+            $this->containers->delete($container);
+        }
+        $this->syncLegacyResourceTotals($probe);
+
+        return $consumed;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function detachAdditionalContainerSnapshot(NeumannProbe $probe, string $containerUid, int $ownerPlayerId): array

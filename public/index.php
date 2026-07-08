@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260704-storage-rule-filterable-items';
+const ASSET_VERSION = '20260707-assemble-probe';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -99,7 +99,7 @@ function refreshRememberedSessionCookie(AppFactory $factory, ?PDO $pdo = null): 
 
 function translatedRouteName(Translator $translator, string $key): string
 {
-    return htmlspecialchars($translator->get($key), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    return $translator->get($key);
 }
 
 $language = selectedLanguage();
@@ -126,7 +126,7 @@ $availableroutes = [
         'name' => translatedRouteName($translator, 'tabProbe'),
         'methods' => ['GET', 'HEAD'],
         'needAuth' => false,
-        'uriPattern' => '#^/$#',
+        'uriPattern' => '#^/(?:\d+)?$#',
         'linkUri' => '/',
         'routeClass' => 'FrontRouteHome',
         'displayOnMainMenu' => true,
@@ -217,7 +217,7 @@ $availableroutes = [
         'name'  => translatedRouteName($translator, 'tabEnvironment'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
-        'uriPattern' => '#^/sensors$#',
+        'uriPattern' => '#^/sensors(?:/\d+)?$#',
         'linkUri' => '/sensors',
         'routeClass' => 'FrontRouteSensors',
         'displayOnMainMenu' => true,
@@ -227,7 +227,7 @@ $availableroutes = [
         'name'  => translatedRouteName($translator, 'tabSystems'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
-        'uriPattern' => '#^/inventories$#',
+        'uriPattern' => '#^/inventories(?:/\d+)?$#',
         'linkUri' => '/inventories',
         'routeClass' => 'FrontRouteInventories',
         'displayOnMainMenu' => true,
@@ -237,7 +237,7 @@ $availableroutes = [
         'name'  => translatedRouteName($translator, 'tabMannies'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
-        'uriPattern' => '#^/mannies$#',
+        'uriPattern' => '#^/mannies(?:/\d+)?$#',
         'linkUri' => '/mannies',
         'routeClass' => 'FrontRouteMannies',
         'displayOnMainMenu' => true,
@@ -247,7 +247,7 @@ $availableroutes = [
         'name'  => translatedRouteName($translator, 'tabActions'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
-        'uriPattern' => '#^/movement(?:/-?\d+/-?\d+/-?\d+)?$#',
+        'uriPattern' => '#^/movement(?:/\d+(?:/-?\d+/-?\d+/-?\d+)?|/-?\d+/-?\d+/-?\d+)?$#',
         'linkUri' => '/movement',
         'routeClass' => 'FrontRouteMovement',
         'displayOnMainMenu' => true,
@@ -257,7 +257,7 @@ $availableroutes = [
         'name'  => 'SCUT',
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
-        'uriPattern' => '#^/scut$#',
+        'uriPattern' => '#^/scut(?:/\d+)?$#',
         'linkUri' => '/scut',
         'routeClass' => 'FrontRouteScut',
         'displayOnMainMenu' => true,
@@ -267,7 +267,7 @@ $availableroutes = [
         'name'  => translatedRouteName($translator, 'tabMessages'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
-        'uriPattern' => '#^/messaging$#',
+        'uriPattern' => '#^/messaging(?:/\d+)?$#',
         'linkUri' => '/messaging',
         'routeClass' => 'FrontRouteMessaging',
         'displayOnMainMenu' => true,
@@ -277,7 +277,7 @@ $availableroutes = [
         'name'  => translatedRouteName($translator, 'tabAlerts'),
         'methods' => ['GET','HEAD'],
         'needAuth' => true,
-        'uriPattern' => '#^/alerts$#',
+        'uriPattern' => '#^/alerts(?:/\d+)?$#',
         'linkUri' => '/alerts',
         'routeClass' => 'FrontRouteAlerts',
         'displayOnMainMenu' => true,

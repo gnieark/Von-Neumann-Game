@@ -49,6 +49,7 @@ final class MannyService implements MannyTaskRuntime
     public const WAYPOINT_BOOKMARK_INSTALL_SECONDS = 10;
     public const DEUTERIUM_TANK_REFILL_SECONDS = 60;
     public const SCUT_RELAY_TURN_ON_SECONDS = 300;
+    public const PROBE_ASSEMBLY_SECONDS = 10800;
     public const MANNY_CARGO_CAPACITY = Manny::CARGO_CAPACITY;
     public const MANNY_CONTAINER_SPACE = Manny::CONTAINER_SPACE;
     public const MOON_MASS_EARTH_UNITS = 0.0123;
@@ -60,6 +61,13 @@ final class MannyService implements MannyTaskRuntime
     public const TASK_VISIBILITY_LOCAL = 'local';
     public const TASK_VISIBILITY_SCUT_NETWORK = 'scut_network';
     public const TASK_VISIBILITY_TOO_FAR = 'too_far';
+    private const PROBE_ASSEMBLY_COMPONENTS = [
+        ProbeItem::TYPE_DEUTERIUM_ENGINE => 1,
+        ProbeItem::TYPE_SCUT_RELAY => 1,
+        ProbeItem::TYPE_ELECTRIC_MOTOR => 5,
+        ProbeItem::TYPE_ATOMIC_PRINTER_PART => 2,
+        ProbeItem::TYPE_SOLAR_PANEL => 4,
+    ];
 
     private readonly WaypointBookmarkService $bookmarks;
     private readonly MannyPublicPresenter $presenter;
@@ -470,6 +478,59 @@ final class MannyService implements MannyTaskRuntime
             'consumedItems' => $plan['consumedItems'],
             'effects' => is_array($definition['effects'] ?? null) ? $definition['effects'] : [],
         ];
+        $this->mannies->save($manny);
+
+        return $this->requiredManny($probe, $uid);
+    }
+
+    /**
+     * @param list<string> $containerIds
+     */
+    public function startProbeAssembly(NeumannProbe $probe, string $uid, array $containerIds): Manny
+    {
+        return $this->withProbeLock(
+            $probe,
+            fn(NeumannProbe $lockedProbe): Manny => $this->startProbeAssemblyLocked($lockedProbe, $uid, $containerIds),
+        );
+    }
+
+    /**
+     * @param list<string> $containerIds
+     */
+    private function startProbeAssemblyLocked(NeumannProbe $probe, string $uid, array $containerIds): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $this->ensureMannyInRange($manny, $probe);
+        $this->ensureMannyIdle($manny);
+        $this->refreshOtherMannyStates($probe, $manny);
+        if (!$manny->isOnProbe()) {
+            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to assemble a new probe.');
+        }
+
+        $plan = $this->probeAssemblyPlan($probe);
+        $consumedContainers = $this->storage->consumeEmptyAdditionalContainers($probe, $containerIds);
+        $this->consumeProbeAssemblyPlan($probe, $plan);
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manny->locationType = Manny::LOCATION_SECTOR;
+        $manny->sector = $probe->currentSector;
+        $manny->currentTask = Manny::TASK_ASSEMBLING_PROBE;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . self::PROBE_ASSEMBLY_SECONDS . ' seconds')->format('c');
+        $manny->taskPayload = [
+            'durationSeconds' => self::PROBE_ASSEMBLY_SECONDS,
+            'components' => $this->probeAssemblyComponentRequirements(),
+            'consumedItems' => $plan['consumedItems'],
+            'consumedContainers' => $consumedContainers,
+            'result' => 'pending',
+        ];
+        $manny->cargoDeuterium = 0.0;
+        $manny->cargoMetals = 0.0;
+        $manny->cargoIce = 0.0;
+        $manny->cargoOrganicCompounds = 0.0;
+        $this->storage->releaseMannyFromStorage($manny);
+        $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
@@ -1552,6 +1613,54 @@ final class MannyService implements MannyTaskRuntime
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function probeAssemblyPlan(NeumannProbe $probe): array
+    {
+        $itemsByType = $this->probeItemsByType($probe);
+        $itemsToConsume = [];
+        $consumedItems = [];
+        foreach (self::PROBE_ASSEMBLY_COMPONENTS as $type => $requiredCount) {
+            $availableItems = $itemsByType[$type] ?? [];
+            if (count($availableItems) < $requiredCount) {
+                throw new MannyActionException(422, 'insufficient_probe_assembly_components', 'Insufficient probe inventory to assemble a new probe.');
+            }
+            for ($index = 0; $index < $requiredCount; $index++) {
+                $item = array_shift($availableItems);
+                if (!$item instanceof ProbeItem) {
+                    continue;
+                }
+                $itemsToConsume[] = $item;
+                $consumedItems[] = $this->consumedItemPayload($item);
+            }
+            $itemsByType[$type] = $availableItems;
+        }
+
+        return [
+            'itemsToConsume' => $itemsToConsume,
+            'consumedItems' => $consumedItems,
+        ];
+    }
+
+    /**
+     * @return list<array{type:string,name:string,quantity:int,unit:string}>
+     */
+    private function probeAssemblyComponentRequirements(): array
+    {
+        $requirements = [];
+        foreach (self::PROBE_ASSEMBLY_COMPONENTS as $type => $quantity) {
+            $requirements[] = [
+                'type' => $type,
+                'name' => $this->itemDisplayName($type),
+                'quantity' => $quantity,
+                'unit' => 'item',
+            ];
+        }
+
+        return $requirements;
+    }
+
+    /**
      * @param array<string, mixed> $recipeDefinition
      * @param array<string, array<ProbeItem>> $itemsByType
      * @param array<ProbeItem> $itemsToConsume
@@ -1768,6 +1877,14 @@ final class MannyService implements MannyTaskRuntime
      * @param array<string, mixed> $plan
      */
     private function consumeProbeImprovementPlan(NeumannProbe $probe, array $plan): void
+    {
+        $this->consumeCraftingPlan($probe, $plan);
+    }
+
+    /**
+     * @param array<string, mixed> $plan
+     */
+    private function consumeProbeAssemblyPlan(NeumannProbe $probe, array $plan): void
     {
         $this->consumeCraftingPlan($probe, $plan);
     }
@@ -2330,6 +2447,34 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $this->clearTask($manny, $result);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    public function refreshProbeAssembly(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        $droneName = $this->nextDroneProbeName($probe->playerId);
+        $newProbe = $this->probes->createForPlayer($probe->playerId, $droneName, $manny->sector ?? $probe->currentSector);
+        $this->storage->ensureProbeStorage($newProbe);
+        $this->removeMannyFromSector($manny);
+        $manny->probeId = $newProbe->id;
+        $manny->storageContainerId = null;
+        $manny->locationType = Manny::LOCATION_PROBE;
+        $manny->sector = null;
+        $this->storage->placeMannyOnProbe($newProbe, $manny);
+        $this->clearTask($manny, [
+            'lastTask' => Manny::TASK_ASSEMBLING_PROBE,
+            'result' => 'success',
+            'probe' => [
+                'id' => $newProbe->id,
+                'name' => $newProbe->name,
+            ],
+        ]);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -4053,6 +4198,8 @@ final class MannyService implements MannyTaskRuntime
             ProbeItem::TYPE_ELECTRIC_MOTOR,
             ProbeItem::TYPE_BATTERY_PACK,
             ProbeItem::TYPE_LINEAR_ACTUATOR,
+            ProbeItem::TYPE_ATOMIC_PRINTER_PART,
+            ProbeItem::TYPE_DEUTERIUM_ENGINE,
             ProbeItem::TYPE_SOLAR_PANEL,
             ProbeItem::TYPE_SCUT_RELAY,
             ProbeItem::TYPE_THERMAL_PROTECTION_SHELL,
@@ -4077,6 +4224,8 @@ final class MannyService implements MannyTaskRuntime
             ProbeItem::TYPE_ELECTRIC_MOTOR => ProbeItem::ELECTRIC_MOTOR_NAME,
             ProbeItem::TYPE_BATTERY_PACK => ProbeItem::BATTERY_PACK_NAME,
             ProbeItem::TYPE_LINEAR_ACTUATOR => ProbeItem::LINEAR_ACTUATOR_NAME,
+            ProbeItem::TYPE_ATOMIC_PRINTER_PART => ProbeItem::ATOMIC_PRINTER_PART_NAME,
+            ProbeItem::TYPE_DEUTERIUM_ENGINE => ProbeItem::DEUTERIUM_ENGINE_NAME,
             ProbeItem::TYPE_SOLAR_PANEL => ProbeItem::SOLAR_PANEL_NAME,
             ProbeItem::TYPE_SCUT_RELAY => ProbeItem::SCUT_RELAY_NAME,
             ProbeItem::TYPE_THERMAL_PROTECTION_SHELL => ProbeItem::THERMAL_PROTECTION_SHELL_NAME,
@@ -4085,6 +4234,22 @@ final class MannyService implements MannyTaskRuntime
             ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT => ProbeItem::ATMOSPHERIC_DROP_KIT_NAME,
             default => $fallback !== null && trim($fallback) !== '' ? $fallback : $type,
         };
+    }
+
+    private function nextDroneProbeName(int $playerId): string
+    {
+        $existing = array_map(
+            static fn(NeumannProbe $probe): string => strtolower($probe->name),
+            $this->probes->findAllByPlayerId($playerId),
+        );
+        for ($index = 1; $index < 100000; $index++) {
+            $candidate = 'drone-' . $index;
+            if (!in_array($candidate, $existing, true)) {
+                return $candidate;
+            }
+        }
+
+        return 'drone-' . bin2hex(random_bytes(4));
     }
 
     private function craftingConfig(): array

@@ -1,6 +1,8 @@
 <?php
 namespace VonNeumannGame\FrontRoute;
 
+use VonNeumannGame\AppFactory;
+use VonNeumannGame\Http\ApiResponse;
 use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\View\TplBlock;
 use VonNeumannGame\FrontRoute\MenuLinkItem;
@@ -13,6 +15,8 @@ class FrontRoute{
 
     protected array $leftMenuItems = []; 
     protected array $footerMenuItems = [];
+    protected ?int $selectedProbeId = null;
+    protected string $routePath = '/';
 
     public function __construct()
     {
@@ -26,6 +30,11 @@ class FrontRoute{
     {
         $this->footerMenuItems[] = $item;
     }
+    public function configureRequestContext(string $routePath, ?int $selectedProbeId): void
+    {
+        $this->routePath = $routePath;
+        $this->selectedProbeId = $selectedProbeId;
+    }
     public function getCustomJs(): string
     {
         return "";
@@ -36,6 +45,21 @@ class FrontRoute{
     }
     public function handle(string $method, string $routePath, ?string $bearer, string $language): void
     {
+        if ($bearer !== null && $this->selectedProbeId !== null) {
+            $probeCheck = $this->selectedProbeResponse($bearer, $this->selectedProbeId);
+            if ($probeCheck->status === 404) {
+                http_response_code(404);
+                header('Content-Type: text/html; charset=utf-8');
+                echo (new FrontRoute404())->getContent($method, $routePath, $bearer, $language);
+                return;
+            }
+            if ($probeCheck->status === 401) {
+                http_response_code(401);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo 'Unauthorized';
+                return;
+            }
+        }
 
         if(isset($this->displayOnMainPage) && $this->displayOnMainPage === false){
             // Si la route n'est pas censée être affichée sur la page principale, on l'affiche seule
@@ -97,6 +121,7 @@ class FrontRoute{
             "language" => $translator->language(),
             "assetVersion" => $assetVersion,
             "authenticated" => is_null($bearer) ? '0' : '1',
+            "selectedProbeId" => $this->selectedProbeId !== null ? (string) $this->selectedProbeId : '',
             "i18nUrl" => "/i18n?lang=" . rawurlencode($translator->language()) . ($assetVersion !== '' ? '&v=' . rawurlencode($assetVersion) : ''),
             "languageFormAction" => self::e((string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/')),
             "customJs" => $this->getCustomJs(),
@@ -126,6 +151,7 @@ class FrontRoute{
             $tplauthenticatedUserContent = new TplBlock('authenticatedUserContent');
             $tplauthenticatedUserContent->addVars([
                 'mainContent' => $content,
+                'selectedProbeId' => $this->selectedProbeId !== null ? self::e((string) $this->selectedProbeId) : '',
             ]); 
 
 
@@ -133,8 +159,9 @@ class FrontRoute{
             
             foreach($this->leftMenuItems as $menuLinkItem){
                 $tplauthenticatedUserContent->addSubBlock((new TplBlock('navpanellinks'))->addVars([
-                    'title' => $menuLinkItem->getTitle(),
-                    'href' => $menuLinkItem->getHref(),
+                    'title' => self::e($menuLinkItem->getTitle()),
+                    'href' => self::e($menuLinkItem->getHref()),
+                    'baseHref' => self::e($menuLinkItem->getBaseHref()),
                     'class' => $menuLinkItem->isActive() ? 'panel-tab active' : 'panel-tab',
                 ]));
             }
@@ -148,6 +175,15 @@ class FrontRoute{
         }
 
         return $tpl->applyTplFile($projectRoot . '/templates/main.html');
+    }
+
+    private function selectedProbeResponse(string $bearer, int $probeId): ApiResponse
+    {
+        $projectRoot = dirname(__DIR__, 2);
+        $factory = new AppFactory($projectRoot);
+        $pdo = $factory->pdo(initializeSchema: true);
+
+        return $factory->apiKernel($pdo)->handle('GET', '/api/probe/' . $probeId, ['Authorization' => $bearer]);
     }
 
 }

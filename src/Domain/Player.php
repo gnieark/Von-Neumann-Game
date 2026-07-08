@@ -12,6 +12,7 @@ final class Player
         public readonly int $id,
         public string $username,
         public ?string $displayName,
+        public ?int $defaultProbeId,
         public SectorCoordinates $homeSector,
         public readonly string $createdAt,
         public string $updatedAt,

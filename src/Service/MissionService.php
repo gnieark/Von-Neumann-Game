@@ -56,9 +56,9 @@ final class MissionService
     /**
      * @return array<Mission>
      */
-    public function activeMissionsForProbe(NeumannProbe $probe): array
+    public function activeMissionsForPlayer(int $playerId): array
     {
-        return $this->missions->activeForProbe($probe->id);
+        return $this->missions->activeForPlayer($playerId);
     }
 
     /**
@@ -81,7 +81,7 @@ final class MissionService
             ? $stepOrder
             : Mission::STEP_ORDER_FREE;
 
-        return $this->missions->create($probe->id, $type, $title, $description, $stepOrder, $metadata, $createdByEvent, $steps, $uid);
+        return $this->missions->create($probe->playerId, $type, $title, $description, $stepOrder, $metadata, $createdByEvent, $steps, $uid);
     }
 
     public function startIntelligentLifeScenario(
@@ -112,7 +112,7 @@ final class MissionService
             return null;
         }
 
-        foreach ($this->missions->activeForProbe($probe->id) as $mission) {
+        foreach ($this->missions->activeForPlayer($probe->playerId) as $mission) {
             if ($mission->type !== self::FIRST_CONTACT_MISSION_TYPE) {
                 continue;
             }
@@ -131,7 +131,7 @@ final class MissionService
 
     public function abandonMission(NeumannProbe $probe, string $missionUid): Mission
     {
-        $mission = $this->missions->findByUidForProbe($probe->id, $missionUid)
+        $mission = $this->missions->findByUidForPlayer($probe->playerId, $missionUid)
             ?? throw new MannyActionException(404, 'mission_not_found', 'Mission not found.');
         if ($mission->isTerminal()) {
             throw new MannyActionException(409, 'mission_not_abandonable', 'Mission is already finished.');
@@ -156,7 +156,7 @@ final class MissionService
         }
 
         $this->missions->markStepCompleted($step);
-        $mission = $this->missions->findByUidForProbe($probe->id, $missionUid) ?? $mission;
+        $mission = $this->missions->findByUidForPlayer($probe->playerId, $missionUid) ?? $mission;
         if ($this->allStepsCompleted($mission)) {
             return $this->missions->markCompleted($mission);
         }
@@ -220,7 +220,7 @@ final class MissionService
         }
 
         $this->ensureReturnToSpaceResourceSteps($mission);
-        $mission = $this->missions->findByUidForProbe($probe->id, $mission->uid) ?? $mission;
+        $mission = $this->missions->findByUidForPlayer($probe->playerId, $mission->uid) ?? $mission;
 
         $waitStepUid = $this->firstContactWaitStepUid($mission);
         $waitStep = $this->missions->findStepByUid($mission->id, $waitStepUid);
@@ -231,7 +231,7 @@ final class MissionService
 
         $this->initializeReturnToSpaceMaterialCounter($mission);
 
-        return $this->missions->findByUidForProbe($probe->id, $mission->uid) ?? $mission;
+        return $this->missions->findByUidForPlayer($probe->playerId, $mission->uid) ?? $mission;
     }
 
     private function ensureReturnToSpaceResourceSteps(Mission $mission): void
@@ -331,7 +331,7 @@ final class MissionService
 
         if ($mission !== null) {
             $this->ensureReturnToSpaceResourceSteps($mission);
-            $mission = $this->missions->findByUidForProbe($probe->id, $mission->uid) ?? $mission;
+            $mission = $this->missions->findByUidForPlayer($probe->playerId, $mission->uid) ?? $mission;
             $this->completeReturnToSpaceResourceStepsReachedByCounter($probe, $mission, $counter);
         }
         if ($this->returnToSpaceRequirementsReached($counter)) {
@@ -394,7 +394,7 @@ final class MissionService
 
     private function activeReturnToSpaceMissionForPlanet(NeumannProbe $probe, string $planetId): ?Mission
     {
-        foreach ($this->missions->activeForProbe($probe->id) as $mission) {
+        foreach ($this->missions->activeForPlayer($probe->playerId) as $mission) {
             if ($mission->type !== self::FIRST_CONTACT_MISSION_TYPE) {
                 continue;
             }
@@ -453,7 +453,7 @@ final class MissionService
             if (round(max(0.0, (float) ($remaining[$type] ?? 0.0)), 4) > 0.0) {
                 continue;
             }
-            $mission = $this->missions->findByUidForProbe($probe->id, $mission->uid) ?? $mission;
+            $mission = $this->missions->findByUidForPlayer($probe->playerId, $mission->uid) ?? $mission;
             if ($mission->isTerminal()) {
                 return;
             }
@@ -744,7 +744,8 @@ final class MissionService
             }
 
             $missionUid = $this->returnToSpaceMissionUidForPlanet($probe, $sector->getCoordinates(), $planetId);
-            $mission = $this->missions->findByUidForProbe($probe->id, $missionUid);
+            $mission = $this->activeReturnToSpaceMissionForPlanet($probe, $planetId)
+                ?? $this->missions->findByUidForPlayer($probe->playerId, $missionUid);
             if ($mission === null) {
                 $mission = $this->startMission(
                     $probe,
@@ -783,7 +784,7 @@ final class MissionService
         $stationStep = $this->missions->findStepByUid($mission->id, $stationStepUid);
         if ($stationStep !== null && $stationStep->status === MissionStep::STATUS_PENDING) {
             $this->missions->markStepCompleted($stationStep);
-            $mission = $this->missions->findByUidForProbe($mission->probeId, $mission->uid) ?? $mission;
+            $mission = $this->missions->findByUidForPlayer($mission->playerId, $mission->uid) ?? $mission;
         }
 
         $this->missions->markCompleted($mission);
@@ -845,7 +846,7 @@ final class MissionService
 
     private function activeMissionForProbe(NeumannProbe $probe, string $missionUid): Mission
     {
-        $mission = $this->missions->findByUidForProbe($probe->id, $missionUid)
+        $mission = $this->missions->findByUidForPlayer($probe->playerId, $missionUid)
             ?? throw new MannyActionException(404, 'mission_not_found', 'Mission not found.');
         if ($mission->isTerminal()) {
             throw new MannyActionException(409, 'mission_not_active', 'Mission is already finished.');
@@ -858,7 +859,8 @@ final class MissionService
     {
         $planetName = $this->publicPlanetName($planet, $sector);
         $uid = $this->firstContactMissionUid($probe, $sector, $planet);
-        $existing = $this->missions->findByUidForProbe($probe->id, $uid);
+        $existing = $this->activeReturnToSpaceMissionForPlanet($probe, $planet->getId())
+            ?? $this->missions->findByUidForPlayer($probe->playerId, $uid);
         if ($existing !== null) {
             return $existing;
         }
@@ -974,7 +976,7 @@ final class MissionService
     private function returnToSpaceMissionUidForPlanet(NeumannProbe $probe, SectorCoordinates $sector, string $planetId): string
     {
         return 'mis_first_contact_' . substr(hash('sha256', implode('|', [
-            $probe->id,
+            $probe->playerId,
             $sector->toKey(),
             $planetId,
             self::SCENARIO_RETURN_TO_SPACE_PROGRAM,

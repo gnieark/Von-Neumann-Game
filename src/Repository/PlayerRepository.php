@@ -17,8 +17,8 @@ final class PlayerRepository
         $homeSector ??= SectorCoordinates::origin();
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
-            'INSERT INTO players (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
-             VALUES (:username, :display_name, :password_hash, :x, :y, :z, :created_at, :updated_at)'
+            'INSERT INTO players (username, display_name, password_hash, default_probe_id, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
+             VALUES (:username, :display_name, :password_hash, NULL, :x, :y, :z, :created_at, :updated_at)'
         );
         $stmt->execute([
             'username' => $username,
@@ -64,12 +64,13 @@ final class PlayerRepository
     {
         $player->updatedAt = gmdate('c');
         $stmt = $this->pdo->prepare(
-            'UPDATE players SET username = :username, display_name = :display_name, home_sector_x = :x, home_sector_y = :y, home_sector_z = :z, forum_admin = :forum_admin, forum_moderator = :forum_moderator, updated_at = :updated_at WHERE id = :id'
+            'UPDATE players SET username = :username, display_name = :display_name, default_probe_id = :default_probe_id, home_sector_x = :x, home_sector_y = :y, home_sector_z = :z, forum_admin = :forum_admin, forum_moderator = :forum_moderator, updated_at = :updated_at WHERE id = :id'
         );
         $stmt->execute([
             'id' => $player->id,
             'username' => $player->username,
             'display_name' => $player->displayName,
+            'default_probe_id' => $player->defaultProbeId,
             'x' => $player->homeSector->getX(),
             'y' => $player->homeSector->getY(),
             'z' => $player->homeSector->getZ(),
@@ -85,6 +86,7 @@ final class PlayerRepository
             (int) $row['id'],
             (string) $row['username'],
             $row['display_name'] !== null ? (string) $row['display_name'] : null,
+            isset($row['default_probe_id']) ? (int) $row['default_probe_id'] : null,
             new SectorCoordinates((int) $row['home_sector_x'], (int) $row['home_sector_y'], (int) $row['home_sector_z']),
             (string) $row['created_at'],
             (string) $row['updated_at'],

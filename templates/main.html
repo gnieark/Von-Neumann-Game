@@ -18,7 +18,7 @@
     {{customJs}}
     {{customCss}}
 </head>
-<body data-authenticated="{{authenticated}}">
+<body data-authenticated="{{authenticated}}" data-selected-probe-id="{{selectedProbeId}}">
 
     <header class="topbar">
         <div>
@@ -57,8 +57,12 @@
             <aside class="nav-panel">
                 <p class="eyebrow">Active console</p>
                 <h1 id="navpanelPalyer"></h1>
+                <label class="probe-selector" for="nav-probe-select">
+                    <span>{{t.probeSelectorLabel}}</span>
+                    <select id="nav-probe-select" data-selected-probe-id="{{authenticatedUserContent.selectedProbeId}}"></select>
+                </label>
                 <!-- BEGIN authenticatedUserContent.navpanellinks -->
-                 <a class="{{authenticatedUserContent.navpanellinks.class}}" href="{{authenticatedUserContent.navpanellinks.href}}" data-nav-link="{{authenticatedUserContent.navpanellinks.href}}">{{authenticatedUserContent.navpanellinks.title}}</a>
+                 <a class="{{authenticatedUserContent.navpanellinks.class}}" href="{{authenticatedUserContent.navpanellinks.href}}" data-nav-link="{{authenticatedUserContent.navpanellinks.baseHref}}">{{authenticatedUserContent.navpanellinks.title}}</a>
                 <!-- END authenticatedUserContent.navpanellinks -->  
             </aside>
             <section class="workspace">

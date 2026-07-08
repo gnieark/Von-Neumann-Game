@@ -901,6 +901,28 @@ button.account-menu-item {
     font-size: 1.35rem;
 }
 
+.probe-selector {
+    display: grid;
+    gap: 6px;
+    margin: -10px 0 16px;
+    color: #b8c9ce;
+    font-size: .76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.probe-selector select {
+    width: 100%;
+    min-height: 36px;
+    border: 1px solid #657276;
+    border-radius: 3px;
+    background: #121719;
+    color: #f3dfa0;
+    font: inherit;
+    padding: 6px 8px;
+    text-transform: none;
+}
+
 .panel-tab {
     display: flex;
     align-items: center;
@@ -1082,6 +1104,105 @@ button.account-menu-item {
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 10px;
     margin-bottom: 16px;
+}
+
+.probe-identity {
+    margin-top: -2px;
+}
+
+.probe-identity-block {
+    display: grid;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(143, 182, 189, .18);
+}
+
+.probe-identity-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.probe-identity-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: #f1f7f7;
+    font-size: 1.05rem;
+}
+
+.probe-settings-button {
+    flex: 0 0 auto;
+}
+
+.probe-inline-form,
+.probe-instance-form {
+    display: grid;
+    gap: 10px;
+}
+
+.probe-inline-form {
+    grid-template-columns: minmax(180px, 1fr) auto;
+    align-items: end;
+}
+
+.probe-inline-form[hidden] {
+    display: none;
+}
+
+.probe-inline-form label,
+.probe-instance-form label {
+    display: grid;
+    gap: 5px;
+}
+
+.probe-inline-form input,
+.probe-instance-form select {
+    min-height: 34px;
+}
+
+.probe-inline-form button,
+.probe-instance-form button {
+    min-height: 34px;
+    white-space: nowrap;
+}
+
+.probe-type-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: var(--muted);
+}
+
+.probe-type-line b {
+    color: var(--text);
+}
+
+.probe-identity-notice {
+    margin: 0;
+    padding: 8px 10px;
+    border-left: 3px solid var(--cold);
+    background: rgba(143, 182, 189, .08);
+}
+
+.probe-identity-notice-error {
+    border-left-color: var(--error);
+    background: rgba(209, 139, 117, .1);
+}
+
+.probe-instance-accordion {
+    display: grid;
+    gap: 0;
+}
+
+.probe-instance-accordion-panel[hidden] {
+    display: none;
+}
+
+.probe-instance-form p {
+    margin: 0;
+    color: var(--text);
 }
 
 .probe-terminal-alert {
@@ -1476,6 +1597,36 @@ button.account-menu-item {
     font-size: .9rem;
     line-height: 1.55;
     text-shadow: 0 0 5px rgba(140, 255, 129, .2);
+}
+
+#actions-panel.probe-unreachable-panel > :not(.panel-heading):not(#action-status),
+#scut-panel.probe-unreachable-panel > :not(.panel-heading):not(#scut-status),
+#messages-panel.probe-unreachable-panel > :not(.panel-heading):not(#message-status),
+#alerts-panel.probe-unreachable-panel > :not(.panel-heading):not(#console-alerts-empty) {
+    display: none;
+}
+
+#actions-panel.probe-unreachable-panel > #action-status,
+#scut-panel.probe-unreachable-panel > #scut-status,
+#messages-panel.probe-unreachable-panel > #message-status,
+#alerts-panel.probe-unreachable-panel > #console-alerts-empty {
+    display: block;
+    margin-top: 0;
+}
+
+#environment-panel.probe-unreachable-panel .sector-scan-separator,
+#environment-panel.probe-unreachable-panel .sector-neighbor-scan,
+#environment-panel.probe-unreachable-panel .sector-visited-history {
+    display: none;
+}
+
+#environment-panel.probe-unreachable-panel .sector-scan-section > :not(#sector-context) {
+    display: none;
+}
+
+#environment-panel.probe-unreachable-panel #sector-context {
+    display: block;
+    margin-top: 0;
 }
 
 .sector-summary {
@@ -3398,6 +3549,11 @@ button.account-menu-item {
         flex-basis: 100%;
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .probe-inline-form {
+        grid-template-columns: 1fr;
+        align-items: stretch;
     }
 
     .inventory-move-form,

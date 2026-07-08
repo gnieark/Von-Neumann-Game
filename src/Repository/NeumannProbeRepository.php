@@ -41,16 +41,37 @@ final class NeumannProbeRepository
             'updated_at' => $now,
         ]);
 
-        return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe creation failed.');
+        $probe = $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe creation failed.');
+        $this->assignDefaultProbeIfMissing($playerId, $probe->id);
+
+        return $probe;
     }
 
     public function findByPlayerId(int $playerId): ?NeumannProbe
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM neumann_probes WHERE player_id = :player_id');
+        $stmt = $this->pdo->prepare(
+            'SELECT neumann_probes.*
+             FROM neumann_probes
+             LEFT JOIN players ON players.id = neumann_probes.player_id
+             WHERE neumann_probes.player_id = :player_id
+             ORDER BY CASE WHEN neumann_probes.id = players.default_probe_id THEN 0 ELSE 1 END, neumann_probes.id ASC
+             LIMIT 1'
+        );
         $stmt->execute(['player_id' => $playerId]);
         $row = $stmt->fetch();
 
         return $row ? $this->hydrate($row) : null;
+    }
+
+    /**
+     * @return array<NeumannProbe>
+     */
+    public function findAllByPlayerId(int $playerId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM neumann_probes WHERE player_id = :player_id ORDER BY id ASC');
+        $stmt->execute(['player_id' => $playerId]);
+
+        return array_map(fn(array $row): NeumannProbe => $this->hydrate($row), $stmt->fetchAll());
     }
 
     public function findById(int $id): ?NeumannProbe
@@ -204,6 +225,29 @@ final class NeumannProbeRepository
             'entered_current_sector_at' => $probe->enteredCurrentSectorAt,
             'updated_at' => $probe->updatedAt,
             'exclude_from_stats' => $probe->excludeFromStats ? 1 : 0,
+        ]);
+    }
+
+    private function assignDefaultProbeIfMissing(int $playerId, int $probeId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE players
+             SET default_probe_id = :probe_id, updated_at = :updated_at
+             WHERE id = :player_id
+               AND (
+                   default_probe_id IS NULL
+                   OR NOT EXISTS (
+                       SELECT 1
+                       FROM neumann_probes
+                       WHERE neumann_probes.id = players.default_probe_id
+                         AND neumann_probes.player_id = players.id
+                   )
+               )'
+        );
+        $stmt->execute([
+            'player_id' => $playerId,
+            'probe_id' => $probeId,
+            'updated_at' => gmdate('c'),
         ]);
     }
 

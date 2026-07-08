@@ -2,10 +2,41 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-07
+
+### Changed
+
+- API v81 : ajout de `POST /api/probe/mannies/{mannyId}/assemble-probe`, une tâche Manny extérieure de 3 heures qui consomme 2 containers vides, 1 `deuterium_engine`, 1 `scut_relay`, 5 `electric_motor`, 2 `atomic_printer_part` et 4 `solar_panel`, puis crée une sonde `drone-N` appartenant au joueur et y transfère la Manny.
+- Interface : l’accordéon Fabrication des Mannys propose “Assemble a new probe”, avec description, liste des composants et sélection de deux containers vides.
+- API v80 : ajout des recettes `atomic_printer_part` et `deuterium_engine`; la pièce d’imprimante atomique se fabrique via l’imprimante atomique en 45 minutes, et le moteur au deutérium s’assemble via Manny en 2 heures avec 0.5 ECE de deutérium direct.
+- Interface : ajout des libellés et descriptions FR/EN pour les pièces d’imprimante atomique et moteurs au deutérium dans les pages Mannys et Inventaires.
+
+## 2026-07-06
+
+### Changed
+
+- API v79 : `GET /api/probes` expose `isReachable` pour chaque sonde, vrai quand elle est la sonde par défaut, dans le même secteur, ou joignable via une couverture SCUT partagée.
+- Interface : la page Sonde affiche le nom et le type de la sonde, permet de la renommer quand elle est joignable, et propose depuis la sonde principale une bascule d’instance vers un drone joignable.
+- Interface : les pages ciblant une sonde injoignable harmonisent leur avertissement hors portée et réduisent les pages Capteurs, Mouvement, SCUT, Messagerie et Alertes à leur titre, rafraîchissement et message d’avertissement.
+- Interface : le sélecteur de sonde du nav-panel indique les sondes inaccessibles.
+- Interface : le libellé `Mannys & printer` du nav-panel anglais n’affiche plus l’entité HTML échappée.
+
 ## 2026-07-04
+
+### Changed
+
+- API v78 : `GET /api/probe/{probeId}` limite désormais une sonde possédée hors secteur courant et hors réseau SCUT partagé à `id`, `name`, `status: out_of_scut_range` et `sector` relatif.
+- Maintenance : ajout de `scripts/add-drone-probe.php` pour créer une sonde `drone` exclue des stats publiques, avec une Manny `manny-drone` déjà placée dans son stockage.
+- Interface : les pages principales acceptent un ID de sonde dans l’URL, le nav-panel propose un sélecteur de sonde active, et les liens de navigation conservent cet ID pour les sondes non défaut.
+- API v77 : les endpoints opérationnels de sonde acceptent désormais des variantes `/api/probe/{probeId}/...` pour agir sur une sonde possédée non défaut, à condition qu’elle soit dans le même secteur que la sonde par défaut ou joignable par le même réseau SCUT.
+- API v76 : les missions sont désormais rattachées au joueur (`probe_missions.player_id`) et restent visibles depuis `/api/probe/missions` après un changement de sonde par défaut; le script `scripts/migrate-probe-missions-to-player.php` migre les bases existantes depuis `probe_id`.
+- API v75 : `PATCH /api/probe/{probeId}` permet de définir la sonde par défaut si la sonde par défaut actuelle et la sonde cible sont dans le même secteur ou dans des secteurs couverts par le même réseau SCUT.
+- API v74 : `GET /api/probe` retourne désormais explicitement la sonde par défaut, `GET /api/probes` liste les sondes du joueur avec `defaultProbeId` et `isDefault`, et `GET /api/probe/{probeId}` retourne une sonde possédée ou `404` sinon.
+- Base de données : préparation interne du modèle multi-sondes avec `players.default_probe_id` et un lien one-to-many de `players` vers `neumann_probes`.
 
 ### Fixed
 
+- Interface : les liens du nav-panel pour les sondes non défaut ne dupliquent plus l’ID de sonde (`/sensors/537/537`).
 - Interface : `/inventories` ne propose plus l’imprimante atomique ni les containers additionnels dans les items filtrables de “Manage storage rules by container”.
 - API : le minage Manny vers un container détaché n’exige plus 0,05 ECE de place libre fantôme dans la sonde quand la Manny qui part libère déjà son propre emplacement.
 - Debug : `scripts/add-deuterium-asteroid-alert.php` et `scripts/add-deuterium-asteroid-alerts-for-low-fuel.php` n’ajoutent plus d’astéroïde ni d’alerte dans les secteurs qui contiennent déjà un astéroïde avec du deutérium, et l’alerte injectée est désormais rédigée en anglais.

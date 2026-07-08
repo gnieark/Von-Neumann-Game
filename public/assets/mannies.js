@@ -5,7 +5,14 @@
     const MANNY_MINING_AMOUNT_MAX = 0.55;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe", "assemble-probe"]);
+    const PROBE_ASSEMBLY_COMPONENTS = [
+        {"type": "deuterium_engine", "quantity": 1},
+        {"type": "scut_relay", "quantity": 1},
+        {"type": "electric_motor", "quantity": 5},
+        {"type": "atomic_printer_part", "quantity": 2},
+        {"type": "solar_panel", "quantity": 4},
+    ];
 
     const state = {
         currentCraftingRecipes: [],
@@ -52,7 +59,7 @@
     }
 
     async function refreshProbeInventory() {
-        const probeData = await window.VNG.apiJson("/api/probe", {"method": "GET"});
+        const probeData = await window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"});
         const probe = probeData && probeData.probe ? probeData.probe : {};
         state.currentInventory = probe.inventory || null;
         state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
@@ -61,7 +68,7 @@
     }
 
     async function refreshProbeImprovements() {
-        const data = await window.VNG.apiJson("/api/probe/probe-improvements-available", {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/probe-improvements-available"), {"method": "GET"});
         state.currentProbeImprovements = Array.isArray(data && data.improvements)
             ? data.improvements
             : [];
@@ -154,6 +161,9 @@
             "electric_motor": tr("electricMotor", "Electric motor"),
             "battery_pack": tr("batteryPack", "Battery pack"),
             "linear_actuator": tr("linearActuator", "Linear actuator"),
+            "atomic_printer_part": tr("atomicPrinterPart", "Atomic printer part"),
+            "deuterium_engine": tr("deuteriumEngine", "Deuterium engine"),
+            "solar_panel": tr("solarPanel", "Solar panel"),
             "thermal_protection_shell": tr("thermalProtectionShell", "Thermal protection shell"),
             "parachute_pack": tr("parachutePack", "Parachute pack"),
             "descent_guidance_module": tr("descentGuidanceModule", "Descent guidance module"),
@@ -180,6 +190,7 @@
             "refilling_deuterium_tank": tr("refillingDeuteriumTank", "Refilling deuterium tank"),
             "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
             "improving_probe": tr("improvingProbe", "Improving probe"),
+            "assembling_probe": tr("assemblingProbe", "Assembling probe"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
             "unknown_too_far": tr("mannyUnknownTooFar", "Status unknown, too far"),
@@ -834,6 +845,8 @@
             "electric_motor": "recipeDescriptionElectricMotor",
             "battery_pack": "recipeDescriptionBatteryPack",
             "linear_actuator": "recipeDescriptionLinearActuator",
+            "atomic_printer_part": "recipeDescriptionAtomicPrinterPart",
+            "deuterium_engine": "recipeDescriptionDeuteriumEngine",
             "thermal_protection_shell": "recipeDescriptionThermalProtectionShell",
             "parachute_pack": "recipeDescriptionParachutePack",
             "descent_guidance_module": "recipeDescriptionDescentGuidanceModule",
@@ -1212,6 +1225,57 @@
                 : "");
     }
 
+    function emptyAdditionalContainers() {
+        return detachableStorageContainers().filter((container) => (
+            Math.max(0, Number(container && container.usedCapacity) || 0) <= 0.00001
+        ));
+    }
+
+    function probeAssemblyAvailability() {
+        const itemCounts = inventoryItemCounts();
+        const itemStatuses = PROBE_ASSEMBLY_COMPONENTS.map((component) => {
+            const available = Math.max(0, itemCounts[component.type] || 0);
+            return {
+                "type": component.type,
+                "required": component.quantity,
+                available,
+                "hasEnough": available >= component.quantity,
+            };
+        });
+
+        return {
+            itemStatuses,
+            "emptyContainers": emptyAdditionalContainers(),
+            "hasComponents": itemStatuses.every((status) => status.hasEnough),
+        };
+    }
+
+    function renderProbeAssemblyIngredients() {
+        const availability = probeAssemblyAvailability();
+        return "<span class=\"manny-craft-ingredients-title\">" + escaped(tr("craftIngredientsRequired", "Required ingredients")) + "</span>"
+            + "<ul>"
+            + availability.itemStatuses.map((status) => {
+                const detail = window.VNG.formatText(tr("ingredientItemStockLine", "{required} required - {available} available"), {
+                    "required": status.required,
+                    "available": status.available,
+                });
+
+                return "<li class=\"" + (status.hasEnough ? "available" : "missing") + "\">"
+                    + "<span>" + escaped(inventoryItemTypeLabel(status.type, status.type)) + "</span>"
+                    + "<b>" + escaped(detail) + "</b>"
+                    + "</li>";
+            }).join("")
+            + "<li class=\"" + (availability.emptyContainers.length >= 2 ? "available" : "missing") + "\">"
+            + "<span>" + escaped(tr("emptyStorageContainers", "Empty containers")) + "</span>"
+            + "<b>" + escaped(window.VNG.formatText(tr("ingredientItemStockLine", "{required} required - {available} available"), {
+                "required": 2,
+                "available": availability.emptyContainers.length,
+            })) + "</b>"
+            + "</li>"
+            + "</ul>"
+            + "<p class=\"manny-craft-duration\">" + escaped(tr("craftingDuration", "Duration") + " " + window.VNG.duration(10800, tr)) + "</p>";
+    }
+
     function updateCraftForm(form) {
         if (!form) {
             return;
@@ -1485,6 +1549,14 @@
                 + "<p>" + escaped(window.VNG.formatText(tr("improvingProbeTaskDetail", "{improvement} is being installed."), {
                     "improvement": payload.improvementName || payload.improvement || tr("probeImprovement", "Probe improvement"),
                 })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("cancelCrafting", "Cancel crafting")) + "</button>"
+                + "</section>";
+        }
+        if (manny.currentTask === "assembling_probe") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("assemblingProbeInProgress", "Probe assembly in progress")) + "</h4>"
+                + "<p>" + escaped(tr("assemblingProbeTaskDetail", "A new probe is being assembled outside the current hull.")) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("cancelCrafting", "Cancel crafting")) + "</button>"
                 + "</section>";
@@ -1924,6 +1996,79 @@
         )).join("");
     }
 
+    function emptyStorageContainerOptions(selected) {
+        const containers = emptyAdditionalContainers();
+        if (containers.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return containers.map((container) => (
+            "<option value=\"" + escaped(container.id) + "\"" + (container.id === selected ? " selected" : "") + ">"
+            + escaped(storageContainerLabel(container))
+            + "</option>"
+        )).join("");
+    }
+
+    function probeAssemblyHint(availability) {
+        if (!availability.hasComponents) {
+            return tr("missingProbeAssemblyComponents", "Insufficient components for this assembly.");
+        }
+        if (availability.emptyContainers.length < 2) {
+            return tr("missingProbeAssemblyContainers", "Two empty containers are required.");
+        }
+
+        return tr("assembleProbeHint", "Assemble a new probe outside the current hull. The Manny will transfer to it when the task completes.");
+    }
+
+    function renderAssembleProbeForm() {
+        const availability = probeAssemblyAvailability();
+        const containers = availability.emptyContainers;
+        const disabled = !availability.hasComponents || containers.length < 2;
+
+        return "<form class=\"manny-assemble-probe-form manny-form\">"
+            + "<p class=\"manny-assemble-probe-description\">" + escaped(tr("assembleProbeDescription", "Assemblez dans l'espace une nouvelle sonde que vous pourrez piloter via SCUT, ou vous transférer dedans. Les composants suivants sont nécessaires.")) + "</p>"
+            + "<div class=\"manny-assemble-probe-ingredients\" aria-live=\"polite\">" + renderProbeAssemblyIngredients() + "</div>"
+            + "<label>" + escaped(tr("emptyStorageContainerOne", "Empty container 1")) + "<select class=\"manny-assemble-probe-container\" name=\"containerIdA\" required>" + emptyStorageContainerOptions(containers[0] ? containers[0].id : "") + "</select></label>"
+            + "<label>" + escaped(tr("emptyStorageContainerTwo", "Empty container 2")) + "<select class=\"manny-assemble-probe-container\" name=\"containerIdB\" required>" + emptyStorageContainerOptions(containers[1] ? containers[1].id : "") + "</select></label>"
+            + "<button class=\"manny-assemble-probe-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("assembleProbe", "Assemble")) + "</button>"
+            + "<p class=\"manny-assemble-probe-hint\">" + escaped(probeAssemblyHint(availability)) + "</p>"
+            + "</form>";
+    }
+
+    function updateAssembleProbeForms() {
+        document.querySelectorAll(".manny-assemble-probe-form").forEach((form) => {
+            const availability = probeAssemblyAvailability();
+            const containers = availability.emptyContainers;
+            const selects = Array.from(form.querySelectorAll(".manny-assemble-probe-container"));
+            const selectedA = selects[0] ? selects[0].value : "";
+            const selectedB = selects[1] ? selects[1].value : "";
+            const firstDefault = containers.some((container) => container.id === selectedA) ? selectedA : (containers[0] ? containers[0].id : "");
+            const secondDefault = containers.some((container) => container.id === selectedB) ? selectedB : (containers.find((container) => container.id !== firstDefault)?.id || "");
+            const ingredientsNode = form.querySelector(".manny-assemble-probe-ingredients");
+            const button = form.querySelector(".manny-assemble-probe-button");
+            const hint = form.querySelector(".manny-assemble-probe-hint");
+
+            selects.forEach((select, index) => {
+                const value = index === 0 ? firstDefault : secondDefault;
+                select.innerHTML = emptyStorageContainerOptions(value);
+                select.value = value;
+            });
+            if (ingredientsNode) {
+                ingredientsNode.innerHTML = renderProbeAssemblyIngredients();
+            }
+            if (button) {
+                const distinctContainers = Boolean(firstDefault && secondDefault && firstDefault !== secondDefault);
+                const disabled = !availability.hasComponents || containers.length < 2 || !distinctContainers;
+                button.disabled = disabled;
+                button.setAttribute("aria-disabled", disabled ? "true" : "false");
+                button.title = disabled ? probeAssemblyHint(availability) : "";
+            }
+            if (hint) {
+                hint.textContent = probeAssemblyHint(availability);
+            }
+        });
+    }
+
     function renderDetachStorageContainerForm() {
         const containers = detachableStorageContainers();
         const asteroids = asteroidTargets();
@@ -2119,6 +2264,7 @@
             {"id": "recover-storage", "title": tr("recoverStorageContainerActionTitle", "Recover a detached container"), "render": renderRecoverStorageContainerForm},
         ];
         const craftActions = [
+            {"id": "assemble-probe", "title": tr("assembleProbeActionTitle", "Assemble a new probe"), "render": renderAssembleProbeForm},
             {"id": "craft", "title": tr("craftingActionTitle", "Craft"), "render": renderCraftForm},
         ];
 
@@ -2182,6 +2328,7 @@
             "atomic-printer-craft": renderAtomicPrinterCraftForm,
             "turn-on-relay": renderTurnOnRelayForm,
             "improve-probe": renderImproveProbeForm,
+            "assemble-probe": renderAssembleProbeForm,
         }[actionId]?.() || "";
     }
 
@@ -2462,6 +2609,7 @@
             updateMannyDetachStorageContainerForms();
             updateMannyDropStorageContainerForms();
             updateMannyRecoverStorageContainerForms();
+            updateAssembleProbeForms();
         }
         scheduleProgressUpdates();
     }
@@ -2787,6 +2935,9 @@
         if (form.classList.contains("manny-improve-probe-form")) {
             updateProbeImprovementForm(form);
         }
+        if (form.classList.contains("manny-assemble-probe-form")) {
+            updateAssembleProbeForms();
+        }
     }
 
     async function openMannyActionAccordion(button, panel) {
@@ -2855,9 +3006,9 @@
 
         try {
             const [probeData, mannyData, sectorData] = await Promise.all([
-                window.VNG.apiJson("/api/probe", {"method": "GET"}),
-                window.VNG.apiJson("/api/probe/mannies", {"method": "GET"}),
-                window.VNG.apiJson("/api/probe/sector", {"method": "GET"}).catch(() => null),
+                window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"}),
+                window.VNG.apiJson(window.VNG.probeApiPath("/mannies"), {"method": "GET"}),
+                window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}).catch(() => null),
             ]);
             const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
@@ -2872,7 +3023,9 @@
             renderMannyList(state.currentMannies);
         } catch (error) {
             renderMannyList([]);
-            setStatus(error.message || tr("requestDenied", "Request denied"));
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "manny-status"})) {
+                setStatus(error.message || tr("requestDenied", "Request denied"));
+            }
         } finally {
             loadInProgress = false;
             if (loadRequestedWhileInProgress) {
@@ -2885,13 +3038,13 @@
 
     async function submitMannyForm(form, mannyId, formData) {
         if (form.classList.contains("manny-rename-form")) {
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId), {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId)), {
                 "method": "PATCH",
                 "body": JSON.stringify({"name": formData.get("name")}),
             });
         }
         if (form.classList.contains("manny-repair-form")) {
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/repair", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/repair"), {
                 "method": "POST",
                 "body": JSON.stringify({"integrityPercent": Number.parseFloat(formData.get("integrityPercent"))}),
             });
@@ -2926,7 +3079,7 @@
                 body.targetContainerId = targetContainerId;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/mine", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/mine"), {
                 "method": "POST",
                 "body": JSON.stringify(body),
             });
@@ -2938,7 +3091,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/salvage", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/salvage"), {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": formData.get("objectId")}),
             });
@@ -2949,7 +3102,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/refill-deuterium-tank", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refill-deuterium-tank"), {
                 "method": "POST",
                 "body": JSON.stringify({}),
             });
@@ -2962,7 +3115,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/inspect-sector-object", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/inspect-sector-object"), {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": formData.get("objectId")}),
             });
@@ -2977,7 +3130,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/detach-storage-container", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/detach-storage-container"), {
                 "method": "POST",
                 "body": JSON.stringify({
                     containerId,
@@ -2995,7 +3148,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/drop-storage-container", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/drop-storage-container"), {
                 "method": "POST",
                 "body": JSON.stringify({containerId, planetId}),
             });
@@ -3010,7 +3163,7 @@
             const selectedOption = targetSelect.selectedOptions[0] || null;
             const source = selectedOption && selectedOption.dataset.source ? selectedOption.dataset.source : undefined;
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/recover-storage-container", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/recover-storage-container"), {
                 "method": "POST",
                 "body": JSON.stringify({
                     "objectId": formData.get("objectId"),
@@ -3035,7 +3188,7 @@
                 body.networkName = networkName;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/turn-on-relay", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/turn-on-relay"), {
                 "method": "POST",
                 "body": JSON.stringify(body),
             });
@@ -3054,9 +3207,30 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/improve-probe", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/improve-probe"), {
                 "method": "POST",
                 "body": JSON.stringify({"improvement": selected}),
+            });
+        }
+        if (form.classList.contains("manny-assemble-probe-form")) {
+            updateAssembleProbeForms();
+            const containerIds = [
+                String(formData.get("containerIdA") || ""),
+                String(formData.get("containerIdB") || ""),
+            ];
+            const availability = probeAssemblyAvailability();
+            if (!availability.hasComponents) {
+                setStatus(tr("missingProbeAssemblyComponents", "Insufficient components for this assembly."));
+                return null;
+            }
+            if (availability.emptyContainers.length < 2 || !containerIds[0] || !containerIds[1] || containerIds[0] === containerIds[1]) {
+                setStatus(tr("missingProbeAssemblyContainers", "Two distinct empty containers are required."));
+                return null;
+            }
+
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/assemble-probe"), {
+                "method": "POST",
+                "body": JSON.stringify({containerIds}),
             });
         }
         if (form.classList.contains("manny-craft-form")) {
@@ -3067,7 +3241,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/craft", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/craft"), {
                 "method": "POST",
                 "body": JSON.stringify({"recipe": formData.get("recipe")}),
             });
@@ -3091,7 +3265,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/atomic-printer/craft", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/atomic-printer/craft"), {
                 "method": "POST",
                 "body": JSON.stringify({"recipe": formData.get("recipe")}),
             });
@@ -3109,7 +3283,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/install-bookmark", {
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/install-bookmark"), {
                 "method": "POST",
                 "body": JSON.stringify({
                     "objectId": formData.get("objectId"),
@@ -3198,6 +3372,9 @@
             if (event.target.classList.contains("manny-probe-improvement")) {
                 updateProbeImprovementForm(event.target.closest(".manny-improve-probe-form"));
             }
+            if (event.target.classList.contains("manny-assemble-probe-container")) {
+                updateAssembleProbeForms();
+            }
         });
 
         mannyList.addEventListener("click", async (event) => {
@@ -3241,7 +3418,7 @@
                 }
                 setStatus(tr("orderSent", "Order transmitted..."));
                 try {
-                    await window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/drop-manny-cargo", {
+                    await window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/drop-manny-cargo"), {
                         "method": "POST",
                         "body": JSON.stringify({}),
                     });
@@ -3265,7 +3442,7 @@
             }
             setStatus(tr("orderSent", "Order transmitted..."));
             try {
-                await window.VNG.apiJson("/api/probe/mannies/" + encodeURIComponent(mannyId) + "/recall", {
+                await window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/recall"), {
                     "method": "POST",
                     "body": JSON.stringify({}),
                 });

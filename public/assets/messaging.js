@@ -52,7 +52,7 @@
     }
 
     function messageEndpointForFolder(folder) {
-        return normalizeMessageFolder(folder) === "sent" ? "/api/probe/messages/sent" : "/api/probe/messages";
+        return normalizeMessageFolder(folder) === "sent" ? window.VNG.probeApiPath("/messages/sent") : window.VNG.probeApiPath("/messages");
     }
 
     function setMessagesForFolder(folder, messages, append) {
@@ -352,7 +352,7 @@
 
         setText("message-status", tr("orderSent", "Order transmitted..."));
         try {
-            const response = await window.VNG.apiJson("/api/probe/messages/" + encodeURIComponent(messageId) + "/read", {
+            const response = await window.VNG.apiJson(window.VNG.probeApiPath("/messages/" + encodeURIComponent(messageId) + "/read"), {
                 "method": "PATCH",
             });
             const updated = response.message || null;
@@ -375,9 +375,10 @@
 
     async function loadCurrentSector() {
         try {
+            window.VNG.setProbeUnreachablePanel?.("messages-panel", false);
             const [probeData, sectorData] = await Promise.all([
-                window.VNG.apiJson("/api/probe", {"method": "GET"}).catch(() => null),
-                window.VNG.apiJson("/api/probe/sector", {"method": "GET"}),
+                window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"}).catch(() => null),
+                window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}),
             ]);
             state.currentProbeId = probeData && probeData.probe && probeData.probe.id ? String(probeData.probe.id) : null;
             state.currentSectorProbes = Array.isArray(sectorData && sectorData.sector && sectorData.sector.probes) ? sectorData.sector.probes : [];
@@ -390,6 +391,10 @@
             state.currentSectorObjects = [];
             state.currentSectorScutNetworks = [];
             state.scutNetworkProbes = [];
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "message-status", "panelId": "messages-panel"})) {
+                window.VNG.setProbeUnreachablePanel?.("messages-panel", false);
+                setText("message-status", error.message || tr("requestDenied", "Request denied"));
+            }
         }
         renderMessageRecipients();
     }
@@ -401,7 +406,7 @@
 
         const networkDetails = await Promise.all(networks
             .filter((network) => network && network.id)
-            .map((network) => window.VNG.apiJson("/api/probe/scut-network/" + encodeURIComponent(network.id), {"method": "GET"})
+            .map((network) => window.VNG.apiJson(window.VNG.probeApiPath("/scut-network/" + encodeURIComponent(network.id)), {"method": "GET"})
                 .then((data) => data && data.network ? data.network : null)
                 .catch(() => null)));
 
@@ -484,7 +489,7 @@
 
             setText("message-status", tr("orderSent", "Order transmitted..."));
             try {
-                await window.VNG.apiJson("/api/probe/messages", {
+                await window.VNG.apiJson(window.VNG.probeApiPath("/messages"), {
                     "method": "POST",
                     "body": JSON.stringify({
                         "recipient": {

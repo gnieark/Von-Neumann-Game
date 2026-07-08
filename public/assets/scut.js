@@ -162,7 +162,7 @@
     }
 
     async function loadNetworkDetail(networkId) {
-        const data = await window.VNG.apiJson("/api/probe/scut-network/" + encodeURIComponent(networkId), {"method": "GET"});
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/scut-network/" + encodeURIComponent(networkId)), {"method": "GET"});
         state.network = data && data.network ? data.network : null;
     }
 
@@ -175,7 +175,8 @@
         refreshTimer = null;
 
         try {
-            const sectorData = await window.VNG.apiJson("/api/probe/sector", {"method": "GET"});
+            window.VNG.setProbeUnreachablePanel?.("scut-panel", false);
+            const sectorData = await window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"});
             const networks = Array.isArray(sectorData && sectorData.sector && sectorData.sector.scutNetworks)
                 ? sectorData.sector.scutNetworks
                 : [];
@@ -198,7 +199,10 @@
             state.networks = [];
             state.network = null;
             renderPage();
-            setStatus(error.message || tr("requestDenied", "Request denied"));
+            if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "scut-status", "panelId": "scut-panel"})) {
+                window.VNG.setProbeUnreachablePanel?.("scut-panel", false);
+                setStatus(error.message || tr("requestDenied", "Request denied"));
+            }
         } finally {
             loadInProgress = false;
             refreshTimer = window.setTimeout(loadScutPage, DEFAULT_REFRESH_MS);

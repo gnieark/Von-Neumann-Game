@@ -26,6 +26,7 @@ use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
 use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
+use VonNeumannGame\FrontRoute\MenuLinkItem;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\MissionRepository;
@@ -195,6 +196,11 @@ class TestFooterFrontRoute extends FrontRoute
     {
         return '<p>Test route</p>';
     }
+
+    public function renderMainPageForTest(?string $bearer, string $language): string
+    {
+        return $this->renderMainPage('<p>Test route</p>', $bearer, $language);
+    }
 }
 
 class TestUnavailablePasswordAuthRoute extends FrontRouteAuthByPwd
@@ -294,6 +300,24 @@ $test->assert(
     'additional footer links are loaded from local config and rendered as external links'
 );
 
+$probeNavRoute = new TestFooterFrontRoute();
+$probeNavRoute->configureRequestContext('/sensors/537', 537);
+$probeNavRoute->addLeftMenuItem(new MenuLinkItem('Sensors', '/sensors/537', true, false, '/sensors'));
+$probeNavRoute->addLeftMenuItem(new MenuLinkItem('Mannys & printer', '/mannies/537', false, false, '/mannies'));
+$probeNavHtml = $probeNavRoute->renderMainPageForTest('token', 'en');
+$test->assert(
+    str_contains($probeNavHtml, 'href="/sensors/537" data-nav-link="/sensors"'),
+    'selected-probe nav links keep a canonical base href for client-side resync'
+);
+$test->assert(
+    str_contains($probeNavHtml, '>Mannys &amp; printer</a>'),
+    'nav panel escapes ampersands exactly once'
+);
+$test->assert(
+    !str_contains($probeNavHtml, 'Mannys &amp;amp; printer'),
+    'nav panel does not double-escape ampersands'
+);
+
 $_SERVER['REQUEST_URI'] = '/authbypwd';
 $_POST = ['username' => 'test', 'password' => 'secret'];
 $passwordAuthRoute = new TestUnavailablePasswordAuthRoute();
@@ -323,6 +347,8 @@ $test->assertEquals(
     'OAuth service extracts the OpenID subject without profile data'
 );
 $loginTemplate = file_get_contents($root . '/templates/loginview.html');
+$mainTemplate = file_get_contents($root . '/templates/main.html');
+$probeTemplate = file_get_contents($root . '/templates/Probe.html');
 $frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
 $probeScript = file_get_contents($root . '/public/assets/probe.js');
@@ -343,6 +369,7 @@ $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
 $scutCoverageMigrationScript = file_get_contents($root . '/scripts/migrate-scut-coverage.php');
+$missionOwnershipMigrationScript = file_get_contents($root . '/scripts/migrate-probe-missions-to-player.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
@@ -352,14 +379,25 @@ $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oau
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'url.searchParams.set("remember", "1")'), 'main JS sends remember=1 when OAuth remember-me is checked');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut$#'"), 'front routes expose the SCUT Network page');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut(?:/\\d+)?$#'"), 'front routes expose the SCUT Network page with optional probe id');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT'"), 'SCUT route keeps the requested short nav title');
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js'), 'SCUT front route loads the SCUT page script');
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, 'Subspace Communications Universal Transceiver'), 'SCUT route uses the expanded page title');
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, '<h2>Subspace Communications Universal Transceiver</h2>'), 'SCUT template exposes the expanded visible heading');
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
-$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/sector'), 'SCUT page reads current sector coverage');
-$test->assert(is_string($scutScript) && str_contains($scutScript, '/api/probe/scut-network/'), 'SCUT page reads existing network details');
+$test->assert(is_string($mainTemplate) && str_contains($mainTemplate, 'id="nav-probe-select"'), 'main template exposes the active probe selector');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'function probeApiPath'), 'main JS builds selected-probe API endpoints');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'function routeBaseHref'), 'main JS normalizes selected-probe route links before adding a probe id');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'probeSelectorUnreachableLabel'), 'main JS labels unreachable probes in the active-probe selector');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'inaccessible'"), 'French translations include the unreachable probe selector suffix');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'unreachable'"), 'English translations include the unreachable probe selector suffix');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'This probe is unreachable. It is too far away and outside the area covered by SCUT. Only its estimated coordinates are available.'), 'English translations include the unreachable selected-probe warning');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'Cette sonde est injoignable. Elle est trop éloignée et hors de la zone couverte par SCUT. Seules ses coordonnées estimées sont disponibles.'), 'French translations include the unreachable selected-probe warning');
+$test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="sector-context" class="sector-context"'), 'Probe template exposes the unreachable selected-probe warning');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/sector")'), 'SCUT page reads selected probe current sector coverage');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/scut-network/"'), 'SCUT page reads selected probe network details');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigationScutCoverage'), 'main JS can set SCUT nav LED state');
 $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
@@ -368,7 +406,7 @@ $test->assert(is_string($movementScript) && str_contains($movementScript, 'curre
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.fuel.maxDeuterium'), 'probe JS reads the max deuterium fuel cap');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeImprovementsOnce'), 'probe JS loads probe improvements once');
-$test->assert(is_string($probeScript) && str_contains($probeScript, '/api/probe/probe-improvements-available'), 'probe JS reads installed probe improvements');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPath("/probe-improvements-available")'), 'probe JS reads installed probe improvements for the selected probe');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'improvement.done === true'), 'probe JS lists completed probe improvements only');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'installed.slice(0, 2)'), 'probe JS summarizes installed probe improvements after two entries');
 $test->assert(is_string($appCss) && str_contains($appCss, '.metric .metric-secondary'), 'probe metric CSS styles secondary metric text');
@@ -388,7 +426,11 @@ $test->assert(str_contains($openApi, 'description: Present only for SCUT relay o
 $test->assert(str_contains($openApi, '$ref: \'#/components/schemas/ScutNetworkReference\''), 'OpenAPI documents SCUT relay SectorObject network references');
 $test->assert(str_contains($openApi, 'dormant_construct'), 'OpenAPI documents dormant construct sector objects');
 $test->assert(str_contains($openApi, 'knownFunction'), 'OpenAPI documents dormant construct function ambiguity');
+$test->assert(str_contains($openApi, '/api/probes'), 'OpenAPI documents the player probe list endpoint');
+$test->assert(str_contains($openApi, '/api/probe/{probeId}'), 'OpenAPI documents the owned probe detail endpoint');
+$test->assert(str_contains($openApi, 'summary: Update a Neumann probe'), 'OpenAPI documents the probe update endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
+$test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
@@ -399,7 +441,7 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"atomic_3d_printer",') && str_contains($inventoriesScript, '"additional_container",'), 'inventories JS excludes atomic printers and additional containers from storage-rule filters');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
-$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"/api/probe/storage-containers/" + encodeURIComponent(containerId)'), 'inventories JS renames containers through the storage-container PATCH endpoint');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'probeApiPath("/storage-containers/" + encodeURIComponent(containerId))'), 'inventories JS renames containers through the selected-probe storage-container PATCH endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'container.label !== "Sonde"'), 'inventories JS honors custom probe-core container labels');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'iconButtonPlaceholder("inventory-line-move-placeholder")'), 'inventories JS keeps a non-interactive move placeholder for additional containers');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
@@ -445,7 +487,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargetsFromObjects'), 'mannies JS builds remote inspection targets from the Manny sector scan');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'abandonRemoteMannyTask'), 'mannies JS relabels remote SCUT-visible recall actions without changing the endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
-$test->assert(is_string($messagingScript) && str_contains($messagingScript, '/api/probe/scut-network/'), 'messaging JS loads SCUT network probe contacts');
+$test->assert(is_string($messagingScript) && str_contains($messagingScript, 'probeApiPath("/scut-network/"'), 'messaging JS loads selected-probe SCUT network probe contacts');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'String(probe.id) !== String(state.currentProbeId'), 'messaging JS excludes the current probe from SCUT network recipients');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'scutNetworkRecipientLabel'), 'messaging JS labels SCUT network recipients');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"printer": atomicPrinterItem() ? "available" : null'), 'mannies JS excludes atomic-printer inventory details from the card refresh hash');
@@ -476,7 +518,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyAc
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupSector'), 'mannies JS renders the sector action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupContainers'), 'mannies JS renders the containers action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupCraft'), 'mannies JS renders the craft action group');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/api/probe/probe-improvements-available'), 'mannies JS loads available probe improvements');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeApiPath("/probe-improvements-available")'), 'mannies JS loads selected-probe available probe improvements');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-improve-probe-form'), 'mannies JS renders the probe improvement form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/improve-probe'), 'mannies JS posts probe improvement orders');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeImprovementAvailability'), 'mannies JS checks improvement ingredient availability');
@@ -498,17 +540,21 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260704-storage-rule-filterable-items"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260707-assemble-probe"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database.json.old'), 'SQLite to MySQL migration script backs up the active database config');
 $test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'scut_covered_sectors'), 'SCUT coverage migration script fills the relational coverage table');
 $test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'DROP COLUMN'), 'SCUT coverage migration script removes legacy JSON columns');
+$test->assert(is_string($missionOwnershipMigrationScript) && str_contains($missionOwnershipMigrationScript, 'probe_missions_new'), 'mission ownership migration script rebuilds SQLite mission ownership');
+$test->assert(is_string($missionOwnershipMigrationScript) && str_contains($missionOwnershipMigrationScript, 'DROP COLUMN probe_id'), 'mission ownership migration script removes the legacy probe mission link');
 $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.php');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'default_probe_id INTEGER NULL'), 'Player table stores a default probe id for future multi-probe ownership');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'player_id INTEGER NOT NULL UNIQUE'), 'Probe table allows several probes for the same player');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS scut_covered_sectors'), 'SCUT coverage sectors are stored in a relational table');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'covered_sectors_json'), 'SCUT coverage is no longer stored in JSON columns');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'FOREIGN KEY(created_by_probe_id)'), 'SCUT relay creator ids are stored without a probe foreign key');
@@ -516,6 +562,7 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_movements_one_active_per_probe'), 'schema enforces one active movement per probe');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'active_probe_id INTEGER GENERATED ALWAYS'), 'MySQL active movement uniqueness uses a generated indexed column');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)'), 'MySQL active movement index waits for the generated-column migration');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_missions_player_status'), 'schema indexes missions by player and status');
 $test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
@@ -550,6 +597,184 @@ $test->assertThrows(
     fn() => $movementConstraintMovements->create($movementConstraintProbe->id, new SectorCoordinates(0, 0, 0), new SectorCoordinates(0, 2, 0), 1, $movementConstraintTimeline, 1.0),
     'database rejects a second active movement for the same probe'
 );
+
+$legacySingleProbeDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-single-probe.sqlite';
+$legacySingleProbeFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacySingleProbeDbPath), $root);
+$legacySingleProbePdo = $legacySingleProbeFactory->create();
+$legacySingleProbePdo->exec(
+    'CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NULL,
+        password_hash TEXT NULL,
+        home_sector_x INTEGER NOT NULL DEFAULT 0,
+        home_sector_y INTEGER NOT NULL DEFAULT 0,
+        home_sector_z INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacySingleProbePdo->exec(
+    'CREATE TABLE neumann_probes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        velocity_c REAL NOT NULL DEFAULT 0,
+        acceleration_c_per_day REAL NOT NULL DEFAULT 0,
+        direction_x REAL NOT NULL DEFAULT 0,
+        direction_y REAL NOT NULL DEFAULT 0,
+        direction_z REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        integrity_percent REAL NOT NULL DEFAULT 100,
+        energy_stored REAL NOT NULL DEFAULT 0,
+        deuterium_stock REAL NOT NULL DEFAULT 100,
+        metals_stock REAL NOT NULL DEFAULT 0,
+        internal_clock_rate REAL NOT NULL DEFAULT 1,
+        current_task TEXT NULL,
+        entered_current_sector_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(player_id) REFERENCES players(id)
+    )'
+);
+$legacySingleProbePdo->exec(
+    "INSERT INTO players
+     (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
+     VALUES ('legacy-single-probe-owner', 'Legacy Single Probe Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+);
+$legacySingleProbePdo->exec(
+    "INSERT INTO neumann_probes
+     (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at)
+     VALUES (1, 'Legacy primary probe', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+);
+$legacySingleProbeFactory->initializeSchema($legacySingleProbePdo);
+$legacySingleProbePlayerColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacySingleProbePdo->query('PRAGMA table_info(players)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('default_probe_id', $legacySingleProbePlayerColumns, true), 'legacy player schema gains default_probe_id');
+$test->assertEquals(1, (int) $legacySingleProbePdo->query('SELECT default_probe_id FROM players WHERE id = 1')->fetchColumn(), 'legacy player default probe is backfilled');
+$legacySingleProbeIndexes = $legacySingleProbePdo->query('PRAGMA index_list(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
+$legacyUniqueProbePlayerIndexes = [];
+foreach ($legacySingleProbeIndexes as $index) {
+    if ((int) ($index['unique'] ?? 0) !== 1) {
+        continue;
+    }
+    $columns = array_map(
+        static fn(array $row): string => (string) $row['name'],
+        $legacySingleProbePdo->query('PRAGMA index_info(' . $legacySingleProbePdo->quote((string) $index['name']) . ')')->fetchAll(PDO::FETCH_ASSOC),
+    );
+    if ($columns === ['player_id']) {
+        $legacyUniqueProbePlayerIndexes[] = (string) $index['name'];
+    }
+}
+$test->assertEquals([], $legacyUniqueProbePlayerIndexes, 'legacy probe schema drops the one-probe-per-player uniqueness');
+$legacySingleProbePlayers = new PlayerRepository($legacySingleProbePdo);
+$legacySingleProbeProbes = new NeumannProbeRepository($legacySingleProbePdo);
+$legacySingleProbeOwner = $legacySingleProbePlayers->findById(1) ?? throw new RuntimeException('Legacy single-probe owner missing.');
+$legacySecondProbe = $legacySingleProbeProbes->createForPlayer($legacySingleProbeOwner->id, 'Legacy second probe', new SectorCoordinates(2, 0, 0));
+$test->assertEquals(2, count($legacySingleProbeProbes->findAllByPlayerId($legacySingleProbeOwner->id)), 'migrated legacy schema accepts a second probe for the same player');
+$test->assertEquals(1, $legacySingleProbePlayers->findById($legacySingleProbeOwner->id)?->defaultProbeId, 'second probe creation does not overwrite a valid migrated default probe');
+$test->assertEquals(2, $legacySecondProbe->id, 'second probe is inserted after legacy migration');
+
+$legacyMissionDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-mission-schema.sqlite';
+$legacyMissionFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMissionDbPath), $root);
+$legacyMissionPdo = $legacyMissionFactory->create();
+$legacyMissionPdo->exec(
+    'CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NULL,
+        password_hash TEXT NULL,
+        home_sector_x INTEGER NOT NULL,
+        home_sector_y INTEGER NOT NULL,
+        home_sector_z INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec(
+    'CREATE TABLE neumann_probes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        entered_current_sector_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec(
+    'CREATE TABLE probe_missions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid TEXT NOT NULL UNIQUE,
+        probe_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NULL,
+        status TEXT NOT NULL,
+        step_order TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        created_by_event_json TEXT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT NULL,
+        failed_at TEXT NULL,
+        abandoned_at TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec(
+    'CREATE TABLE probe_mission_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid TEXT NOT NULL UNIQUE,
+        mission_id INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NULL,
+        status TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        completed_at TEXT NULL,
+        failed_at TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyMissionPdo->exec("INSERT INTO players (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at) VALUES ('legacy-mission-owner', 'Legacy Mission Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionPdo->exec("INSERT INTO neumann_probes (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at) VALUES (1, 'Legacy mission probe', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionPdo->exec("INSERT INTO probe_missions (uid, probe_id, type, title, description, status, step_order, metadata_json, created_by_event_json, started_at, created_at, updated_at) VALUES ('mis_legacy_player_owner', 1, 'legacy_test', 'Legacy mission', NULL, 'active', 'free', '{}', NULL, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionPdo->exec("INSERT INTO probe_mission_steps (uid, mission_id, sort_order, title, description, status, metadata_json, created_at, updated_at) VALUES ('mst_legacy_player_owner', 1, 1, 'Legacy step', NULL, 'pending', '{}', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyMissionConfig = $tmp . DIRECTORY_SEPARATOR . 'legacy-mission-database.json';
+file_put_contents($legacyMissionConfig, json_encode([
+    'driver' => 'sqlite',
+    'path' => $legacyMissionDbPath,
+], JSON_THROW_ON_ERROR));
+$missionOwnershipDryRunCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-missions-to-player.php')
+    . ' --database-config=' . escapeshellarg($legacyMissionConfig)
+    . ' --dry-run';
+exec($missionOwnershipDryRunCommand . ' 2>&1', $missionOwnershipDryRunOutput, $missionOwnershipDryRunStatus);
+$test->assertEquals(0, $missionOwnershipDryRunStatus, 'mission ownership migration dry-run exits successfully');
+$test->assert(str_contains(implode("\n", $missionOwnershipDryRunOutput), '1 mission(s) can be migrated'), 'mission ownership migration dry-run reports migratable missions');
+$missionOwnershipCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-missions-to-player.php')
+    . ' --database-config=' . escapeshellarg($legacyMissionConfig);
+exec($missionOwnershipCommand . ' 2>&1', $missionOwnershipOutput, $missionOwnershipStatus);
+$test->assertEquals(0, $missionOwnershipStatus, 'mission ownership migration exits successfully');
+$migratedMissionColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $legacyMissionPdo->query('PRAGMA table_info(probe_missions)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('player_id', $migratedMissionColumns, true), 'mission ownership migration adds player_id');
+$test->assert(!in_array('probe_id', $migratedMissionColumns, true), 'mission ownership migration drops probe_id');
+$test->assertEquals(1, (int) $legacyMissionPdo->query("SELECT player_id FROM probe_missions WHERE uid = 'mis_legacy_player_owner'")->fetchColumn(), 'mission ownership migration maps probe missions to the owning player');
+$test->assertEquals(1, (int) $legacyMissionPdo->query('SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id = 1')->fetchColumn(), 'mission ownership migration preserves mission steps');
 
 $legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
 $legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
@@ -725,6 +950,22 @@ $playerSchemaColumns = array_map(
 );
 $test->assert(in_array('forum_admin', $playerSchemaColumns, true), 'Player table stores forum admin flag');
 $test->assert(in_array('forum_moderator', $playerSchemaColumns, true), 'Player table stores forum moderator flag');
+$test->assert(in_array('default_probe_id', $playerSchemaColumns, true), 'Player table stores the default probe id');
+$probeSchemaIndexes = $pdo->query('PRAGMA index_list(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
+$uniqueProbePlayerIndexes = [];
+foreach ($probeSchemaIndexes as $index) {
+    if ((int) ($index['unique'] ?? 0) !== 1) {
+        continue;
+    }
+    $indexColumns = array_map(
+        static fn(array $row): string => (string) $row['name'],
+        $pdo->query('PRAGMA index_info(' . $pdo->quote((string) $index['name']) . ')')->fetchAll(PDO::FETCH_ASSOC),
+    );
+    if ($indexColumns === ['player_id']) {
+        $uniqueProbePlayerIndexes[] = (string) $index['name'];
+    }
+}
+$test->assertEquals([], $uniqueProbePlayerIndexes, 'Probe table does not enforce one probe per player');
 $sessionSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(sessions)')->fetchAll(PDO::FETCH_ASSOC),
@@ -767,7 +1008,8 @@ $missionSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_missions)')->fetchAll(PDO::FETCH_ASSOC),
 );
-$test->assert(in_array('probe_id', $missionSchemaColumns, true), 'Mission table assigns missions to probes');
+$test->assert(in_array('player_id', $missionSchemaColumns, true), 'Mission table assigns missions to players');
+$test->assert(!in_array('probe_id', $missionSchemaColumns, true), 'Mission table no longer assigns missions to probes');
 $test->assert(in_array('status', $missionSchemaColumns, true), 'Mission table stores mission status');
 $test->assert(in_array('step_order', $missionSchemaColumns, true), 'Mission table stores step ordering mode');
 $missionStepSchemaColumns = array_map(
@@ -839,11 +1081,217 @@ $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
-$kernel = new ApiKernel($auth, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
+$kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
+
+$multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
+$primaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Primary future probe', $multiProbePlayer->homeSector);
+$secondaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Secondary future probe', new SectorCoordinates(22, 0, 0));
+$multiProbePlayer = $players->findById($multiProbePlayer->id) ?? throw new RuntimeException('Multi-probe player not found.');
+$test->assertEquals($primaryProbe->id, $multiProbePlayer->defaultProbeId, 'first created probe becomes the player default probe');
+$test->assertEquals(2, count($probes->findAllByPlayerId($multiProbePlayer->id)), 'repository allows several probes for one player');
+$test->assertEquals($primaryProbe->id, $probes->findByPlayerId($multiProbePlayer->id)?->id, 'legacy player probe lookup uses the default probe');
+$multiProbePlayer->defaultProbeId = $secondaryProbe->id;
+$players->save($multiProbePlayer);
+$test->assertEquals($secondaryProbe->id, $probes->findByPlayerId($multiProbePlayer->id)?->id, 'legacy player probe lookup follows the player default probe');
+$tertiaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Tertiary future probe', new SectorCoordinates(24, 0, 0));
+$test->assertEquals(3, count($probes->findAllByPlayerId($multiProbePlayer->id)), 'creating a later probe keeps the one-to-many relationship open');
+$test->assertEquals($secondaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'creating another probe does not overwrite an existing valid default');
+$test->assert($tertiaryProbe->id > $secondaryProbe->id, 'third future probe is persisted normally');
+foreach ([$primaryProbe, $secondaryProbe, $tertiaryProbe] as $futureProbe) {
+    $futureProbe->excludeFromStats = true;
+    $probes->save($futureProbe);
+}
+$foreignProbeOwner = $players->createPlayer('foreign-probe-owner', 'Foreign Probe Owner', null, new SectorCoordinates(30, 0, 0));
+$foreignProbe = $probes->createForPlayer($foreignProbeOwner->id, 'Foreign future probe', $foreignProbeOwner->homeSector);
+$foreignProbe->excludeFromStats = true;
+$probes->save($foreignProbe);
+$multiProbeHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($multiProbePlayer)['token']];
+$defaultProbeResponse = $kernel->handle('GET', '/api/probe', $multiProbeHeaders);
+$test->assertEquals(200, $defaultProbeResponse->status, 'GET /api/probe returns the player default probe');
+$test->assertEquals($secondaryProbe->id, $defaultProbeResponse->body['probe']['id'] ?? null, 'GET /api/probe keeps returning the configured default probe');
+$probeListResponse = $kernel->handle('GET', '/api/probes', $multiProbeHeaders);
+$test->assertEquals(200, $probeListResponse->status, 'GET /api/probes lists player probes');
+$test->assertEquals($secondaryProbe->id, $probeListResponse->body['defaultProbeId'] ?? null, 'GET /api/probes exposes the default probe id');
+$listedProbes = $probeListResponse->body['probes'] ?? [];
+$test->assertEquals(3, count($listedProbes), 'GET /api/probes returns every probe owned by the player');
+$listedById = [];
+foreach ($listedProbes as $listedProbe) {
+    $listedById[$listedProbe['id'] ?? 0] = $listedProbe;
+}
+$test->assert(isset($listedById[$primaryProbe->id], $listedById[$secondaryProbe->id], $listedById[$tertiaryProbe->id]), 'GET /api/probes includes all owned probe ids');
+$test->assertEquals(false, $listedById[$primaryProbe->id]['isDefault'] ?? null, 'GET /api/probes marks non-default probes');
+$test->assertEquals(true, $listedById[$secondaryProbe->id]['isDefault'] ?? null, 'GET /api/probes marks the default probe');
+$test->assertEquals(false, $listedById[$primaryProbe->id]['isReachable'] ?? null, 'GET /api/probes marks owned probes outside same-sector and same-SCUT reach as unreachable');
+$test->assertEquals(true, $listedById[$secondaryProbe->id]['isReachable'] ?? null, 'GET /api/probes marks the default probe as reachable');
+$test->assertEquals(false, $listedById[$tertiaryProbe->id]['isReachable'] ?? null, 'GET /api/probes marks another distant owned probe as unreachable');
+$probeByIdResponse = $kernel->handle('GET', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders);
+$test->assertEquals(200, $probeByIdResponse->status, 'GET /api/probe/{probeId} returns an owned probe');
+$test->assertEquals($primaryProbe->id, $probeByIdResponse->body['probe']['id'] ?? null, 'GET /api/probe/{probeId} returns the requested owned probe');
+$test->assertEquals('out_of_scut_range', $probeByIdResponse->body['probe']['status'] ?? null, 'GET /api/probe/{probeId} reports owned probes outside same-sector and same-SCUT reach as outside SCUT');
+$test->assertEquals(['id', 'name', 'status', 'sector'], array_keys($probeByIdResponse->body['probe'] ?? []), 'GET /api/probe/{probeId} limits telemetry for owned probes outside same-sector and same-SCUT reach');
+$test->assert(isset($probeByIdResponse->body['probe']['sector']['relative']), 'GET /api/probe/{probeId} keeps only relative sector telemetry for unreachable owned probes');
+$foreignProbeResponse = $kernel->handle('GET', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders);
+$test->assertEquals(404, $foreignProbeResponse->status, 'GET /api/probe/{probeId} hides probes owned by another player');
+$missingProbeResponse = $kernel->handle('GET', '/api/probe/999999999', $multiProbeHeaders);
+$test->assertEquals(404, $missingProbeResponse->status, 'GET /api/probe/{probeId} returns 404 for a missing probe');
+$unreachableDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(422, $unreachableDefaultProbe->status, 'PATCH /api/probe/{probeId} refuses an owned probe outside same-sector or same-SCUT reach');
+$test->assertEquals('probe_not_in_same_sector', $unreachableDefaultProbe->body['error']['code'] ?? null, 'PATCH /api/probe/{probeId} returns an explicit reachability error');
+$test->assertEquals($secondaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'refused default probe switch keeps the existing default probe');
+$sameSectorProbe = $probes->createForPlayer($multiProbePlayer->id, 'Same sector future probe', $secondaryProbe->currentSector);
+$sameSectorProbe->excludeFromStats = true;
+$probes->save($sameSectorProbe);
+$sameSectorDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameSectorDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts a same-sector owned probe');
+$test->assertEquals($sameSectorProbe->id, $sameSectorDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the new default probe id');
+$test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-sector default probe switch');
+$sameSectorListById = [];
+foreach (($sameSectorDefaultProbe->body['probes'] ?? []) as $listedProbe) {
+    $sameSectorListById[$listedProbe['id'] ?? 0] = $listedProbe;
+}
+$test->assertEquals(true, $sameSectorListById[$sameSectorProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} marks the selected same-sector probe as default');
+$test->assertEquals(false, $sameSectorListById[$secondaryProbe->id]['isDefault'] ?? null, 'PATCH /api/probe/{probeId} clears the previous default marker');
+$test->assertEquals(true, $sameSectorListById[$sameSectorProbe->id]['isReachable'] ?? null, 'PATCH /api/probe/{probeId} returns the new default probe as reachable');
+$test->assertEquals(true, $sameSectorListById[$secondaryProbe->id]['isReachable'] ?? null, 'PATCH /api/probe/{probeId} marks same-sector drones as reachable');
+$multiProbeMission = $missionService->startMission($sameSectorProbe, 'multi_probe_default_switch', 'Multi-probe mission', steps: [['title' => 'Switch default probe']]);
+$scutDefaultRelay = $scut->createOffRelay($sameSectorProbe->currentSector, $sameSectorProbe->id);
+$scut->turnOnRelay($scutDefaultRelay->id);
+$sameScutDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutDefaultProbe->status, 'PATCH /api/probe/{probeId} accepts an owned probe inside the same SCUT network');
+$test->assertEquals($primaryProbe->id, $sameScutDefaultProbe->body['defaultProbeId'] ?? null, 'PATCH /api/probe/{probeId} returns the SCUT-reachable default probe id');
+$test->assertEquals($primaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'PATCH /api/probe/{probeId} persists a same-SCUT default probe switch');
+$sameScutListById = [];
+foreach (($sameScutDefaultProbe->body['probes'] ?? []) as $listedProbe) {
+    $sameScutListById[$listedProbe['id'] ?? 0] = $listedProbe;
+}
+$test->assertEquals(true, $sameScutListById[$sameSectorProbe->id]['isReachable'] ?? null, 'PATCH /api/probe/{probeId} marks same-SCUT drones as reachable');
+$multiProbeMissionsAfterDefaultSwitch = $kernel->handle('GET', '/api/probe/missions', $multiProbeHeaders);
+$test->assertEquals($multiProbeMission->uid, $multiProbeMissionsAfterDefaultSwitch->body['missions'][0]['id'] ?? null, 'player missions stay visible after switching the default probe');
+// Rename the same-sector probe using PATCH payload
+$renameProbe = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders, json_encode(['name' => 'Renamed Probe'], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $renameProbe->status, 'PATCH /api/probe/{probeId} allows renaming a probe');
+$test->assertEquals('Renamed Probe', $probes->findById($sameSectorProbe->id)?->name ?? null, 'Probe rename is persisted in the repository');
+$probeByIdRenamed = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders);
+$test->assertEquals('Renamed Probe', $probeByIdRenamed->body['probe']['name'] ?? null, 'GET /api/probe/{probeId} reflects the renamed probe');
+
+// Rename and set as default in a single PATCH payload
+$renameAndDefault = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders, json_encode(['name' => 'Renamed And Default', 'isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $renameAndDefault->status, 'PATCH /api/probe/{probeId} accepts combined name + isDefault payload');
+$test->assertEquals('Renamed And Default', $probes->findById($sameSectorProbe->id)?->name ?? null, 'Combined PATCH persists the new probe name');
+$test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'Combined PATCH persists default probe selection when permitted');
+$farOwnedProbe = $probes->createForPlayer($multiProbePlayer->id, 'Far future probe', new SectorCoordinates(100, 0, 0));
+$farOwnedProbe->excludeFromStats = true;
+$probes->save($farOwnedProbe);
+$unreachableProbeStorage = $kernel->handle('GET', '/api/probe/' . $farOwnedProbe->id . '/storage-containers', $multiProbeHeaders);
+$test->assertEquals(422, $unreachableProbeStorage->status, 'probe-scoped endpoints refuse owned probes outside default-probe reach');
+$test->assertEquals('probe_not_in_same_sector', $unreachableProbeStorage->body['error']['code'] ?? null, 'probe-scoped endpoints return the SCUT reachability error');
+$foreignProbeStorage = $kernel->handle('GET', '/api/probe/' . $foreignProbe->id . '/storage-containers', $multiProbeHeaders);
+$test->assertEquals(404, $foreignProbeStorage->status, 'probe-scoped endpoints hide probes owned by another player');
+$mannies->ensureDefaultsForProbe($sameSectorProbe);
+$sameSectorProbeManny = $mannies->findByProbeId($sameSectorProbe->id)[0] ?? throw new RuntimeException('Expected same-SCUT probe Manny.');
+$sameScutProbeStorage = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/storage-containers', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeStorage->status, 'GET /api/probe/{probeId}/storage-containers lists a same-SCUT owned probe storage containers');
+$sameScutProbeContainers = $sameScutProbeStorage->body['containers'] ?? [];
+$sameScutProbeCoreContainer = $sameScutProbeContainers[0] ?? null;
+$test->assert(is_string($sameScutProbeCoreContainer['id'] ?? null), 'probe-scoped storage container list exposes container ids');
+$sameScutProbeContainer = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/storage-containers/' . rawurlencode((string) ($sameScutProbeCoreContainer['id'] ?? 'missing')), $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeContainer->status, 'GET /api/probe/{probeId}/storage-containers/{containerId} returns a same-SCUT owned probe container');
+$sameScutProbeRenameContainer = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/storage-containers/' . rawurlencode((string) ($sameScutProbeCoreContainer['id'] ?? 'missing')), $multiProbeHeaders, json_encode([
+    'label' => 'Remote core',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeRenameContainer->status, 'PATCH /api/probe/{probeId}/storage-containers/{containerId} renames a same-SCUT owned probe container');
+$test->assertEquals('Remote core', $sameScutProbeRenameContainer->body['container']['label'] ?? null, 'probe-scoped container rename targets the requested probe');
+$sameScutProbeContainerRules = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/storage-containers/' . rawurlencode((string) ($sameScutProbeCoreContainer['id'] ?? 'missing')) . '/rules', $multiProbeHeaders, json_encode([
+    'priority' => ['metals'],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeContainerRules->status, 'PATCH /api/probe/{probeId}/storage-containers/{containerId}/rules updates a same-SCUT owned probe container');
+$test->assertEquals(['metals'], $sameScutProbeContainerRules->body['container']['rules']['priority'] ?? null, 'probe-scoped container rules target the requested probe');
+$sameScutProbeImprovements = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/probe-improvements-available?includeAll=1', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeImprovements->status, 'GET /api/probe/{probeId}/probe-improvements-available reads same-SCUT owned probe improvements');
+$sameScutProbeStorageMove = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/storage-moves', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeStorageMove->status, 'POST /api/probe/{probeId}/storage-moves routes to same-SCUT owned probe validation');
+$sameScutProbeMannies = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/mannies', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeMannies->status, 'GET /api/probe/{probeId}/mannies lists same-SCUT owned probe Mannys');
+$sameScutProbeRenameManny = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/mannies/' . rawurlencode($sameSectorProbeManny->uid), $multiProbeHeaders, json_encode([
+    'name' => 'remote-manny',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeRenameManny->status, 'PATCH /api/probe/{probeId}/mannies/{mannyId} renames a same-SCUT owned probe Manny');
+$test->assertEquals('remote-manny', $sameScutProbeRenameManny->body['manny']['name'] ?? null, 'probe-scoped Manny rename targets the requested probe');
+$sameScutProbeMannyRepair = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/mannies/' . rawurlencode($sameSectorProbeManny->uid) . '/repair', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeMannyRepair->status, 'POST /api/probe/{probeId}/mannies/{mannyId}/repair routes to same-SCUT owned probe validation');
+$sameScutProbeAtomicPrinter = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/atomic-printer/craft', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeAtomicPrinter->status, 'POST /api/probe/{probeId}/atomic-printer/craft routes to same-SCUT owned probe validation');
+$sameScutProbeMessages = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/messages', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeMessages->status, 'GET /api/probe/{probeId}/messages lists same-SCUT owned probe messages');
+$sameScutProbeSentMessage = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/messages', $multiProbeHeaders, json_encode([
+    'recipient' => ['type' => 'probe', 'id' => $primaryProbe->id],
+    'body' => 'Message from a same-SCUT controlled probe.',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $sameScutProbeSentMessage->status, 'POST /api/probe/{probeId}/messages sends from a same-SCUT owned probe');
+$test->assertEquals($sameSectorProbe->id, $sameScutProbeSentMessage->body['message']['sender']['probeId'] ?? null, 'probe-scoped message send uses the requested probe as sender');
+// Ensure default probe can reach the target via SCUT before sending
+$ensureDefaultForMessage = $kernel->handle('PATCH', '/api/probe/' . $primaryProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $ensureDefaultForMessage->status, 'Ensure default probe is set for sending a message to same-SCUT probe');
+
+$messageToSameScutProbe = $kernel->handle('POST', '/api/probe/messages', $multiProbeHeaders, json_encode([
+    'recipient' => ['type' => 'probe', 'id' => $sameSectorProbe->id],
+    'body' => 'Message to a same-SCUT controlled probe.',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $messageToSameScutProbe->status, 'default probe can send a message to a same-SCUT owned probe');
+$sameScutProbeReadMessage = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/messages/' . (int) ($messageToSameScutProbe->body['message']['id'] ?? 0) . '/read', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeReadMessage->status, 'PATCH /api/probe/{probeId}/messages/{messageId}/read marks same-SCUT owned probe messages read');
+$sameScutProbeAlert = $damageWarnings->createMannyReportAlert($sameSectorProbe->id, $sameSectorProbe->currentSector, 'remote-report', 'Remote report', 'Remote report ready.');
+$sameScutProbeAlerts = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeAlerts->status, 'GET /api/probe/{probeId}/alerts lists same-SCUT owned probe alerts');
+$sameScutProbeReadAlert = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/alerts/' . $sameScutProbeAlert->id, $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeReadAlert->status, 'PATCH /api/probe/{probeId}/alerts/{alertId} marks same-SCUT owned probe alerts read');
+$nowForSameScutWarning = gmdate('c');
+$pdo->prepare(
+    'INSERT INTO probe_damage_warnings
+     (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, read_at, resolved_at, created_at, updated_at)
+     VALUES (:probe_id, NULL, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, :risk_percent, :additional_container_count, :message, NULL, NULL, :created_at, :updated_at)'
+)->execute([
+    'probe_id' => $sameSectorProbe->id,
+    'type' => \VonNeumannGame\Domain\ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
+    'status' => \VonNeumannGame\Domain\ProbeDamageWarning::STATUS_UNREAD,
+    'phase' => 'api_probe_scoped_test',
+    'scheduled_at' => $nowForSameScutWarning,
+    'sector_x' => $sameSectorProbe->currentSector->getX(),
+    'sector_y' => $sameSectorProbe->currentSector->getY(),
+    'sector_z' => $sameSectorProbe->currentSector->getZ(),
+    'container_id' => (string) ($sameScutProbeCoreContainer['id'] ?? 'probe-core'),
+    'container_label' => 'Remote core',
+    'object_id' => 'remote-core-drift',
+    'risk_percent' => 10,
+    'additional_container_count' => 5,
+    'message' => 'Probe-scoped damage warning.',
+    'created_at' => $nowForSameScutWarning,
+    'updated_at' => $nowForSameScutWarning,
+]);
+$sameScutProbeWarningId = (int) $pdo->lastInsertId();
+$sameScutProbeDamageWarnings = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeDamageWarnings->status, 'GET /api/probe/{probeId}/damage-warnings lists same-SCUT owned probe damage warnings');
+$sameScutProbeReadDamageWarning = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings/' . $sameScutProbeWarningId, $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeReadDamageWarning->status, 'PATCH /api/probe/{probeId}/damage-warnings/{damageWarningId} marks same-SCUT owned probe damage warnings read');
+$sameScutProbeVisitedSectors = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/visited-sectors', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeVisitedSectors->status, 'GET /api/probe/{probeId}/visited-sectors accepts same-SCUT owned probes');
+$sameScutProbeSector = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/sector', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeSector->status, 'GET /api/probe/{probeId}/sector observes same-SCUT owned probes');
+$sameScutProbeMove = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/move', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $sameScutProbeMove->status, 'POST /api/probe/{probeId}/move routes to same-SCUT owned probe validation');
+$sameScutProbeBookmark = $items->create($sameSectorProbe->id, 'waypoint_bookmark', 'Remote bookmark', 0.01, uid: 'same-scut-probe-bookmark');
+$sameScutProbeInventoryItem = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/inventory/' . rawurlencode($sameScutProbeBookmark->uid), $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeInventoryItem->status, 'GET /api/probe/{probeId}/inventory/{itemId} reads same-SCUT owned probe inventory items');
+$sameScutProbeJettison = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/inventory/' . rawurlencode($sameScutProbeBookmark->uid) . '/jettison', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $sameScutProbeJettison->status, 'POST /api/probe/{probeId}/inventory/{itemId}/jettison acts on same-SCUT owned probe inventory items');
+$foreignDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $foreignProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
+$test->assertEquals(404, $foreignDefaultProbe->status, 'PATCH /api/probe/{probeId} hides probes owned by another player');
+$missingDefaultProbe = $kernel->handle('PATCH', '/api/probe/999999999', $multiProbeHeaders);
+$test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeId} returns 404 for a missing probe');
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(73, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(81, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -869,7 +1317,7 @@ $sectorRepository->save(new SectorContent($privacySector, [
     ),
 ]));
 $privacyObservation = (new SectorObservationService($sectorService, $visitedSectors))->observe(
-    new Player(424242, 'privacy-observer', 'Privacy Observer', $privacyHome, gmdate('c'), gmdate('c')),
+    new Player(424242, 'privacy-observer', 'Privacy Observer', null, $privacyHome, gmdate('c'), gmdate('c')),
     new NeumannProbe(424242, 424242, 'Privacy probe', $privacySector, 0.0, 0.0, new ProbeDirection(), ProbeStatus::Idle, 100.0, 0.0, 100.0, 0.0, 0.0, 0.0, 1.0, null, gmdate('c'), gmdate('c'), gmdate('c'), false),
     $privacySector,
 )->toArray();
@@ -1170,6 +1618,35 @@ if ($createdProbe !== null) {
             static fn($manny): bool => str_starts_with($manny->name, 'manny-debug-'),
         ));
         $test->assert($debugMannies !== [] && $debugMannies[0]->storageContainerId !== null, 'add-inventory-item CLI places created Mannys in storage');
+
+        $beforeDroneProbeCount = count($probes->findAllByPlayerId($cliInventoryPlayer->id));
+        $dryRunDroneProbeCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-drone-probe.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --dry-run'
+            . ' ' . $cliInventoryPlayer->id;
+        exec($dryRunDroneProbeCommand . ' 2>&1', $dryRunDroneProbeOutput, $dryRunDroneProbeStatus);
+        $test->assertEquals(0, $dryRunDroneProbeStatus, 'add-drone-probe CLI dry-run exits successfully');
+        $test->assertEquals($beforeDroneProbeCount, count($probes->findAllByPlayerId($cliInventoryPlayer->id)), 'add-drone-probe CLI dry-run leaves probes unchanged');
+
+        $addDroneProbeCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-drone-probe.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --player=' . escapeshellarg($cliInventoryPlayer->username);
+        exec($addDroneProbeCommand . ' 2>&1', $addDroneProbeOutput, $addDroneProbeStatus);
+        $addDroneProbeText = implode("\n", $addDroneProbeOutput);
+        $test->assertEquals(0, $addDroneProbeStatus, 'add-drone-probe CLI exits successfully');
+        $test->assert(str_contains($addDroneProbeText, 'Created probe #'), 'add-drone-probe CLI reports the created probe');
+        $droneProbes = array_values(array_filter(
+            $probes->findAllByPlayerId($cliInventoryPlayer->id),
+            static fn(NeumannProbe $probe): bool => $probe->name === 'drone',
+        ));
+        $test->assertEquals(1, count($droneProbes), 'add-drone-probe CLI creates exactly one drone probe for the player');
+        $test->assertEquals(true, $droneProbes[0]->excludeFromStats, 'add-drone-probe CLI excludes the debug probe from public stats');
+        $droneMannies = $droneProbes === [] ? [] : $mannies->findByProbeId($droneProbes[0]->id);
+        $test->assertEquals(1, count($droneMannies), 'add-drone-probe CLI puts one Manny in the drone probe');
+        $test->assert($droneMannies !== [] && $droneMannies[0]->name === 'manny-drone' && $droneMannies[0]->storageContainerId !== null, 'add-drone-probe CLI stores the Manny inside the drone probe');
+        $test->assertEquals($cliInventoryProbe->id, $players->findById($cliInventoryPlayer->id)?->defaultProbeId, 'add-drone-probe CLI keeps the existing default probe');
     }
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 9 WHERE id = :id')->execute(['id' => $createdProbe->id]);
@@ -1219,7 +1696,7 @@ if ($createdProbe !== null) {
     $legacyDamageWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $missionHeaders);
     $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
-    $test->assert(is_string($alertsScript) && str_contains($alertsScript, '/api/probe/alerts'), 'alerts page uses the generic persistent-alert endpoint');
+    $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'probeApiPath("/alerts"'), 'alerts page uses the selected-probe persistent-alert endpoint');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'replace(/\\r?\\n/g, "<br>")'), 'alerts page renders message line breaks');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'type === "manny_report"'), 'alerts page recognizes Manny report alerts');
     $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alertPriority'), 'alerts page prioritizes Manny reports above regular unread alerts');
@@ -1444,6 +1921,7 @@ $deleteMannies = $deleteProbe === null ? [] : $mannies->findByProbeId($deletePro
 $deleteSession = $auth->createSessionForPlayer($deletePlayer);
 $auth->createApiKeyForPlayer($deletePlayer);
 if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 2) {
+    $deleteSecondaryProbe = $probes->createForPlayer($deletePlayer->id, 'Delete secondary probe', new SectorCoordinates(30, 0, 0));
     $deleteSentMessage = $messages->create($deleteProbe->id, $createdProbe->id, $deleteProbe->currentSector, 'Deleting sender ping');
     $deleteReceivedMessage = $messages->create($createdProbe->id, $deleteProbe->id, $deleteProbe->currentSector, 'Deleting recipient ping');
     $deleteRelay = $scutRelays->create($deleteProbe->id, $deleteProbe->currentSector);
@@ -1482,17 +1960,18 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
 
     $deleteStats = (new AccountDeletionService($pdo, $probes, $mannies, $sectorService))->deletePlayer($deletePlayer);
     $test->assertEquals(1, $deleteStats['players'] ?? null, 'account deletion reports the deleted player');
-    $test->assertEquals(1, $deleteStats['probes'] ?? null, 'account deletion reports the deleted probe');
+    $test->assertEquals(2, $deleteStats['probes'] ?? null, 'account deletion reports all deleted probes');
     $test->assertEquals(1, $deleteStats['probeMessagesSent'] ?? null, 'account deletion reports sent probe messages');
     $test->assertEquals(1, $deleteStats['probeMessagesReceived'] ?? null, 'account deletion reports received probe messages');
-    $test->assertEquals(1, $deleteStats['probeMissions'] ?? null, 'account deletion reports probe missions');
-    $test->assertEquals(2, $deleteStats['probeMissionSteps'] ?? null, 'account deletion reports probe mission steps');
+    $test->assertEquals(1, $deleteStats['playerMissions'] ?? null, 'account deletion reports player missions');
+    $test->assertEquals(2, $deleteStats['playerMissionSteps'] ?? null, 'account deletion reports player mission steps');
     $test->assertEquals(1, $deleteStats['manniesDetachedAsAbandoned'] ?? null, 'account deletion detaches outside Mannys as abandoned');
     $test->assert($players->findById($deletePlayer->id) === null, 'account deletion removes the player row');
     $test->assert($probes->findByPlayerId($deletePlayer->id) === null, 'account deletion removes the player probe');
+    $test->assert($probes->findById($deleteSecondaryProbe->id) === null, 'account deletion removes secondary player probes');
     $test->assert($messages->findById($deleteSentMessage->id) === null, 'account deletion removes messages sent by the deleted probe');
     $test->assert($messages->findById($deleteReceivedMessage->id) === null, 'account deletion removes messages received by the deleted probe');
-    $test->assert($missions->findByUidForProbe($deleteProbe->id, $deleteMission->uid) === null, 'account deletion removes probe missions');
+    $test->assert($missions->findByUidForPlayer($deletePlayer->id, $deleteMission->uid) === null, 'account deletion removes player missions');
     $test->assertEquals($deleteProbe->id, $scutRelays->findById($deleteRelay->id)?->createdByProbeId, 'account deletion keeps SCUT relays with their historical creator id');
     $test->assert($auth->getPlayerFromBearerToken('Bearer ' . $deleteSession['token']) === null, 'account deletion removes active sessions');
     $test->assert($mannies->findByUid($onboardManny->uid) === null, 'account deletion removes onboard Mannys');
@@ -1834,6 +2313,25 @@ $test->assert(isset($recipesById['battery_pack']), 'crafting recipes expose batt
 $test->assertEquals('carbon_compounds', $recipesById['battery_pack']['ingredients'][2]['type'] ?? null, 'battery pack uses organic compounds');
 $test->assert(isset($recipesById['linear_actuator']), 'crafting recipes expose linear actuators');
 $test->assertEquals('electric_motor', $recipesById['linear_actuator']['ingredients'][2]['type'] ?? null, 'linear actuator requires an electric motor');
+$test->assert(isset($recipesById['atomic_printer_part']), 'crafting recipes expose atomic printer parts');
+$test->assertEquals(['atomic_3d_printer'], $recipesById['atomic_printer_part']['craftableBy'] ?? null, 'atomic printer parts are printed by the atomic printer');
+$test->assertEquals('micro_conductor', $recipesById['atomic_printer_part']['ingredients'][0]['type'] ?? null, 'atomic printer parts require micro conductors');
+$test->assertEquals(2700, $recipesById['atomic_printer_part']['durationSeconds'] ?? null, 'atomic printer part print takes forty-five real minutes');
+$test->assertEquals(0.01, $recipesById['atomic_printer_part']['output']['containerSpace'] ?? null, 'atomic printer parts occupy 0.01 containers');
+$test->assert(isset($recipesById['deuterium_engine']), 'crafting recipes expose deuterium engines');
+$test->assertEquals(['manny'], $recipesById['deuterium_engine']['craftableBy'] ?? null, 'deuterium engines are assembled by Manny');
+$deuteriumEngineIngredients = [];
+foreach ($recipesById['deuterium_engine']['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $deuteriumEngineIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(1, $deuteriumEngineIngredients['atomic_printer_part']['quantity'] ?? null, 'deuterium engines require one atomic printer part');
+$test->assertEquals(1, $deuteriumEngineIngredients['integrated_circuit']['quantity'] ?? null, 'deuterium engines require one integrated circuit');
+$test->assertEquals(2, $deuteriumEngineIngredients['electric_motor']['quantity'] ?? null, 'deuterium engines require two electric motors');
+$test->assertEquals(0.5, $deuteriumEngineIngredients['deuterium']['quantity'] ?? null, 'deuterium engines directly consume 0.5 ECE of deuterium');
+$test->assert($recipesById['deuterium_engine']['durationSeconds'] <= 86400, 'deuterium engine assembly stays under twenty-four hours');
+$test->assertEquals(0.06, $recipesById['deuterium_engine']['output']['containerSpace'] ?? null, 'deuterium engines occupy 0.06 containers');
 $test->assert(isset($recipesById['solar_panel']), 'crafting recipes expose solar panels');
 $test->assertEquals(['manny'], $recipesById['solar_panel']['craftableBy'] ?? null, 'solar panels are assembled by Manny');
 $test->assertEquals('micro_conductor', $recipesById['solar_panel']['ingredients'][0]['type'] ?? null, 'solar panel requires micro conductors');
@@ -3378,7 +3876,7 @@ if ($intelligentLifeProbe !== null) {
                         $test->assertEquals('pending', $activeFirstContactBeforeStation->body['missions'][0]['steps'][4]['status'] ?? null, 'first-contact mission waits for the deuterium station step');
 
                         $completedFirstContactMissions = array_values(array_filter(
-                            $missions->findForProbe($intelligentLifeProbeForFinalDrop->id, [Mission::STATUS_COMPLETED]),
+                            $missions->findForPlayer($intelligentLifeProbeForFinalDrop->playerId, [Mission::STATUS_COMPLETED]),
                             static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
                         ));
                         $test->assertEquals(0, count($completedFirstContactMissions), 'first-contact mission is not completed before the station is ready');
@@ -3422,13 +3920,13 @@ if ($intelligentLifeProbe !== null) {
                         $test->assert(is_string($stationReadyMessage['body'] ?? null) && str_contains((string) $stationReadyMessage['body'], 'deuterium refuel station'), 'final station-ready message announces the station');
 
                         $completedFirstContactMissions = array_values(array_filter(
-                            $missions->findForProbe($intelligentLifeProbeForFinalDrop->id, [Mission::STATUS_COMPLETED]),
+                            $missions->findForPlayer($intelligentLifeProbeForFinalDrop->playerId, [Mission::STATUS_COMPLETED]),
                             static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
                         ));
                         $test->assertEquals(1, count($completedFirstContactMissions), 'first-contact mission completes when the deuterium station is ready');
                         if ($fellowContributorProbe !== null) {
                             $fellowCompletedMissions = array_values(array_filter(
-                                $missions->findForProbe($fellowContributorProbe->id, [Mission::STATUS_COMPLETED]),
+                                $missions->findForPlayer($fellowContributorProbe->playerId, [Mission::STATUS_COMPLETED]),
                                 static fn(Mission $mission): bool => $mission->type === 'first_contact.return_to_space_program',
                             ));
                             $test->assertEquals(1, count($fellowCompletedMissions), 'first-contact mission success is persisted for a contributing player');
@@ -3904,6 +4402,7 @@ if ($foreignMannyId !== '') {
         ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
         ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],
         ['POST', $foreignMannyPath . '/improve-probe', ['improvement' => 'deuterium_compression'], 'POST /api/probe/mannies/{id}/improve-probe'],
+        ['POST', $foreignMannyPath . '/assemble-probe', ['containerIds' => ['container-a', 'container-b']], 'POST /api/probe/mannies/{id}/assemble-probe'],
         ['POST', $foreignMannyPath . '/recall', [], 'POST /api/probe/mannies/{id}/recall'],
     ] as [$method, $path, $body, $label]) {
         assertForeignMannyEndpointReturnsNotFound($test, $kernel, $headers, $method, $path, $body, $label);
@@ -4100,6 +4599,83 @@ if ($createdProbe !== null) {
     ]);
     $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
     $test->assertEquals(200.0, $probes->findByPlayerId($improvementPlayer->id)?->deuteriumStock, 'completed improved tank refill fills the probe to 200 percent');
+
+    $assemblyPlayer = $auth->registerPlayerWithPassword('probe-assembly-user', 'secret', 'Probe Assembly User');
+    $assemblyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($assemblyPlayer)['token']];
+    $assemblyProbe = $probes->findByPlayerId($assemblyPlayer->id) ?? throw new RuntimeException('Expected assembly probe.');
+    $assemblyMannyList = $kernel->handle('GET', '/api/probe/mannies', $assemblyHeaders);
+    $assemblyMannyId = (string) ($assemblyMannyList->body['mannies'][0]['id'] ?? '');
+    $assemblyMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $assemblyMannyRow->execute(['uid' => $assemblyMannyId]);
+    $assemblyMannyDbId = (int) $assemblyMannyRow->fetchColumn();
+    $assemblyContainerItemA = $storage->addItem($assemblyProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $assemblyContainerItemB = $storage->addItem($assemblyProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $assemblyContainerIdA = 'container-' . $assemblyContainerItemA->uid;
+    $assemblyContainerIdB = 'container-' . $assemblyContainerItemB->uid;
+    $missingAssemblyComponents = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyMannyId) . '/assemble-probe', $assemblyHeaders, json_encode([
+        'containerIds' => [$assemblyContainerIdA, $assemblyContainerIdB],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingAssemblyComponents->status, 'probe assembly requires all configured components');
+    $test->assertEquals('insufficient_probe_assembly_components', $missingAssemblyComponents->body['error']['code'] ?? null, 'missing probe assembly components return an explicit error');
+
+    $assemblyComponents = [
+        [ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::DEUTERIUM_ENGINE_NAME, 0.06, 1],
+        [ProbeItem::TYPE_SCUT_RELAY, ProbeItem::SCUT_RELAY_NAME, 0.12, 1],
+        [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006, 5],
+        [ProbeItem::TYPE_ATOMIC_PRINTER_PART, ProbeItem::ATOMIC_PRINTER_PART_NAME, 0.01, 2],
+        [ProbeItem::TYPE_SOLAR_PANEL, ProbeItem::SOLAR_PANEL_NAME, 0.015, 4],
+    ];
+    foreach ($assemblyComponents as [$type, $name, $space, $count]) {
+        for ($index = 0; $index < $count; $index++) {
+            $storage->addItem($assemblyProbe, $type, $name, $space);
+        }
+    }
+
+    $assemblyContainerA = $storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdA);
+    if ($assemblyContainerA !== null) {
+        $storageContainers->setResourceAmount($assemblyContainerA->id, ResourceComposition::METALS, 0.01);
+    }
+    $nonEmptyAssemblyContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyMannyId) . '/assemble-probe', $assemblyHeaders, json_encode([
+        'containerIds' => [$assemblyContainerIdA, $assemblyContainerIdB],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $nonEmptyAssemblyContainer->status, 'probe assembly refuses a non-empty selected container');
+    $test->assertEquals('storage_container_not_empty', $nonEmptyAssemblyContainer->body['error']['code'] ?? null, 'non-empty selected assembly containers return an explicit error');
+    if ($assemblyContainerA !== null) {
+        $storageContainers->setResourceAmount($assemblyContainerA->id, ResourceComposition::METALS, 0.0);
+    }
+    $assemblyProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $assemblyProbe, []);
+
+    $assembleProbe = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyMannyId) . '/assemble-probe', $assemblyHeaders, json_encode([
+        'containerIds' => [$assemblyContainerIdA, $assemblyContainerIdB],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $assembleProbe->status, 'POST /api/probe/mannies/{id}/assemble-probe starts probe assembly');
+    $test->assertEquals('assembling_probe', $assembleProbe->body['manny']['currentTask'] ?? null, 'probe assembly task is exposed on Manny');
+    $test->assertEquals('sector', $assembleProbe->body['manny']['location']['type'] ?? null, 'probe assembly moves the Manny outside the probe');
+    $test->assertEquals(10800, $assembleProbe->body['manny']['task']['durationSeconds'] ?? null, 'probe assembly lasts three hours');
+    $test->assertEquals(13, count($assembleProbe->body['manny']['task']['consumedItems'] ?? []), 'probe assembly consumes all required components');
+    $test->assertEquals(2, count($assembleProbe->body['manny']['task']['consumedContainers'] ?? []), 'probe assembly consumes the two selected containers');
+    $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdA) === null, 'accepted probe assembly removes the first ingredient container immediately');
+    $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdB) === null, 'accepted probe assembly removes the second ingredient container immediately');
+    $test->assertEquals(null, $items->findByUidForProbe($assemblyProbe->id, $assemblyContainerItemA->uid), 'accepted probe assembly consumes the first backing container item');
+    $test->assertEquals(null, $items->findByUidForProbe($assemblyProbe->id, $assemblyContainerItemB->uid), 'accepted probe assembly consumes the second backing container item');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $assemblyMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $assemblyHeaders);
+    $assemblyProbes = $probes->findAllByPlayerId($assemblyPlayer->id);
+    $assemblyDrones = array_values(array_filter(
+        $assemblyProbes,
+        static fn(NeumannProbe $probe): bool => $probe->name === 'drone-1',
+    ));
+    $test->assertEquals(1, count($assemblyDrones), 'completed probe assembly creates drone-1 for the player');
+    $assemblyDrone = $assemblyDrones[0] ?? null;
+    $test->assert($assemblyDrone instanceof NeumannProbe && $assemblyDrone->currentSector->equals($assemblyProbe->currentSector), 'assembled drone is created in the assembly sector');
+    $test->assertEquals($assemblyProbe->id, $players->findById($assemblyPlayer->id)?->defaultProbeId, 'completed probe assembly keeps the original default probe');
+    $assemblyMannyAfterCompletion = $mannies->findByUid($assemblyMannyId);
+    $test->assertEquals($assemblyDrone?->id, $assemblyMannyAfterCompletion?->probeId, 'completed probe assembly transfers the Manny to the new drone');
+    $test->assertEquals(Manny::LOCATION_PROBE, $assemblyMannyAfterCompletion?->locationType, 'transferred assembly Manny is aboard the new drone');
+    $test->assert($assemblyMannyAfterCompletion?->storageContainerId !== null, 'transferred assembly Manny is stored in the new drone cargo');
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);
@@ -5080,7 +5656,7 @@ if ($riskProbe !== null) {
         $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $reassignedProbe->body['probe']['sector']['relative'] ?? null, 'reassigned probe starts at a fresh relative origin');
         $test->assertEquals('idle', $reassignedProbe->body['probe']['status'] ?? null, 'reassigned probe is operational');
         $test->assert($probes->findById($riskProbe->id) === null, 'mind snapshot reassignment deletes the terminal probe');
-        $test->assert($missions->findByUidForProbe($riskProbe->id, $reassignmentMission->uid) === null, 'mind snapshot reassignment deletes terminal probe missions');
+        $test->assert($missions->findByUidForPlayer($riskPlayer->id, $reassignmentMission->uid) !== null, 'mind snapshot reassignment keeps player missions');
         $test->assert($reassignmentWarning === null || $damageWarnings->findById($reassignmentWarning->id) === null, 'mind snapshot reassignment deletes terminal probe damage warnings before movements');
         $test->assertEquals($riskProbe->id, $scutRelays->findById($reassignmentRelay->id)?->createdByProbeId, 'mind snapshot reassignment keeps SCUT relays with their historical creator id');
         $newRiskProbe = $probes->findByPlayerId($riskPlayer->id);
@@ -5150,6 +5726,9 @@ if ($escapeProbe !== null) {
 foreach ([
     'GET /api/me',
     'GET /api/probe',
+    'GET /api/probe/1',
+    'PATCH /api/probe/1',
+    'GET /api/probes',
     'POST /api/probe/mind-snapshot/reassign',
     'POST /api/probe/atomic-printer/craft',
     'GET /api/probe/messages',

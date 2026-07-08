@@ -27,7 +27,9 @@ class FrontRouteFactory{
                 }
 
                 $frontRoute = new $routeClass();
-                self::addMenuItems($frontRoute, $availableRoutes, $route, $projectRoot);
+                $selectedProbeId = self::selectedProbeIdFromPath($routePath);
+                $frontRoute->configureRequestContext($routePath, $selectedProbeId);
+                self::addMenuItems($frontRoute, $availableRoutes, $route, $projectRoot, $selectedProbeId);
 
                 return $frontRoute;
             }
@@ -38,12 +40,13 @@ class FrontRouteFactory{
 
         // Si aucune route ne correspond, on retourne une route 404
         $frontRoute = new FrontRoute404();
-        self::addMenuItems($frontRoute, $availableRoutes, null, $projectRoot);
+        $frontRoute->configureRequestContext($routePath, null);
+        self::addMenuItems($frontRoute, $availableRoutes, null, $projectRoot, null);
 
         return $frontRoute;
     }
 
-    private static function addMenuItems(FrontRoute $frontRoute, array $availableRoutes, ?array $activeRoute, string $projectRoot): void
+    private static function addMenuItems(FrontRoute $frontRoute, array $availableRoutes, ?array $activeRoute, string $projectRoot, ?int $selectedProbeId): void
     {
 
         //custom footer menu items from config
@@ -57,11 +60,16 @@ class FrontRouteFactory{
             if(isset($route['displayOnMainMenu']) && $route['displayOnMainMenu'] === true){
                 //(string $title, string $href, bool $active = false)
                 $active = $activeRoute !== null && $activeRoute['linkUri'] === $route['linkUri'];
+                $href = $selectedProbeId !== null
+                    ? self::routeHrefForProbe($route['linkUri'], $selectedProbeId)
+                    : $route['linkUri'];
                 $frontRoute->addLeftMenuItem(
                     new MenuLinkItem(
                     $route['name'],
-                    $route['linkUri'],
-                    $active
+                    $href,
+                    $active,
+                    false,
+                    $route['linkUri']
                 ));
 
             }
@@ -76,6 +84,30 @@ class FrontRouteFactory{
         }
 
 
+    }
+
+    private static function selectedProbeIdFromPath(string $routePath): ?int
+    {
+        if (preg_match('#^/(\d+)$#', $routePath, $matches) === 1) {
+            return (int) $matches[1];
+        }
+        if (preg_match('#^/(?:sensors|inventories|mannies|scut|messaging|alerts)/(\d+)$#', $routePath, $matches) === 1) {
+            return (int) $matches[1];
+        }
+        if (preg_match('#^/movement/(\d+)(?:/-?\d+/-?\d+/-?\d+)?$#', $routePath, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        return null;
+    }
+
+    private static function routeHrefForProbe(string $linkUri, int $probeId): string
+    {
+        if ($linkUri === '/') {
+            return '/' . $probeId;
+        }
+
+        return rtrim($linkUri, '/') . '/' . $probeId;
     }
 
     /**
