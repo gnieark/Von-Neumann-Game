@@ -8,7 +8,8 @@ final class ProbeImprovement
 {
     public function __construct(
         public readonly int $id,
-        public readonly int $probeId,
+        public readonly ?int $playerId,
+        public readonly ?int $probeId,
         public readonly string $improvement,
         public bool $available,
         public bool $done,

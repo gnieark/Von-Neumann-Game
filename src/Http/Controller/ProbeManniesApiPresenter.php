@@ -58,7 +58,7 @@ final class ProbeManniesApiPresenter
 
         $result = [];
         foreach ($definitions as $id => $definition) {
-            $row = $rows[$id] ?? new ProbeImprovement(0, $probe->id, $id, false, false, '', '');
+            $row = $rows[$id] ?? new ProbeImprovement(0, $probe->playerId, $probe->id, $id, false, false, '', '');
             if (!$includeAll && !$row->available && !$row->done) {
                 continue;
             }

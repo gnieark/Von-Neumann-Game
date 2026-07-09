@@ -38,4 +38,6 @@ interface MannyTaskRuntime
     public function refreshProbeImprovement(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
     public function refreshProbeAssembly(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
+
+    public function refreshDeuteriumTransferToProbe(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 }

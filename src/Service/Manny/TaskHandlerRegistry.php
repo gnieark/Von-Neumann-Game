@@ -27,6 +27,7 @@ final class TaskHandlerRegistry
             new ScutRelayTurnOnTaskHandler(),
             new ProbeImprovementTaskHandler(),
             new ProbeAssemblyTaskHandler(),
+            new DeuteriumTransferTaskHandler(),
         ];
     }
 }

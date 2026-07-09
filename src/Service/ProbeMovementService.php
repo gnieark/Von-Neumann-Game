@@ -51,6 +51,7 @@ final class ProbeMovementService
         private readonly ?ProbeDamageWarningRepository $damageWarnings = null,
         private readonly ?MissionService $missions = null,
         private readonly ?ProbeImprovementRepository $improvements = null,
+        private readonly ?ProbeReinstantiationService $reinstantiation = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -158,9 +159,9 @@ final class ProbeMovementService
         }
 
         $phase = $this->phaseAt($movement, $now);
-        $this->checkDestructionAtCruiseStart($probe, $movement, $phase, $now);
+        $replacementProbe = $this->checkDestructionAtCruiseStart($probe, $movement, $phase, $now);
         if ($movement->status === 'destroyed') {
-            return $this->probes->findById($probe->id) ?? $probe;
+            return $replacementProbe ?? $this->probes->findById($probe->id) ?? $probe;
         }
 
         $movement->status = $phase;
@@ -326,10 +327,10 @@ final class ProbeMovementService
         return 'arrived';
     }
 
-    private function checkDestructionAtCruiseStart(NeumannProbe $probe, ProbeMovement $movement, string $phase, \DateTimeImmutable $now): void
+    private function checkDestructionAtCruiseStart(NeumannProbe $probe, ProbeMovement $movement, string $phase, \DateTimeImmutable $now): ?NeumannProbe
     {
         if ($phase !== 'cruising' || $movement->destructionCheckedAt !== null) {
-            return;
+            return null;
         }
 
         $movement->destructionCheckedAt = $now->format('c');
@@ -347,10 +348,16 @@ final class ProbeMovementService
             $probe->integrityPercent = 0.0;
             $probe->currentTask = null;
             $this->probes->save($probe);
-            return;
+
+            return $this->reinstantiation?->switchDefaultProbeAfterTerminalLoss(
+                $probe,
+                ProbeReinstantiationService::TERMINAL_REASON_COLLISION,
+            );
         }
 
         $this->movements->save($movement);
+
+        return null;
     }
 
     private function registerForgottenMannies(NeumannProbe $probe): void
@@ -777,6 +784,10 @@ final class ProbeMovementService
         $probe->currentTask = null;
         $probe->integrityPercent = 0.0;
         $this->probes->save($probe);
+        $this->reinstantiation?->switchDefaultProbeAfterTerminalLoss(
+            $probe,
+            ProbeReinstantiationService::TERMINAL_REASON_BLACK_HOLE,
+        );
     }
 
     private function applyIntersectorIntegrityLoss(NeumannProbe $probe, ProbeMovement $movement): void

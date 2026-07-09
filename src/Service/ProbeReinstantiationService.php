@@ -13,6 +13,7 @@ use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\SectorContent;
@@ -23,6 +24,9 @@ use VonNeumannGame\Sector\SectorService;
 
 final class ProbeReinstantiationService
 {
+    public const TERMINAL_REASON_BLACK_HOLE = 'black_hole_trap';
+    public const TERMINAL_REASON_COLLISION = 'movement_collision';
+
     private readonly SectorGrid $grid;
 
     public function __construct(
@@ -32,6 +36,7 @@ final class ProbeReinstantiationService
         private readonly MannyRepository $mannies,
         private readonly VisitedSectorRepository $visitedSectors,
         private readonly ?SectorService $sectors = null,
+        private readonly ?ProbeDamageWarningRepository $damageWarnings = null,
         ?SectorGrid $grid = null,
         private readonly array $gameplayConfig = [],
         private readonly array $universeConfig = [],
@@ -88,6 +93,73 @@ final class ProbeReinstantiationService
         ];
     }
 
+    public function switchDefaultProbeAfterTerminalLoss(NeumannProbe $terminalProbe, string $reason): ?NeumannProbe
+    {
+        $player = $this->players->findById($terminalProbe->playerId);
+        if ($player === null || $player->defaultProbeId !== $terminalProbe->id) {
+            return null;
+        }
+
+        $replacement = $this->replacementProbeFor($player, $terminalProbe);
+        if ($replacement === null) {
+            return null;
+        }
+
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $player->defaultProbeId = $replacement->id;
+            $this->players->save($player);
+            $this->damageWarnings?->createMindSnapshotTransferredAlert(
+                $replacement->id,
+                $replacement->currentSector,
+                $terminalProbe->id,
+                $reason,
+                $this->mindSnapshotTransferMessage($reason),
+            );
+            $this->deleteProbeData($terminalProbe->id);
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (\Throwable $error) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
+        }
+
+        return $this->probes->findById($replacement->id) ?? $replacement;
+    }
+
+    private function replacementProbeFor(Player $player, NeumannProbe $terminalProbe): ?NeumannProbe
+    {
+        foreach ($this->probes->findAllByPlayerId($player->id) as $probe) {
+            if ($probe->id === $terminalProbe->id) {
+                continue;
+            }
+            if (in_array($probe->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true)) {
+                continue;
+            }
+
+            return $probe;
+        }
+
+        return null;
+    }
+
+    private function mindSnapshotTransferMessage(string $reason): string
+    {
+        return match ($reason) {
+            self::TERMINAL_REASON_BLACK_HOLE => 'Instance switch complete: the last stable backup of your mind has been transferred into this probe after your default probe was trapped beyond a black-hole escape threshold.',
+            self::TERMINAL_REASON_COLLISION => 'Instance switch complete: the last stable backup of your mind has been transferred into this probe after your default probe was destroyed by a high-velocity collision during intersector movement.',
+            default => 'Instance switch complete: the last stable backup of your mind has been transferred into this probe after your default probe was lost.',
+        };
+    }
+
     /**
      * @param array<Manny> $mannies
      */
@@ -130,10 +202,8 @@ final class ProbeReinstantiationService
         $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM mannies WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute(
-            'DELETE FROM probe_messages WHERE sender_probe_id = :probe_id OR recipient_probe_id = :probe_id',
-            ['probe_id' => $probeId],
-        );
+        $this->execute('UPDATE probe_messages SET sender_probe_id = NULL WHERE sender_probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute('UPDATE probe_messages SET recipient_probe_id = NULL WHERE recipient_probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM storage_container_resources
@@ -141,6 +211,7 @@ final class ProbeReinstantiationService
             ['probe_id' => $probeId],
         );
         $this->execute('DELETE FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute('DELETE FROM probe_improvement_installations WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM neumann_probes WHERE id = :probe_id', ['probe_id' => $probeId]);
     }
 

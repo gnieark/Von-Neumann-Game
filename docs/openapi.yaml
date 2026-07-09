@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '81'
+  version: '84'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 81
+                apiVersion: 84
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -967,6 +967,11 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1refill-deuterium-tank/post'
+  /api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-to-probe:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1transfer-deuterium-to-probe/post'
   /api/probe/{probeId}/mannies/{mannyId}/turn-on-relay:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
@@ -1160,9 +1165,10 @@ paths:
     get:
       summary: List available probe improvements
       description: >
-        Returns probe improvements that have been unlocked for the current
-        probe, plus improvements already completed. Pass `includeAll=1` to
-        include locked catalog entries as unavailable.
+        Returns probe improvements whose blueprints are known by the player
+        owning the selected probe. The `done` flag is evaluated for that
+        selected probe only. Pass `includeAll=1` to include locked catalog
+        entries as unavailable.
       parameters:
         - in: query
           name: includeAll
@@ -1172,7 +1178,7 @@ paths:
           description: Include locked improvements from the gameplay catalog.
       responses:
         '200':
-          description: Probe improvements visible to the authenticated probe
+          description: Probe improvements known by the authenticated player for the selected probe
           content:
             application/json:
               schema:
@@ -1447,7 +1453,8 @@ paths:
         Returns persistent alerts produced for the authenticated probe. Alerts
         currently cover fragile external storage movement warnings,
         intelligent-life detections when the probe arrives in a sector,
-        debug-injected sector object detections, and anomaly detections.
+        instance-switch mind snapshot transfer notices, debug-injected sector
+        object detections, and anomaly detections.
       responses:
         '200':
           description: Current and past alerts for the authenticated probe
@@ -1510,6 +1517,21 @@ paths:
                     readAt: null
                     resolvedAt: null
                   - id: 10
+                    type: mind_snapshot_transferred
+                    status: unread
+                    message: 'Instance switch complete: the last stable backup of your mind has been transferred into this probe after your default probe was destroyed by a high-velocity collision during intersector movement.'
+                    phase: instance_switch
+                    scheduledAt: '2026-06-12T16:00:00+00:00'
+                    sector:
+                      relative: { x: 8, y: 0, z: 0 }
+                    instanceSwitch:
+                      previousProbeId: 42
+                      reason: movement_collision
+                    createdAt: '2026-06-12T16:00:00+00:00'
+                    updatedAt: '2026-06-12T16:00:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                  - id: 11
                     type: anomaly_detected
                     status: unread
                     message: "ANOMALY DETECTED\n\nSensors report a coherent signal propagating through space.\n\nThe signal originates from the approximative direction -50 25 -15 relative to the current position. Distance unknown.\n\nAnalysis in progress."
@@ -2789,6 +2811,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/transfer-deuterium-to-probe:
+    post:
+      summary: Transfer deuterium to another probe or drone with a Manny
+      description: >
+        Starts a five-minute Manny task that transfers a reserved deuterium
+        amount from the current probe to another probe in the same
+        sector. The requested amount must be strictly lower than the source
+        probe current deuterium reserve. When the task completes, the target
+        probe is filled only up to its maximum deuterium capacity and any
+        surplus is returned to the source probe.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyDeuteriumTransferRequest'
+            example:
+              targetProbeId: 42
+              amount: 10
+      responses:
+        '202':
+          description: Deuterium transfer task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is busy, unavailable, not onboard, or the target tank is already full
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Target probe is not in the same sector or source deuterium is insufficient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/turn-on-relay:
     post:
       summary: Send a Manny to turn on a SCUT relay
@@ -3900,10 +3972,10 @@ components:
           type: string
         available:
           type: boolean
-          description: Whether the authenticated probe has unlocked the improvement.
+          description: Whether the selected probe owner's player knows this improvement blueprint.
         done:
           type: boolean
-          description: Whether the improvement effect has already been installed.
+          description: Whether the improvement effect has already been installed on the selected probe.
         durationSeconds:
           type: integer
           minimum: 1
@@ -4341,7 +4413,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred]
         status:
           type: string
           enum: [unread, read]
@@ -4350,7 +4422,7 @@ components:
           description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
         phase:
           type: string
-          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report]
+          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch]
         scheduledAt:
           type: string
           format: date-time
@@ -4433,6 +4505,19 @@ components:
             objectLabel:
               type: string
               nullable: true
+        instanceSwitch:
+          type: object
+          description: Present for `mind_snapshot_transferred` alerts.
+          required: [previousProbeId, reason]
+          properties:
+            previousProbeId:
+              type: integer
+              nullable: true
+              description: Deleted probe that hosted the previous default instance.
+            reason:
+              type: string
+              nullable: true
+              enum: [black_hole_trap, movement_collision]
         createdAt:
           type: string
           format: date-time
@@ -4740,6 +4825,19 @@ components:
           nullable: true
           maxLength: 255
           description: Optional name for a newly isolated network. Ignored when the relay joins existing coverage.
+    MannyDeuteriumTransferRequest:
+      type: object
+      required: [targetProbeId, amount]
+      properties:
+        targetProbeId:
+          type: integer
+          minimum: 1
+          description: Target probe id. The target must be in the same sector as the source probe.
+        amount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Deuterium percentage points to reserve from the source probe and transfer after five minutes. Must be strictly lower than the source probe current deuterium reserve.
     MannyMineRequest:
       type: object
       required: [objectId, targetAmount]
@@ -5003,7 +5101,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, turning_on_scut_relay, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, turning_on_scut_relay, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0

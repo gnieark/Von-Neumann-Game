@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 81;
+    public const API_VERSION = 84;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -134,8 +134,8 @@ final class ApiKernel
                     ? $this->probeStorageContainerRenameResponse($player, $ctx->stringParam(0), $ctx->body)
                     : $this->probeStorageContainerResponse($player, $ctx->stringParam(0)),
             )),
-            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(1), $ctx->params[2], $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
-            ApiRoute::regex('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|turn-on-relay|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(0), $ctx->params[1], $ctx->body))),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|turn-on-relay|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(1), $ctx->params[2], $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|turn-on-relay|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(0), $ctx->params[1], $ctx->body))),
             ApiRoute::regex('#^/api/probe/(\d+)/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->rename($player, $ctx->stringParam(1), $ctx->body, $probe), $ctx->intParam(0), ['PATCH'])),
@@ -1798,6 +1798,13 @@ final class ApiKernel
                 'objectId' => $warning->objectId,
                 'objectType' => $warning->containerId !== '' ? $warning->containerId : 'object',
                 'objectLabel' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
+            ];
+        }
+
+        if ($warning->type === ProbeDamageWarning::TYPE_MIND_SNAPSHOT_TRANSFERRED) {
+            $alert['instanceSwitch'] = [
+                'previousProbeId' => ctype_digit($warning->objectId) ? (int) $warning->objectId : null,
+                'reason' => $warning->containerId !== '' ? $warning->containerId : null,
             ];
         }
 
