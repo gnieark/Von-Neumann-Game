@@ -211,7 +211,7 @@ final class ProbeReinstantiationService
             ['probe_id' => $probeId],
         );
         $this->execute('DELETE FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('DELETE FROM probe_improvements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute('DELETE FROM probe_improvement_installations WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM neumann_probes WHERE id = :probe_id', ['probe_id' => $probeId]);
     }
 

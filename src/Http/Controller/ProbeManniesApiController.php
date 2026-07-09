@@ -198,6 +198,22 @@ final class ProbeManniesApiController
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
 
+        if ($action === 'transfer-deuterium-to-probe') {
+            $targetProbeId = $data['targetProbeId'] ?? $data['probeId'] ?? null;
+            $amount = $data['amount'] ?? $data['deuteriumAmount'] ?? null;
+            if (!is_int($targetProbeId) && !(is_string($targetProbeId) && ctype_digit($targetProbeId))) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain targetProbeId as an integer.');
+            }
+            if (!is_numeric($amount)) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain amount.');
+            }
+
+            $manny = $this->mannies->startDeuteriumTransferToProbe($probe, $uid, (int) $targetProbeId, (float) $amount);
+            $probe = $this->freshProbe($probe);
+
+            return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
+        }
+
         if ($action === 'improve-probe') {
             $improvement = $data['improvement'] ?? $data['id'] ?? null;
             if (!is_string($improvement) || trim($improvement) === '') {

@@ -370,6 +370,7 @@ $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
 $scutCoverageMigrationScript = file_get_contents($root . '/scripts/migrate-scut-coverage.php');
 $missionOwnershipMigrationScript = file_get_contents($root . '/scripts/migrate-probe-missions-to-player.php');
+$probeImprovementMigrationScript = file_get_contents($root . '/scripts/migrate-probe-improvements.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
@@ -455,6 +456,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspec
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-manny-hash'), 'mannies JS exposes the Manny state hash on Manny cards');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'restoreActionAccordionPanelIds'), 'mannies JS restores opened action accordions after card refresh');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'atomicPrinterStateHash'), 'mannies JS computes an atomic-printer state hash');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-printer-hash'), 'mannies JS exposes the atomic-printer state hash on the printer card');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'cursor.dataset.printerHash !== printerHash'), 'mannies JS rebuilds the atomic-printer card only when its hash changes');
@@ -513,6 +515,12 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuteri
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/refill-deuterium-tank'), 'mannies JS can start a deuterium tank refill action');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/transfer-deuterium-to-probe'), 'mannies JS can start a deuterium transfer action');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-transfer-deuterium-form'), 'mannies JS renders the deuterium transfer form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshProbeTransferTargets'), 'mannies JS loads same-sector probe transfer targets lazily');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'currentSectorProbes'), 'mannies JS includes public same-sector probes as deuterium transfer targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasProbeTransferTargetFuel'), 'mannies JS hides target deuterium values when they are not accessible');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'transferDeuteriumToProbeActionTitle'), 'mannies JS labels the deuterium transfer action');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-action-group-trigger'), 'mannies JS groups task actions inside parent accordions');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupProbe'), 'mannies JS renders the probe action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupSector'), 'mannies JS renders the sector action group');
@@ -540,7 +548,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260707-assemble-probe"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260709-deuterium-transfer"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -563,6 +571,11 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'active_probe_id INTEGER GENERATED ALWAYS'), 'MySQL active movement uniqueness uses a generated indexed column');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)'), 'MySQL active movement index waits for the generated-column migration');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_missions_player_status'), 'schema indexes missions by player and status');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_blueprints'), 'schema stores probe improvement blueprints by player');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_installations'), 'schema stores completed probe improvements by probe');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvements ('), 'schema no longer creates the legacy mixed probe_improvements table');
+$test->assert(is_string($probeImprovementMigrationScript) && str_contains($probeImprovementMigrationScript, 'probe_improvement_blueprints'), 'probe improvement migration script creates player blueprint rows');
+$test->assert(is_string($probeImprovementMigrationScript) && str_contains($probeImprovementMigrationScript, 'DROP TABLE probe_improvements'), 'probe improvement migration script drops the legacy table by default');
 $test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
@@ -775,6 +788,66 @@ $test->assert(in_array('player_id', $migratedMissionColumns, true), 'mission own
 $test->assert(!in_array('probe_id', $migratedMissionColumns, true), 'mission ownership migration drops probe_id');
 $test->assertEquals(1, (int) $legacyMissionPdo->query("SELECT player_id FROM probe_missions WHERE uid = 'mis_legacy_player_owner'")->fetchColumn(), 'mission ownership migration maps probe missions to the owning player');
 $test->assertEquals(1, (int) $legacyMissionPdo->query('SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id = 1')->fetchColumn(), 'mission ownership migration preserves mission steps');
+
+$legacyImprovementDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-probe-improvements.sqlite';
+$legacyImprovementFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyImprovementDbPath), $root);
+$legacyImprovementPdo = $legacyImprovementFactory->create();
+$legacyImprovementPdo->exec(
+    'CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NULL,
+        password_hash TEXT NULL,
+        home_sector_x INTEGER NOT NULL,
+        home_sector_y INTEGER NOT NULL,
+        home_sector_z INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyImprovementPdo->exec(
+    'CREATE TABLE neumann_probes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        entered_current_sector_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyImprovementPdo->exec(
+    'CREATE TABLE probe_improvements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        probe_id INTEGER NOT NULL,
+        improvement TEXT NOT NULL,
+        available INTEGER NOT NULL DEFAULT 0,
+        done INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )'
+);
+$legacyImprovementPdo->exec("INSERT INTO players (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at) VALUES ('legacy-improvement-owner', 'Legacy Improvement Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyImprovementPdo->exec("INSERT INTO neumann_probes (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at) VALUES (1, 'Legacy improvement probe A', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyImprovementPdo->exec("INSERT INTO neumann_probes (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at) VALUES (1, 'Legacy improvement probe B', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
+$legacyImprovementPdo->exec("INSERT INTO probe_improvements (probe_id, improvement, available, done, created_at, updated_at) VALUES (1, 'deuterium_compression', 1, 1, '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00')");
+$legacyImprovementPdo->exec("INSERT INTO probe_improvements (probe_id, improvement, available, done, created_at, updated_at) VALUES (2, 'reinforced_container_couplings', 1, 0, '2026-01-03T00:00:00+00:00', '2026-01-03T00:00:00+00:00')");
+$legacyImprovementConfig = $tmp . DIRECTORY_SEPARATOR . 'legacy-probe-improvements-database.json';
+file_put_contents($legacyImprovementConfig, json_encode([
+    'driver' => 'sqlite',
+    'path' => $legacyImprovementDbPath,
+], JSON_THROW_ON_ERROR));
+$probeImprovementMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-improvements.php')
+    . ' --database-config=' . escapeshellarg($legacyImprovementConfig);
+exec($probeImprovementMigrationCommand . ' 2>&1', $probeImprovementMigrationOutput, $probeImprovementMigrationStatus);
+$test->assertEquals(0, $probeImprovementMigrationStatus, 'probe improvement migration exits successfully');
+$test->assertEquals(2, (int) $legacyImprovementPdo->query('SELECT COUNT(*) FROM probe_improvement_blueprints')->fetchColumn(), 'probe improvement migration stores known blueprints by player');
+$test->assertEquals(1, (int) $legacyImprovementPdo->query('SELECT COUNT(*) FROM probe_improvement_installations')->fetchColumn(), 'probe improvement migration stores completed improvements by probe');
+$test->assertEquals(0, (int) $legacyImprovementPdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'probe_improvements'")->fetchColumn(), 'probe improvement migration drops the legacy mixed table');
 
 $legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
 $legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
@@ -1043,14 +1116,18 @@ $scutCoverageSchemaColumns = array_map(
 $test->assert(in_array('scut_network_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their network id');
 $test->assert(in_array('scut_relay_id', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store their relay id');
 $test->assert(in_array('sector_x', $scutCoverageSchemaColumns, true), 'SCUT coverage rows store sector coordinates');
-$probeImprovementSchemaColumns = array_map(
+$probeImprovementBlueprintSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
-    $pdo->query('PRAGMA table_info(probe_improvements)')->fetchAll(PDO::FETCH_ASSOC),
+    $pdo->query('PRAGMA table_info(probe_improvement_blueprints)')->fetchAll(PDO::FETCH_ASSOC),
 );
-$test->assert(in_array('probe_id', $probeImprovementSchemaColumns, true), 'probe improvements store their probe id');
-$test->assert(in_array('improvement', $probeImprovementSchemaColumns, true), 'probe improvements store their canonical improvement id');
-$test->assert(in_array('available', $probeImprovementSchemaColumns, true), 'probe improvements track availability');
-$test->assert(in_array('done', $probeImprovementSchemaColumns, true), 'probe improvements track completion');
+$test->assert(in_array('player_id', $probeImprovementBlueprintSchemaColumns, true), 'probe improvement blueprints store their player id');
+$test->assert(in_array('improvement', $probeImprovementBlueprintSchemaColumns, true), 'probe improvement blueprints store their canonical improvement id');
+$probeImprovementInstallationSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_improvement_installations)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('probe_id', $probeImprovementInstallationSchemaColumns, true), 'probe improvement installations store their probe id');
+$test->assert(in_array('improvement', $probeImprovementInstallationSchemaColumns, true), 'probe improvement installations store their canonical improvement id');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -1291,7 +1368,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(82, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(84, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -4401,6 +4478,7 @@ if ($foreignMannyId !== '') {
         ['POST', $foreignMannyPath . '/inspect-asteroid', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-asteroid'],
         ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
         ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],
+        ['POST', $foreignMannyPath . '/transfer-deuterium-to-probe', ['targetProbeId' => $createdProbe?->id ?? 1, 'amount' => 1], 'POST /api/probe/mannies/{id}/transfer-deuterium-to-probe'],
         ['POST', $foreignMannyPath . '/improve-probe', ['improvement' => 'deuterium_compression'], 'POST /api/probe/mannies/{id}/improve-probe'],
         ['POST', $foreignMannyPath . '/assemble-probe', ['containerIds' => ['container-a', 'container-b']], 'POST /api/probe/mannies/{id}/assemble-probe'],
         ['POST', $foreignMannyPath . '/recall', [], 'POST /api/probe/mannies/{id}/recall'],
@@ -4481,9 +4559,77 @@ if ($createdProbe !== null) {
     $test->assertEquals(null, $refillAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed deuterium refill clears the Manny task');
     $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed deuterium refill fills the probe tank');
 
+    $transferTargetProbe = $probes->createForPlayer($player->id, 'Deuterium receiver drone', $createdProbe->currentSector);
+    $transferFarProbe = $probes->createForPlayer($player->id, 'Far deuterium receiver', new SectorCoordinates(992, 0, 0));
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 50 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 95 WHERE id = :id')->execute(['id' => $transferTargetProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 25 WHERE id = :id')->execute(['id' => $transferFarProbe->id]);
+    $sameAmountTransfer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/transfer-deuterium-to-probe', $headers, json_encode([
+        'targetProbeId' => $transferTargetProbe->id,
+        'amount' => 50,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $sameAmountTransfer->status, 'deuterium transfer amount must be lower than the source reserve');
+    $test->assertEquals('insufficient_deuterium', $sameAmountTransfer->body['error']['code'] ?? null, 'equal source reserve transfer returns insufficient_deuterium');
+    $farProbeTransfer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/transfer-deuterium-to-probe', $headers, json_encode([
+        'targetProbeId' => $transferFarProbe->id,
+        'amount' => 1,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $farProbeTransfer->status, 'deuterium transfer requires the target probe in the same sector');
+    $test->assertEquals('probe_not_in_same_sector', $farProbeTransfer->body['error']['code'] ?? null, 'far deuterium transfer returns an explicit same-sector error');
+    $transferManny = $kernel->handle('POST', '/api/probe/' . $createdProbe->id . '/mannies/' . rawurlencode($firstMannyId) . '/transfer-deuterium-to-probe', $headers, json_encode([
+        'targetProbeId' => $transferTargetProbe->id,
+        'amount' => 10,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $transferManny->status, 'POST /api/probe/{probeId}/mannies/{id}/transfer-deuterium-to-probe starts a deuterium transfer task');
+    $test->assertEquals('transferring_deuterium_to_probe', $transferManny->body['manny']['currentTask'] ?? null, 'deuterium transfer task is exposed on Manny');
+    $test->assertEquals(300, $transferManny->body['manny']['task']['durationSeconds'] ?? null, 'deuterium transfer takes five minutes');
+    $test->assertEquals(10, $transferManny->body['manny']['task']['reservedAmount'] ?? null, 'deuterium transfer stores the reserved amount');
+    $test->assertEquals($transferTargetProbe->id, $transferManny->body['manny']['task']['targetProbeId'] ?? null, 'deuterium transfer stores the target probe id');
+    $test->assertEquals(40.0, $probes->findById($createdProbe->id)?->deuteriumStock, 'deuterium transfer reserves fuel immediately on the source probe');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $repairMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $transferAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $test->assertEquals(null, $transferAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed deuterium transfer clears the Manny task');
+    $test->assertEquals('success', $transferAfterCompletion->body['mannies'][0]['task']['result'] ?? null, 'completed deuterium transfer records a success result');
+    $test->assertEquals(5, $transferAfterCompletion->body['mannies'][0]['task']['transferredAmount'] ?? null, 'completed deuterium transfer records the amount accepted by the target');
+    $test->assertEquals(5, $transferAfterCompletion->body['mannies'][0]['task']['returnedAmount'] ?? null, 'completed deuterium transfer returns target-capacity surplus');
+    $test->assertEquals(45.0, $probes->findById($createdProbe->id)?->deuteriumStock, 'deuterium transfer returns surplus to the source probe');
+    $test->assertEquals(100.0, $probes->findById($transferTargetProbe->id)?->deuteriumStock, 'deuterium transfer fills the target probe to its maximum');
+
+    $foreignTransferPlayer = $auth->registerPlayerWithPassword('foreign-deuterium-receiver', 'secret', 'Foreign Deuterium Receiver');
+    $foreignTransferProbe = $probes->createForPlayer($foreignTransferPlayer->id, 'Foreign receiver probe', $createdProbe->currentSector);
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 60 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 80 WHERE id = :id')->execute(['id' => $foreignTransferProbe->id]);
+    $sectorWithForeignProbe = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $observedForeignProbe = null;
+    foreach ($sectorWithForeignProbe->body['sector']['probes'] ?? [] as $observedProbe) {
+        if (($observedProbe['id'] ?? null) === $foreignTransferProbe->id) {
+            $observedForeignProbe = $observedProbe;
+            break;
+        }
+    }
+    $test->assert($observedForeignProbe !== null, 'current sector exposes foreign probes as public probe presence');
+    $test->assert(!array_key_exists('fuel', $observedForeignProbe ?? []), 'public foreign probe presence does not expose target fuel');
+    $foreignTransferManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/transfer-deuterium-to-probe', $headers, json_encode([
+        'targetProbeId' => $foreignTransferProbe->id,
+        'amount' => 5,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $foreignTransferManny->status, 'deuterium transfer can target another player probe in the same sector');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $repairMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $foreignTransferAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $test->assertEquals('success', $foreignTransferAfterCompletion->body['mannies'][0]['task']['result'] ?? null, 'foreign-probe deuterium transfer records a success result');
+    $test->assertEquals(55.0, $probes->findById($createdProbe->id)?->deuteriumStock, 'foreign-probe deuterium transfer consumes source fuel');
+    $test->assertEquals(85.0, $probes->findById($foreignTransferProbe->id)?->deuteriumStock, 'foreign-probe deuterium transfer fills the other player target');
+
     $improvementPlayer = $auth->registerPlayerWithPassword('probe-improvement-user', 'secret', 'Probe Improvement User');
     $improvementHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($improvementPlayer)['token']];
     $improvementProbe = $probes->findByPlayerId($improvementPlayer->id) ?? throw new RuntimeException('Expected improvement probe.');
+    $improvementSecondProbe = $probes->createForPlayer($improvementPlayer->id, 'Probe Improvement Sibling', $improvementProbe->currentSector);
     $improvementMannyList = $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
     $improvementMannyId = (string) ($improvementMannyList->body['mannies'][0]['id'] ?? '');
     $improvementMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
@@ -4506,6 +4652,9 @@ if ($createdProbe !== null) {
     $availableImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
     $test->assertEquals('deuterium_compression', $availableImprovements->body['improvements'][0]['id'] ?? null, 'available probe improvements are returned by default');
     $test->assertEquals(300, $availableImprovements->body['improvements'][0]['durationSeconds'] ?? null, 'deuterium compression exposes its configured duration');
+    $availableOnSecondProbe = $kernel->handle('GET', '/api/probe/' . $improvementSecondProbe->id . '/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals('deuterium_compression', $availableOnSecondProbe->body['improvements'][0]['id'] ?? null, 'known probe improvement blueprints are shared by all probes owned by the player');
+    $test->assertEquals(false, $availableOnSecondProbe->body['improvements'][0]['done'] ?? null, 'shared probe improvement blueprints are not automatically installed on sibling probes');
 
     foreach ($items->findByProbeId($improvementProbe->id) as $item) {
         if (in_array($item->type, [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::TYPE_STEEL_BAR], true)) {
@@ -4539,6 +4688,8 @@ if ($createdProbe !== null) {
     $test->assertEquals(null, $improvementAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed probe improvement clears the Manny task');
     $completedImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
     $test->assertEquals(true, $completedImprovements->body['improvements'][0]['done'] ?? null, 'completed probe improvement is persisted as done');
+    $secondProbeAfterCompletion = $kernel->handle('GET', '/api/probe/' . $improvementSecondProbe->id . '/probe-improvements-available', $improvementHeaders);
+    $test->assertEquals(false, $secondProbeAfterCompletion->body['improvements'][0]['done'] ?? null, 'completed probe improvements remain probe-specific');
     $probeAfterImprovement = $kernel->handle('GET', '/api/probe', $improvementHeaders);
     $test->assertEquals(200.0, $probeAfterImprovement->body['probe']['fuel']['maxDeuterium'] ?? null, 'deuterium compression raises the exposed fuel maximum');
 

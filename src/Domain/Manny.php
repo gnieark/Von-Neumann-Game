@@ -27,6 +27,7 @@ final class Manny
     public const TASK_TURNING_ON_SCUT_RELAY = 'turning_on_scut_relay';
     public const TASK_IMPROVING_PROBE = 'improving_probe';
     public const TASK_ASSEMBLING_PROBE = 'assembling_probe';
+    public const TASK_TRANSFERRING_DEUTERIUM_TO_PROBE = 'transferring_deuterium_to_probe';
     public const CARGO_CAPACITY = 0.05;
     public const CONTAINER_SPACE = 0.05;
 

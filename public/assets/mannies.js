@@ -5,7 +5,7 @@
     const MANNY_MINING_AMOUNT_MAX = 0.55;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe", "assemble-probe"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe", "assemble-probe", "transfer-deuterium"]);
     const PROBE_ASSEMBLY_COMPONENTS = [
         {"type": "deuterium_engine", "quantity": 1},
         {"type": "scut_relay", "quantity": 1},
@@ -20,8 +20,13 @@
         currentMannies: [],
         currentMannyMineTargets: [],
         currentMannySalvageTargets: [],
+        currentProbeDeuterium: 0,
+        currentProbeId: null,
+        currentProbeMaxDeuterium: 100,
         currentProbeImprovements: [],
         currentProbeSectorRelative: null,
+        currentProbeTransferTargets: [],
+        currentSectorProbes: [],
         currentSectorObjects: [],
         remoteSectorScans: {},
     };
@@ -62,9 +67,74 @@
         const probeData = await window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"});
         const probe = probeData && probeData.probe ? probeData.probe : {};
         state.currentInventory = probe.inventory || null;
+        state.currentProbeId = Number.isFinite(Number(probe.id)) ? Number(probe.id) : null;
+        state.currentProbeDeuterium = Math.max(0, Number(probe.fuel && probe.fuel.deuterium) || 0);
+        state.currentProbeMaxDeuterium = Math.max(0, Number(probe.fuel && probe.fuel.maxDeuterium) || 100);
         state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
 
         return state.currentInventory;
+    }
+
+    async function refreshProbeTransferTargets() {
+        const [listData, sectorData] = await Promise.all([
+            window.VNG.apiJson("/api/probes", {"method": "GET"}),
+            window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}).catch(() => null),
+        ]);
+        const probes = Array.isArray(listData && listData.probes) ? listData.probes : [];
+        const sector = sectorData && sectorData.sector ? sectorData.sector : {};
+        state.currentSectorProbes = Array.isArray(sector.probes) ? sector.probes : state.currentSectorProbes;
+        const currentId = state.currentProbeId;
+        const currentSector = state.currentProbeSectorRelative;
+        if (!currentId || !currentSector) {
+            state.currentProbeTransferTargets = [];
+            return state.currentProbeTransferTargets;
+        }
+
+        const details = await Promise.all(probes
+            .filter((probe) => Number(probe && probe.id) !== currentId)
+            .map(async (probe) => {
+                try {
+                    const data = await window.VNG.apiJson("/api/probe/" + encodeURIComponent(probe.id), {"method": "GET"});
+                    return data && data.probe ? data.probe : null;
+                } catch (error) {
+                    return null;
+                }
+            }));
+
+        const targets = new Map();
+        state.currentSectorProbes
+            .filter((probe) => probe && probe.id && Number(probe.id) !== currentId)
+            .forEach((probe) => {
+                targets.set(String(probe.id), {
+                    "id": Number(probe.id),
+                    "name": probe.name || String(probe.id),
+                    "status": probe.status || "",
+                });
+            });
+
+        details
+            .filter((probe) => (
+                probe
+                && probe.id
+                && !["dead", "trapped_by_black_hole"].includes(probe.status)
+                && sameRelativeSector(probe.sector && probe.sector.relative, currentSector)
+            ))
+            .forEach((probe) => {
+                const target = {
+                    "id": Number(probe.id),
+                    "name": probe.name || String(probe.id),
+                    "status": probe.status || "",
+                };
+                if (probe.fuel && Number.isFinite(Number(probe.fuel.deuterium)) && Number.isFinite(Number(probe.fuel.maxDeuterium))) {
+                    target.deuterium = Math.max(0, Number(probe.fuel.deuterium));
+                    target.maxDeuterium = Math.max(0, Number(probe.fuel.maxDeuterium));
+                }
+                targets.set(String(probe.id), target);
+            });
+
+        state.currentProbeTransferTargets = Array.from(targets.values());
+
+        return state.currentProbeTransferTargets;
     }
 
     async function refreshProbeImprovements() {
@@ -125,6 +195,11 @@
                 "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
                 "remoteSectorMine": remoteMannyMineStateHash(item),
                 "remoteSectorInspect": remoteMannyInspectStateHash(item),
+                "deuteriumTransfer": [
+                    state.currentProbeDeuterium,
+                    state.currentProbeMaxDeuterium,
+                    state.currentProbeTransferTargets.map((target) => target.id + ":" + (hasProbeTransferTargetFuel(target) ? target.deuterium + ":" + target.maxDeuterium : "public")).join(","),
+                ].join("|"),
             },
         }));
 
@@ -188,6 +263,7 @@
             "inspecting_sector_object": tr("inspectingSectorObject", "Inspecting sector object"),
             "inspecting_asteroid": tr("inspectingSectorObject", "Inspecting sector object"),
             "refilling_deuterium_tank": tr("refillingDeuteriumTank", "Refilling deuterium tank"),
+            "transferring_deuterium_to_probe": tr("transferringDeuteriumToProbe", "Transferring deuterium"),
             "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
             "improving_probe": tr("improvingProbe", "Improving probe"),
             "assembling_probe": tr("assemblingProbe", "Assembling probe"),
@@ -1645,6 +1721,16 @@
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
         }
+        if (manny.currentTask === "transferring_deuterium_to_probe") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("deuteriumTransferInProgress", "Deuterium transfer in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("deuteriumTransferTaskDetail", "The Manny is transferring {amount}% deuterium to {target}."), {
+                    "amount": window.VNG.numberValue(payload.requestedAmount || payload.reservedAmount || 0),
+                    "target": payload.targetProbeName || payload.targetProbeId || tr("tabProbe", "Probe"),
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "</section>";
+        }
 
         return "<section class=\"manny-task-panel\">"
             + "<h4>" + escaped(taskLabel(manny.currentTask)) + "</h4>"
@@ -2186,6 +2272,72 @@
             + "</form>";
     }
 
+    function probeTransferTargets() {
+        return Array.isArray(state.currentProbeTransferTargets) ? state.currentProbeTransferTargets : [];
+    }
+
+    function probeTransferTargetLabel(target) {
+        const name = target && (target.name || target.id) ? (target.name || target.id) : tr("tabProbe", "Probe");
+        if (!hasProbeTransferTargetFuel(target)) {
+            return name;
+        }
+
+        const deuterium = window.VNG.numberValue(Number(target.deuterium));
+        const maxDeuterium = window.VNG.numberValue(Number(target.maxDeuterium));
+        return name + " - " + deuterium + "/" + maxDeuterium + "%";
+    }
+
+    function hasProbeTransferTargetFuel(target) {
+        return Boolean(
+            target
+            && Object.prototype.hasOwnProperty.call(target, "deuterium")
+            && Object.prototype.hasOwnProperty.call(target, "maxDeuterium")
+            && Number.isFinite(Number(target.deuterium))
+            && Number.isFinite(Number(target.maxDeuterium))
+        );
+    }
+
+    function probeTransferTargetOptions(selected) {
+        const targets = probeTransferTargets();
+        if (targets.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return targets.map((target, index) => {
+            const id = String(target.id || "");
+            const isSelected = id === String(selected || "") || (!selected && index === 0);
+
+            return "<option value=\"" + escaped(id) + "\"" + (isSelected ? " selected" : "") + ">"
+                + escaped(probeTransferTargetLabel(target))
+                + "</option>";
+        }).join("");
+    }
+
+    function deuteriumTransferHint(hasTarget, available) {
+        if (!hasTarget) {
+            return tr("noSameSectorTransferProbe", "No other probe or drone is available in this sector.");
+        }
+        if (available <= 0.0001) {
+            return tr("noSourceProbeDeuterium", "The source probe has no deuterium available to transfer.");
+        }
+
+        return tr("transferDeuteriumToProbeHint", "The Manny transfers deuterium from this probe reserve to another probe in the same sector. Duration: 5 minutes.");
+    }
+
+    function renderDeuteriumTransferForm() {
+        const targets = probeTransferTargets();
+        const hasTarget = targets.length > 0;
+        const available = Math.max(0, Number(state.currentProbeDeuterium) || 0);
+        const disabled = !hasTarget || available <= 0.0001;
+
+        return "<form class=\"manny-transfer-deuterium-form manny-form\">"
+            + "<label>" + escaped(tr("deuteriumTransferTargetProbe", "Target probe or drone")) + "<select class=\"manny-transfer-deuterium-target\" name=\"targetProbeId\" required>" + probeTransferTargetOptions("") + "</select></label>"
+            + "<label>" + escaped(tr("deuteriumTransferAmount", "Deuterium amount")) + "<input class=\"manny-transfer-deuterium-amount\" name=\"amount\" type=\"number\" min=\"0.0001\" max=\"" + escaped(String(available)) + "\" step=\"0.0001\" value=\"" + escaped(available > 0.0001 ? String(Math.min(1, available / 2)) : "0") + "\" required></label>"
+            + "<button class=\"manny-transfer-deuterium-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("transferDeuteriumToProbe", "Transfer deuterium")) + "</button>"
+            + "<p class=\"manny-transfer-deuterium-hint\">" + escaped(deuteriumTransferHint(hasTarget, available)) + "</p>"
+            + "</form>";
+    }
+
     function scutRelayTargetOptions(selected) {
         const targets = inactiveScutRelayTargets();
         if (targets.length === 0) {
@@ -2259,6 +2411,7 @@
             sectorActions.unshift({"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
         }
         const containerActions = [
+            {"id": "transfer-deuterium", "title": tr("transferDeuteriumToProbeActionTitle", "Transfer deuterium to a probe or drone"), "render": renderDeuteriumTransferForm},
             {"id": "detach-storage", "title": tr("detachStorageActionTitle", "Detach a container"), "render": renderDetachStorageContainerForm},
             {"id": "drop-storage", "title": tr("dropStorageActionTitle", "Drop a container on a planet"), "render": renderDropStorageContainerForm},
             {"id": "recover-storage", "title": tr("recoverStorageContainerActionTitle", "Recover a detached container"), "render": renderRecoverStorageContainerForm},
@@ -2329,6 +2482,7 @@
             "turn-on-relay": renderTurnOnRelayForm,
             "improve-probe": renderImproveProbeForm,
             "assemble-probe": renderAssembleProbeForm,
+            "transfer-deuterium": renderDeuteriumTransferForm,
         }[actionId]?.() || "";
     }
 
@@ -2520,6 +2674,41 @@
         return template.content.firstElementChild;
     }
 
+    function openActionAccordionPanelIds(card) {
+        if (!card) {
+            return new Set();
+        }
+
+        return new Set(Array.from(card.querySelectorAll(".manny-action-accordion-trigger[aria-controls]"))
+            .filter((button) => button.getAttribute("aria-expanded") === "true")
+            .map((button) => button.getAttribute("aria-controls"))
+            .filter(Boolean));
+    }
+
+    function restoreActionAccordionPanelIds(card, openPanelIds) {
+        if (!card || !(openPanelIds instanceof Set) || openPanelIds.size === 0) {
+            return;
+        }
+
+        const panels = Array.from(card.querySelectorAll(".manny-action-accordion-panel[id]"));
+        card.querySelectorAll(".manny-action-accordion-trigger[aria-controls]").forEach((button) => {
+            const panelId = button.getAttribute("aria-controls");
+            if (!panelId || !openPanelIds.has(panelId)) {
+                return;
+            }
+            const panel = panels.find((candidate) => candidate.id === panelId) || null;
+            if (!panel) {
+                return;
+            }
+            button.setAttribute("aria-expanded", "true");
+            panel.hidden = false;
+            if (panel.dataset.lazyInventory === "1" && panel.innerHTML.trim() === "") {
+                panel.innerHTML = renderLazyActionForm(panel.dataset.actionId || "");
+                updateActionForm(panel);
+            }
+        });
+    }
+
     function renderMannyList(mannies) {
         const node = document.getElementById("manny-list");
         if (!node) {
@@ -2561,7 +2750,9 @@
                 const expanded = card
                     ? card.querySelector(".manny-accordion-trigger")?.getAttribute("aria-expanded") === "true"
                     : false;
+                const actionOpenPanelIds = openActionAccordionPanelIds(card);
                 card = elementFromHtml(renderMannyCard(manny, expanded));
+                restoreActionAccordionPanelIds(card, actionOpenPanelIds);
                 if (existing) {
                     existing.replaceWith(card);
                 }
@@ -2610,6 +2801,7 @@
             updateMannyDropStorageContainerForms();
             updateMannyRecoverStorageContainerForms();
             updateAssembleProbeForms();
+            updateDeuteriumTransferForms();
         }
         scheduleProgressUpdates();
     }
@@ -2856,6 +3048,43 @@
         });
     }
 
+    function updateDeuteriumTransferForms() {
+        document.querySelectorAll(".manny-transfer-deuterium-form").forEach((form) => {
+            const targetSelect = form.querySelector(".manny-transfer-deuterium-target");
+            const amountInput = form.querySelector(".manny-transfer-deuterium-amount");
+            const button = form.querySelector(".manny-transfer-deuterium-button");
+            const hint = form.querySelector(".manny-transfer-deuterium-hint");
+            const selected = targetSelect ? targetSelect.value : "";
+            const targets = probeTransferTargets();
+            const available = Math.max(0, Number(state.currentProbeDeuterium) || 0);
+
+            if (targetSelect) {
+                targetSelect.innerHTML = probeTransferTargetOptions(selected);
+                if (!targets.some((target) => String(target.id) === String(targetSelect.value))) {
+                    targetSelect.value = targets[0] ? String(targets[0].id) : "";
+                }
+            }
+            if (amountInput) {
+                amountInput.max = String(available);
+                const currentAmount = Number(amountInput.value);
+                if (!Number.isFinite(currentAmount) || currentAmount <= 0) {
+                    amountInput.value = available > 0.0001 ? String(Math.min(1, available / 2)) : "0";
+                } else if (currentAmount >= available && available > 0.0001) {
+                    amountInput.value = String(Math.max(0.0001, Math.floor((available - 0.0001) * 10000) / 10000));
+                }
+            }
+            if (button) {
+                const amount = Number(amountInput ? amountInput.value : 0);
+                const disabled = targets.length === 0 || !Number.isFinite(amount) || amount <= 0 || amount >= available;
+                button.disabled = disabled;
+                button.setAttribute("aria-disabled", disabled ? "true" : "false");
+            }
+            if (hint) {
+                hint.textContent = deuteriumTransferHint(targets.length > 0, available);
+            }
+        });
+    }
+
     function updateMannyBookmarkForms() {
         document.querySelectorAll(".manny-bookmark-form").forEach((form) => {
             const targetSelect = form.querySelector(".manny-bookmark-target");
@@ -2938,6 +3167,9 @@
         if (form.classList.contains("manny-assemble-probe-form")) {
             updateAssembleProbeForms();
         }
+        if (form.classList.contains("manny-transfer-deuterium-form")) {
+            updateDeuteriumTransferForms();
+        }
     }
 
     async function openMannyActionAccordion(button, panel) {
@@ -2947,6 +3179,9 @@
             try {
                 if (panel.dataset.actionId === "improve-probe") {
                     await Promise.all([refreshProbeInventory(), refreshProbeImprovements()]);
+                } else if (panel.dataset.actionId === "transfer-deuterium") {
+                    await refreshProbeInventory();
+                    await refreshProbeTransferTargets();
                 } else {
                     await refreshProbeInventory();
                 }
@@ -3013,7 +3248,11 @@
             const probe = probeData && probeData.probe ? probeData.probe : {};
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
             state.currentInventory = probe.inventory || (sectorData && sectorData.inventory) || null;
+            state.currentProbeId = Number.isFinite(Number(probe.id)) ? Number(probe.id) : null;
+            state.currentProbeDeuterium = Math.max(0, Number(probe.fuel && probe.fuel.deuterium) || 0);
+            state.currentProbeMaxDeuterium = Math.max(0, Number(probe.fuel && probe.fuel.maxDeuterium) || 100);
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
+            state.currentSectorProbes = Array.isArray(sector.probes) ? sector.probes : [];
             const rawMannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
@@ -3105,6 +3344,20 @@
             return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refill-deuterium-tank"), {
                 "method": "POST",
                 "body": JSON.stringify({}),
+            });
+        }
+        if (form.classList.contains("manny-transfer-deuterium-form")) {
+            updateDeuteriumTransferForms();
+            const targetProbeId = Number.parseInt(String(formData.get("targetProbeId") || ""), 10);
+            const amount = Number.parseFloat(String(formData.get("amount") || ""));
+            if (!Number.isFinite(targetProbeId) || targetProbeId <= 0 || !Number.isFinite(amount) || amount <= 0 || amount >= state.currentProbeDeuterium) {
+                setStatus(tr("invalidDeuteriumTransferOrder", "Invalid deuterium transfer order."));
+                return null;
+            }
+
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/transfer-deuterium-to-probe"), {
+                "method": "POST",
+                "body": JSON.stringify({targetProbeId, amount}),
             });
         }
         if (form.classList.contains("manny-inspect-sector-object-form")) {
@@ -3374,6 +3627,15 @@
             }
             if (event.target.classList.contains("manny-assemble-probe-container")) {
                 updateAssembleProbeForms();
+            }
+            if (event.target.classList.contains("manny-transfer-deuterium-target") || event.target.classList.contains("manny-transfer-deuterium-amount")) {
+                updateDeuteriumTransferForms();
+            }
+        });
+
+        mannyList.addEventListener("input", (event) => {
+            if (event.target.classList.contains("manny-transfer-deuterium-amount")) {
+                updateDeuteriumTransferForms();
             }
         });
 

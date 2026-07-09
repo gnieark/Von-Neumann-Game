@@ -134,18 +134,26 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_probe_id ON probe_items(probe_id)",
             "CREATE INDEX IF NOT EXISTS idx_probe_items_uid ON probe_items(uid)",
-            "CREATE TABLE IF NOT EXISTS probe_improvements (
+            "CREATE TABLE IF NOT EXISTS probe_improvement_blueprints (
+                id $id,
+                player_id INTEGER NOT NULL,
+                improvement $text NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(player_id, improvement),
+                FOREIGN KEY(player_id) REFERENCES players(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_improvement_blueprints_player_id ON probe_improvement_blueprints(player_id)",
+            "CREATE TABLE IF NOT EXISTS probe_improvement_installations (
                 id $id,
                 probe_id INTEGER NOT NULL,
                 improvement $text NOT NULL,
-                available $boolean,
-                done $boolean,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
                 UNIQUE(probe_id, improvement),
                 FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
             )",
-            "CREATE INDEX IF NOT EXISTS idx_probe_improvements_probe_id ON probe_improvements(probe_id)",
+            "CREATE INDEX IF NOT EXISTS idx_probe_improvement_installations_probe_id ON probe_improvement_installations(probe_id)",
             "CREATE TABLE IF NOT EXISTS storage_containers (
                 id $id,
                 uid $text NOT NULL,
@@ -593,22 +601,31 @@ final class SchemaInitializer
     {
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
-        $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
 
         $pdo->exec(
-            "CREATE TABLE IF NOT EXISTS probe_improvements (
+            "CREATE TABLE IF NOT EXISTS probe_improvement_blueprints (
+                id $id,
+                player_id INTEGER NOT NULL,
+                improvement $text NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                UNIQUE(player_id, improvement),
+                FOREIGN KEY(player_id) REFERENCES players(id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_improvement_blueprints_player_id ON probe_improvement_blueprints(player_id)');
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS probe_improvement_installations (
                 id $id,
                 probe_id INTEGER NOT NULL,
                 improvement $text NOT NULL,
-                available $boolean,
-                done $boolean,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
                 UNIQUE(probe_id, improvement),
                 FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
             )"
         );
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_improvements_probe_id ON probe_improvements(probe_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_improvement_installations_probe_id ON probe_improvement_installations(probe_id)');
     }
 
     private function ensureScutSchema(PDO $pdo): void

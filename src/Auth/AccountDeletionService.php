@@ -196,6 +196,7 @@ final class AccountDeletionService
             ['probe_id' => $probeId],
         );
         $this->execute('DELETE FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
+        $this->execute('DELETE FROM probe_improvement_installations WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM storage_container_resources
              WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)',
@@ -211,6 +212,7 @@ final class AccountDeletionService
         $this->execute('DELETE FROM sessions WHERE player_id = :player_id', $params);
         $this->execute('DELETE FROM api_keys WHERE player_id = :player_id', $params);
         $this->execute('DELETE FROM visited_sectors WHERE player_id = :player_id', $params);
+        $this->execute('DELETE FROM probe_improvement_blueprints WHERE player_id = :player_id', $params);
         $this->execute(
             'DELETE FROM probe_mission_steps WHERE mission_id IN (SELECT id FROM probe_missions WHERE player_id = :player_id)',
             $params,
