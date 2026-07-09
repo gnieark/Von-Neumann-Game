@@ -704,7 +704,8 @@
     }
 
     function sectorProbeObjects(sector) {
-        const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
+        const probes = (Array.isArray(sector && sector.probes) ? sector.probes : [])
+            .filter((probe) => !(probe && probe.owned));
 
         return probes.map((probe, index) => ({
             "id": "probe-" + String(probe && probe.id ? probe.id : index),

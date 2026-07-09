@@ -391,6 +391,8 @@ $test->assert(is_string($mainScript) && str_contains($mainScript, 'function prob
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function routeBaseHref'), 'main JS normalizes selected-probe route links before adding a probe id');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'probeSelectorUnreachableLabel'), 'main JS labels unreachable probes in the active-probe selector');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'probe && probe.owned'), 'main JS ignores owned probes for current-sector probe alerts');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'probe && probe.owned'), 'sensors JS ignores owned probes for sector probe presence objects');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'inaccessible'"), 'French translations include the unreachable probe selector suffix');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'unreachable'"), 'English translations include the unreachable probe selector suffix');
@@ -548,7 +550,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260709-deuterium-transfer"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260709-owned-probe-presence"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1382,7 +1384,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(84, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(85, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -4234,6 +4236,7 @@ $movingNeighbor = $auth->registerPlayerWithPassword('moving-neighbor', 'secret',
 $stationaryNeighborProbe = $probes->findByPlayerId($stationaryNeighbor->id);
 $movingNeighborProbe = $probes->findByPlayerId($movingNeighbor->id);
 if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighborProbe !== null) {
+    $ownedNeighborProbe = $probes->createForPlayer($player->id, 'Owned sector drone', $createdProbe->currentSector);
     $stationaryNeighborProbe->currentSector = $createdProbe->currentSector;
     $probes->save($stationaryNeighborProbe);
     $movingNeighborProbe->currentSector = $createdProbe->currentSector;
@@ -4259,6 +4262,9 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
         $detectedProbesById[(int) ($detectedProbe['id'] ?? 0)] = $detectedProbe;
     }
     $test->assert(!isset($detectedProbesById[$createdProbe->id]), 'current probe is not listed as another sector probe');
+    $test->assertEquals('Owned sector drone', $detectedProbesById[$ownedNeighborProbe->id]['name'] ?? null, 'current-sector scan still exposes owned sibling probes for action targets');
+    $test->assertEquals(true, $detectedProbesById[$ownedNeighborProbe->id]['owned'] ?? null, 'current-sector scan marks owned sibling probes for WebUI alert filtering');
+    $test->assertEquals(false, $detectedProbesById[$stationaryNeighborProbe->id]['owned'] ?? null, 'current-sector scan marks foreign probes as not owned');
     $test->assertEquals('Stationary neighbor probe', $detectedProbesById[$stationaryNeighborProbe->id]['name'] ?? null, 'current-sector scan exposes another probe name');
     $test->assertEquals(false, $detectedProbesById[$stationaryNeighborProbe->id]['moving'] ?? null, 'current-sector scan marks idle neighbor probe as not moving');
     $test->assertEquals('Moving neighbor probe', $detectedProbesById[$movingNeighborProbe->id]['name'] ?? null, 'current-sector scan exposes moving probe name');

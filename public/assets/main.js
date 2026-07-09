@@ -713,7 +713,8 @@ function sectorAlerts(sector, messages) {
         });
     }
 
-    const probes = Array.isArray(sector && sector.probes) ? sector.probes : [];
+    const probes = (Array.isArray(sector && sector.probes) ? sector.probes : [])
+        .filter((probe) => !(probe && probe.owned));
     if (probes.length > 0) {
         const probeLabels = probes.map((probe) => formatText(t(messages, "sectorProbeAlertEntry", "{name} ({movement})"), {
             "name": probe && probe.name ? probe.name : t(messages, "unknownProbe", "Unknown probe"),

@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 84;
+    public const API_VERSION = 85;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1420,7 +1420,7 @@ final class ApiKernel
     }
 
     /**
-     * @return array<array{id:int, name:string, moving:bool}>
+     * @return array<array{id:int, name:string, moving:bool, owned:bool}>
      */
     private function observedProbePresence(NeumannProbe $probe, SectorCoordinates $sector): array
     {
@@ -1435,6 +1435,7 @@ final class ApiKernel
                 'id' => $otherProbe->id,
                 'name' => $otherProbe->name,
                 'moving' => $this->movements->activeMovementForProbe($otherProbe) !== null,
+                'owned' => $otherProbe->playerId === $probe->playerId,
             ];
         }
 
