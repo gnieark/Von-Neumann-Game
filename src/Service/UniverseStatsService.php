@@ -67,14 +67,15 @@ final class UniverseStatsService
     }
 
     /**
-     * @return array<int, array{x: int, y: int, z: int}>
+     * @return array<int, array{playerId: int, x: int, y: int, z: int}>
      */
     private function probeRows(): array
     {
-        $stmt = $this->pdo->query('SELECT sector_x, sector_y, sector_z FROM neumann_probes WHERE exclude_from_stats = 0 ORDER BY id ASC');
+        $stmt = $this->pdo->query('SELECT player_id, sector_x, sector_y, sector_z FROM neumann_probes WHERE exclude_from_stats = 0 ORDER BY id ASC');
         $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map(static fn(array $row): array => [
+            'playerId' => (int) $row['player_id'],
             'x' => (int) $row['sector_x'],
             'y' => (int) $row['sector_y'],
             'z' => (int) $row['sector_z'],
@@ -442,7 +443,7 @@ final class UniverseStatsService
     }
 
     /**
-     * @param array<int, array{x: int, y: int, z: int}> $probeRows
+     * @param array<int, array{playerId: int, x: int, y: int, z: int}> $probeRows
      * @return array{furthest: int, closest: int}
      */
     private function probeDistances(array $probeRows): array
@@ -461,7 +462,9 @@ final class UniverseStatsService
                 $b = new SectorCoordinates($probeRows[$j]['x'], $probeRows[$j]['y'], $probeRows[$j]['z']);
                 $distance = $grid->getDistance($a, $b);
                 $furthest = max($furthest, $distance);
-                $closest = $closest === null ? $distance : min($closest, $distance);
+                if ($probeRows[$i]['playerId'] !== $probeRows[$j]['playerId']) {
+                    $closest = $closest === null ? $distance : min($closest, $distance);
+                }
             }
         }
 

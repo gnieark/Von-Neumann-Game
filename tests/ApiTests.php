@@ -983,6 +983,20 @@ $test->assertEquals('Stats SCUT Alpha', $topScutNetworksByCoverage[0]['networkNa
 $test->assertEquals(3, $topScutNetworksByCoverage[0]['coveredSectors'] ?? null, 'public stats SCUT network coverage podium exposes covered-sector counts');
 $test->assert(!in_array(5, array_column($topScutNetworksByCoverage, 'coveredSectors'), true), 'public stats SCUT network coverage podium ignores inactive relay coverage');
 
+$statsDistanceDbPath = $tmp . DIRECTORY_SEPARATOR . 'stats-distance.sqlite';
+$statsDistanceFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $statsDistanceDbPath), $root);
+$statsDistancePdo = $statsDistanceFactory->create();
+$statsDistanceFactory->initializeSchema($statsDistancePdo);
+$statsDistancePlayers = new PlayerRepository($statsDistancePdo);
+$statsDistanceProbes = new NeumannProbeRepository($statsDistancePdo);
+$statsDistancePlayerOne = $statsDistancePlayers->createPlayer('stats-distance-one', 'Stats Distance One', null, new SectorCoordinates(0, 0, 0));
+$statsDistancePlayerTwo = $statsDistancePlayers->createPlayer('stats-distance-two', 'Stats Distance Two', null, new SectorCoordinates(4, 0, 0));
+$statsDistanceProbes->createForPlayer($statsDistancePlayerOne->id, 'Stats Distance One Home', new SectorCoordinates(0, 0, 0));
+$statsDistanceProbes->createForPlayer($statsDistancePlayerOne->id, 'Stats Distance One Nearby', new SectorCoordinates(1, 1, 0));
+$statsDistanceProbes->createForPlayer($statsDistancePlayerTwo->id, 'Stats Distance Two Probe', new SectorCoordinates(4, 0, 0));
+$statsDistanceStats = (new UniverseStatsService($statsDistancePdo, $tmp . DIRECTORY_SEPARATOR . 'stats-distance-universe'))->collect();
+$test->assertEquals(3, $statsDistanceStats['metrics']['closestProbeDistance'] ?? null, 'public stats closest-probe distance ignores probes owned by the same player');
+
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();
 $dbFactory->initializeSchema($pdo);
