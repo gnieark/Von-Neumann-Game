@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 81;
+    public const API_VERSION = 82;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1798,6 +1798,13 @@ final class ApiKernel
                 'objectId' => $warning->objectId,
                 'objectType' => $warning->containerId !== '' ? $warning->containerId : 'object',
                 'objectLabel' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
+            ];
+        }
+
+        if ($warning->type === ProbeDamageWarning::TYPE_MIND_SNAPSHOT_TRANSFERRED) {
+            $alert['instanceSwitch'] = [
+                'previousProbeId' => ctype_digit($warning->objectId) ? (int) $warning->objectId : null,
+                'reason' => $warning->containerId !== '' ? $warning->containerId : null,
             ];
         }
 

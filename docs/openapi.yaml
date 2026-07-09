@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '81'
+  version: '82'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 81
+                apiVersion: 82
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1447,7 +1447,8 @@ paths:
         Returns persistent alerts produced for the authenticated probe. Alerts
         currently cover fragile external storage movement warnings,
         intelligent-life detections when the probe arrives in a sector,
-        debug-injected sector object detections, and anomaly detections.
+        instance-switch mind snapshot transfer notices, debug-injected sector
+        object detections, and anomaly detections.
       responses:
         '200':
           description: Current and past alerts for the authenticated probe
@@ -1510,6 +1511,21 @@ paths:
                     readAt: null
                     resolvedAt: null
                   - id: 10
+                    type: mind_snapshot_transferred
+                    status: unread
+                    message: 'Instance switch complete: the last stable backup of your mind has been transferred into this probe after your default probe was destroyed by a high-velocity collision during intersector movement.'
+                    phase: instance_switch
+                    scheduledAt: '2026-06-12T16:00:00+00:00'
+                    sector:
+                      relative: { x: 8, y: 0, z: 0 }
+                    instanceSwitch:
+                      previousProbeId: 42
+                      reason: movement_collision
+                    createdAt: '2026-06-12T16:00:00+00:00'
+                    updatedAt: '2026-06-12T16:00:00+00:00'
+                    readAt: null
+                    resolvedAt: null
+                  - id: 11
                     type: anomaly_detected
                     status: unread
                     message: "ANOMALY DETECTED\n\nSensors report a coherent signal propagating through space.\n\nThe signal originates from the approximative direction -50 25 -15 relative to the current position. Distance unknown.\n\nAnalysis in progress."
@@ -4341,7 +4357,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred]
         status:
           type: string
           enum: [unread, read]
@@ -4350,7 +4366,7 @@ components:
           description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
         phase:
           type: string
-          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report]
+          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch]
         scheduledAt:
           type: string
           format: date-time
@@ -4433,6 +4449,19 @@ components:
             objectLabel:
               type: string
               nullable: true
+        instanceSwitch:
+          type: object
+          description: Present for `mind_snapshot_transferred` alerts.
+          required: [previousProbeId, reason]
+          properties:
+            previousProbeId:
+              type: integer
+              nullable: true
+              description: Deleted probe that hosted the previous default instance.
+            reason:
+              type: string
+              nullable: true
+              enum: [black_hole_trap, movement_collision]
         createdAt:
           type: string
           format: date-time

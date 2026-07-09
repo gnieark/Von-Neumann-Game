@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-09
+
+### Changed
+
+- API v82 : lorsqu’une sonde par défaut est détruite par collision de déplacement ou piégée par un trou noir, l’esprit du joueur bascule automatiquement vers une autre sonde opérationnelle du joueur si elle existe; l’ancienne sonde est supprimée sans effacer les données rattachées au joueur, et une alerte `mind_snapshot_transferred` en anglais est créée sur la nouvelle sonde.
+
 ## 2026-07-07
 
 ### Changed

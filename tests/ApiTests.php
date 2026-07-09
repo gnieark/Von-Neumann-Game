@@ -1076,11 +1076,11 @@ $sectorService = new SectorService($sectorRepository, new SectorContentGenerator
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, worldSeed: 'api-test-world');
+$reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings);
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
-$reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService);
 $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
 
 $multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
@@ -1291,7 +1291,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(81, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(82, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5667,6 +5667,70 @@ if ($riskProbe !== null) {
     }
 }
 
+$instanceSwitchPlayer = $auth->registerPlayerWithPassword('instance-switch-collision', 'secret', 'Instance Switch Collision');
+$instanceSwitchHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($instanceSwitchPlayer)['token']];
+$instanceSwitchProbe = $probes->findByPlayerId($instanceSwitchPlayer->id);
+if ($instanceSwitchProbe !== null && $createdProbe !== null) {
+    $instanceSwitchDrone = $probes->createForPlayer($instanceSwitchPlayer->id, 'Collision fallback drone', new SectorCoordinates(80, 0, 0));
+    $instanceSwitchMission = $missionService->startMission($instanceSwitchProbe, 'instance_switch_collision', 'Instance switch collision', steps: [['title' => 'Keep player mission']]);
+    $instanceSwitchCategory = $forum->createCategory('Instance switch collision');
+    $instanceSwitchPost = $forum->createPost($instanceSwitchPlayer, $instanceSwitchCategory->id, 'Mind backup report', 'Please keep this forum post.');
+    $instanceSwitchMessage = $messages->create($instanceSwitchProbe->id, $createdProbe->id, $instanceSwitchProbe->currentSector, 'Historical sender survives probe deletion.');
+
+    $instanceSwitchMove = $kernel->handle('POST', '/api/probe/move', $instanceSwitchHeaders, json_encode(['target' => ['x' => 8, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $instanceSwitchMove->status, 'instance-switch collision movement starts');
+    $instanceSwitchMovement = $movements->findActiveByProbeId($instanceSwitchProbe->id);
+    if ($instanceSwitchMovement !== null) {
+        $base = time();
+        $chosenStartedAt = gmdate('c', $base - 240 * 60);
+        for ($i = 0; $i < 2000; $i++) {
+            $candidate = gmdate('c', $base - (240 * 60) - $i);
+            $payload = implode('|', [
+                'api-test-world',
+                $instanceSwitchMovement->probeId,
+                $instanceSwitchMovement->id,
+                $instanceSwitchMovement->origin->toKey(),
+                $instanceSwitchMovement->target->toKey(),
+                $candidate,
+            ]);
+            $roll = hexdec(substr(hash('sha256', $payload), 0, 15)) / hexdec(str_repeat('f', 15));
+            if ($roll < 0.40) {
+                $chosenStartedAt = $candidate;
+                break;
+            }
+        }
+
+        $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
+            'id' => $instanceSwitchMovement->id,
+            'started' => $chosenStartedAt,
+            'prep' => gmdate('c', $base - 230 * 60),
+            'accel' => gmdate('c', $base - 110 * 60),
+            'cruise' => gmdate('c', $base + 70 * 60),
+            'decel' => gmdate('c', $base + 190 * 60),
+            'arrival' => gmdate('c', $base + 190 * 60),
+        ]);
+
+        $instanceSwitchResponse = $kernel->handle('GET', '/api/probe', $instanceSwitchHeaders);
+        $test->assertEquals(200, $instanceSwitchResponse->status, 'collision instance switch returns an operational default probe');
+        $test->assertEquals($instanceSwitchDrone->id, $instanceSwitchResponse->body['probe']['id'] ?? null, 'collision instance switch selects another owned probe as default');
+        $test->assertEquals($instanceSwitchDrone->id, $players->findById($instanceSwitchPlayer->id)?->defaultProbeId, 'collision instance switch persists the new default probe');
+        $test->assert($probes->findById($instanceSwitchProbe->id) === null, 'collision instance switch deletes the destroyed default probe');
+        $test->assert($missions->findByUidForPlayer($instanceSwitchPlayer->id, $instanceSwitchMission->uid) !== null, 'collision instance switch keeps player missions');
+        $test->assert($forum->findPostById($instanceSwitchPost->id) !== null, 'collision instance switch keeps forum posts linked to the player');
+        $detachedMessage = $messages->findById($instanceSwitchMessage->id);
+        $test->assert($detachedMessage !== null, 'collision instance switch keeps historical probe messages');
+        $test->assertEquals(null, $detachedMessage?->senderProbeId, 'collision instance switch detaches deleted sender probe foreign keys');
+        $collisionAlerts = $kernel->handle('GET', '/api/probe/alerts', $instanceSwitchHeaders);
+        $collisionTransferAlerts = array_values(array_filter(
+            $collisionAlerts->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'mind_snapshot_transferred'
+        ));
+        $test->assertEquals(1, count($collisionTransferAlerts), 'collision instance switch creates one transfer alert on the new probe');
+        $test->assert(str_contains((string) ($collisionTransferAlerts[0]['message'] ?? ''), 'high-velocity collision'), 'collision transfer alert explains the collision cause in English');
+        $test->assertEquals($instanceSwitchProbe->id, $collisionTransferAlerts[0]['instanceSwitch']['previousProbeId'] ?? null, 'collision transfer alert identifies the previous probe');
+    }
+}
+
 $blackHolePlayer = $auth->registerPlayerWithPassword('black-hole', 'secret', 'Black Hole');
 $blackHoleSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'black-hole', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $blackHoleHeaders = ['Authorization' => 'Bearer ' . (string) ($blackHoleSession->body['token'] ?? '')];
@@ -5704,6 +5768,42 @@ if ($blackHoleProbe !== null) {
         $trappedMove = $kernel->handle('POST', '/api/probe/move', $blackHoleHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
         $test->assertEquals(409, $trappedMove->status, 'black hole trapped probe cannot start movement');
         $test->assertEquals('probe_trapped_by_black_hole', $trappedMove->body['error']['code'] ?? null, 'black hole trapped action error code is explicit');
+    }
+}
+
+$blackHoleSwitchPlayer = $auth->registerPlayerWithPassword('black-hole-instance-switch', 'secret', 'Black Hole Instance Switch');
+$blackHoleSwitchHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($blackHoleSwitchPlayer)['token']];
+$blackHoleSwitchProbe = $probes->findByPlayerId($blackHoleSwitchPlayer->id);
+if ($blackHoleSwitchProbe !== null) {
+    $blackHoleSwitchDrone = $probes->createForPlayer($blackHoleSwitchPlayer->id, 'Black hole fallback drone', new SectorCoordinates(82, 0, 0));
+    $blackHoleSwitchMission = $missionService->startMission($blackHoleSwitchProbe, 'instance_switch_black_hole', 'Instance switch black hole', steps: [['title' => 'Keep black-hole mission']]);
+    $sectorRepository->save(new SectorContent($blackHoleSwitchProbe->currentSector, [
+        new BlackHole('switch-black-hole', null, 9.0, 24.0, true, 180.0),
+    ]));
+
+    $kernel->handle('GET', '/api/probe/sector', $blackHoleSwitchHeaders);
+    $blackHoleSwitchTrapEvent = $scheduledEvents->findPendingByTypeAndEntity(SchedulerService::PROBE_BLACK_HOLE_TRAP, 'probe', $blackHoleSwitchProbe->id);
+    $test->assert($blackHoleSwitchTrapEvent !== null, 'black-hole instance switch schedules a trap event');
+    if ($blackHoleSwitchTrapEvent !== null) {
+        $pdo->prepare('UPDATE scheduled_events SET run_at = :run_at WHERE id = :id')->execute([
+            'id' => $blackHoleSwitchTrapEvent->id,
+            'run_at' => gmdate('c', time() - 1),
+        ]);
+        $blackHoleSwitchStats = $scheduler->processDueEvents();
+        $test->assertEquals(1, $blackHoleSwitchStats['processed'], 'scheduler processes black-hole instance switch trap event');
+        $test->assertEquals($blackHoleSwitchDrone->id, $players->findById($blackHoleSwitchPlayer->id)?->defaultProbeId, 'black-hole instance switch persists the fallback probe as default');
+        $test->assert($probes->findById($blackHoleSwitchProbe->id) === null, 'black-hole instance switch deletes the trapped default probe');
+        $test->assert($missions->findByUidForPlayer($blackHoleSwitchPlayer->id, $blackHoleSwitchMission->uid) !== null, 'black-hole instance switch keeps player missions');
+        $blackHoleSwitchProbeResponse = $kernel->handle('GET', '/api/probe', $blackHoleSwitchHeaders);
+        $test->assertEquals($blackHoleSwitchDrone->id, $blackHoleSwitchProbeResponse->body['probe']['id'] ?? null, 'GET /api/probe returns the black-hole fallback probe');
+        $blackHoleSwitchAlerts = $kernel->handle('GET', '/api/probe/alerts', $blackHoleSwitchHeaders);
+        $blackHoleTransferAlerts = array_values(array_filter(
+            $blackHoleSwitchAlerts->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'mind_snapshot_transferred'
+        ));
+        $test->assertEquals(1, count($blackHoleTransferAlerts), 'black-hole instance switch creates one transfer alert on the new probe');
+        $test->assert(str_contains((string) ($blackHoleTransferAlerts[0]['message'] ?? ''), 'black-hole escape threshold'), 'black-hole transfer alert explains the trap cause in English');
+        $test->assertEquals('black_hole_trap', $blackHoleTransferAlerts[0]['instanceSwitch']['reason'] ?? null, 'black-hole transfer alert exposes a structured reason');
     }
 }
 
