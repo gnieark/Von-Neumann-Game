@@ -1384,9 +1384,66 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(85, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(86, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
+
+$multiScanDbPath = $tmp . DIRECTORY_SEPARATOR . 'multi-scan.sqlite';
+$multiScanFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $multiScanDbPath), $root);
+$multiScanPdo = $multiScanFactory->create();
+$multiScanFactory->initializeSchema($multiScanPdo);
+$multiScanPlayers = new PlayerRepository($multiScanPdo);
+$multiScanAuthMethods = new PlayerAuthRepository($multiScanPdo);
+$multiScanProbes = new NeumannProbeRepository($multiScanPdo);
+$multiScanMannies = new MannyRepository($multiScanPdo);
+$multiScanItems = new ProbeItemRepository($multiScanPdo);
+$multiScanProbeImprovements = new ProbeImprovementRepository($multiScanPdo);
+$multiScanMessages = new ProbeMessageRepository($multiScanPdo);
+$multiScanRelays = new ScutRelayRepository($multiScanPdo);
+$multiScanNetworks = new ScutNetworkRepository($multiScanPdo);
+$multiScanScut = new ScutNetworkService($multiScanRelays, $multiScanNetworks, $multiScanProbes);
+$multiScanMissions = new MissionRepository($multiScanPdo);
+$multiScanWarnings = new ProbeDamageWarningRepository($multiScanPdo);
+$multiScanForum = new ForumRepository($multiScanPdo);
+$multiScanStorageContainers = new StorageContainerRepository($multiScanPdo);
+$multiScanMovements = new ProbeMovementRepository($multiScanPdo);
+$multiScanScheduledEvents = new ScheduledEventRepository($multiScanPdo);
+$multiScanSessions = new SessionRepository($multiScanPdo);
+$multiScanApiKeys = new ApiKeyRepository($multiScanPdo);
+$multiScanVisited = new VisitedSectorRepository($multiScanPdo);
+$multiScanUniversePath = $tmp . DIRECTORY_SEPARATOR . 'multi-scan-universe';
+$multiScanSectorRepository = new SectorFileRepository($multiScanUniversePath);
+$multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world');
+$multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $multiScanProbes, $multiScanSessions, $multiScanVisited, 7, $multiScanMannies, $multiScanApiKeys, $multiScanSectorService);
+$multiScanStorage = new ProbeStorageService($multiScanStorageContainers, $multiScanItems, $multiScanMannies, $multiScanProbes, improvements: $multiScanProbeImprovements);
+$multiScanMissionService = new MissionService($multiScanMissions, $multiScanMessages, [], 'multi-scan-world', $multiScanSectorService, $multiScanProbes, $multiScanPlayers);
+$multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanSectorService, $multiScanWarnings);
+$multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, worldSeed: 'multi-scan-world');
+$multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
+$multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements);
+$multiScanKernel = new ApiKernel($multiScanAuth, $multiScanPlayers, $multiScanProbes, new SectorObservationService($multiScanSectorService, $multiScanVisited, mannies: $multiScanMannies), $multiScanMovementService, $multiScanVisited, $multiScanMannyService, $multiScanItems, $multiScanStorage, $multiScanMessages, $multiScanWarnings, $multiScanForum, $multiScanMissionService, $multiScanReinstantiation, $multiScanScut, improvements: $multiScanProbeImprovements);
+$multiScanPlayer = $multiScanAuth->registerPlayerWithPassword('multi-scan-observer', 'secret', 'Multi Scan Observer', 'Multi scan default');
+$multiScanDefaultProbe = $multiScanProbes->findByPlayerId($multiScanPlayer->id);
+if ($multiScanDefaultProbe !== null) {
+    $multiScanHeaders = ['Authorization' => 'Bearer ' . $multiScanAuth->createSessionForPlayer($multiScanPlayer)['token']];
+    $multiScanTarget = $multiScanDefaultProbe->currentSector->add(4, 0, 0);
+    $multiScanTooEarlyProbe = $multiScanProbes->createForPlayer($multiScanPlayer->id, 'Too early sector scanner', $multiScanDefaultProbe->currentSector->add(2, 0, 0));
+    $multiScanBetterProbe = $multiScanProbes->createForPlayer($multiScanPlayer->id, 'Better sector scanner', $multiScanDefaultProbe->currentSector->add(2, 2, 0));
+    $multiScanDefaultProbe->enteredCurrentSectorAt = gmdate('c', time() - 8 * 3600);
+    $multiScanTooEarlyProbe->enteredCurrentSectorAt = gmdate('c', time() - 60);
+    $multiScanBetterProbe->enteredCurrentSectorAt = gmdate('c', time() - 3600);
+    $multiScanProbes->save($multiScanDefaultProbe);
+    $multiScanProbes->save($multiScanTooEarlyProbe);
+    $multiScanProbes->save($multiScanBetterProbe);
+    $multiScanRelay = $multiScanRelays->create($multiScanDefaultProbe->id, $multiScanDefaultProbe->currentSector);
+    $multiScanScut->turnOnRelay($multiScanRelay->id, 'Multi scan test');
+    $multiScanRelative = $multiScanTarget->subtract($multiScanPlayer->homeSector);
+    $multiScanResponse = $multiScanKernel->handle('GET', '/api/sector?x=' . $multiScanRelative['x'] . '&y=' . $multiScanRelative['y'] . '&z=' . $multiScanRelative['z'], $multiScanHeaders);
+    $test->assertEquals(200, $multiScanResponse->status, 'GET /api/sector can use a closer reachable probe for scans');
+    $test->assertEquals('distant_scan', $multiScanResponse->body['sector']['knowledgeLevel'] ?? null, 'GET /api/sector uses the closer reachable probe scan level');
+    $test->assertEquals(2, $multiScanResponse->body['sector']['distance'] ?? null, 'GET /api/sector exposes distance from the selected closer scanner');
+    $test->assertEquals(1800, $multiScanResponse->body['sector']['scan']['requiredResidenceSeconds'] ?? null, 'GET /api/sector skips closer probes with insufficient scan data before selecting another scanner');
+}
 
 $privacyHome = new SectorCoordinates(1000, 1000, 0);
 $privacySector = new SectorCoordinates(1002, 1000, 0);
@@ -5540,6 +5597,7 @@ if ($currentProbe !== null) {
     $tooEarly = $kernel->handle('GET', '/api/sector?x=' . $relOne['x'] . '&y=' . $relOne['y'] . '&z=' . $relOne['z'], $headers);
     $test->assertEquals(400, $tooEarly->status, 'distance 1 scan before enough residence time returns an error');
     $test->assertEquals('insufficient_scan_data', $tooEarly->body['error']['code'] ?? null, 'insufficient scan data error code is explicit');
+
 }
 
 $invalidCoordinates = $kernel->handle('GET', '/api/sector?x=1&y=0&z=0', $headers);

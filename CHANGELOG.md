@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - Stats : la distance entre les deux sondes les plus proches ignore désormais les paires de sondes appartenant au même joueur.
+- API v86 : `GET /api/sector` utilise désormais la sonde possédée reachable la plus proche du secteur demandé quand elle fournit un scan valide, en ignorant les candidates encore en `insufficient_scan_data`.
 - API v85 : les entrées `sector.probes` de `/api/probe/sector` exposent désormais `owned` pour distinguer les sondes du joueur authentifié des sondes étrangères dans le secteur courant.
 - WebUI : l’alerte de sonde détectée dans le secteur ignore désormais les autres sondes possédées par le joueur.
 - API v84 : les blueprints d’améliorations de sonde sont désormais connus au niveau joueur et partagés par toutes ses sondes; `GET /api/probe/{probeId}/probe-improvements-available` retourne les améliorations connues du joueur propriétaire de la sonde sélectionnée, avec `done` calculé pour cette sonde précise. La migration de production dédiée est `php scripts/migrate-probe-improvements.php`.

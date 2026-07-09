@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 85;
+    public const API_VERSION = 86;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1190,6 +1190,78 @@ final class ApiKernel
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $target = $this->observations->relativeToAbsolute($player, (int) $query['x'], (int) $query['y'], (int) $query['z']);
+
+        return new ApiResponse(200, [
+            'sector' => $this->bestSectorObservation($player, $probe, $target),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function bestSectorObservation(Player $player, NeumannProbe $defaultProbe, SectorCoordinates $target): array
+    {
+        $grid = new SectorGrid();
+        $defaultDistance = $grid->getDistance($defaultProbe->currentSector, $target);
+        $candidates = [[
+            'probe' => $defaultProbe,
+            'distance' => $defaultDistance,
+            'default' => true,
+        ]];
+
+        foreach ($this->probes->findAllByPlayerId($player->id) as $candidate) {
+            if ($candidate->id === $defaultProbe->id) {
+                continue;
+            }
+
+            $candidate = $this->movements->refreshProbeMovementState($candidate);
+            if (in_array($candidate->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true)) {
+                continue;
+            }
+            if (!$this->scut->canSectorsCommunicate($defaultProbe->currentSector, $candidate->currentSector)) {
+                continue;
+            }
+
+            $distance = $grid->getDistance($candidate->currentSector, $target);
+            if ($distance >= $defaultDistance) {
+                continue;
+            }
+
+            $candidates[] = [
+                'probe' => $candidate,
+                'distance' => $distance,
+                'default' => false,
+            ];
+        }
+
+        usort(
+            $candidates,
+            static fn(array $a, array $b): int => [$a['distance'], $a['default'] ? 1 : 0, $a['probe']->id]
+                <=> [$b['distance'], $b['default'] ? 1 : 0, $b['probe']->id],
+        );
+
+        $insufficientScanData = null;
+        foreach ($candidates as $candidate) {
+            try {
+                return $this->sectorObservationFromProbe($player, $candidate['probe'], $target);
+            } catch (ObservationAccessException $e) {
+                if ($e->errorCode !== 'insufficient_scan_data') {
+                    throw $e;
+                }
+                $insufficientScanData = $e;
+            }
+        }
+
+        throw $insufficientScanData ?? new \RuntimeException('No sector observation candidate available.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sectorObservationFromProbe(Player $player, NeumannProbe $probe, SectorCoordinates $target): array
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $this->movements->ensureProbeOperational($probe);
         $movement = $this->movements->activeMovementForProbe($probe);
         $sensorMode = $this->movements->sensorModeFor($movement, $probe->status);
         if ($movement === null && $target->equals($probe->currentSector)) {
@@ -1197,28 +1269,29 @@ final class ApiKernel
         }
 
         if ($sensorMode === 'blind' && !$this->visitedSectors->hasVisited($player, $target)) {
-            return ApiResponse::error(400, 'sensors_unavailable', 'External sensors are unavailable at current relativistic velocity.');
+            throw new ObservationAccessException(
+                'sensors_unavailable',
+                'External sensors are unavailable at current relativistic velocity.',
+            );
         }
         if ($sensorMode === 'degraded' && !$this->visitedSectors->hasVisited($player, $target) && !$target->equals($probe->currentSector)) {
             $observable = $this->movements->observableSectorFor($probe, $movement) ?? $probe->currentSector;
             $frame = new PlayerReferenceFrame($player->homeSector);
 
-            return new ApiResponse(200, [
-                'sector' => [
-                    'relativeCoordinates' => $frame->globalToRelative($target),
-                    'distance' => (new SectorGrid())->getDistance($observable, $target),
-                    'knowledgeLevel' => 'long_range_estimation',
-                    'confidence' => 0.12,
-                    'sensorMode' => 'degraded',
-                    'dataFreshness' => 'degraded_live',
-                    'message' => 'Sensors are degraded during intersector maneuvering.',
-                    'scan' => [
-                        'currentSectorResidenceSeconds' => 0,
-                        'requiredResidenceSeconds' => 0,
-                        'scanQuality' => 0.12,
-                    ],
+            return [
+                'relativeCoordinates' => $frame->globalToRelative($target),
+                'distance' => (new SectorGrid())->getDistance($observable, $target),
+                'knowledgeLevel' => 'long_range_estimation',
+                'confidence' => 0.12,
+                'sensorMode' => 'degraded',
+                'dataFreshness' => 'degraded_live',
+                'message' => 'Sensors are degraded during intersector maneuvering.',
+                'scan' => [
+                    'currentSectorResidenceSeconds' => 0,
+                    'requiredResidenceSeconds' => 0,
+                    'scanQuality' => 0.12,
                 ],
-            ]);
+            ];
         }
 
         if ($target->equals($probe->currentSector)) {
@@ -1231,9 +1304,8 @@ final class ApiKernel
             $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
         }
         $includeRelays = ($observation['knowledgeLevel'] ?? null) === 'detailed' || (int) ($observation['distance'] ?? 999999) <= ScutRelay::RADIUS_SECTORS;
-        $observation = $this->withScutSectorData($player, $observation, $target, $includeRelays);
 
-        return new ApiResponse(200, ['sector' => $observation]);
+        return $this->withScutSectorData($player, $observation, $target, $includeRelays);
     }
 
     private function probeMoveResponse(Player $player, ?string $body, ?NeumannProbe $probe = null): ApiResponse
