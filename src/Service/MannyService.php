@@ -1460,6 +1460,7 @@ final class MannyService implements MannyTaskRuntime
     private function canRefreshMannyTaskFromProbe(NeumannProbe $probe, Manny $manny): bool
     {
         return $manny->isInSameSectorAs($probe)
+            || $manny->currentTask === Manny::TASK_ASSEMBLING_PROBE
             || $this->canRefreshRemoteMiningViaScut($probe, $manny)
             || $this->canRefreshRemoteInspectViaScut($probe, $manny);
     }

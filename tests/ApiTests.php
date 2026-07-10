@@ -4637,6 +4637,9 @@ if ($createdProbe !== null) {
     $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdB) === null, 'accepted probe assembly removes the second ingredient container immediately');
     $test->assertEquals(null, $items->findByUidForProbe($assemblyProbe->id, $assemblyContainerItemA->uid), 'accepted probe assembly consumes the first backing container item');
     $test->assertEquals(null, $items->findByUidForProbe($assemblyProbe->id, $assemblyContainerItemB->uid), 'accepted probe assembly consumes the second backing container item');
+    $assemblySector = $assemblyProbe->currentSector;
+    $assemblyProbe->currentSector = $assemblyProbe->currentSector->add(2, 0, 0);
+    $probes->save($assemblyProbe);
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $assemblyMannyDbId,
         'ended' => gmdate('c', time() - 1),
@@ -4649,7 +4652,7 @@ if ($createdProbe !== null) {
     ));
     $test->assertEquals(1, count($assemblyDrones), 'completed probe assembly creates drone-1 for the player');
     $assemblyDrone = $assemblyDrones[0] ?? null;
-    $test->assert($assemblyDrone instanceof NeumannProbe && $assemblyDrone->currentSector->equals($assemblyProbe->currentSector), 'assembled drone is created in the assembly sector');
+    $test->assert($assemblyDrone instanceof NeumannProbe && $assemblyDrone->currentSector->equals($assemblySector), 'assembled drone is created in the assembly sector even after the original probe moved away');
     $test->assertEquals($assemblyProbe->id, $players->findById($assemblyPlayer->id)?->defaultProbeId, 'completed probe assembly keeps the original default probe');
     $assemblyMannyAfterCompletion = $mannies->findByUid($assemblyMannyId);
     $test->assertEquals($assemblyDrone?->id, $assemblyMannyAfterCompletion?->probeId, 'completed probe assembly transfers the Manny to the new drone');
