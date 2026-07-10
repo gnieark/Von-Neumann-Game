@@ -415,8 +415,11 @@ $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-st
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-network-coverage-podium-title'), 'stats view exposes the SCUT network coverage podium');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'data-stats-podium-extra hidden'), 'stats route renders extra ranking rows as hidden by default');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topVisitedPlayers'), 'stats route reads player-based explorer podium rows');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutRelayActivatorRows'), 'stats route renders SCUT relay activator rows');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutNetworkCoverageRows'), 'stats route renders SCUT network coverage rows');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'toutes sondes possédées confondues'), 'French translations describe the player-based explorer podium');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'across all owned probes'), 'English translations describe the player-based explorer podium');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Secteurs couverts par au moins un réseau SCUT'"), 'French translations include the SCUT covered-sector metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Sectors covered by at least one SCUT network'"), 'English translations include the SCUT covered-sector metric');
 $test->assert(str_contains($openApi, 'anomaly_detected'), 'OpenAPI documents anomaly-detected alerts');
@@ -731,6 +734,7 @@ $statsRankingPlayers = new PlayerRepository($statsRankingPdo);
 $statsRankingProbes = new NeumannProbeRepository($statsRankingPdo);
 $statsRankingVisitedSectors = new VisitedSectorRepository($statsRankingPdo);
 $statsRankingProbeRows = [];
+$statsRankingPlayerRows = [];
 for ($ranking = 1; $ranking <= 10; $ranking++) {
     $rankingPlayer = $statsRankingPlayers->createPlayer(
         'stats-ranking-' . $ranking,
@@ -738,11 +742,13 @@ for ($ranking = 1; $ranking <= 10; $ranking++) {
         null,
         new SectorCoordinates(200 + ($ranking * 2), 0, 0),
     );
+    $statsRankingPlayerRows[$ranking] = $rankingPlayer;
     $statsRankingProbeRows[$ranking] = $statsRankingProbes->createForPlayer($rankingPlayer->id, 'Stats Ranking Probe ' . $ranking, $rankingPlayer->homeSector);
     for ($visit = 0; $visit <= 10 - $ranking; $visit++) {
         $statsRankingVisitedSectors->markVisited($rankingPlayer, new SectorCoordinates(200 + ($ranking * 2), $visit * 2, 0));
     }
 }
+$statsRankingProbes->createForPlayer($statsRankingPlayerRows[1]->id, 'Stats Ranking Secondary Probe', new SectorCoordinates(202, 2, 0));
 $statsScutNetworkInsert = $statsRankingPdo->prepare(
     'INSERT INTO scut_networks (name, created_at, updated_at)
      VALUES (:name, :created_at, :updated_at)'
@@ -806,11 +812,15 @@ foreach ([
     }
 }
 $rankingStats = (new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe'))->collect();
-$topRankingProbes = $rankingStats['metrics']['topVisitedProbes'] ?? [];
-$test->assertEquals(9, count($topRankingProbes), 'public stats visited-sector ranking exposes the first nine rows');
-$test->assertEquals('Stats Ranking Probe 1', $topRankingProbes[0]['probeName'] ?? null, 'public stats top-nine ranking keeps the first-ranked probe first');
-$test->assertEquals('Stats Ranking Probe 9', $topRankingProbes[8]['probeName'] ?? null, 'public stats top-nine ranking keeps the ninth-ranked probe visible');
-$test->assert(!in_array('Stats Ranking Probe 10', array_column($topRankingProbes, 'probeName'), true), 'public stats top-nine ranking excludes the tenth row');
+$topRankingPlayers = $rankingStats['metrics']['topVisitedPlayers'] ?? [];
+$legacyTopRankingProbes = $rankingStats['metrics']['topVisitedProbes'] ?? [];
+$test->assertEquals(9, count($topRankingPlayers), 'public stats visited-sector ranking exposes the first nine rows');
+$test->assertEquals('Stats Ranking 1', $legacyTopRankingProbes[0]['probeName'] ?? null, 'public stats keeps the legacy visited-probe podium key as a player-name alias');
+$test->assertEquals('Stats Ranking 1', $topRankingPlayers[0]['playerName'] ?? null, 'public stats top-nine ranking keeps the first-ranked player first');
+$test->assertEquals('Stats Ranking 9', $topRankingPlayers[8]['playerName'] ?? null, 'public stats top-nine ranking keeps the ninth-ranked player visible');
+$test->assertEquals(10, $topRankingPlayers[0]['visitedSectors'] ?? null, 'public stats explorer podium counts player visited sectors once across owned probes');
+$test->assert(!in_array('Stats Ranking 10', array_column($topRankingPlayers, 'playerName'), true), 'public stats top-nine ranking excludes the tenth row');
+$test->assertEquals(1, count(array_filter($topRankingPlayers, static fn(array $row): bool => ($row['playerName'] ?? null) === 'Stats Ranking 1')), 'public stats explorer podium keeps one row per player even with several probes');
 $test->assertEquals(4, $rankingStats['metrics']['scutCoveredSectors'] ?? null, 'public stats count sectors covered by at least one SCUT network once');
 $topScutRelayActivators = $rankingStats['metrics']['topScutRelayActivators'] ?? [];
 $test->assertEquals('Stats Ranking Probe 1', $topScutRelayActivators[0]['probeName'] ?? null, 'public stats SCUT activator podium ranks relay creators');
@@ -1705,10 +1715,10 @@ if ($oauthProbe !== null) {
     $probes->save($oauthProbe);
     $stats = (new UniverseStatsService($pdo, $universePath))->collect();
     $test->assertEquals(1, $stats['metrics']['probesInUniverse'] ?? null, 'public stats exclude probes marked as test probes');
-    $topVisitedProbes = $stats['metrics']['topVisitedProbes'] ?? [];
-    $test->assertEquals('Probe of remi', $topVisitedProbes[0]['probeName'] ?? null, 'public stats podium ranks included probes by visited sectors');
-    $test->assertEquals(1, $topVisitedProbes[0]['visitedSectors'] ?? null, 'public stats podium exposes visited-sector counts');
-    $test->assert(!in_array('Sonde de Nova Pilot', array_column($topVisitedProbes, 'probeName'), true), 'public stats podium excludes hidden test probes');
+    $topVisitedPlayers = $stats['metrics']['topVisitedPlayers'] ?? [];
+    $test->assertEquals('Remi', $topVisitedPlayers[0]['playerName'] ?? null, 'public stats podium ranks included players by visited sectors');
+    $test->assertEquals(1, $topVisitedPlayers[0]['visitedSectors'] ?? null, 'public stats podium exposes visited-sector counts');
+    $test->assert(!in_array('Nova Pilot', array_column($topVisitedPlayers, 'playerName'), true), 'public stats podium excludes hidden test probes');
 
     $statsUniversePath = $tmp . DIRECTORY_SEPARATOR . 'stats-universe';
     $statsSectorRepository = new SectorFileRepository($statsUniversePath);

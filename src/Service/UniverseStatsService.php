@@ -36,6 +36,8 @@ final class UniverseStatsService
         $intelligentLifeStats = $this->intelligentLifeDiscoveryStats();
         $scutStats = $this->scutStats();
 
+        $topVisitedPlayers = $this->topVisitedPlayers();
+
         return [
             'generatedAt' => gmdate('c'),
             'metrics' => [
@@ -57,7 +59,8 @@ final class UniverseStatsService
                 'scutCoveredSectors' => $scutStats['coveredSectors'],
                 'successfulMissions' => 0,
                 'failedMissions' => 0,
-                'topVisitedProbes' => $this->topVisitedProbes(),
+                'topVisitedPlayers' => $topVisitedPlayers,
+                'topVisitedProbes' => $this->legacyTopVisitedProbeRows($topVisitedPlayers),
                 'topWaypointPlayers' => $waypointStats['topPlayers'],
                 'topIntelligentLifeDiscoverers' => $intelligentLifeStats['topDiscoverers'],
                 'topScutRelayActivators' => $scutStats['topActivators'],
@@ -105,26 +108,52 @@ final class UniverseStatsService
     }
 
     /**
-     * @return array<int, array{rank: int, probeName: string, visitedSectors: int}>
+     * @return array<int, array{rank: int, playerId: int, playerName: string, visitedSectors: int}>
      */
-    private function topVisitedProbes(): array
+    private function topVisitedPlayers(): array
     {
         $stmt = $this->pdo->query(
-            'SELECT neumann_probes.name AS probe_name, COUNT(visited_sectors.id) AS visited_count
-             FROM neumann_probes
-             LEFT JOIN visited_sectors ON visited_sectors.player_id = neumann_probes.player_id
-             WHERE neumann_probes.exclude_from_stats = 0
-             GROUP BY neumann_probes.id, neumann_probes.name
-             ORDER BY visited_count DESC, neumann_probes.name ASC, neumann_probes.id ASC
+            'SELECT players.id AS player_id, players.username, players.display_name,
+                    COALESCE(NULLIF(players.display_name, \'\'), players.username, \'\') AS player_name,
+                    COUNT(visited_sectors.id) AS visited_count
+             FROM players
+             LEFT JOIN visited_sectors ON visited_sectors.player_id = players.id
+             WHERE EXISTS (
+                 SELECT 1
+                 FROM neumann_probes
+                 WHERE neumann_probes.player_id = players.id
+                   AND neumann_probes.exclude_from_stats = 0
+             )
+             GROUP BY players.id, players.username, players.display_name
+             ORDER BY visited_count DESC, player_name ASC, players.id ASC
              LIMIT ' . self::PUBLIC_RANKING_LIMIT
         );
         $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return array_map(static fn(array $row, int $index): array => [
-            'rank' => $index + 1,
-            'probeName' => (string) $row['probe_name'],
-            'visitedSectors' => max(0, (int) $row['visited_count']),
-        ], $rows, array_keys($rows));
+        return array_map(static function (array $row, int $index): array {
+            $displayName = trim((string) ($row['display_name'] ?? ''));
+            $username = trim((string) ($row['username'] ?? ''));
+
+            return [
+                'rank' => $index + 1,
+                'playerId' => (int) $row['player_id'],
+                'playerName' => $displayName !== '' ? $displayName : $username,
+                'visitedSectors' => max(0, (int) $row['visited_count']),
+            ];
+        }, $rows, array_keys($rows));
+    }
+
+    /**
+     * @param array<int, array{rank: int, playerId: int, playerName: string, visitedSectors: int}> $players
+     * @return array<int, array{rank: int, probeName: string, visitedSectors: int}>
+     */
+    private function legacyTopVisitedProbeRows(array $players): array
+    {
+        return array_map(static fn(array $row): array => [
+            'rank' => $row['rank'],
+            'probeName' => $row['playerName'],
+            'visitedSectors' => $row['visitedSectors'],
+        ], $players);
     }
 
     /**

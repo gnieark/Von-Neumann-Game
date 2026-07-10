@@ -163,6 +163,7 @@ class FrontRouteStats extends FrontRoute{
             'scutCoveredSectors' => 0,
             'successfulMissions' => 0,
             'failedMissions' => 0,
+            'topVisitedPlayers' => [],
             'topVisitedProbes' => [],
             'topIntelligentLifeDiscoverers' => [],
             'topWaypointPlayers' => [],
@@ -197,7 +198,10 @@ class FrontRouteStats extends FrontRoute{
      */
     private function topVisitedProbeRows(array $metrics, Translator $translator): array
     {
-        $rows = is_array($metrics['topVisitedProbes'] ?? null) ? $metrics['topVisitedProbes'] : [];
+        $rows = is_array($metrics['topVisitedPlayers'] ?? null) ? $metrics['topVisitedPlayers'] : [];
+        if ($rows === []) {
+            $rows = is_array($metrics['topVisitedProbes'] ?? null) ? $metrics['topVisitedProbes'] : [];
+        }
         $podium = [];
         foreach ($rows as $index => $row) {
             if (!is_array($row)) {
@@ -206,7 +210,9 @@ class FrontRouteStats extends FrontRoute{
             $visitedSectors = max(0, (int) ($row['visitedSectors'] ?? 0));
             $podium[] = [
                 'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
-                'name' => trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownProbe'),
+                'name' => trim((string) ($row['playerName'] ?? '')) !== ''
+                    ? (string) $row['playerName']
+                    : (trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownPlayer')),
                 'visitedSectors' => $this->formatNumber($visitedSectors),
                 'visitedSectorsLabel' => $translator->get($visitedSectors > 1 ? 'statsVisitedSectorsPodiumPlural' : 'statsVisitedSectorsPodiumSingular'),
             ];
