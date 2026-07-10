@@ -801,6 +801,7 @@ paths:
   /api/probe/{probeId}/storage-containers/{containerId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/StorageContainerId'
     get:
       $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D/get'
     patch:
@@ -808,6 +809,7 @@ paths:
   /api/probe/{probeId}/storage-containers/{containerId}/rules:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/StorageContainerId'
     patch:
       $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D~1rules/patch'
   /api/probe/{probeId}/storage-moves:
@@ -830,11 +832,13 @@ paths:
   /api/probe/{probeId}/scut-network/{scutNetworkId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/ScutNetworkId'
     get:
       $ref: '#/paths/~1api~1probe~1scut-network~1%7BscutNetworkId%7D/get'
   /api/probe/{probeId}/messages/{messageId}/read:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/ProbeMessageId'
     patch:
       $ref: '#/paths/~1api~1probe~1messages~1%7BmessageId%7D~1read/patch'
   /api/probe/{probeId}/alerts:
@@ -845,6 +849,7 @@ paths:
   /api/probe/{probeId}/alerts/{alertId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/AlertId'
     patch:
       $ref: '#/paths/~1api~1probe~1alerts~1%7BalertId%7D/patch'
   /api/probe/{probeId}/damage-warnings:
@@ -855,6 +860,7 @@ paths:
   /api/probe/{probeId}/damage-warnings/{damageWarningId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/DamageWarningId'
     patch:
       $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/patch'
   /api/probe/{probeId}/visited-sectors:
@@ -875,11 +881,13 @@ paths:
   /api/probe/{probeId}/inventory/{itemId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/InventoryItemId'
     get:
       $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D/get'
   /api/probe/{probeId}/inventory/{itemId}/jettison:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/InventoryItemId'
     post:
       $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D~1jettison/post'
   /api/probe/{probeId}/mannies:
@@ -890,31 +898,37 @@ paths:
   /api/probe/{probeId}/mannies/{mannyId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     patch:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D/patch'
   /api/probe/{probeId}/mannies/{mannyId}/repair:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1repair/post'
   /api/probe/{probeId}/mannies/{mannyId}/mine:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1mine/post'
   /api/probe/{probeId}/mannies/{mannyId}/craft:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1craft/post'
   /api/probe/{probeId}/mannies/{mannyId}/improve-probe:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1improve-probe/post'
   /api/probe/{probeId}/mannies/{mannyId}/assemble-probe:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1assemble-probe/post'
   /api/probe/{probeId}/atomic-printer/craft:
@@ -925,56 +939,67 @@ paths:
   /api/probe/{probeId}/mannies/{mannyId}/salvage:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1salvage/post'
   /api/probe/{probeId}/mannies/{mannyId}/detach-storage-container:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1detach-storage-container/post'
   /api/probe/{probeId}/mannies/{mannyId}/drop-storage-container:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-storage-container/post'
   /api/probe/{probeId}/mannies/{mannyId}/inspect-sector-object:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1inspect-sector-object/post'
   /api/probe/{probeId}/mannies/{mannyId}/recover-storage-container:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recover-storage-container/post'
   /api/probe/{probeId}/mannies/{mannyId}/install-bookmark:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1install-bookmark/post'
   /api/probe/{probeId}/mannies/{mannyId}/recall:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recall/post'
   /api/probe/{probeId}/mannies/{mannyId}/drop-manny-cargo:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-manny-cargo/post'
   /api/probe/{probeId}/mannies/{mannyId}/refill-deuterium-tank:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1refill-deuterium-tank/post'
   /api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-to-probe:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1transfer-deuterium-to-probe/post'
   /api/probe/{probeId}/mannies/{mannyId}/turn-on-relay:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1turn-on-relay/post'
   /api/probe/mind-snapshot/reassign:
@@ -3153,6 +3178,21 @@ components:
         type: integer
         minimum: 1
       example: 7
+    AlertId:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 5
+    InventoryItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: mny_8d4a2c1f5a91b334
     ForumCategoryId:
       name: categoryId
       in: path
