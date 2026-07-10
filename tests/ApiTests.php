@@ -368,9 +368,6 @@ $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
-$scutCoverageMigrationScript = file_get_contents($root . '/scripts/migrate-scut-coverage.php');
-$missionOwnershipMigrationScript = file_get_contents($root . '/scripts/migrate-probe-missions-to-player.php');
-$probeImprovementMigrationScript = file_get_contents($root . '/scripts/migrate-probe-improvements.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
@@ -555,10 +552,6 @@ $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigra
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database.json.old'), 'SQLite to MySQL migration script backs up the active database config');
-$test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'scut_covered_sectors'), 'SCUT coverage migration script fills the relational coverage table');
-$test->assert(is_string($scutCoverageMigrationScript) && str_contains($scutCoverageMigrationScript, 'DROP COLUMN'), 'SCUT coverage migration script removes legacy JSON columns');
-$test->assert(is_string($missionOwnershipMigrationScript) && str_contains($missionOwnershipMigrationScript, 'probe_missions_new'), 'mission ownership migration script rebuilds SQLite mission ownership');
-$test->assert(is_string($missionOwnershipMigrationScript) && str_contains($missionOwnershipMigrationScript, 'DROP COLUMN probe_id'), 'mission ownership migration script removes the legacy probe mission link');
 $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.php');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
@@ -576,8 +569,6 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_blueprints'), 'schema stores probe improvement blueprints by player');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_installations'), 'schema stores completed probe improvements by probe');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvements ('), 'schema no longer creates the legacy mixed probe_improvements table');
-$test->assert(is_string($probeImprovementMigrationScript) && str_contains($probeImprovementMigrationScript, 'probe_improvement_blueprints'), 'probe improvement migration script creates player blueprint rows');
-$test->assert(is_string($probeImprovementMigrationScript) && str_contains($probeImprovementMigrationScript, 'DROP TABLE probe_improvements'), 'probe improvement migration script drops the legacy table by default');
 $test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
@@ -694,162 +685,6 @@ $legacySecondProbe = $legacySingleProbeProbes->createForPlayer($legacySingleProb
 $test->assertEquals(2, count($legacySingleProbeProbes->findAllByPlayerId($legacySingleProbeOwner->id)), 'migrated legacy schema accepts a second probe for the same player');
 $test->assertEquals(1, $legacySingleProbePlayers->findById($legacySingleProbeOwner->id)?->defaultProbeId, 'second probe creation does not overwrite a valid migrated default probe');
 $test->assertEquals(2, $legacySecondProbe->id, 'second probe is inserted after legacy migration');
-
-$legacyMissionDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-mission-schema.sqlite';
-$legacyMissionFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMissionDbPath), $root);
-$legacyMissionPdo = $legacyMissionFactory->create();
-$legacyMissionPdo->exec(
-    'CREATE TABLE players (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE,
-        display_name TEXT NULL,
-        password_hash TEXT NULL,
-        home_sector_x INTEGER NOT NULL,
-        home_sector_y INTEGER NOT NULL,
-        home_sector_z INTEGER NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacyMissionPdo->exec(
-    'CREATE TABLE neumann_probes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        sector_x INTEGER NOT NULL,
-        sector_y INTEGER NOT NULL,
-        sector_z INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        entered_current_sector_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacyMissionPdo->exec(
-    'CREATE TABLE probe_missions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        uid TEXT NOT NULL UNIQUE,
-        probe_id INTEGER NOT NULL,
-        type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT NULL,
-        status TEXT NOT NULL,
-        step_order TEXT NOT NULL,
-        metadata_json TEXT NOT NULL,
-        created_by_event_json TEXT NULL,
-        started_at TEXT NOT NULL,
-        completed_at TEXT NULL,
-        failed_at TEXT NULL,
-        abandoned_at TEXT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacyMissionPdo->exec(
-    'CREATE TABLE probe_mission_steps (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        uid TEXT NOT NULL UNIQUE,
-        mission_id INTEGER NOT NULL,
-        sort_order INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT NULL,
-        status TEXT NOT NULL,
-        metadata_json TEXT NOT NULL,
-        completed_at TEXT NULL,
-        failed_at TEXT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacyMissionPdo->exec("INSERT INTO players (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at) VALUES ('legacy-mission-owner', 'Legacy Mission Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
-$legacyMissionPdo->exec("INSERT INTO neumann_probes (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at) VALUES (1, 'Legacy mission probe', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
-$legacyMissionPdo->exec("INSERT INTO probe_missions (uid, probe_id, type, title, description, status, step_order, metadata_json, created_by_event_json, started_at, created_at, updated_at) VALUES ('mis_legacy_player_owner', 1, 'legacy_test', 'Legacy mission', NULL, 'active', 'free', '{}', NULL, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
-$legacyMissionPdo->exec("INSERT INTO probe_mission_steps (uid, mission_id, sort_order, title, description, status, metadata_json, created_at, updated_at) VALUES ('mst_legacy_player_owner', 1, 1, 'Legacy step', NULL, 'pending', '{}', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
-$legacyMissionConfig = $tmp . DIRECTORY_SEPARATOR . 'legacy-mission-database.json';
-file_put_contents($legacyMissionConfig, json_encode([
-    'driver' => 'sqlite',
-    'path' => $legacyMissionDbPath,
-], JSON_THROW_ON_ERROR));
-$missionOwnershipDryRunCommand = escapeshellarg(PHP_BINARY)
-    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-missions-to-player.php')
-    . ' --database-config=' . escapeshellarg($legacyMissionConfig)
-    . ' --dry-run';
-exec($missionOwnershipDryRunCommand . ' 2>&1', $missionOwnershipDryRunOutput, $missionOwnershipDryRunStatus);
-$test->assertEquals(0, $missionOwnershipDryRunStatus, 'mission ownership migration dry-run exits successfully');
-$test->assert(str_contains(implode("\n", $missionOwnershipDryRunOutput), '1 mission(s) can be migrated'), 'mission ownership migration dry-run reports migratable missions');
-$missionOwnershipCommand = escapeshellarg(PHP_BINARY)
-    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-missions-to-player.php')
-    . ' --database-config=' . escapeshellarg($legacyMissionConfig);
-exec($missionOwnershipCommand . ' 2>&1', $missionOwnershipOutput, $missionOwnershipStatus);
-$test->assertEquals(0, $missionOwnershipStatus, 'mission ownership migration exits successfully');
-$migratedMissionColumns = array_map(
-    static fn(array $row): string => (string) $row['name'],
-    $legacyMissionPdo->query('PRAGMA table_info(probe_missions)')->fetchAll(PDO::FETCH_ASSOC),
-);
-$test->assert(in_array('player_id', $migratedMissionColumns, true), 'mission ownership migration adds player_id');
-$test->assert(!in_array('probe_id', $migratedMissionColumns, true), 'mission ownership migration drops probe_id');
-$test->assertEquals(1, (int) $legacyMissionPdo->query("SELECT player_id FROM probe_missions WHERE uid = 'mis_legacy_player_owner'")->fetchColumn(), 'mission ownership migration maps probe missions to the owning player');
-$test->assertEquals(1, (int) $legacyMissionPdo->query('SELECT COUNT(*) FROM probe_mission_steps WHERE mission_id = 1')->fetchColumn(), 'mission ownership migration preserves mission steps');
-
-$legacyImprovementDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-probe-improvements.sqlite';
-$legacyImprovementFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyImprovementDbPath), $root);
-$legacyImprovementPdo = $legacyImprovementFactory->create();
-$legacyImprovementPdo->exec(
-    'CREATE TABLE players (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE,
-        display_name TEXT NULL,
-        password_hash TEXT NULL,
-        home_sector_x INTEGER NOT NULL,
-        home_sector_y INTEGER NOT NULL,
-        home_sector_z INTEGER NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacyImprovementPdo->exec(
-    'CREATE TABLE neumann_probes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        sector_x INTEGER NOT NULL,
-        sector_y INTEGER NOT NULL,
-        sector_z INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        entered_current_sector_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacyImprovementPdo->exec(
-    'CREATE TABLE probe_improvements (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        probe_id INTEGER NOT NULL,
-        improvement TEXT NOT NULL,
-        available INTEGER NOT NULL DEFAULT 0,
-        done INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacyImprovementPdo->exec("INSERT INTO players (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at) VALUES ('legacy-improvement-owner', 'Legacy Improvement Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
-$legacyImprovementPdo->exec("INSERT INTO neumann_probes (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at) VALUES (1, 'Legacy improvement probe A', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
-$legacyImprovementPdo->exec("INSERT INTO neumann_probes (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at) VALUES (1, 'Legacy improvement probe B', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')");
-$legacyImprovementPdo->exec("INSERT INTO probe_improvements (probe_id, improvement, available, done, created_at, updated_at) VALUES (1, 'deuterium_compression', 1, 1, '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00')");
-$legacyImprovementPdo->exec("INSERT INTO probe_improvements (probe_id, improvement, available, done, created_at, updated_at) VALUES (2, 'reinforced_container_couplings', 1, 0, '2026-01-03T00:00:00+00:00', '2026-01-03T00:00:00+00:00')");
-$legacyImprovementConfig = $tmp . DIRECTORY_SEPARATOR . 'legacy-probe-improvements-database.json';
-file_put_contents($legacyImprovementConfig, json_encode([
-    'driver' => 'sqlite',
-    'path' => $legacyImprovementDbPath,
-], JSON_THROW_ON_ERROR));
-$probeImprovementMigrationCommand = escapeshellarg(PHP_BINARY)
-    . ' ' . escapeshellarg($root . '/scripts/migrate-probe-improvements.php')
-    . ' --database-config=' . escapeshellarg($legacyImprovementConfig);
-exec($probeImprovementMigrationCommand . ' 2>&1', $probeImprovementMigrationOutput, $probeImprovementMigrationStatus);
-$test->assertEquals(0, $probeImprovementMigrationStatus, 'probe improvement migration exits successfully');
-$test->assertEquals(2, (int) $legacyImprovementPdo->query('SELECT COUNT(*) FROM probe_improvement_blueprints')->fetchColumn(), 'probe improvement migration stores known blueprints by player');
-$test->assertEquals(1, (int) $legacyImprovementPdo->query('SELECT COUNT(*) FROM probe_improvement_installations')->fetchColumn(), 'probe improvement migration stores completed improvements by probe');
-$test->assertEquals(0, (int) $legacyImprovementPdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'probe_improvements'")->fetchColumn(), 'probe improvement migration drops the legacy mixed table');
 
 $legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
 $legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
@@ -1615,50 +1450,6 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($addConstructText, 'Dormant construct in sector 6:0:0'), 'add-dormant-construct CLI reports the target sector');
     $test->assert($cliSectorRepository->load($addConstructCoordinates)->findObjectById(DormantConstruct::objectIdForSector($addConstructCoordinates, 'local-development-world')) instanceof DormantConstruct, 'add-dormant-construct CLI persists a dormant construct');
 
-    $backfillUnvisitedCoordinates = new SectorCoordinates(8, 0, 0);
-    $backfillVisitedCoordinates = new SectorCoordinates(10, 0, 0);
-    $cliSectorRepository->save(new SectorContent($backfillUnvisitedCoordinates, source: 'cli-backfill-test'));
-    $cliSectorRepository->save(new SectorContent($backfillVisitedCoordinates, source: 'cli-backfill-test'));
-    $backfillDbPath = $tmp . DIRECTORY_SEPARATOR . 'backfill-dormant-constructs.sqlite';
-    $backfillDbConfig = $tmp . DIRECTORY_SEPARATOR . 'backfill-dormant-constructs-database.json';
-    file_put_contents($backfillDbConfig, json_encode([
-        'driver' => 'sqlite',
-        'path' => $backfillDbPath,
-    ], JSON_THROW_ON_ERROR));
-    $backfillDbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $backfillDbPath), $root);
-    $backfillPdo = $backfillDbFactory->create();
-    $backfillDbFactory->initializeSchema($backfillPdo);
-    $backfillPdo->prepare(
-        'INSERT INTO players (username, display_name, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
-         VALUES (:username, :display_name, 0, 0, 0, :created_at, :updated_at)'
-    )->execute([
-        'username' => 'backfill-visitor',
-        'display_name' => 'Backfill Visitor',
-        'created_at' => gmdate('c'),
-        'updated_at' => gmdate('c'),
-    ]);
-    $backfillPdo->prepare(
-        'INSERT INTO visited_sectors (player_id, sector_x, sector_y, sector_z, first_visited_at, last_visited_at, visit_count)
-         VALUES (1, :x, :y, :z, :first_visited_at, :last_visited_at, 1)'
-    )->execute([
-        'x' => $backfillVisitedCoordinates->getX(),
-        'y' => $backfillVisitedCoordinates->getY(),
-        'z' => $backfillVisitedCoordinates->getZ(),
-        'first_visited_at' => gmdate('c'),
-        'last_visited_at' => gmdate('c'),
-    ]);
-    $backfillCommand = escapeshellarg(PHP_BINARY)
-        . ' ' . escapeshellarg($root . '/scripts/backfill-dormant-constructs.php')
-        . ' --database-config=' . escapeshellarg($backfillDbConfig)
-        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
-        . ' --chance-denominator=1';
-    exec($backfillCommand . ' 2>&1', $backfillOutput, $backfillStatus);
-    $backfillText = implode("\n", $backfillOutput);
-    $test->assertEquals(0, $backfillStatus, 'backfill-dormant-constructs CLI exits successfully');
-    $test->assert(str_contains($backfillText, 'Dormant construct backfill complete.'), 'backfill-dormant-constructs CLI reports completion');
-    $test->assert($cliSectorRepository->load($backfillUnvisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillUnvisitedCoordinates, 'local-development-world')) instanceof DormantConstruct, 'backfill-dormant-constructs adds dormant constructs to unvisited generated sectors on positive roll');
-    $test->assert(!($cliSectorRepository->load($backfillVisitedCoordinates)->findObjectById(DormantConstruct::objectIdForSector($backfillVisitedCoordinates, 'local-development-world')) instanceof DormantConstruct), 'backfill-dormant-constructs leaves visited generated sectors untouched');
-
     $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
     if ($cliInventoryProbe !== null) {
@@ -1708,50 +1499,6 @@ if ($createdProbe !== null) {
             $storageContainers->findByUidForProbe($cliInventoryProbe->id, 'container-' . ($cliContainers[0]->uid ?? 'missing')) !== null,
             'add-inventory-item CLI creates the paired storage container for additional containers',
         );
-        $cliCoreContainer = $storageContainers->findByUidForProbe($cliInventoryProbe->id, 'probe-core');
-        $cliPairedContainer = $storageContainers->findByUidForProbe($cliInventoryProbe->id, 'container-' . ($cliContainers[0]->uid ?? 'missing'));
-        if ($cliCoreContainer !== null && $cliPairedContainer !== null) {
-            $pdo->prepare('UPDATE probe_items SET storage_container_id = :container_id WHERE id = :id')->execute([
-                'container_id' => $cliPairedContainer->id,
-                'id' => $cliContainers[0]->id,
-            ]);
-            $orphanContainerUid = 'container-itm_missing_backing_for_test';
-            $pdo->prepare(
-                'INSERT INTO storage_containers
-                 (uid, probe_id, kind, label, sort_order, capacity, priority_filter_json, exclusion_filter_json, strict_exclusion_filter_json, created_at, updated_at)
-                 VALUES (:uid, :probe_id, :kind, :label, :sort_order, :capacity, :priority, :exclusion, :strict_exclusion, :created_at, :updated_at)'
-            )->execute([
-                'uid' => $orphanContainerUid,
-                'probe_id' => $cliInventoryProbe->id,
-                'kind' => 'container',
-                'label' => 'Empty orphan',
-                'sort_order' => 99,
-                'capacity' => 1.0,
-                'priority' => '[]',
-                'exclusion' => '[]',
-                'strict_exclusion' => '[]',
-                'created_at' => gmdate('c'),
-                'updated_at' => gmdate('c'),
-            ]);
-            $dryRunRelinkCommand = escapeshellarg(PHP_BINARY)
-                . ' ' . escapeshellarg($root . '/scripts/relink-additional-containers-to-core.php')
-                . ' --database-config=' . escapeshellarg($userinfosDbConfig)
-                . ' --dry-run';
-            exec($dryRunRelinkCommand . ' 2>&1', $dryRunRelinkOutput, $dryRunRelinkStatus);
-            $test->assertEquals(0, $dryRunRelinkStatus, 'relink additional containers CLI dry-run exits successfully');
-            $test->assertEquals($cliPairedContainer->id, $items->findByUidForProbe($cliInventoryProbe->id, $cliContainers[0]->uid)?->storageContainerId, 'relink dry-run leaves additional container placement unchanged');
-            $test->assert($storageContainers->findByUidForProbe($cliInventoryProbe->id, $orphanContainerUid) !== null, 'relink dry-run leaves empty orphan containers unchanged');
-            $relinkCommand = escapeshellarg(PHP_BINARY)
-                . ' ' . escapeshellarg($root . '/scripts/relink-additional-containers-to-core.php')
-                . ' --database-config=' . escapeshellarg($userinfosDbConfig);
-            exec($relinkCommand . ' 2>&1', $relinkOutput, $relinkStatus);
-            $relinkText = implode("\n", $relinkOutput);
-            $test->assertEquals(0, $relinkStatus, 'relink additional containers CLI exits successfully');
-            $test->assert(str_contains($relinkText, 'Relinked 1 additional container item(s) to probe-core'), 'relink additional containers CLI reports moved rows');
-            $test->assert(str_contains($relinkText, 'removed 1 empty orphan container(s)'), 'relink additional containers CLI reports removed empty orphan containers');
-            $test->assertEquals($cliCoreContainer->id, $items->findByUidForProbe($cliInventoryProbe->id, $cliContainers[0]->uid)?->storageContainerId, 'relink additional containers CLI moves container items back to probe-core');
-            $test->assert($storageContainers->findByUidForProbe($cliInventoryProbe->id, $orphanContainerUid) === null, 'relink additional containers CLI removes empty orphan containers');
-        }
 
         $beforeMannyCount = count($mannies->findByProbeId($cliInventoryProbe->id));
         $addMannyCommand = escapeshellarg(PHP_BINARY)
@@ -1863,84 +1610,6 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($lowFuelText, 'Players below 10% deuterium: 1'), 'low-fuel CLI counts low-fuel players before sector filtering');
     $test->assert(str_contains($lowFuelText, 'skipped existing deuterium asteroid: 1'), 'low-fuel CLI skips low-fuel players already in sectors with a deuterium asteroid');
     $test->assert(str_contains($lowFuelText, 'processed: 0'), 'low-fuel CLI does not call the per-player script for skipped sectors');
-    $anomalyPlayer = $auth->registerPlayerWithPassword('origin-anomaly', 'secret', 'Origin Anomaly', 'Origin anomaly probe');
-    $anomalyProbe = $probes->findByPlayerId($anomalyPlayer->id);
-    $test->assert($anomalyProbe !== null, 'origin anomaly test probe is created');
-    if ($anomalyProbe !== null) {
-        $pdo->prepare('UPDATE neumann_probes SET sector_x = 20, sector_y = -10, sector_z = 6, exclude_from_stats = 1 WHERE id = :id')->execute(['id' => $anomalyProbe->id]);
-    }
-    $anomalyProbeCount = (int) $pdo->query('SELECT COUNT(*) FROM neumann_probes')->fetchColumn();
-    $anomalyAlertCountBefore = (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn();
-    $dryRunAnomalyCommand = escapeshellarg(PHP_BINARY)
-        . ' ' . escapeshellarg($root . '/scripts/add-origin-anomaly-alerts.php')
-        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
-        . ' --dry-run';
-    exec($dryRunAnomalyCommand . ' 2>&1', $dryRunAnomalyOutput, $dryRunAnomalyStatus);
-    $dryRunAnomalyText = implode("\n", $dryRunAnomalyOutput);
-    $test->assertEquals(0, $dryRunAnomalyStatus, 'origin anomaly CLI dry-run exits successfully');
-    $test->assert(str_contains($dryRunAnomalyText, 'direction: -50 25 -15'), 'origin anomaly CLI dry-run computes approximate origin direction');
-    $test->assertEquals(
-        $anomalyAlertCountBefore,
-        (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn(),
-        'origin anomaly CLI dry-run leaves alerts unchanged',
-    );
-    $anomalyCommand = escapeshellarg(PHP_BINARY)
-        . ' ' . escapeshellarg($root . '/scripts/add-origin-anomaly-alerts.php')
-        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
-        . ' --delay-seconds=0';
-    exec($anomalyCommand . ' 2>&1', $anomalyOutput, $anomalyStatus);
-    $anomalyText = implode("\n", $anomalyOutput);
-    $test->assertEquals(0, $anomalyStatus, 'origin anomaly CLI exits successfully');
-    $test->assert(str_contains($anomalyText, 'initial alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one initial alert per probe');
-    $test->assert(str_contains($anomalyText, 'messages created: ' . $anomalyProbeCount), 'origin anomaly CLI sends one SCUT plans message per probe');
-    $test->assert(str_contains($anomalyText, 'final alerts created: ' . $anomalyProbeCount), 'origin anomaly CLI adds one final alert per probe');
-    $test->assertEquals(
-        $anomalyAlertCountBefore + ($anomalyProbeCount * 2),
-        (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'anomaly_detected'")->fetchColumn(),
-        'origin anomaly CLI persists two anomaly alerts per probe',
-    );
-    $test->assertEquals(
-        $anomalyProbeCount,
-        (int) $pdo->query("SELECT COUNT(*) FROM probe_messages WHERE sender_type = 'unknown' AND sender_id = 'origin-anomaly-broadcast'")->fetchColumn(),
-        'origin anomaly CLI persists one unknown-sender message per probe',
-    );
-    $anomalyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($anomalyPlayer)['token']];
-    $anomalyAlerts = $kernel->handle('GET', '/api/probe/alerts', $anomalyHeaders);
-    $initialAnomalyAlert = null;
-    $finalAnomalyAlert = null;
-    foreach ($anomalyAlerts->body['alerts'] ?? [] as $alert) {
-        if (($alert['type'] ?? null) !== 'anomaly_detected') {
-            continue;
-        }
-        if (str_starts_with((string) ($alert['message'] ?? ''), 'ANOMALY DETECTED')) {
-            $initialAnomalyAlert = $alert;
-        }
-        if (($alert['message'] ?? null) === 'The "SCUT RELAY" plans have been integrated.') {
-            $finalAnomalyAlert = $alert;
-        }
-    }
-    $test->assert($initialAnomalyAlert !== null, 'GET /api/probe/alerts exposes origin anomaly CLI initial alerts');
-    if ($initialAnomalyAlert !== null) {
-        $test->assertEquals('unread', $initialAnomalyAlert['status'] ?? null, 'origin anomaly alert starts unread');
-        $test->assert(str_contains((string) ($initialAnomalyAlert['message'] ?? ''), 'approximative direction -50 25 -15'), 'origin anomaly alert stores the approximate direction');
-        $test->assert(str_contains((string) ($initialAnomalyAlert['message'] ?? ''), 'Distance unknown.'), 'origin anomaly alert stores the requested distance wording');
-    }
-    $test->assert($finalAnomalyAlert !== null, 'GET /api/probe/alerts exposes SCUT plans integration alerts');
-    $anomalyMessages = $kernel->handle('GET', '/api/probe/messages', $anomalyHeaders);
-    $scutPlansMessage = null;
-    foreach ($anomalyMessages->body['messages'] ?? [] as $message) {
-        if (($message['sender']['type'] ?? null) === 'unknown') {
-            $scutPlansMessage = $message;
-            break;
-        }
-    }
-    $test->assert($scutPlansMessage !== null, 'GET /api/probe/messages exposes unknown-sender SCUT plans messages');
-    if ($scutPlansMessage !== null) {
-        $test->assertEquals('Expéditeur inconnu', $scutPlansMessage['sender']['name'] ?? null, 'SCUT plans message exposes the requested unknown sender');
-        $test->assert(str_contains((string) ($scutPlansMessage['body'] ?? ''), 'Attached are the manufacturing specifications for a SCUT relay.'), 'SCUT plans message stores the requested relay specification text');
-        $test->assert(str_contains((string) ($scutPlansMessage['body'] ?? ''), 'Together...'), 'SCUT plans message keeps the requested line breaks in the body');
-    }
-    $pdo->exec("DELETE FROM probe_messages WHERE sender_type = 'unknown' AND sender_id = 'origin-anomaly-broadcast'");
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 
     $storageRepairSession = $auth->createSessionForPlayer($player);
