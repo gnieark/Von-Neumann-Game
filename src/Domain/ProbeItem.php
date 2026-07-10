@@ -47,6 +47,40 @@ final class ProbeItem
     public const DESCENT_GUIDANCE_MODULE_NAME = 'Descent guidance module';
     public const ATMOSPHERIC_DROP_KIT_NAME = 'Atmospheric drop kit';
 
+    /**
+     * @return array<string, string>
+     */
+    public static function canonicalNames(): array
+    {
+        return [
+            self::TYPE_WAYPOINT_BOOKMARK => self::WAYPOINT_BOOKMARK_NAME,
+            self::TYPE_STEEL_BAR => self::STEEL_BAR_NAME,
+            self::TYPE_STEEL_PLATE => self::STEEL_PLATE_NAME,
+            self::TYPE_ADDITIONAL_CONTAINER => self::ADDITIONAL_CONTAINER_NAME,
+            self::TYPE_MICRO_CONDUCTOR => self::MICRO_CONDUCTOR_NAME,
+            self::TYPE_CERAMIC_INSULATOR => self::CERAMIC_INSULATOR_NAME,
+            self::TYPE_CRYSTAL_SUBSTRATE => self::CRYSTAL_SUBSTRATE_NAME,
+            self::TYPE_DOPANT_MATRIX => self::DOPANT_MATRIX_NAME,
+            self::TYPE_INTEGRATED_CIRCUIT => self::INTEGRATED_CIRCUIT_NAME,
+            self::TYPE_ELECTRIC_MOTOR => self::ELECTRIC_MOTOR_NAME,
+            self::TYPE_BATTERY_PACK => self::BATTERY_PACK_NAME,
+            self::TYPE_LINEAR_ACTUATOR => self::LINEAR_ACTUATOR_NAME,
+            self::TYPE_ATOMIC_PRINTER_PART => self::ATOMIC_PRINTER_PART_NAME,
+            self::TYPE_DEUTERIUM_ENGINE => self::DEUTERIUM_ENGINE_NAME,
+            self::TYPE_SOLAR_PANEL => self::SOLAR_PANEL_NAME,
+            self::TYPE_SCUT_RELAY => self::SCUT_RELAY_NAME,
+            self::TYPE_THERMAL_PROTECTION_SHELL => self::THERMAL_PROTECTION_SHELL_NAME,
+            self::TYPE_PARACHUTE_PACK => self::PARACHUTE_PACK_NAME,
+            self::TYPE_DESCENT_GUIDANCE_MODULE => self::DESCENT_GUIDANCE_MODULE_NAME,
+            self::TYPE_ATMOSPHERIC_DROP_KIT => self::ATMOSPHERIC_DROP_KIT_NAME,
+        ];
+    }
+
+    public static function canonicalNameForType(string $type): ?string
+    {
+        return self::canonicalNames()[$type] ?? null;
+    }
+
     public function __construct(
         public readonly int $id,
         public readonly string $uid,

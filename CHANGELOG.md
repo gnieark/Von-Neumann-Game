@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v87 : les noms API des items et stocks d’inventaire exposés par les endpoints de sonde sont désormais canoniques en anglais; exécuter `php scripts/migrate-probe-item-names.php --database-config=config/database.json` après le déploiement pour normaliser les lignes `probe_items` existantes.
 - Stats : le podium des explorateurs classe désormais les joueurs par nombre de secteurs visités, toutes leurs sondes possédées confondues.
 - Stats : la distance entre les deux sondes les plus proches ignore désormais les paires de sondes appartenant au même joueur.
 - API v86 : `GET /api/sector` utilise désormais la sonde possédée reachable la plus proche du secteur demandé quand elle fournit un scan valide, en ignorant les candidates encore en `insufficient_scan_data`.

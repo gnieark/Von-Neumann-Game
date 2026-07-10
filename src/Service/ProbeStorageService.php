@@ -105,7 +105,7 @@ final class ProbeStorageService
             new ProbeInventoryItem(
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
-                'Imprimante atomique',
+                'Atomic printer',
                 $this->atomicPrinterSpace(),
                 $printerAssistant !== null ? self::ATOMIC_PRINTER_TASK : null,
                 $printerAssistant?->taskProgressPercent() ?? 0.0,
@@ -144,7 +144,7 @@ final class ProbeStorageService
             new ProbeExternalTank(
                 'probe-' . $probe->id . '-deuterium-tank',
                 'deuterium',
-                'Cuve externe de deutérium',
+                'External deuterium tank',
                 $probe->deuteriumStock,
             ),
         ];
@@ -181,7 +181,7 @@ final class ProbeStorageService
             $items[] = (new ProbeInventoryItem(
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
-                'Imprimante atomique',
+                'Atomic printer',
                 $this->atomicPrinterSpace(),
                 $printerAssistant !== null ? self::ATOMIC_PRINTER_TASK : null,
                 $printerAssistant?->taskProgressPercent() ?? 0.0,
@@ -1245,9 +1245,9 @@ final class ProbeStorageService
     private function resourceStocks(NeumannProbe $probe, array $containers): array
     {
         $labels = [
-            ResourceComposition::METALS => 'Métaux',
-            ResourceComposition::ICE => 'Glace',
-            ResourceComposition::CARBON_COMPOUNDS => 'Composés organiques',
+            ResourceComposition::METALS => 'Metals',
+            ResourceComposition::ICE => 'Ice',
+            ResourceComposition::CARBON_COMPOUNDS => 'Carbon compounds',
         ];
         $stocks = [];
         foreach ($labels as $type => $name) {

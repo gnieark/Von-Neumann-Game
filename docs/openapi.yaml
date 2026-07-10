@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '86'
+  version: '87'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 86
+                apiVersion: 87
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1870,7 +1870,7 @@ paths:
                   items:
                     - id: probe-1-atomic-3d-printer
                       type: atomic_3d_printer
-                      name: Imprimante atomique
+                      name: Atomic printer
                       containerSpace: 0.3
                       currentTask: null
                       taskProgressPercent: 0
@@ -1902,21 +1902,21 @@ paths:
                   resourceStocks:
                     - id: probe-1-stock-metals
                       type: metals
-                      name: Métaux
+                      name: Metals
                       amount: 0
                       containerSpace: 0
                       capacityUnit: earth_container_equivalent
                       containers: []
                     - id: probe-1-stock-ice
                       type: ice
-                      name: Glace
+                      name: Ice
                       amount: 0
                       containerSpace: 0
                       capacityUnit: earth_container_equivalent
                       containers: []
                     - id: probe-1-stock-organic-compounds
                       type: carbon_compounds
-                      name: Composés organiques
+                      name: Carbon compounds
                       amount: 0
                       containerSpace: 0
                       capacityUnit: earth_container_equivalent
@@ -1937,7 +1937,7 @@ paths:
                   externalTanks:
                     - id: probe-1-deuterium-tank
                       type: deuterium
-                      name: Cuve externe de deutérium
+                      name: External deuterium tank
                       fillPercent: 100
                       external: true
                       usesCargoCapacity: false

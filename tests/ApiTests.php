@@ -1229,7 +1229,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(86, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(87, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1517,6 +1517,39 @@ if ($createdProbe !== null) {
             static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_STEEL_BAR,
         ));
         $test->assertEquals(2, count($cliSteelBars), 'add-inventory-item CLI creates one item row per requested quantity');
+
+        $legacyItemUid = 'legacy-french-steel-plate';
+        $legacyItemCreatedAt = gmdate('c');
+        $pdo->prepare(
+            'INSERT INTO probe_items
+             (uid, probe_id, storage_container_id, type, name, container_space, metadata_json, created_at, updated_at)
+             VALUES (:uid, :probe_id, NULL, :type, :name, :container_space, :metadata_json, :created_at, :updated_at)'
+        )->execute([
+            'uid' => $legacyItemUid,
+            'probe_id' => $cliInventoryProbe->id,
+            'type' => ProbeItem::TYPE_STEEL_PLATE,
+            'name' => 'Plaque d’acier',
+            'container_space' => 0.01,
+            'metadata_json' => '{}',
+            'created_at' => $legacyItemCreatedAt,
+            'updated_at' => $legacyItemCreatedAt,
+        ]);
+        $migrateItemNamesDryRunCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/migrate-probe-item-names.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --dry-run';
+        exec($migrateItemNamesDryRunCommand . ' 2>&1', $migrateItemNamesDryRunOutput, $migrateItemNamesDryRunStatus);
+        $test->assertEquals(0, $migrateItemNamesDryRunStatus, 'migrate-probe-item-names CLI dry-run exits successfully');
+        $test->assert(str_contains(implode("\n", $migrateItemNamesDryRunOutput), 'Dry-run: 1 probe item row(s) would be renamed'), 'migrate-probe-item-names CLI dry-run reports legacy rows');
+        $test->assertEquals('Plaque d’acier', $items->findByUidForProbe($cliInventoryProbe->id, $legacyItemUid)?->name, 'migrate-probe-item-names dry-run leaves legacy names unchanged');
+
+        $migrateItemNamesCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/migrate-probe-item-names.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig);
+        exec($migrateItemNamesCommand . ' 2>&1', $migrateItemNamesOutput, $migrateItemNamesStatus);
+        $test->assertEquals(0, $migrateItemNamesStatus, 'migrate-probe-item-names CLI exits successfully');
+        $test->assert(str_contains(implode("\n", $migrateItemNamesOutput), '1 probe item row(s) renamed'), 'migrate-probe-item-names CLI reports renamed rows');
+        $test->assertEquals(ProbeItem::STEEL_PLATE_NAME, $items->findByUidForProbe($cliInventoryProbe->id, $legacyItemUid)?->name, 'migrate-probe-item-names rewrites known item names to canonical English');
 
         $beforeDryRunCount = count($items->findByProbeId($cliInventoryProbe->id));
         $dryRunInventoryItemCommand = escapeshellarg(PHP_BINARY)
@@ -4210,7 +4243,7 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
 $inventoryItems = $sector->body['inventory']['items'] ?? [];
 $printer = $inventoryItems[0] ?? null;
 $test->assertEquals('atomic_3d_printer', $printer['type'] ?? null, 'default inventory starts with an atomic printer');
-$test->assertEquals('Imprimante atomique', $printer['name'] ?? null, 'default inventory displays the renamed atomic printer');
+$test->assertEquals('Atomic printer', $printer['name'] ?? null, 'default inventory exposes the atomic printer API name in English');
 $test->assertEquals(0.3, $printer['containerSpace'] ?? null, 'atomic printer occupies 0.3 containers');
 
 $mannyItems = array_values(array_filter($inventoryItems, static fn(array $item): bool => ($item['type'] ?? null) === 'manny'));
@@ -4225,6 +4258,7 @@ $resourceStocks = $sector->body['inventory']['resourceStocks'] ?? [];
 $test->assert(is_string($resourceStocks[0]['id'] ?? null), 'resource stocks expose stable inventory ids for jettison orders');
 $resourceStockTypes = array_column($resourceStocks, 'type');
 $test->assertEquals(['metals', 'ice', 'carbon_compounds'], $resourceStockTypes, 'resource stocks expose metals, ice and organic compounds separately');
+$test->assertEquals(['Metals', 'Ice', 'Carbon compounds'], array_column($resourceStocks, 'name'), 'resource stocks expose canonical English API names');
 
 $printerTask = $kernel->handle('GET', '/api/probe/inventory/' . rawurlencode((string) ($printer['id'] ?? 'missing')), $headers);
 $test->assertEquals(200, $printerTask->status, 'inventory item id endpoint returns printer task state');

@@ -32,7 +32,7 @@ final class ProbeInventory
             new ProbeInventoryItem(
                 'probe-' . $probe->id . '-atomic-3d-printer',
                 'atomic_3d_printer',
-                'Imprimante atomique',
+                'Atomic printer',
                 0.3,
                 null,
                 0,
@@ -81,7 +81,7 @@ final class ProbeInventory
             new ProbeExternalTank(
                 'probe-' . $probe->id . '-deuterium-tank',
                 'deuterium',
-                'Cuve externe de deutérium',
+                'External deuterium tank',
                 $probe->deuteriumStock,
             ),
         ];
@@ -90,7 +90,7 @@ final class ProbeInventory
             [
                 'id' => 'probe-' . $probe->id . '-stock-metals',
                 'type' => 'metals',
-                'name' => 'Métaux',
+                'name' => 'Metals',
                 'amount' => $probe->metalsStock,
                 'containerSpace' => $probe->metalsStock,
                 'capacityUnit' => self::CAPACITY_UNIT,
@@ -98,7 +98,7 @@ final class ProbeInventory
             [
                 'id' => 'probe-' . $probe->id . '-stock-ice',
                 'type' => 'ice',
-                'name' => 'Glace',
+                'name' => 'Ice',
                 'amount' => $probe->iceStock,
                 'containerSpace' => $probe->iceStock,
                 'capacityUnit' => self::CAPACITY_UNIT,
@@ -106,7 +106,7 @@ final class ProbeInventory
             [
                 'id' => 'probe-' . $probe->id . '-stock-organic-compounds',
                 'type' => 'carbon_compounds',
-                'name' => 'Composés organiques',
+                'name' => 'Carbon compounds',
                 'amount' => $probe->organicCompoundsStock,
                 'containerSpace' => $probe->organicCompoundsStock,
                 'capacityUnit' => self::CAPACITY_UNIT,

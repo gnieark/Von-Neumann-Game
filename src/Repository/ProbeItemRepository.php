@@ -15,6 +15,7 @@ final class ProbeItemRepository
     {
         $now = gmdate('c');
         $uid ??= $this->uniqueUid();
+        $name = ProbeItem::canonicalNameForType($type) ?? $name;
         $exists = $this->pdo->prepare('SELECT COUNT(*) FROM probe_items WHERE uid = :uid');
         $exists->execute(['uid' => $uid]);
         if ((int) $exists->fetchColumn() > 0) {
