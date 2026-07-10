@@ -28,7 +28,7 @@ try {
     $players = new PlayerRepository($pdo);
     $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
 
-    [$player, $probe] = userinfosResolveSubject($players, $probes, $options);
+    [$player, $probe, $ownedProbes] = userinfosResolveSubject($players, $probes, $options);
     if ($player === null) {
         throw new RuntimeException('Player not found.');
     }
@@ -36,7 +36,7 @@ try {
         throw new RuntimeException('Probe not found for player #' . $player->id . ' (' . $player->username . ').');
     }
 
-    $report = userinfosBuildReport($pdo, $player, $probe, $gameplayConfig, $options['limit']);
+    $report = userinfosBuildReport($pdo, $player, $probe, $ownedProbes, $gameplayConfig, $options['limit']);
 
     if ($options['json']) {
         echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
@@ -161,55 +161,78 @@ function userinfosPositiveInt(string $value, string $label): int
 }
 
 /**
- * @return array{0: ?\VonNeumannGame\Domain\Player, 1: ?\VonNeumannGame\Domain\NeumannProbe}
+ * @return array{0: ?\VonNeumannGame\Domain\Player, 1: ?\VonNeumannGame\Domain\NeumannProbe, 2: array<int, \VonNeumannGame\Domain\NeumannProbe>}
  */
 function userinfosResolveSubject(PlayerRepository $players, NeumannProbeRepository $probes, array $options): array
 {
     $probe = null;
     $player = null;
+    $ownedProbes = [];
 
     if ($options['probeId'] !== null) {
         $probe = $probes->findById($options['probeId']);
         $player = $probe !== null ? $players->findById($probe->playerId) : null;
-        return [$player, $probe];
+        $ownedProbes = $player !== null ? $probes->findAllByPlayerId($player->id) : [];
+        return [$player, $probe, $ownedProbes];
     }
 
     if ($options['playerId'] !== null) {
         $player = $players->findById($options['playerId']);
-        $probe = $player !== null ? $probes->findByPlayerId($player->id) : null;
-        return [$player, $probe];
+        $ownedProbes = $player !== null ? $probes->findAllByPlayerId($player->id) : [];
+        $probe = userinfosDefaultProbe($player, $ownedProbes);
+        return [$player, $probe, $ownedProbes];
     }
 
     if ($options['username'] !== null) {
         $player = $players->findByUsername((string) $options['username']);
-        $probe = $player !== null ? $probes->findByPlayerId($player->id) : null;
-        return [$player, $probe];
+        $ownedProbes = $player !== null ? $probes->findAllByPlayerId($player->id) : [];
+        $probe = userinfosDefaultProbe($player, $ownedProbes);
+        return [$player, $probe, $ownedProbes];
     }
 
     $subject = (string) $options['subject'];
     if (str_starts_with($subject, 'probe:')) {
         $probe = $probes->findById(userinfosPositiveInt(substr($subject, 6), 'probe id'));
         $player = $probe !== null ? $players->findById($probe->playerId) : null;
-        return [$player, $probe];
+        $ownedProbes = $player !== null ? $probes->findAllByPlayerId($player->id) : [];
+        return [$player, $probe, $ownedProbes];
     }
     if (str_starts_with($subject, 'player:')) {
         $player = $players->findById(userinfosPositiveInt(substr($subject, 7), 'player id'));
-        $probe = $player !== null ? $probes->findByPlayerId($player->id) : null;
-        return [$player, $probe];
+        $ownedProbes = $player !== null ? $probes->findAllByPlayerId($player->id) : [];
+        $probe = userinfosDefaultProbe($player, $ownedProbes);
+        return [$player, $probe, $ownedProbes];
     }
     if (preg_match('/\A#?(\d+)\z/', $subject, $matches) === 1) {
         $probe = $probes->findById((int) $matches[1]);
         $player = $probe !== null ? $players->findById($probe->playerId) : null;
-        return [$player, $probe];
+        $ownedProbes = $player !== null ? $probes->findAllByPlayerId($player->id) : [];
+        return [$player, $probe, $ownedProbes];
     }
 
     $player = $players->findByUsername($subject);
-    $probe = $player !== null ? $probes->findByPlayerId($player->id) : null;
+    $ownedProbes = $player !== null ? $probes->findAllByPlayerId($player->id) : [];
+    $probe = userinfosDefaultProbe($player, $ownedProbes);
 
-    return [$player, $probe];
+    return [$player, $probe, $ownedProbes];
 }
 
-function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $gameplayConfig, int $limit): array
+function userinfosDefaultProbe(?object $player, array $ownedProbes): ?object
+{
+    if ($player === null || $ownedProbes === []) {
+        return null;
+    }
+
+    foreach ($ownedProbes as $probe) {
+        if ($player->defaultProbeId !== null && $probe->id === $player->defaultProbeId) {
+            return $probe;
+        }
+    }
+
+    return $ownedProbes[0];
+}
+
+function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ownedProbes, array $gameplayConfig, int $limit): array
 {
     $frame = new PlayerReferenceFrame($player->homeSector);
     $relative = $frame->globalToRelative($probe->currentSector);
@@ -345,6 +368,8 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ga
             'id' => $player->id,
             'username' => $player->username,
             'displayName' => $player->displayName,
+            'defaultProbeId' => $player->defaultProbeId,
+            'probeCount' => count($ownedProbes),
             'homeSector' => ['absolute' => $home],
             'createdAt' => $player->createdAt,
             'updatedAt' => $player->updatedAt,
@@ -354,6 +379,11 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ga
             'sessions' => $sessions,
             'apiKeys' => $apiKeys,
         ],
+        'focusedProbeId' => $probe->id,
+        'probes' => array_map(
+            static fn(object $ownedProbe): array => userinfosProbeOverview($pdo, $player, $ownedProbe, $frame, $gameplayConfig, $probe->id),
+            $ownedProbes,
+        ),
         'probe' => [
             'id' => $probe->id,
             'name' => $probe->name,
@@ -413,6 +443,65 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ga
             'received' => array_map(static fn(array $row): array => userinfosDecorateMessageRow($row, $frame), $messagesReceived),
             'sent' => array_map(static fn(array $row): array => userinfosDecorateMessageRow($row, $frame), $messagesSent),
         ],
+    ];
+}
+
+function userinfosProbeOverview(PDO $pdo, object $player, object $probe, PlayerReferenceFrame $frame, array $gameplayConfig, int $focusedProbeId): array
+{
+    $relative = $frame->globalToRelative($probe->currentSector);
+    $movementIds = userinfosColumn(
+        $pdo,
+        'SELECT id FROM probe_movements WHERE probe_id = :probe_id',
+        ['probe_id' => $probe->id],
+    );
+    $pendingEvents = userinfosScheduledEvents($pdo, $probe->id, $movementIds, 1000);
+    $pendingEvents = array_values(array_filter(
+        $pendingEvents,
+        static fn(array $event): bool => (string) $event['status'] === 'pending',
+    ));
+
+    return [
+        'id' => $probe->id,
+        'name' => $probe->name,
+        'isDefault' => $player->defaultProbeId === $probe->id,
+        'isFocused' => $probe->id === $focusedProbeId,
+        'position' => [
+            'absolute' => userinfosCoordinatesArray($probe->currentSector),
+            'relativeToHome' => $relative,
+        ],
+        'navigation' => [
+            'status' => $probe->status->value,
+            'currentTask' => $probe->currentTask,
+            'enteredCurrentSectorAt' => $probe->enteredCurrentSectorAt,
+        ],
+        'health' => [
+            'integrityPercent' => $probe->integrityPercent,
+            'energyStored' => $probe->energyStored,
+            'internalClockRate' => $probe->internalClockRate,
+        ],
+        'legacyResourceTotals' => userinfosLegacyTotals($probe),
+        'counts' => [
+            'containers' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probe->id]),
+            'items' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probe->id]),
+            'mannies' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM mannies WHERE probe_id = :probe_id', ['probe_id' => $probe->id]),
+            'movements' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probe->id]),
+            'activeMovements' => userinfosScalar(
+                $pdo,
+                "SELECT COUNT(*) FROM probe_movements WHERE probe_id = :probe_id AND status IN ('preparing', 'accelerating', 'cruising', 'decelerating')",
+                ['probe_id' => $probe->id],
+            ),
+            'pendingScheduledEvents' => count($pendingEvents),
+            'unreadWarnings' => userinfosScalar(
+                $pdo,
+                "SELECT COUNT(*) FROM probe_damage_warnings WHERE probe_id = :probe_id AND status = 'unread'",
+                ['probe_id' => $probe->id],
+            ),
+            'receivedMessages' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM probe_messages WHERE recipient_probe_id = :probe_id', ['probe_id' => $probe->id]),
+            'sentMessages' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM probe_messages WHERE sender_probe_id = :probe_id', ['probe_id' => $probe->id]),
+        ],
+        'excludeFromStats' => $probe->excludeFromStats,
+        'createdAt' => $probe->createdAt,
+        'updatedAt' => $probe->updatedAt,
     ];
 }
 
@@ -665,6 +754,9 @@ function userinfosRenderReport(array $report): string
     $out[] = 'Player';
     $out[] = '  #' . $report['player']['id'] . ' username=' . $report['player']['username']
         . ' displayName=' . userinfosValue($report['player']['displayName']);
+    $out[] = '  defaultProbeId=' . userinfosValue($report['player']['defaultProbeId'])
+        . ' probeCount=' . $report['player']['probeCount']
+        . ' focusedProbeId=' . userinfosValue($report['focusedProbeId']);
     $out[] = '  home absolute: ' . userinfosFormatCoordinates($report['player']['homeSector']['absolute']);
     $out[] = '  created: ' . $report['player']['createdAt'] . ' updated: ' . $report['player']['updatedAt'];
     $out[] = '  auth methods: ' . count($report['player']['authMethods'])
@@ -677,7 +769,34 @@ function userinfosRenderReport(array $report): string
             . ' created=' . $auth['created_at'];
     }
     $out[] = '';
-    $out[] = 'Probe';
+    $out[] = 'Probes (' . count($report['probes']) . ')';
+    foreach ($report['probes'] as $probeOverview) {
+        $markers = [];
+        if ($probeOverview['isDefault']) {
+            $markers[] = 'default';
+        }
+        if ($probeOverview['isFocused']) {
+            $markers[] = 'focus';
+        }
+        $markerText = $markers === [] ? '-' : implode(',', $markers);
+        $out[] = '  - #' . $probeOverview['id'] . ' name=' . $probeOverview['name']
+            . ' markers=' . $markerText
+            . ' status=' . $probeOverview['navigation']['status']
+            . ' task=' . userinfosValue($probeOverview['navigation']['currentTask'])
+            . ' abs=' . userinfosFormatCoordinates($probeOverview['position']['absolute'])
+            . ' rel=' . userinfosFormatCoordinates($probeOverview['position']['relativeToHome']);
+        $out[] = '    containers=' . $probeOverview['counts']['containers']
+            . ' items=' . $probeOverview['counts']['items']
+            . ' mannies=' . $probeOverview['counts']['mannies']
+            . ' movements=' . $probeOverview['counts']['movements']
+            . ' activeMovements=' . $probeOverview['counts']['activeMovements']
+            . ' pendingEvents=' . $probeOverview['counts']['pendingScheduledEvents']
+            . ' unreadWarnings=' . $probeOverview['counts']['unreadWarnings']
+            . ' messages=' . $probeOverview['counts']['receivedMessages'] . '/' . $probeOverview['counts']['sentMessages'];
+        $out[] = '    legacy totals: ' . userinfosFormatResourceMap($probeOverview['legacyResourceTotals']);
+    }
+    $out[] = '';
+    $out[] = 'Focused probe';
     $out[] = '  #' . $report['probe']['id'] . ' name=' . $report['probe']['name'] . ' playerId=' . $report['probe']['playerId'];
     $out[] = '  absolute: ' . userinfosFormatCoordinates($report['probe']['position']['absolute']);
     $out[] = '  relative: ' . userinfosFormatCoordinates($report['probe']['position']['relativeToHome']) . ' from player home';

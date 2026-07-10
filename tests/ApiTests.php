@@ -1417,6 +1417,44 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($userinfosText, 'relative: 0:0:0 from player home'), 'userinfos CLI reports relative position');
     $test->assert(str_contains($userinfosText, 'Inventory'), 'userinfos CLI reports inventory state');
     $test->assert(str_contains($userinfosText, 'Visited sectors'), 'userinfos CLI reports visited sector history');
+    $userinfosMultiPlayer = $auth->registerPlayerWithPassword('userinfos-multi', 'secret', 'Userinfos Multi', 'Userinfos primary');
+    $userinfosDefaultProbe = $probes->findByPlayerId($userinfosMultiPlayer->id) ?? throw new RuntimeException('Expected userinfos multi default probe.');
+    $userinfosAuxProbe = $probes->createForPlayer(
+        $userinfosMultiPlayer->id,
+        'Userinfos auxiliary',
+        new SectorCoordinates($userinfosMultiPlayer->homeSector->getX() + 2, $userinfosMultiPlayer->homeSector->getY(), $userinfosMultiPlayer->homeSector->getZ()),
+    );
+    $pdo->prepare('UPDATE neumann_probes SET exclude_from_stats = 1 WHERE id IN (:default_probe_id, :aux_probe_id)')->execute([
+        'default_probe_id' => $userinfosDefaultProbe->id,
+        'aux_probe_id' => $userinfosAuxProbe->id,
+    ]);
+    $userinfosMultiCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/userinfos.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --username=' . escapeshellarg($userinfosMultiPlayer->username)
+        . ' --limit=1';
+    exec($userinfosMultiCommand . ' 2>&1', $userinfosMultiOutput, $userinfosMultiStatus);
+    $userinfosMultiText = implode("\n", $userinfosMultiOutput);
+    $test->assertEquals(0, $userinfosMultiStatus, 'userinfos CLI exits successfully for a multi-probe player');
+    $test->assert(str_contains($userinfosMultiText, 'Probes (2)'), 'userinfos CLI lists every probe owned by the player');
+    $test->assert(str_contains($userinfosMultiText, '#' . $userinfosDefaultProbe->id . ' name=Userinfos primary'), 'userinfos CLI includes the default probe in the overview');
+    $test->assert(str_contains($userinfosMultiText, 'markers=default,focus'), 'userinfos CLI marks the default focused probe');
+    $test->assert(str_contains($userinfosMultiText, '#' . $userinfosAuxProbe->id . ' name=Userinfos auxiliary'), 'userinfos CLI includes non-default probes in the overview');
+    $userinfosMultiJsonCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/userinfos.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+        . ' --username=' . escapeshellarg($userinfosMultiPlayer->username)
+        . ' --limit=1'
+        . ' --json';
+    exec($userinfosMultiJsonCommand . ' 2>&1', $userinfosMultiJsonOutput, $userinfosMultiJsonStatus);
+    $test->assertEquals(0, $userinfosMultiJsonStatus, 'userinfos CLI JSON exits successfully for a multi-probe player');
+    $userinfosMultiJson = json_decode(implode("\n", $userinfosMultiJsonOutput), true, 512, JSON_THROW_ON_ERROR);
+    $test->assertEquals(2, $userinfosMultiJson['player']['probeCount'] ?? null, 'userinfos JSON exposes the player probe count');
+    $test->assertEquals(
+        [$userinfosDefaultProbe->id, $userinfosAuxProbe->id],
+        array_column($userinfosMultiJson['probes'] ?? [], 'id'),
+        'userinfos JSON exposes all owned probe ids',
+    );
 
     $cliSectorUniverse = $tmp . DIRECTORY_SEPARATOR . 'cli-sector-universe';
     $cliSectorRepository = new SectorFileRepository($cliSectorUniverse);
