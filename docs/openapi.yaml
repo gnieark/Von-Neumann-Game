@@ -794,24 +794,106 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/storage-containers:
-    parameters:
-      - $ref: '#/components/parameters/ProbeId'
     get:
-      $ref: '#/paths/~1api~1probe~1storage-containers/get'
+      summary: List probe storage containers
+      description: >
+        Returns the selected probe core storage and each additional container
+        created from an additional_container inventory item. The deuterium tank
+        is not managed here.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+      responses:
+        '200':
+          description: Storage containers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [containers]
+                properties:
+                  containers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StorageContainer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/probe/{probeId}/storage-containers/{containerId}:
-    parameters:
-      - $ref: '#/components/parameters/ProbeId'
-      - $ref: '#/components/parameters/StorageContainerId'
     get:
-      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D/get'
+      summary: Get one storage container content
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/StorageContainerId'
+      responses:
+        '200':
+          description: Container inventory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageContainerInventoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     patch:
-      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D/patch'
+      summary: Rename a storage container
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/StorageContainerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StorageContainerRenameRequest'
+            example:
+              label: Soute metaux
+      responses:
+        '200':
+          description: Storage container renamed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageContainerRenameResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/storage-containers/{containerId}/rules:
-    parameters:
-      - $ref: '#/components/parameters/ProbeId'
-      - $ref: '#/components/parameters/StorageContainerId'
     patch:
-      $ref: '#/paths/~1api~1probe~1storage-containers~1%7BcontainerId%7D~1rules/patch'
+      summary: Update storage routing rules for a container
+      description: >
+        Priority routes matching new items to this selected-probe container
+        first unless it is full. Exclusion avoids this container unless no
+        other non-strict container can accept the item. Strict exclusion
+        prevents automatic placement into this container.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/StorageContainerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StorageContainerRules'
+            example:
+              priority: [metals]
+              exclusion: [ice]
+              strictExclusion: [manny]
+      responses:
+        '200':
+          description: Rules updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageContainerRulesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/storage-moves:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
