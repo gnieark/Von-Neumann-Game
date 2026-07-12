@@ -17,6 +17,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - API v83 : ajout de `POST /api/probe/mannies/{mannyId}/transfer-deuterium-to-probe` et de sa variante `/api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-to-probe`; une Manny réserve immédiatement du deutérium de la sonde source, réalise le transfert en 5 minutes vers une sonde ou un drone du même secteur, remplit la cible au maximum et rend le surplus à la source.
 - Interface : `/mannies` ajoute l’ordre “Transfer deuterium to a probe or drone” dans le groupe Containers, avec choix de la sonde cible du même secteur et de la quantité; le taux de deutérium de la cible n’est affiché que lorsqu’il est accessible pour la sonde du joueur.
 - API v82 : lorsqu’une sonde par défaut est détruite par collision de déplacement ou piégée par un trou noir, l’esprit du joueur bascule automatiquement vers une autre sonde opérationnelle du joueur si elle existe; l’ancienne sonde est supprimée sans effacer les données rattachées au joueur, et une alerte `mind_snapshot_transferred` en anglais est créée sur la nouvelle sonde.
+- OpenAPI : les opérations `{probeId}` réutilisées pour les déplacements de stock, messages, alertes, warnings, secteurs visités, secteur courant, déplacement, Mannys et impression atomique déclarent maintenant `probeId` au niveau opération pour l’affichage Swagger UI.
 
 ## 2026-07-07
 
