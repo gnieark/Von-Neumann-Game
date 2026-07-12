@@ -77,7 +77,8 @@ final class AppFactory
         $players = new PlayerRepository($pdo);
         $authMethods = new PlayerAuthRepository($pdo);
         $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
-        $mannies = new MannyRepository($pdo, $gameplayConfig);
+        $scheduledEvents = new ScheduledEventRepository($pdo);
+        $mannies = new MannyRepository($pdo, $gameplayConfig, $scheduledEvents);
         $items = new ProbeItemRepository($pdo);
         $improvements = new ProbeImprovementRepository($pdo);
         $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
@@ -89,7 +90,6 @@ final class AppFactory
         $damageWarnings = new ProbeDamageWarningRepository($pdo);
         $forum = new ForumRepository($pdo);
         $movements = new ProbeMovementRepository($pdo);
-        $scheduledEvents = new ScheduledEventRepository($pdo);
         $sessions = new SessionRepository($pdo);
         $apiKeys = new ApiKeyRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
@@ -101,7 +101,7 @@ final class AppFactory
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
 
@@ -115,14 +115,14 @@ final class AppFactory
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();
         $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
-        $mannies = new MannyRepository($pdo, $gameplayConfig);
+        $scheduledEvents = new ScheduledEventRepository($pdo);
+        $mannies = new MannyRepository($pdo, $gameplayConfig, $scheduledEvents);
         $items = new ProbeItemRepository($pdo);
         $storageContainers = new StorageContainerRepository($pdo, $gameplayConfig);
         $messages = new ProbeMessageRepository($pdo);
         $missions = new MissionRepository($pdo);
         $movements = new ProbeMovementRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
-        $scheduledEvents = new ScheduledEventRepository($pdo);
         $damageWarnings = new ProbeDamageWarningRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
@@ -130,11 +130,16 @@ final class AppFactory
         $improvements = new ProbeImprovementRepository($pdo);
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $players = new PlayerRepository($pdo);
+        $scutRelays = new ScutRelayRepository($pdo);
+        $scutNetworks = new ScutNetworkRepository($pdo);
+        $scut = new ScutNetworkService($scutRelays, $scutNetworks, $probes);
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players);
+        $bookmarks = new WaypointBookmarkService($items, $sectorService);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
 
-        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
+        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
     }
 
     public function authService(PDO $pdo): AuthService

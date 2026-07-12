@@ -9,6 +9,8 @@ use VonNeumannGame\Domain\ScheduledEvent;
 
 final class ScheduledEventRepository
 {
+    public const UNSCHEDULED_RUN_AT = '9999-12-31T00:00:00+00:00';
+
     public function __construct(private readonly PDO $pdo) {}
 
     public function schedule(
@@ -77,6 +79,11 @@ final class ScheduledEventRepository
 
     public function markDone(ScheduledEvent $event): void
     {
+        $this->markDoneById($event->id);
+    }
+
+    public function markDoneById(int $id): void
+    {
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
@@ -84,8 +91,40 @@ final class ScheduledEventRepository
              WHERE id = :id"
         );
         $stmt->execute([
-            'id' => $event->id,
+            'id' => $id,
             'processed_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
+    public function updateRunAtAndPayload(int $id, string $runAt, array $payload): void
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            "UPDATE scheduled_events
+             SET run_at = :run_at, payload_json = :payload_json, updated_at = :updated_at
+             WHERE id = :id AND status IN ('pending', 'running')"
+        );
+        $stmt->execute([
+            'id' => $id,
+            'run_at' => $runAt,
+            'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'updated_at' => $now,
+        ]);
+    }
+
+    public function release(ScheduledEvent $event, string $runAt, array $payload): void
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            "UPDATE scheduled_events
+             SET status = 'pending', run_at = :run_at, payload_json = :payload_json, locked_at = NULL, updated_at = :updated_at
+             WHERE id = :id AND status = 'running'"
+        );
+        $stmt->execute([
+            'id' => $event->id,
+            'run_at' => $runAt,
+            'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'updated_at' => $now,
         ]);
     }

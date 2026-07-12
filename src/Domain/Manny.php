@@ -42,6 +42,7 @@ final class Manny
         public ?string $currentTask,
         public ?string $taskStartedAt,
         public ?string $taskEndsAt,
+        public ?int $taskScheduledEventId,
         public array $taskPayload,
         public float $cargoDeuterium,
         public float $cargoMetals,

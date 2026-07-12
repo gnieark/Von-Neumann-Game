@@ -863,7 +863,58 @@ $mannySchemaColumns = array_map(
 $test->assert(in_array('cargo_ice', $mannySchemaColumns, true), 'Manny table stores ice cargo explicitly');
 $test->assert(in_array('cargo_organic_compounds', $mannySchemaColumns, true), 'Manny table stores organic-compound cargo explicitly');
 $test->assert(in_array('storage_container_id', $mannySchemaColumns, true), 'Manny table stores its storage container');
+$test->assert(in_array('task_scheduled_event_id', $mannySchemaColumns, true), 'Manny table links active tasks to scheduled events');
 $test->assert(!in_array('cargo_other', $mannySchemaColumns, true), 'Manny table no longer stores generic cargo_other');
+$mannyTaskMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'manny-task-migration.sqlite';
+$mannyTaskMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'manny-task-migration-database.json';
+file_put_contents($mannyTaskMigrationConfig, json_encode([
+    'driver' => 'sqlite',
+    'path' => $mannyTaskMigrationDbPath,
+], JSON_THROW_ON_ERROR));
+$mannyTaskMigrationFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $mannyTaskMigrationDbPath), $root);
+$mannyTaskMigrationPdo = $mannyTaskMigrationFactory->create();
+$mannyTaskMigrationFactory->initializeSchema($mannyTaskMigrationPdo);
+$mannyTaskMigrationPlayers = new PlayerRepository($mannyTaskMigrationPdo);
+$mannyTaskMigrationProbes = new NeumannProbeRepository($mannyTaskMigrationPdo);
+$mannyTaskMigrationMannies = new MannyRepository($mannyTaskMigrationPdo);
+$mannyTaskMigrationPlayer = $mannyTaskMigrationPlayers->createPlayer('manny-task-migration', 'Manny Task Migration', null, SectorCoordinates::origin());
+$mannyTaskMigrationProbe = $mannyTaskMigrationProbes->createForPlayer($mannyTaskMigrationPlayer->id, 'Manny Task Migration Probe');
+$mannyTaskMigrationManny = $mannyTaskMigrationMannies->createForProbe($mannyTaskMigrationProbe->id, 'migration-manny', uid: 'mny_migration_task');
+$mannyTaskMigrationRunAt = '2026-01-01T00:05:00+00:00';
+$mannyTaskMigrationPdo->prepare(
+    'UPDATE mannies
+     SET current_task = :task,
+         task_started_at = :started_at,
+         task_ends_at = :ends_at,
+         task_payload_json = :payload
+     WHERE id = :id'
+)->execute([
+    'id' => $mannyTaskMigrationManny->id,
+    'task' => Manny::TASK_REPAIR,
+    'started_at' => '2026-01-01T00:00:00+00:00',
+    'ends_at' => $mannyTaskMigrationRunAt,
+    'payload' => json_encode(['integrityPercent' => 4.5], JSON_THROW_ON_ERROR),
+]);
+$mannyTaskMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/migrate-manny-tasks-to-scheduled-events.php')
+    . ' --database-config=' . escapeshellarg($mannyTaskMigrationConfig);
+exec($mannyTaskMigrationCommand . ' 2>&1', $mannyTaskMigrationOutput, $mannyTaskMigrationStatus);
+$test->assertEquals(0, $mannyTaskMigrationStatus, 'migrate-manny-tasks-to-scheduled-events CLI exits successfully');
+$mannyTaskMigrationRow = $mannyTaskMigrationPdo->query(
+    "SELECT m.task_scheduled_event_id, m.task_payload_json, se.type, se.entity_type, se.entity_id, se.run_at, se.status, se.payload_json
+     FROM mannies m
+     LEFT JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+     WHERE m.uid = 'mny_migration_task'"
+)->fetch(PDO::FETCH_ASSOC);
+$mannyTaskMigrationPayload = json_decode((string) ($mannyTaskMigrationRow['payload_json'] ?? '{}'), true);
+$test->assert((int) ($mannyTaskMigrationRow['task_scheduled_event_id'] ?? 0) > 0, 'Manny task migration stores the scheduled event id');
+$test->assertEquals('{}', $mannyTaskMigrationRow['task_payload_json'] ?? null, 'Manny task migration clears the active payload from the Manny row');
+$test->assertEquals(SchedulerService::MANNY_TASK, $mannyTaskMigrationRow['type'] ?? null, 'Manny task migration creates manny.task events');
+$test->assertEquals('manny', $mannyTaskMigrationRow['entity_type'] ?? null, 'Manny task migration targets Manny entities');
+$test->assertEquals($mannyTaskMigrationManny->id, (int) ($mannyTaskMigrationRow['entity_id'] ?? 0), 'Manny task migration keeps the Manny database id');
+$test->assertEquals($mannyTaskMigrationRunAt, $mannyTaskMigrationRow['run_at'] ?? null, 'Manny task migration preserves task end time');
+$test->assertEquals('pending', $mannyTaskMigrationRow['status'] ?? null, 'Manny task migration creates pending events');
+$test->assertEquals(4.5, (float) ($mannyTaskMigrationPayload['integrityPercent'] ?? 0), 'Manny task migration moves the task payload into scheduled_events');
 $itemSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_items)')->fetchAll(PDO::FETCH_ASSOC),
@@ -993,7 +1044,8 @@ $test->assert(in_array('improvement', $probeImprovementInstallationSchemaColumns
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
-$mannies = new MannyRepository($pdo);
+$scheduledEvents = new ScheduledEventRepository($pdo);
+$mannies = new MannyRepository($pdo, scheduledEvents: $scheduledEvents);
 $items = new ProbeItemRepository($pdo);
 $probeImprovements = new ProbeImprovementRepository($pdo);
 $messages = new ProbeMessageRepository($pdo);
@@ -1005,7 +1057,6 @@ $damageWarnings = new ProbeDamageWarningRepository($pdo);
 $forum = new ForumRepository($pdo);
 $storageContainers = new StorageContainerRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
-$scheduledEvents = new ScheduledEventRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $apiKeys = new ApiKeyRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
@@ -1017,8 +1068,8 @@ $missionService = new MissionService($missions, $messages, [], 'api-test-world',
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements);
-$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents);
+$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
 $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
 
 $multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
@@ -1240,7 +1291,8 @@ $multiScanFactory->initializeSchema($multiScanPdo);
 $multiScanPlayers = new PlayerRepository($multiScanPdo);
 $multiScanAuthMethods = new PlayerAuthRepository($multiScanPdo);
 $multiScanProbes = new NeumannProbeRepository($multiScanPdo);
-$multiScanMannies = new MannyRepository($multiScanPdo);
+$multiScanScheduledEvents = new ScheduledEventRepository($multiScanPdo);
+$multiScanMannies = new MannyRepository($multiScanPdo, scheduledEvents: $multiScanScheduledEvents);
 $multiScanItems = new ProbeItemRepository($multiScanPdo);
 $multiScanProbeImprovements = new ProbeImprovementRepository($multiScanPdo);
 $multiScanMessages = new ProbeMessageRepository($multiScanPdo);
@@ -1252,7 +1304,6 @@ $multiScanWarnings = new ProbeDamageWarningRepository($multiScanPdo);
 $multiScanForum = new ForumRepository($multiScanPdo);
 $multiScanStorageContainers = new StorageContainerRepository($multiScanPdo);
 $multiScanMovements = new ProbeMovementRepository($multiScanPdo);
-$multiScanScheduledEvents = new ScheduledEventRepository($multiScanPdo);
 $multiScanSessions = new SessionRepository($multiScanPdo);
 $multiScanApiKeys = new ApiKeyRepository($multiScanPdo);
 $multiScanVisited = new VisitedSectorRepository($multiScanPdo);
@@ -1265,7 +1316,7 @@ $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMess
 $multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanSectorService, $multiScanWarnings);
 $multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, worldSeed: 'multi-scan-world');
 $multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
-$multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements);
+$multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents);
 $multiScanKernel = new ApiKernel($multiScanAuth, $multiScanPlayers, $multiScanProbes, new SectorObservationService($multiScanSectorService, $multiScanVisited, mannies: $multiScanMannies), $multiScanMovementService, $multiScanVisited, $multiScanMannyService, $multiScanItems, $multiScanStorage, $multiScanMessages, $multiScanWarnings, $multiScanForum, $multiScanMissionService, $multiScanReinstantiation, $multiScanScut, improvements: $multiScanProbeImprovements);
 $multiScanPlayer = $multiScanAuth->registerPlayerWithPassword('multi-scan-observer', 'secret', 'Multi Scan Observer', 'Multi scan default');
 $multiScanDefaultProbe = $multiScanProbes->findByPlayerId($multiScanPlayer->id);
@@ -4333,6 +4384,23 @@ if ($createdProbe !== null) {
     $repairRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $repairRow->execute(['uid' => $firstMannyId]);
     $repairMannyDbId = (int) $repairRow->fetchColumn();
+    $repairEventRow = $pdo->prepare(
+        'SELECT m.task_scheduled_event_id, m.task_payload_json, se.type, se.entity_type, se.entity_id, se.status, se.payload_json
+         FROM mannies m
+         LEFT JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.id = :id'
+    );
+    $repairEventRow->execute(['id' => $repairMannyDbId]);
+    $repairEvent = $repairEventRow->fetch(PDO::FETCH_ASSOC) ?: [];
+    $repairEventId = (int) ($repairEvent['task_scheduled_event_id'] ?? 0);
+    $repairEventPayload = json_decode((string) ($repairEvent['payload_json'] ?? '{}'), true);
+    $test->assert($repairEventId > 0, 'started Manny task stores a scheduled event id');
+    $test->assertEquals('{}', $repairEvent['task_payload_json'] ?? null, 'active Manny task payload is moved out of the mannies row');
+    $test->assertEquals(SchedulerService::MANNY_TASK, $repairEvent['type'] ?? null, 'started Manny task creates a manny.task scheduled event');
+    $test->assertEquals('manny', $repairEvent['entity_type'] ?? null, 'Manny scheduled event targets the Manny entity');
+    $test->assertEquals($repairMannyDbId, (int) ($repairEvent['entity_id'] ?? 0), 'Manny scheduled event stores the Manny database id');
+    $test->assertEquals('pending', $repairEvent['status'] ?? null, 'new Manny scheduled event is pending');
+    $test->assertEquals(2.0, (float) ($repairEventPayload['integrityPercent'] ?? 0), 'Manny scheduled event stores the active task payload');
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $repairMannyDbId,
         'ended' => gmdate('c', time() - 1),
@@ -4340,6 +4408,34 @@ if ($createdProbe !== null) {
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $repairedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(97.0, $repairedProbe?->integrityPercent, 'completed Manny repair restores probe integrity');
+    $repairEventStatus = $pdo->prepare('SELECT status FROM scheduled_events WHERE id = :id');
+    $repairEventStatus->execute(['id' => $repairEventId]);
+    $test->assertEquals('done', $repairEventStatus->fetchColumn(), 'API refresh marks the completed Manny scheduled event done');
+
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 90 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $cronRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 1], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $cronRepair->status, 'Manny repair can be queued for scheduler completion');
+    $cronRepairRow = $pdo->prepare('SELECT id, task_scheduled_event_id FROM mannies WHERE uid = :uid');
+    $cronRepairRow->execute(['uid' => $firstMannyId]);
+    $cronRepairMannyRow = $cronRepairRow->fetch(PDO::FETCH_ASSOC) ?: [];
+    $cronRepairMannyId = (int) ($cronRepairMannyRow['id'] ?? 0);
+    $cronRepairEventId = (int) ($cronRepairMannyRow['task_scheduled_event_id'] ?? 0);
+    $past = gmdate('c', time() - 1);
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $cronRepairMannyId,
+        'ended' => $past,
+    ]);
+    $pdo->prepare('UPDATE scheduled_events SET run_at = :ended WHERE id = :id')->execute([
+        'id' => $cronRepairEventId,
+        'ended' => $past,
+    ]);
+    $cronRepairStats = $scheduler->processDueEvents();
+    $test->assert($cronRepairStats['processed'] >= 1, 'scheduler processes due Manny task events');
+    $test->assertEquals(91.0, $probes->findByPlayerId($player->id)?->integrityPercent, 'scheduler refresh completes Manny repair task');
+    $cronRepairEventStatus = $pdo->prepare('SELECT status FROM scheduled_events WHERE id = :id');
+    $cronRepairEventStatus->execute(['id' => $cronRepairEventId]);
+    $test->assertEquals('done', $cronRepairEventStatus->fetchColumn(), 'scheduler marks completed Manny task event done');
+    $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.03]);
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),

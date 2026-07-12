@@ -31,8 +31,10 @@ final class MannyPublicPresenter
         $taskProgressPercent = $manny->taskProgressPercent();
         $taskEstimatedEndTime = $manny->taskEndsAt;
         $task = $this->publicTaskPayload($manny);
-        if ($manny->currentTask !== null && $taskVisibility === MannyService::TASK_VISIBILITY_TOO_FAR) {
-            $currentTask = MannyService::PUBLIC_TASK_UNKNOWN_TOO_FAR;
+        if ($taskVisibility === MannyService::TASK_VISIBILITY_TOO_FAR) {
+            if ($manny->currentTask !== null) {
+                $currentTask = MannyService::PUBLIC_TASK_UNKNOWN_TOO_FAR;
+            }
             $taskProgressPercent = 0.0;
             $taskEstimatedEndTime = null;
             $task = [];

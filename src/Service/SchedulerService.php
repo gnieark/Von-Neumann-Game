@@ -14,12 +14,14 @@ final class SchedulerService
     public const PROBE_MOVEMENT_PHASE = 'probe.movement.phase';
     public const PROBE_BLACK_HOLE_TRAP = 'probe.black_hole.trap';
     public const PROBE_STORAGE_CONTAINER_BREAK = 'probe.storage_container.break';
+    public const MANNY_TASK = 'manny.task';
 
     public function __construct(
         private readonly ScheduledEventRepository $events,
         private readonly NeumannProbeRepository $probes,
         private readonly ProbeMovementRepository $movements,
         private readonly ProbeMovementService $movementService,
+        private readonly ?MannyService $mannyService = null,
     ) {}
 
     /**
@@ -41,9 +43,10 @@ final class SchedulerService
             }
 
             try {
-                $this->process($claimed);
-                $this->events->markDone($claimed);
-                $stats['processed']++;
+                if ($this->process($claimed)) {
+                    $this->events->markDone($claimed);
+                    $stats['processed']++;
+                }
             } catch (\Throwable $error) {
                 $this->events->markFailed($claimed, $error);
                 $stats['failed']++;
@@ -53,17 +56,18 @@ final class SchedulerService
         return $stats;
     }
 
-    private function process(ScheduledEvent $event): void
+    private function process(ScheduledEvent $event): bool
     {
-        match ($event->type) {
+        return match ($event->type) {
             self::PROBE_MOVEMENT_PHASE => $this->processProbeMovementPhase($event),
             self::PROBE_BLACK_HOLE_TRAP => $this->processProbeBlackHoleTrap($event),
             self::PROBE_STORAGE_CONTAINER_BREAK => $this->processProbeStorageContainerBreak($event),
+            self::MANNY_TASK => $this->processMannyTask($event),
             default => throw new \RuntimeException('Unsupported scheduled event type: ' . $event->type),
         };
     }
 
-    private function processProbeMovementPhase(ScheduledEvent $event): void
+    private function processProbeMovementPhase(ScheduledEvent $event): bool
     {
         if ($event->entityType !== 'probe_movement') {
             throw new \RuntimeException('Invalid entity type for movement event: ' . $event->entityType);
@@ -71,18 +75,20 @@ final class SchedulerService
 
         $movement = $this->movements->findById($event->entityId);
         if ($movement === null) {
-            return;
+            return true;
         }
 
         $probe = $this->probes->findById($movement->probeId);
         if ($probe === null) {
-            return;
+            return true;
         }
 
         $this->movementService->refreshProbeMovementState($probe);
+
+        return true;
     }
 
-    private function processProbeBlackHoleTrap(ScheduledEvent $event): void
+    private function processProbeBlackHoleTrap(ScheduledEvent $event): bool
     {
         if ($event->entityType !== 'probe') {
             throw new \RuntimeException('Invalid entity type for black hole trap event: ' . $event->entityType);
@@ -90,18 +96,44 @@ final class SchedulerService
 
         $probe = $this->probes->findById($event->entityId);
         if ($probe === null) {
-            return;
+            return true;
         }
 
         $this->movementService->trapProbeByBlackHole($probe);
+
+        return true;
     }
 
-    private function processProbeStorageContainerBreak(ScheduledEvent $event): void
+    private function processProbeStorageContainerBreak(ScheduledEvent $event): bool
     {
         if ($event->entityType !== 'probe_damage_warning') {
             throw new \RuntimeException('Invalid entity type for storage break event: ' . $event->entityType);
         }
 
         $this->movementService->breakStorageContainerFromScheduledWarning($event->payload);
+
+        return true;
+    }
+
+    private function processMannyTask(ScheduledEvent $event): bool
+    {
+        if ($this->mannyService === null) {
+            throw new \RuntimeException('Manny scheduler is unavailable.');
+        }
+
+        $manny = $this->mannyService->refreshScheduledMannyTask($event);
+        if ($manny === null || $manny->currentTask === null || $manny->taskScheduledEventId !== $event->id) {
+            return true;
+        }
+
+        $runAt = $manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT;
+        if ($runAt <= gmdate('c')) {
+            $runAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+                ->modify('+60 seconds')
+                ->format('c');
+        }
+        $this->events->release($event, $runAt, $manny->taskPayload);
+
+        return false;
     }
 }

@@ -106,6 +106,7 @@ final class SchemaInitializer
                 current_task $nullableText,
                 task_started_at $nullableText,
                 task_ends_at $nullableText,
+                task_scheduled_event_id INTEGER NULL,
                 task_payload_json TEXT NOT NULL,
                 cargo_deuterium $decimal NOT NULL DEFAULT 0,
                 cargo_metals $decimal NOT NULL DEFAULT 0,
@@ -462,6 +463,8 @@ final class SchemaInitializer
             $this->syncForumFirstMessages($pdo);
             $this->ensureSqliteMannyCargoColumns($pdo);
             $this->ensureSqliteMannyProbeIdNullable($pdo);
+            $this->ensureSqliteColumn($pdo, 'mannies', 'task_scheduled_event_id', 'INTEGER NULL');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
             $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
@@ -499,6 +502,10 @@ final class SchemaInitializer
             $this->syncForumFirstMessages($pdo);
             $this->ensureMysqlMannyProbeIdNullable($pdo);
             $this->ensureMysqlMannyCargoColumns($pdo);
+            $this->ensureMysqlColumn($pdo, 'mannies', 'task_scheduled_event_id', 'INTEGER NULL AFTER task_ends_at');
+            if (!$this->mysqlIndexExists($pdo, 'mannies', 'idx_mannies_task_scheduled_event_id')) {
+                $pdo->exec('CREATE INDEX idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
+            }
             $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
