@@ -15,11 +15,13 @@ use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
+use VonNeumannGame\Domain\ScheduledEvent;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
 use VonNeumannGame\Service\Manny\TaskHandlerInterface;
@@ -74,6 +76,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly MannyPublicPresenter $presenter;
     /** @var list<TaskHandlerInterface> */
     private readonly array $taskHandlers;
+    private bool $refreshOutOfRangeScheduledTasks = false;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -88,6 +91,7 @@ final class MannyService implements MannyTaskRuntime
         private readonly ?ProbeDamageWarningRepository $alerts = null,
         private readonly ?ProbeImprovementRepository $improvements = null,
         ?array $taskHandlers = null,
+        private readonly ?ScheduledEventRepository $scheduledEvents = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
         $this->presenter = new MannyPublicPresenter(
@@ -1429,10 +1433,43 @@ final class MannyService implements MannyTaskRuntime
 
     public function refreshMannyState(Manny $manny, NeumannProbe $probe): Manny
     {
+        return $this->refreshMannyStateInternal($manny, $probe, true);
+    }
+
+    public function refreshScheduledMannyTask(ScheduledEvent $event): ?Manny
+    {
+        if ($event->entityType !== 'manny') {
+            throw new \RuntimeException('Invalid entity type for Manny task event: ' . $event->entityType);
+        }
+
+        $manny = $this->mannies->findById($event->entityId);
+        if ($manny === null || $manny->probeId === null) {
+            return $manny;
+        }
+        if ($manny->taskScheduledEventId !== $event->id || $manny->currentTask === null) {
+            return $manny;
+        }
+
+        $probe = $this->probes->findById($manny->probeId);
+        if ($probe === null) {
+            return $manny;
+        }
+
+        $previous = $this->refreshOutOfRangeScheduledTasks;
+        $this->refreshOutOfRangeScheduledTasks = true;
+        try {
+            return $this->refreshMannyStateInternal($manny, $probe, false);
+        } finally {
+            $this->refreshOutOfRangeScheduledTasks = $previous;
+        }
+    }
+
+    private function refreshMannyStateInternal(Manny $manny, NeumannProbe $probe, bool $enforceVisibilityGate): Manny
+    {
         if ($manny->currentTask === null) {
             return $manny;
         }
-        if (!$this->canRefreshMannyTaskFromProbe($probe, $manny)) {
+        if ($enforceVisibilityGate && !$this->canRefreshMannyTaskFromProbe($probe, $manny)) {
             return $manny;
         }
 
@@ -1445,7 +1482,7 @@ final class MannyService implements MannyTaskRuntime
                     if ($fresh->currentTask === null || !$handler->supports($fresh->currentTask)) {
                         return $fresh;
                     }
-                    if (!$this->canRefreshMannyTaskFromProbe($lockedProbe, $fresh)) {
+                    if (!$this->refreshOutOfRangeScheduledTasks && !$this->canRefreshMannyTaskFromProbe($lockedProbe, $fresh)) {
                         return $fresh;
                     }
 
@@ -1459,6 +1496,10 @@ final class MannyService implements MannyTaskRuntime
 
     private function canRefreshMannyTaskFromProbe(NeumannProbe $probe, Manny $manny): bool
     {
+        if ($this->refreshOutOfRangeScheduledTasks) {
+            return true;
+        }
+
         return $manny->isInSameSectorAs($probe)
             || $manny->currentTask === Manny::TASK_ASSEMBLING_PROBE
             || $this->canRefreshRemoteMiningViaScut($probe, $manny)

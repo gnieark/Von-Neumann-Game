@@ -290,7 +290,11 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ow
     );
     $mannies = userinfosRows(
         $pdo,
-        'SELECT * FROM mannies WHERE probe_id = :probe_id ORDER BY name ASC, id ASC',
+        'SELECT m.*, se.payload_json AS active_task_payload_json
+         FROM mannies m
+         LEFT JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.probe_id = :probe_id
+         ORDER BY m.name ASC, m.id ASC',
         ['probe_id' => $probe->id],
     );
     $visited = userinfosRows(
@@ -347,7 +351,8 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ow
         'SELECT id FROM probe_movements WHERE probe_id = :probe_id',
         ['probe_id' => $probe->id],
     );
-    $scheduledEvents = userinfosScheduledEvents($pdo, $probe->id, $movementIds, $limit);
+    $mannyIds = array_map(static fn(array $manny): int => (int) $manny['id'], $mannies);
+    $scheduledEvents = userinfosScheduledEvents($pdo, $probe->id, $movementIds, $mannyIds, $limit);
 
     $inventory = userinfosInventoryReport($probe, $gameplayConfig, $containers, $resources, $items, $mannies);
     $visitedTotal = userinfosScalar(
@@ -454,7 +459,12 @@ function userinfosProbeOverview(PDO $pdo, object $player, object $probe, PlayerR
         'SELECT id FROM probe_movements WHERE probe_id = :probe_id',
         ['probe_id' => $probe->id],
     );
-    $pendingEvents = userinfosScheduledEvents($pdo, $probe->id, $movementIds, 1000);
+    $mannyIds = userinfosColumn(
+        $pdo,
+        'SELECT id FROM mannies WHERE probe_id = :probe_id',
+        ['probe_id' => $probe->id],
+    );
+    $pendingEvents = userinfosScheduledEvents($pdo, $probe->id, $movementIds, $mannyIds, 1000);
     $pendingEvents = array_values(array_filter(
         $pendingEvents,
         static fn(array $event): bool => (string) $event['status'] === 'pending',
@@ -637,7 +647,7 @@ function userinfosDiagnostics(object $probe, ?array $visitedCurrent, int $visite
     ];
 }
 
-function userinfosScheduledEvents(PDO $pdo, int $probeId, array $movementIds, int $limit): array
+function userinfosScheduledEvents(PDO $pdo, int $probeId, array $movementIds, array $mannyIds, int $limit): array
 {
     $params = ['probe_id' => $probeId, 'limit' => $limit];
     $movementPlaceholders = [];
@@ -649,12 +659,22 @@ function userinfosScheduledEvents(PDO $pdo, int $probeId, array $movementIds, in
     $movementSql = $movementPlaceholders === []
         ? '0 = 1'
         : 'entity_type = \'probe_movement\' AND entity_id IN (' . implode(', ', $movementPlaceholders) . ')';
+    $mannyPlaceholders = [];
+    foreach ($mannyIds as $index => $mannyId) {
+        $key = 'manny_id_' . $index;
+        $mannyPlaceholders[] = ':' . $key;
+        $params[$key] = (int) $mannyId;
+    }
+    $mannySql = $mannyPlaceholders === []
+        ? '0 = 1'
+        : 'entity_type = \'manny\' AND entity_id IN (' . implode(', ', $mannyPlaceholders) . ')';
 
     return userinfosRows(
         $pdo,
         "SELECT * FROM scheduled_events
          WHERE (entity_type = 'probe' AND entity_id = :probe_id)
             OR ({$movementSql})
+            OR ({$mannySql})
          ORDER BY status = 'pending' DESC, run_at DESC, id DESC
          LIMIT :limit",
         $params,
@@ -733,7 +753,8 @@ function userinfosMannySummary(array $manny): array
         'currentTask' => $manny['current_task'],
         'taskStartedAt' => $manny['task_started_at'],
         'taskEndsAt' => $manny['task_ends_at'],
-        'taskPayload' => userinfosJsonObject($manny['task_payload_json'] ?? '{}'),
+        'taskScheduledEventId' => $manny['task_scheduled_event_id'] !== null ? (int) $manny['task_scheduled_event_id'] : null,
+        'taskPayload' => userinfosJsonObject($manny['active_task_payload_json'] ?? $manny['task_payload_json'] ?? '{}'),
         'cargo' => [
             'deuterium' => round((float) ($manny['cargo_deuterium'] ?? 0.0), 4),
             'metals' => round((float) ($manny['cargo_metals'] ?? 0.0), 4),

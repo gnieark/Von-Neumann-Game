@@ -199,6 +199,12 @@ final class ProbeReinstantiationService
              AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :probe_id)',
             ['entity_type' => 'probe_damage_warning', 'probe_id' => $probeId],
         );
+        $this->execute(
+            'DELETE FROM scheduled_events
+             WHERE entity_type = :entity_type
+             AND entity_id IN (SELECT id FROM mannies WHERE probe_id = :probe_id)',
+            ['entity_type' => 'manny', 'probe_id' => $probeId],
+        );
         $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM mannies WHERE probe_id = :probe_id', ['probe_id' => $probeId]);

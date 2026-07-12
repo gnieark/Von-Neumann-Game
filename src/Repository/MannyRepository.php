@@ -15,6 +15,7 @@ final class MannyRepository
     public function __construct(
         private readonly PDO $pdo,
         private readonly array $config = [],
+        private readonly ?ScheduledEventRepository $scheduledEvents = null,
     ) {}
 
     public function ensureDefaultsForProbe(NeumannProbe $probe): void
@@ -46,8 +47,8 @@ final class MannyRepository
         }
         $stmt = $this->pdo->prepare(
             'INSERT INTO mannies
-             (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
-             VALUES (:uid, :probe_id, :storage_container_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, 0, 0, 0, 0, :created_at, :updated_at)'
+             (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_scheduled_event_id, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
+             VALUES (:uid, :probe_id, :storage_container_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, 0, 0, 0, 0, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
@@ -145,6 +146,29 @@ final class MannyRepository
     public function save(Manny $manny): void
     {
         $manny->updatedAt = gmdate('c');
+        $taskPayloadForMannyRow = $manny->taskPayload;
+        if ($this->scheduledEvents !== null) {
+            if ($manny->currentTask !== null) {
+                $runAt = $manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT;
+                if ($manny->taskScheduledEventId === null) {
+                    $event = $this->scheduledEvents->schedule(
+                        'manny.task',
+                        'manny',
+                        $manny->id,
+                        $runAt,
+                        $manny->taskPayload,
+                    );
+                    $manny->taskScheduledEventId = $event->id;
+                } else {
+                    $this->scheduledEvents->updateRunAtAndPayload($manny->taskScheduledEventId, $runAt, $manny->taskPayload);
+                }
+                $taskPayloadForMannyRow = [];
+            } elseif ($manny->taskScheduledEventId !== null) {
+                $this->scheduledEvents->markDoneById($manny->taskScheduledEventId);
+                $manny->taskScheduledEventId = null;
+            }
+        }
+
         $stmt = $this->pdo->prepare(
             'UPDATE mannies SET
                 probe_id = :probe_id,
@@ -157,6 +181,7 @@ final class MannyRepository
                 current_task = :current_task,
                 task_started_at = :task_started_at,
                 task_ends_at = :task_ends_at,
+                task_scheduled_event_id = :task_scheduled_event_id,
                 task_payload_json = :task_payload_json,
                 cargo_deuterium = :cargo_deuterium,
                 cargo_metals = :cargo_metals,
@@ -177,7 +202,8 @@ final class MannyRepository
             'current_task' => $manny->currentTask,
             'task_started_at' => $manny->taskStartedAt,
             'task_ends_at' => $manny->taskEndsAt,
-            'task_payload_json' => json_encode($manny->taskPayload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'task_scheduled_event_id' => $manny->taskScheduledEventId,
+            'task_payload_json' => $this->encodePayload($taskPayloadForMannyRow),
             'cargo_deuterium' => $manny->cargoDeuterium,
             'cargo_metals' => $manny->cargoMetals,
             'cargo_ice' => $manny->cargoIce,
@@ -191,6 +217,15 @@ final class MannyRepository
         $payload = json_decode((string) ($row['task_payload_json'] ?? '{}'), true);
         if (!is_array($payload)) {
             $payload = [];
+        }
+        $taskScheduledEventId = isset($row['task_scheduled_event_id']) && $row['task_scheduled_event_id'] !== null
+            ? (int) $row['task_scheduled_event_id']
+            : null;
+        if ($taskScheduledEventId !== null && ($row['current_task'] ?? null) !== null) {
+            $scheduledPayload = $this->scheduledTaskPayload($taskScheduledEventId);
+            if ($scheduledPayload !== null) {
+                $payload = $scheduledPayload;
+            }
         }
 
         $sector = $row['sector_x'] === null || $row['sector_y'] === null || $row['sector_z'] === null
@@ -208,6 +243,7 @@ final class MannyRepository
             $row['current_task'] !== null ? (string) $row['current_task'] : null,
             $row['task_started_at'] !== null ? (string) $row['task_started_at'] : null,
             $row['task_ends_at'] !== null ? (string) $row['task_ends_at'] : null,
+            $taskScheduledEventId,
             $payload,
             (float) ($row['cargo_deuterium'] ?? 0),
             (float) ($row['cargo_metals'] ?? 0),
@@ -216,6 +252,18 @@ final class MannyRepository
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function scheduledTaskPayload(int $scheduledEventId): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT payload_json FROM scheduled_events WHERE id = :id');
+        $stmt->execute(['id' => $scheduledEventId]);
+        $payload = json_decode((string) $stmt->fetchColumn(), true);
+
+        return is_array($payload) ? $payload : null;
     }
 
     private function uniqueUid(): string
@@ -227,5 +275,15 @@ final class MannyRepository
         } while ((int) $stmt->fetchColumn() > 0);
 
         return $uid;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function encodePayload(array $payload): string
+    {
+        return $payload === []
+            ? '{}'
+            : json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 }

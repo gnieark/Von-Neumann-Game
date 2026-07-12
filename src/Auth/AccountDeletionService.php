@@ -147,6 +147,11 @@ final class AccountDeletionService
 
     private function detachManny(Manny $manny): void
     {
+        $this->execute(
+            'DELETE FROM scheduled_events WHERE entity_type = :entity_type AND entity_id = :manny_id',
+            ['entity_type' => 'manny', 'manny_id' => $manny->id],
+        );
+
         $stmt = $this->pdo->prepare(
             'UPDATE mannies
              SET probe_id = NULL,
@@ -155,6 +160,7 @@ final class AccountDeletionService
                  current_task = NULL,
                  task_started_at = NULL,
                  task_ends_at = NULL,
+                 task_scheduled_event_id = NULL,
                  task_payload_json = :task_payload_json,
                  updated_at = :updated_at
              WHERE id = :id'
@@ -184,6 +190,12 @@ final class AccountDeletionService
              WHERE entity_type = :entity_type
              AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :probe_id)',
             ['entity_type' => 'probe_damage_warning', 'probe_id' => $probeId],
+        );
+        $this->execute(
+            'DELETE FROM scheduled_events
+             WHERE entity_type = :entity_type
+             AND entity_id IN (SELECT id FROM mannies WHERE probe_id = :probe_id)',
+            ['entity_type' => 'manny', 'probe_id' => $probeId],
         );
         $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
@@ -239,14 +251,17 @@ final class AccountDeletionService
             'SELECT COUNT(*) FROM scheduled_events
              WHERE (entity_type = :probe_entity_type AND entity_id = :probe_id)
              OR (entity_type = :movement_entity_type AND entity_id IN (SELECT id FROM probe_movements WHERE probe_id = :movement_probe_id))
-             OR (entity_type = :damage_warning_entity_type AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :damage_warning_probe_id))',
+             OR (entity_type = :damage_warning_entity_type AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :damage_warning_probe_id))
+             OR (entity_type = :manny_entity_type AND entity_id IN (SELECT id FROM mannies WHERE probe_id = :manny_probe_id))',
             [
                 'probe_entity_type' => 'probe',
                 'movement_entity_type' => 'probe_movement',
                 'damage_warning_entity_type' => 'probe_damage_warning',
+                'manny_entity_type' => 'manny',
                 'probe_id' => $probeId,
                 'movement_probe_id' => $probeId,
                 'damage_warning_probe_id' => $probeId,
+                'manny_probe_id' => $probeId,
             ],
         );
     }
