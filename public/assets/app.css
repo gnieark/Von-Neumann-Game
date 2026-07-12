@@ -1991,7 +1991,7 @@ button.account-menu-item {
 
 .forum-post-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
 }
 
@@ -2073,6 +2073,10 @@ button.account-menu-item {
 .forum-thread-messages {
     display: grid;
     gap: 10px;
+}
+
+.forum-last-post-jump {
+    justify-self: start;
 }
 
 .forum-message {
