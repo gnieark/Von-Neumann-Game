@@ -363,6 +363,7 @@ $messagingScript = file_get_contents($root . '/public/assets/messaging.js');
 $scutScript = file_get_contents($root . '/public/assets/scut.js');
 $scutRoute = file_get_contents($root . '/src/FrontRoute/FrontRouteScut.php');
 $manniesScript = file_get_contents($root . '/public/assets/mannies.js');
+$forumScript = file_get_contents($root . '/public/assets/forum.js');
 $statsScript = file_get_contents($root . '/public/assets/stats.js');
 $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
@@ -436,6 +437,9 @@ $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-secto
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
+$test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
+$test->assert(is_string($forumScript) && str_contains($forumScript, 'data-forum-jump-last'), 'forum JS exposes a jump-to-last-post button for long threads');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'forumJumpLastPost' => 'atteindre le dernier post'"), 'French translations include the forum last-post jump label');
 $test->assert(is_string($statsScript) && str_contains($statsScript, '[data-stats-podium-extra]'), 'stats JS toggles extra ranking rows');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-button'), 'inventories JS exposes the selected-container rename action');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'function storageRulesDetailsOpen()'), 'inventories JS detects an opened storage-rules accordion');
@@ -550,7 +554,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260709-owned-probe-presence"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260712-forum-thread-chronological"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

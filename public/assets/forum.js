@@ -69,6 +69,30 @@
             : "-";
     }
 
+    function messageSortValue(message) {
+        const timestamp = Date.parse(message && message.createdAt ? message.createdAt : "");
+        return Number.isNaN(timestamp) ? 0 : timestamp;
+    }
+
+    function chronologicalMessages(messages) {
+        const byId = new Map();
+        (Array.isArray(messages) ? messages : []).forEach((message) => {
+            if (!message || message.id === undefined || message.id === null) {
+                return;
+            }
+            byId.set(String(message.id), message);
+        });
+
+        return Array.from(byId.values()).sort((left, right) => {
+            const timeDiff = messageSortValue(left) - messageSortValue(right);
+            if (timeDiff !== 0) {
+                return timeDiff;
+            }
+
+            return Number(left.id || 0) - Number(right.id || 0);
+        });
+    }
+
     function messageCountLabel(count) {
         const number = Number(count || 0);
         return window.VNG.formatText(
@@ -173,6 +197,9 @@
         const loadMore = state.currentMessagePagination && state.currentMessagePagination.hasMore
             ? "<button data-forum-message-load-more type=\"button\">" + escaped(tr("forumOlderMessages", "Show older messages")) + "</button>"
             : "";
+        const jumpLast = "<button class=\"forum-last-post-jump\" data-forum-jump-last hidden type=\"button\">"
+            + escaped(tr("forumJumpLastPost", "atteindre le dernier post"))
+        + "</button>";
 
         return "<div class=\"forum-inline-thread\">"
             + "<div class=\"forum-thread-nav\">"
@@ -185,10 +212,11 @@
                     + "<p class=\"forum-muted\">" + escaped(meta) + "</p>"
                 + "</div>"
             + "</div>"
+            + jumpLast
+            + loadMore
             + "<div class=\"forum-thread-messages\">"
                 + renderMessageList()
             + "</div>"
-            + loadMore
             + "<form class=\"forum-reply-form\" data-forum-reply-form>"
                 + "<label>" + escaped(tr("forumReplyBody", "Reply"))
                     + "<textarea name=\"body\" rows=\"4\" maxlength=\"5000\" required></textarea>"
@@ -259,6 +287,27 @@
             empty.hidden = state.categories.length > 0;
         }
         container.innerHTML = state.categories.map(renderCategory).join("");
+        updateLastPostJumpButton();
+    }
+
+    function updateLastPostJumpButton() {
+        window.requestAnimationFrame(() => {
+            const thread = document.querySelector(".forum-inline-thread");
+            const button = document.querySelector("[data-forum-jump-last]");
+            if (!thread || !button) {
+                return;
+            }
+
+            button.hidden = thread.getBoundingClientRect().height <= window.innerHeight;
+        });
+    }
+
+    function jumpToLastPost() {
+        const messages = Array.from(document.querySelectorAll(".forum-inline-thread .forum-thread-messages .forum-message"));
+        const target = messages.length > 0
+            ? messages[messages.length - 1]
+            : document.querySelector(".forum-inline-thread [data-forum-reply-form]");
+        target?.scrollIntoView({"block": "end", "behavior": "smooth"});
     }
 
     function renderThread() {
@@ -313,7 +362,7 @@
         state.currentPost = data.post || null;
         state.currentFirstMessage = data.firstMessage || null;
         const nextMessages = Array.isArray(data.messages) ? data.messages : [];
-        state.currentMessages = settings.append ? state.currentMessages.concat(nextMessages) : nextMessages;
+        state.currentMessages = chronologicalMessages(settings.append ? state.currentMessages.concat(nextMessages) : nextMessages);
         state.currentMessagePagination = data.pagination || null;
         if (!settings.append) {
             state.editingMessageId = null;
@@ -393,9 +442,9 @@
             if (state.currentFirstMessage && String(state.currentFirstMessage.id) === String(updated.id)) {
                 state.currentFirstMessage = updated;
             }
-            state.currentMessages = state.currentMessages.map((message) => (
+            state.currentMessages = chronologicalMessages(state.currentMessages.map((message) => (
                 String(message.id) === String(updated.id) ? updated : message
-            ));
+            )));
         }
         state.editingMessageId = null;
         renderThread();
@@ -433,6 +482,11 @@
                     "offset": state.currentMessages.length,
                     "silent": true,
                 }).catch((error) => setStatus(error.message || tr("requestDenied", "Request denied")));
+                return;
+            }
+
+            if (event.target.closest("[data-forum-jump-last]")) {
+                jumpToLastPost();
                 return;
             }
 
@@ -539,6 +593,7 @@
             event.preventDefault();
             replyToPost(event.currentTarget).catch((error) => setStatus(error.message || tr("requestDenied", "Request denied")));
         });
+        window.addEventListener("resize", updateLastPostJumpButton);
     }
 
     withVng(async () => {
