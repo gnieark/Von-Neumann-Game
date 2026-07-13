@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-13
+
+### Changed
+
+- Interface : `/mannies` ajoute des filtres d’état et de portée, un tri par nom, tâche ou secteur, et une commande de réinitialisation pour organiser la liste des Mannys sans changer le contrat API.
+
 ## 2026-07-09
 
 ### Changed

@@ -4,6 +4,30 @@
             <h2>{{t.mannyManagement}}</h2>
         </div>
     </div>
+    <div class="manny-filter-row" aria-label="{{t.mannyFilters}}">
+        <label>{{t.mannyFilterStatus}}
+            <select id="manny-filter-status">
+                <option value="all" selected>{{t.mannyFilterStatusAll}}</option>
+                <option value="idle">{{t.mannyFilterStatusIdle}}</option>
+                <option value="busy">{{t.mannyFilterStatusBusy}}</option>
+            </select>
+        </label>
+        <label>{{t.mannyFilterRange}}
+            <select id="manny-filter-range">
+                <option value="all" selected>{{t.mannyFilterRangeAll}}</option>
+                <option value="local">{{t.mannyFilterRangeLocal}}</option>
+                <option value="remote">{{t.mannyFilterRangeRemote}}</option>
+            </select>
+        </label>
+        <label>{{t.mannySortOrder}}
+            <select id="manny-sort-order">
+                <option value="name" selected>{{t.mannySortName}}</option>
+                <option value="task">{{t.mannySortTask}}</option>
+                <option value="sector">{{t.mannySortSector}}</option>
+            </select>
+        </label>
+        <button id="manny-filter-reset" class="icon-button manny-filter-reset" type="button" title="{{t.mannyFiltersReset}}" aria-label="{{t.mannyFiltersReset}}">&#10227;</button>
+    </div>
     <div id="manny-list" class="manny-list" aria-live="polite"></div>
     <p id="manny-status" class="action-status" aria-live="polite"></p>
 </article>
