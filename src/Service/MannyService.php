@@ -33,6 +33,7 @@ use VonNeumannGame\Service\Manny\MannyTaskRuntime;
 use VonNeumannGame\Service\Manny\ProbeAssemblyTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeImprovementTaskHandler;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
+use VonNeumannGame\Service\Manny\ReturningTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -91,6 +92,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly ProbeImprovementTaskHandler $probeImprovementTaskHandler;
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
+    private readonly ReturningTaskHandler $returningTaskHandler;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -372,6 +374,34 @@ final class MannyService implements MannyTaskRuntime
             fn(?NeumannProbe $probe): float => $this->maxDeuteriumPercent($probe),
             fn(NeumannProbe $probe): bool => $this->probeAcceptsMannyOrders($probe),
         );
+        $this->returningTaskHandler = new ReturningTaskHandler(
+            fn(NeumannProbe $probe, Manny $manny, array $payload): bool => $this->canAcceptMannyDocking($probe, $manny, $payload),
+            function (Manny $manny, array $payload): void {
+                $this->waitForStorageSpace($manny, $payload);
+            },
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->transferMannyCargoToProbe($manny, $probe);
+            },
+            function (NeumannProbe $probe, Manny $manny, array $payload): void {
+                $this->deliverReservedSalvageItems($probe, $manny, $payload);
+            },
+            function (NeumannProbe $probe, array $payload): void {
+                $this->deliverReservedDetachedContainer($probe, $payload);
+            },
+            fn(Manny $manny): bool => $this->mannyCargoIsEmpty($manny),
+            fn(Manny $manny): bool => $this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null,
+            fn(NeumannProbe $probe, Manny $manny): bool => $this->storage->placeMannyOnProbe($probe, $manny),
+            function (Manny $manny): void {
+                $this->removeMannyFromSector($manny);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->taskRefresher = new MannyTaskRefresher(
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
@@ -382,6 +412,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->probeAssemblyTaskHandler,
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
+                $this->returningTaskHandler,
             ),
             $this,
             fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
@@ -2286,42 +2317,6 @@ final class MannyService implements MannyTaskRuntime
             $this->clearTask($manny);
         }
 
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshReturning(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        if (!$this->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
-            $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
-        }
-
-        $this->transferMannyCargoToProbe($manny, $probe);
-        $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
-        $this->deliverReservedDetachedContainer($probe, $manny->taskPayload);
-        if ($this->mannyCargoIsEmpty($manny)) {
-            $finalPayload = ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null) ? $manny->taskPayload : [];
-            if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-                $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
-                $this->mannies->save($manny);
-
-                return $this->mannies->findById($manny->id) ?? $manny;
-            }
-            $this->removeMannyFromSector($manny);
-            $manny->locationType = Manny::LOCATION_PROBE;
-            $manny->sector = null;
-            $this->clearTask($manny, $finalPayload);
-        } else {
-            $this->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
-        }
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;

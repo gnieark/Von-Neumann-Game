@@ -18,6 +18,7 @@ final class TaskHandlerRegistry
         ProbeAssemblyTaskHandler $probeAssembly,
         DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
         DeuteriumTransferTaskHandler $deuteriumTransfer,
+        ReturningTaskHandler $returning,
     ): array
     {
         return [
@@ -30,7 +31,7 @@ final class TaskHandlerRegistry
             $dropStorageContainer,
             $inspectSectorObject,
             $deuteriumTankRefill,
-            new ReturningTaskHandler(),
+            $returning,
             new WaitingForSpaceTaskHandler(),
             new StorageMoveTaskHandler(),
             new ScutRelayTurnOnTaskHandler(),
