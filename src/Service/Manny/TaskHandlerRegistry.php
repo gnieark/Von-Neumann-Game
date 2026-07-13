@@ -13,6 +13,7 @@ final class TaskHandlerRegistry
         RepairTaskHandler $repair,
         DetachStorageContainerTaskHandler $detachStorageContainer,
         DropStorageContainerTaskHandler $dropStorageContainer,
+        InspectSectorObjectTaskHandler $inspectSectorObject,
         DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
         DeuteriumTransferTaskHandler $deuteriumTransfer,
     ): array
@@ -25,7 +26,7 @@ final class TaskHandlerRegistry
             new WaypointBookmarkInstallationTaskHandler(),
             $detachStorageContainer,
             $dropStorageContainer,
-            new InspectSectorObjectTaskHandler(),
+            $inspectSectorObject,
             $deuteriumTankRefill,
             new ReturningTaskHandler(),
             new WaitingForSpaceTaskHandler(),

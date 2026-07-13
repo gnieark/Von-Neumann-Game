@@ -26,6 +26,7 @@ use VonNeumannGame\Service\Manny\DetachStorageContainerTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTankRefillTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTransferTaskHandler;
 use VonNeumannGame\Service\Manny\DropStorageContainerTaskHandler;
+use VonNeumannGame\Service\Manny\InspectSectorObjectTaskHandler;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRefresher;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
@@ -83,6 +84,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly RepairTaskHandler $repairTaskHandler;
     private readonly DetachStorageContainerTaskHandler $detachStorageContainerTaskHandler;
     private readonly DropStorageContainerTaskHandler $dropStorageContainerTaskHandler;
+    private readonly InspectSectorObjectTaskHandler $inspectSectorObjectTaskHandler;
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
 
@@ -185,6 +187,53 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->inspectSectorObjectTaskHandler = new InspectSectorObjectTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(Manny $manny, NeumannProbe $probe): bool => $this->canOrderRemoteMannyViaScut($probe, $manny),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
+            fn(SectorContent $sector, string $objectId, int $playerId): ?UniverseObject => $this->findInspectableSectorObject($sector, $objectId, $playerId),
+            fn(SectorContent $sector, string $objectId, ?int $discoveringPlayerId): ?array => $this->hiddenDetachedContainerDetection($sector, $objectId, $discoveringPlayerId),
+            fn(): int => $this->miningTravelSeconds(),
+            fn(UniverseObject $target): array => $this->bookmarkTargetArray($target),
+            function (Manny $manny): void {
+                $this->storage->releaseMannyFromStorage($manny);
+            },
+            function (Manny $manny): void {
+                $this->removeMannyFromSector($manny);
+            },
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(SectorDetachedContainer $container): array => $this->detachedContainerInspectionReport($container),
+            fn(NeumannProbe $probe, SectorContent $sector, DormantConstruct $construct): array => $this->dormantConstructInspectionReport($probe, $sector, $construct),
+            function (int $probeId, SectorCoordinates $sectorCoordinates, string $objectId, string $objectLabel, string $message, string $objectType, ?string $scheduledAt): void {
+                $this->alerts?->createMannyReportAlert($probeId, $sectorCoordinates, $objectId, $objectLabel, $message, $objectType, $scheduledAt);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            function (Manny $manny, string $state): void {
+                $this->registerMannyInSector($manny, $state);
+            },
+            fn(NeumannProbe $probe, Manny $manny): bool => $this->storage->placeMannyOnProbe($probe, $manny),
+            function (Manny $manny, array $payload): void {
+                $this->waitForStorageSpace($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->deuteriumTankRefillTaskHandler = new DeuteriumTankRefillTaskHandler(
             function (NeumannProbe $probe): void {
                 $this->ensureProbeAcceptsMannyOrders($probe);
@@ -244,6 +293,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->repairTaskHandler,
                 $this->detachStorageContainerTaskHandler,
                 $this->dropStorageContainerTaskHandler,
+                $this->inspectSectorObjectTaskHandler,
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
             ),
@@ -747,45 +797,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startInspectSectorObjectLocked(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-        $remoteViaScut = !$manny->isInSameSectorAs($probe);
-        if ($remoteViaScut && !$this->canOrderRemoteMannyViaScut($probe, $manny)) {
-            $this->ensureMannyInRange($manny, $probe);
-        } elseif (!$remoteViaScut) {
-            $this->ensureMannyInRange($manny, $probe);
-        }
-
-        $taskSector = $manny->sector ?? $probe->currentSector;
-        $sector = $this->sectors->getOrCreateSector($taskSector);
-        $target = $this->findInspectableSectorObject($sector, $objectId, $probe->playerId);
-        if ($target === null) {
-            throw new MannyActionException(422, 'invalid_sector_object_target', 'This object cannot be inspected by a Manny.');
-        }
-
-        $detection = $target instanceof Asteroid
-            ? $this->hiddenDetachedContainerDetection($sector, $objectId, $probe->playerId)
-            : null;
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $durationSeconds = $this->miningTravelSeconds() * 2;
-        $manny->locationType = Manny::LOCATION_SECTOR;
-        $manny->sector = $taskSector;
-        $manny->currentTask = Manny::TASK_INSPECTING_SECTOR_OBJECT;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'objectId' => $objectId,
-            'durationSeconds' => $durationSeconds,
-            'target' => $this->bookmarkTargetArray($target),
-            'targetMode' => $target instanceof SectorDetachedContainer ? $target->getMode() : null,
-        ] + ($detection !== null ? ['artificialObjectDetected' => $detection] : []);
-        $this->storage->releaseMannyFromStorage($manny);
-        $this->removeMannyFromSector($manny);
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->inspectSectorObjectTaskHandler->start($probe, $uid, $objectId);
     }
 
     public function startRecoverDetachedContainer(NeumannProbe $probe, string $uid, string $objectId): Manny
@@ -2515,79 +2527,6 @@ final class MannyService implements MannyTaskRuntime
             $result['failureReason'] = $e->errorCode;
         }
 
-        $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshInspectSectorObject(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $sector = $this->sectors->getOrCreateSector($manny->sector ?? $probe->currentSector);
-        $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
-        $target = $this->findInspectableSectorObject($sector, $objectId, $probe->playerId);
-        $detection = $target instanceof Asteroid
-            ? $this->hiddenDetachedContainerDetection($sector, $objectId, $probe->playerId)
-            : null;
-        $result = [
-            'lastTask' => Manny::TASK_INSPECTING_SECTOR_OBJECT,
-            'result' => 'success',
-            'objectId' => $objectId,
-            'target' => $manny->taskPayload['target'] ?? null,
-        ] + ($detection !== null ? ['artificialObjectDetected' => $detection] : []);
-        $reportScheduledAt = is_string($manny->taskEndsAt) && trim($manny->taskEndsAt) !== ''
-            ? $manny->taskEndsAt
-            : null;
-        if ($target === null) {
-            $result['result'] = 'failed';
-            $result['failureReason'] = 'target_unavailable';
-        } elseif ($target instanceof SectorDetachedContainer) {
-            $report = $this->detachedContainerInspectionReport($target);
-            $result['containerReport'] = $report;
-            $this->alerts?->createMannyReportAlert(
-                $probe->id,
-                $sector->getCoordinates(),
-                $target->getId(),
-                (string) ($target->getName() ?? $target->getId()),
-                $report['message'],
-                scheduledAt: $reportScheduledAt,
-            );
-        } elseif ($target instanceof DormantConstruct) {
-            $report = $this->dormantConstructInspectionReport($probe, $sector, $target);
-            $this->alerts?->createMannyReportAlert(
-                $probe->id,
-                $sector->getCoordinates(),
-                $target->getId(),
-                (string) ($target->getName() ?? $target->getId()),
-                $report['message'],
-                'dormant_construct',
-                $reportScheduledAt,
-            );
-        }
-
-        if (!$manny->isInSameSectorAs($probe)) {
-            $this->clearTask($manny, $result);
-            $manny->locationType = Manny::LOCATION_SECTOR;
-            $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
-        }
-
-        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-            $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe'] + $result);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
-        }
-
-        $this->removeMannyFromSector($manny);
-        $manny->locationType = Manny::LOCATION_PROBE;
-        $manny->sector = null;
         $this->clearTask($manny, $result);
         $this->mannies->save($manny);
 
