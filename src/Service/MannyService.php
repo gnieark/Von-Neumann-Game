@@ -22,9 +22,11 @@ use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
+use VonNeumannGame\Service\Manny\DeuteriumTransferTaskHandler;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRefresher;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
+use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -75,6 +77,8 @@ final class MannyService implements MannyTaskRuntime
     private readonly WaypointBookmarkService $bookmarks;
     private readonly MannyPublicPresenter $presenter;
     private readonly MannyTaskRefresher $taskRefresher;
+    private readonly RepairTaskHandler $repairTaskHandler;
+    private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -96,8 +100,41 @@ final class MannyService implements MannyTaskRuntime
             $this->scut,
             fn(Manny $manny): array => $this->mannyCargoArray($manny),
         );
+        $this->repairTaskHandler = new RepairTaskHandler(
+            $this->mannies,
+            $this->probes,
+            $this->storage,
+            $this->config,
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+        );
+        $this->deuteriumTransferTaskHandler = new DeuteriumTransferTaskHandler(
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            fn(int $probeId): ?NeumannProbe => $this->probes->findById($probeId),
+            function (NeumannProbe $probe): void {
+                $this->probes->save($probe);
+            },
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(?NeumannProbe $probe): float => $this->maxDeuteriumPercent($probe),
+            fn(NeumannProbe $probe): bool => $this->probeAcceptsMannyOrders($probe),
+        );
         $this->taskRefresher = new MannyTaskRefresher(
-            $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(),
+            $taskHandlers ?? TaskHandlerRegistry::defaultHandlers($this->repairTaskHandler, $this->deuteriumTransferTaskHandler),
             $this,
             fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
@@ -163,42 +200,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startRepairLocked(NeumannProbe $probe, string $uid, float $integrityPercent): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to repair it.');
-        }
-
-        $integrityPercent = round($integrityPercent, 2);
-        if ($integrityPercent <= 0) {
-            throw new MannyActionException(400, 'bad_request', 'Repair percent must be greater than zero.');
-        }
-        $missingIntegrity = round(max(0.0, $this->maxIntegrityPercent() - $probe->integrityPercent), 2);
-        if ($missingIntegrity <= 0.0001) {
-            throw new MannyActionException(409, 'probe_integrity_full', 'The probe integrity is already full.');
-        }
-
-        $integrityPercent = min($integrityPercent, $missingIntegrity);
-        $metalsCost = round($integrityPercent * $this->repairMetalsPerIntegrityPercent(), 4);
-        if ($this->storage->resourceStock($probe, ResourceComposition::METALS) + 0.00001 < $metalsCost) {
-            throw new MannyActionException(422, 'insufficient_metals', 'Insufficient metals in probe inventory for this repair.');
-        }
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $this->storage->consumeResource($probe, ResourceComposition::METALS, $metalsCost);
-
-        $manny->currentTask = Manny::TASK_REPAIR;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . (int) ceil($integrityPercent * $this->repairSecondsPerIntegrityPercent()) . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'integrityPercent' => $integrityPercent,
-            'metalsCost' => $metalsCost,
-        ];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->repairTaskHandler->start($probe, $uid, $integrityPercent);
     }
 
     public function startMining(NeumannProbe $probe, string $uid, string $objectId, string|array $resourceTypes, float $targetAmount, ?string $targetContainerId = null): Manny
@@ -940,59 +942,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startDeuteriumTransferToProbeLocked(NeumannProbe $probe, string $uid, int $targetProbeId, float $amount): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the source probe to transfer deuterium.');
-        }
-
-        if ($targetProbeId <= 0 || $targetProbeId === $probe->id) {
-            throw new MannyActionException(400, 'bad_request', 'Target probe id must reference another probe.');
-        }
-
-        $targetProbe = $this->probes->findById($targetProbeId);
-        if ($targetProbe === null) {
-            throw new MannyActionException(404, 'not_found', 'Target probe not found.');
-        }
-        $this->ensureProbeAcceptsMannyOrders($targetProbe);
-        if (!$targetProbe->currentSector->equals($probe->currentSector)) {
-            throw new MannyActionException(422, 'probe_not_in_same_sector', 'Target probe must be in the same sector as the source probe.');
-        }
-
-        $amount = round($amount, 4);
-        if ($amount <= 0.0) {
-            throw new MannyActionException(400, 'bad_request', 'Transferred deuterium amount must be greater than zero.');
-        }
-        if ($amount + 0.00001 >= $probe->deuteriumStock) {
-            throw new MannyActionException(422, 'insufficient_deuterium', 'Transferred deuterium amount must be lower than the source probe deuterium reserve.');
-        }
-        if ($targetProbe->deuteriumStock >= $this->maxDeuteriumPercent($targetProbe) - 0.0001) {
-            throw new MannyActionException(409, 'probe_deuterium_full', 'The target probe deuterium tank is already full.');
-        }
-
-        $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - $amount), 4);
-        $this->probes->save($probe);
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $manny->currentTask = Manny::TASK_TRANSFERRING_DEUTERIUM_TO_PROBE;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . self::DEUTERIUM_TRANSFER_SECONDS . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'durationSeconds' => self::DEUTERIUM_TRANSFER_SECONDS,
-            'resourceType' => ResourceComposition::DEUTERIUM,
-            'sourceProbeId' => $probe->id,
-            'sourceProbeName' => $probe->name,
-            'targetProbeId' => $targetProbe->id,
-            'targetProbeName' => $targetProbe->name,
-            'requestedAmount' => $amount,
-            'reservedAmount' => $amount,
-            'result' => 'pending',
-        ];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->deuteriumTransferTaskHandler->start($probe, $uid, $targetProbeId, $amount);
     }
 
     public function startScutRelayTurnOn(NeumannProbe $probe, string $uid, int $relayId, ?string $networkName = null): Manny
@@ -1483,22 +1433,6 @@ final class MannyService implements MannyTaskRuntime
     {
         return $this->mannies->findByUidForProbe($probe->id, $uid)
             ?? throw new MannyActionException(404, 'manny_not_found', 'Manny not found.');
-    }
-
-    public function refreshRepair(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $integrityPercent = (float) ($manny->taskPayload['integrityPercent'] ?? 0);
-        $probe->addIntegrityPercent($integrityPercent, $this->maxIntegrityPercent());
-        $this->probes->save($probe);
-
-        $this->clearTask($manny);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
     }
 
     public function refreshCrafting(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
@@ -2801,64 +2735,6 @@ final class MannyService implements MannyTaskRuntime
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    public function refreshDeuteriumTransferToProbe(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $reservedAmount = round(max(0.0, (float) ($manny->taskPayload['reservedAmount'] ?? $manny->taskPayload['requestedAmount'] ?? 0.0)), 4);
-        $targetProbeId = (int) ($manny->taskPayload['targetProbeId'] ?? 0);
-        $targetProbe = $targetProbeId > 0 ? $this->probes->findById($targetProbeId) : null;
-        $result = [
-            'lastTask' => Manny::TASK_TRANSFERRING_DEUTERIUM_TO_PROBE,
-            'resourceType' => ResourceComposition::DEUTERIUM,
-            'sourceProbeId' => $probe->id,
-            'sourceProbeName' => $probe->name,
-            'targetProbeId' => $targetProbeId,
-            'targetProbeName' => (string) ($manny->taskPayload['targetProbeName'] ?? ''),
-            'requestedAmount' => round((float) ($manny->taskPayload['requestedAmount'] ?? $reservedAmount), 4),
-            'reservedAmount' => $reservedAmount,
-        ];
-
-        if (
-            $reservedAmount <= 0.0
-            || $targetProbe === null
-            || !$targetProbe->currentSector->equals($probe->currentSector)
-            || in_array($targetProbe->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true)
-        ) {
-            $probe->deuteriumStock = round($probe->deuteriumStock + $reservedAmount, 4);
-            $this->probes->save($probe);
-            $result['result'] = 'failed';
-            $result['failureReason'] = $targetProbe === null ? 'target_probe_not_found' : 'target_probe_unavailable';
-            $result['returnedAmount'] = $reservedAmount;
-            $result['transferredAmount'] = 0.0;
-            $this->clearTask($manny, $result);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
-        }
-
-        $targetCapacity = round(max(0.0, $this->maxDeuteriumPercent($targetProbe) - $targetProbe->deuteriumStock), 4);
-        $transferredAmount = round(min($reservedAmount, $targetCapacity), 4);
-        $returnedAmount = round(max(0.0, $reservedAmount - $transferredAmount), 4);
-        $targetProbe->deuteriumStock = round($targetProbe->deuteriumStock + $transferredAmount, 4);
-        $probe->deuteriumStock = round($probe->deuteriumStock + $returnedAmount, 4);
-        $this->probes->save($targetProbe);
-        $this->probes->save($probe);
-
-        $result['result'] = 'success';
-        $result['targetProbeName'] = $targetProbe->name;
-        $result['transferredAmount'] = $transferredAmount;
-        $result['returnedAmount'] = $returnedAmount;
-        $result['targetDeuterium'] = $targetProbe->deuteriumStock;
-        $result['targetMaxDeuterium'] = $this->maxDeuteriumPercent($targetProbe);
-        $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
     private function currentSectorHasDeuteriumRefuelStation(NeumannProbe $probe): bool
     {
         foreach ($this->sectors->getOrCreateSector($probe->currentSector)->getObjects() as $object) {
@@ -2915,6 +2791,11 @@ final class MannyService implements MannyTaskRuntime
         if ($probe->status === ProbeStatus::TrappedByBlackHole) {
             throw new MannyActionException(409, 'probe_trapped_by_black_hole', 'The probe is trapped beyond a black hole escape threshold.');
         }
+    }
+
+    private function probeAcceptsMannyOrders(NeumannProbe $probe): bool
+    {
+        return !in_array($probe->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true);
     }
 
     private function ensureMannyInRange(Manny $manny, NeumannProbe $probe): void
@@ -4391,16 +4272,6 @@ final class MannyService implements MannyTaskRuntime
         return Config::getArray($this->config, 'crafting');
     }
 
-    private function repairSecondsPerIntegrityPercent(): int
-    {
-        return max(1, Config::int($this->config, 'manny.actions.repairSecondsPerIntegrityPercent', self::REPAIR_SECONDS_PER_INTEGRITY_PERCENT));
-    }
-
-    private function repairMetalsPerIntegrityPercent(): float
-    {
-        return max(0.0, Config::float($this->config, 'manny.actions.repairMetalsPerIntegrityPercent', self::REPAIR_METALS_PER_INTEGRITY_PERCENT));
-    }
-
     private function miningTravelSeconds(): int
     {
         return max(0, Config::int($this->config, 'manny.actions.miningTravelSeconds', self::MINING_TRAVEL_SECONDS));
@@ -4459,11 +4330,6 @@ final class MannyService implements MannyTaskRuntime
     private function mineablePlanetMaxMass(): float
     {
         return max(0.0, Config::float($this->config, 'manny.mineablePlanetMaxMassEarthUnits', self::MOON_MASS_EARTH_UNITS));
-    }
-
-    private function maxIntegrityPercent(): float
-    {
-        return max(0.0001, Config::float($this->config, 'probe.maxIntegrityPercent', self::MAX_INTEGRITY_PERCENT));
     }
 
     private function maxDeuteriumPercent(?NeumannProbe $probe = null): float

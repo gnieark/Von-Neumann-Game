@@ -9,10 +9,10 @@ final class TaskHandlerRegistry
     /**
      * @return list<TaskHandlerInterface>
      */
-    public static function defaultHandlers(): array
+    public static function defaultHandlers(RepairTaskHandler $repair, DeuteriumTransferTaskHandler $deuteriumTransfer): array
     {
         return [
-            new RepairTaskHandler(),
+            $repair,
             new MiningTaskHandler(),
             new CraftingTaskHandler(),
             new SalvageTaskHandler(),
@@ -27,7 +27,7 @@ final class TaskHandlerRegistry
             new ScutRelayTurnOnTaskHandler(),
             new ProbeImprovementTaskHandler(),
             new ProbeAssemblyTaskHandler(),
-            new DeuteriumTransferTaskHandler(),
+            $deuteriumTransfer,
         ];
     }
 }

@@ -9,8 +9,6 @@ use VonNeumannGame\Domain\NeumannProbe;
 
 interface MannyTaskRuntime
 {
-    public function refreshRepair(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
-
     public function refreshMining(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
     public function refreshCrafting(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
@@ -38,6 +36,4 @@ interface MannyTaskRuntime
     public function refreshProbeImprovement(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
     public function refreshProbeAssembly(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
-
-    public function refreshDeuteriumTransferToProbe(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 }
