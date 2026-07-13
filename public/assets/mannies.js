@@ -29,6 +29,11 @@
         currentProbeTransferTargets: [],
         currentSectorProbes: [],
         currentSectorObjects: [],
+        mannyFilters: {
+            status: "all",
+            range: "all",
+            sort: "name",
+        },
         remoteSectorScans: {},
     };
 
@@ -343,6 +348,123 @@
     function relativeSectorKey(relative) {
         const coordinates = relativeCoordinates(relative);
         return coordinates ? coordinates.x + ":" + coordinates.y + ":" + coordinates.z : "";
+    }
+
+    function compareText(left, right) {
+        return String(left || "").localeCompare(String(right || ""), undefined, {
+            "numeric": true,
+            "sensitivity": "base",
+        });
+    }
+
+    function mannyName(manny) {
+        return String((manny && (manny.name || manny.id)) || "");
+    }
+
+    function mannyRange(manny) {
+        if (!manny || !manny.location) {
+            return "remote";
+        }
+        if (manny.location.type === "probe") {
+            return "local";
+        }
+        const relative = mannyRelativeSector(manny);
+        if (relative !== null && sameRelativeSector(relative, state.currentProbeSectorRelative)) {
+            return "local";
+        }
+
+        return "remote";
+    }
+
+    function mannyRangeSortKey(manny) {
+        if (!manny || !manny.location) {
+            return "2:";
+        }
+        if (manny.location.type === "probe") {
+            return "0:probe";
+        }
+        const relative = mannyRelativeSector(manny);
+        const rangeRank = mannyRange(manny) === "local" ? "0" : "1";
+
+        return rangeRank + ":" + (relative ? relativeSectorKey(relative) : "sector");
+    }
+
+    function mannyTaskSortKey(manny) {
+        if (!manny || manny.currentTask === null) {
+            return tr("mannyInactive", "Inactive");
+        }
+
+        return taskLabel(manny.currentTask);
+    }
+
+    function mannyMatchesFilters(manny) {
+        const filters = state.mannyFilters;
+        const busy = manny && manny.currentTask !== null;
+        if (filters.status === "idle" && busy) {
+            return false;
+        }
+        if (filters.status === "busy" && !busy) {
+            return false;
+        }
+        if (filters.range !== "all" && mannyRange(manny) !== filters.range) {
+            return false;
+        }
+
+        return true;
+    }
+
+    function sortMannies(mannies) {
+        const sort = state.mannyFilters.sort;
+        return [...mannies].sort((left, right) => {
+            if (sort === "task") {
+                return compareText(mannyTaskSortKey(left), mannyTaskSortKey(right))
+                    || compareText(mannyName(left), mannyName(right));
+            }
+            if (sort === "sector") {
+                return compareText(mannyRangeSortKey(left), mannyRangeSortKey(right))
+                    || compareText(mannyName(left), mannyName(right));
+            }
+
+            return compareText(mannyName(left), mannyName(right));
+        });
+    }
+
+    function visibleMannies() {
+        return sortMannies((Array.isArray(state.currentMannies) ? state.currentMannies : []).filter(mannyMatchesFilters));
+    }
+
+    function mannyFiltersActive() {
+        const filters = state.mannyFilters;
+        return filters.status !== "all" || filters.range !== "all" || filters.sort !== "name";
+    }
+
+    function renderVisibleMannies() {
+        renderMannyList(visibleMannies());
+    }
+
+    function setSelectValue(id, value) {
+        const node = document.getElementById(id);
+        if (node) {
+            node.value = value;
+        }
+    }
+
+    function syncMannyFilterStateFromControls() {
+        state.mannyFilters.status = document.getElementById("manny-filter-status")?.value || "all";
+        state.mannyFilters.range = document.getElementById("manny-filter-range")?.value || "all";
+        state.mannyFilters.sort = document.getElementById("manny-sort-order")?.value || "name";
+    }
+
+    function resetMannyFilters() {
+        state.mannyFilters = {
+            status: "all",
+            range: "all",
+            sort: "name",
+        };
+        setSelectValue("manny-filter-status", "all");
+        setSelectValue("manny-filter-range", "all");
+        setSelectValue("manny-sort-order", "name");
+        renderVisibleMannies();
     }
 
     function remoteSectorScanForKey(key) {
@@ -2786,8 +2908,12 @@
             changed = true;
         });
 
+        const filteredEmpty = mannyItems.length === 0
+            && mannyFiltersActive()
+            && Array.isArray(state.currentMannies)
+            && state.currentMannies.length > 0;
         const emptyHtml = mannyItems.length === 0
-            ? "<p class=\"empty-state\" data-manny-empty=\"1\">" + escaped(tr("noMannies", "No Manny is available.")) + "</p>"
+            ? "<p class=\"empty-state\" data-manny-empty=\"1\">" + escaped(filteredEmpty ? tr("noMannyFilterMatches", "No Manny matches these filters.") : tr("noMannies", "No Manny is available.")) + "</p>"
             : "";
         const emptyNode = node.querySelector("[data-manny-empty]");
         if (emptyHtml && !emptyNode) {
@@ -3268,8 +3394,9 @@
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);
             await loadRemoteMannySectorScans(rawMannies);
             state.currentMannies = rawMannies.map(withMannyStateHash);
-            renderMannyList(state.currentMannies);
+            renderVisibleMannies();
         } catch (error) {
+            state.currentMannies = [];
             renderMannyList([]);
             if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "manny-status"})) {
                 setStatus(error.message || tr("requestDenied", "Request denied"));
@@ -3722,6 +3849,15 @@
                 setStatus(error.message || tr("requestDenied", "Request denied"));
             }
         });
+
+        document.querySelectorAll("#manny-filter-status, #manny-filter-range, #manny-sort-order").forEach((select) => {
+            select.addEventListener("change", () => {
+                syncMannyFilterStateFromControls();
+                renderVisibleMannies();
+            });
+        });
+
+        document.getElementById("manny-filter-reset")?.addEventListener("click", resetMannyFilters);
     }
 
     withVng(async () => {
@@ -3731,6 +3867,7 @@
 
         i18n = await window.VNG.loadI18n();
         await loadCraftingRecipesOnce();
+        syncMannyFilterStateFromControls();
         bindEvents();
         loadManniesPage();
     });
