@@ -23,8 +23,8 @@ use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
+use VonNeumannGame\Service\Manny\MannyTaskRefresher;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
-use VonNeumannGame\Service\Manny\TaskHandlerInterface;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -74,9 +74,7 @@ final class MannyService implements MannyTaskRuntime
 
     private readonly WaypointBookmarkService $bookmarks;
     private readonly MannyPublicPresenter $presenter;
-    /** @var list<TaskHandlerInterface> */
-    private readonly array $taskHandlers;
-    private bool $refreshOutOfRangeScheduledTasks = false;
+    private readonly MannyTaskRefresher $taskRefresher;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -98,7 +96,13 @@ final class MannyService implements MannyTaskRuntime
             $this->scut,
             fn(Manny $manny): array => $this->mannyCargoArray($manny),
         );
-        $this->taskHandlers = $taskHandlers ?? TaskHandlerRegistry::defaultHandlers();
+        $this->taskRefresher = new MannyTaskRefresher(
+            $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(),
+            $this,
+            fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+            fn(NeumannProbe $probe, Manny $manny): bool => $this->canRefreshMannyTaskFromProbe($probe, $manny),
+        );
     }
 
     /**
@@ -1433,7 +1437,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function refreshMannyState(Manny $manny, NeumannProbe $probe): Manny
     {
-        return $this->refreshMannyStateInternal($manny, $probe, true);
+        return $this->taskRefresher->refresh($manny, $probe, true);
     }
 
     public function refreshScheduledMannyTask(ScheduledEvent $event): ?Manny
@@ -1455,48 +1459,12 @@ final class MannyService implements MannyTaskRuntime
             return $manny;
         }
 
-        $previous = $this->refreshOutOfRangeScheduledTasks;
-        $this->refreshOutOfRangeScheduledTasks = true;
-        try {
-            return $this->refreshMannyStateInternal($manny, $probe, false);
-        } finally {
-            $this->refreshOutOfRangeScheduledTasks = $previous;
-        }
-    }
-
-    private function refreshMannyStateInternal(Manny $manny, NeumannProbe $probe, bool $enforceVisibilityGate): Manny
-    {
-        if ($manny->currentTask === null) {
-            return $manny;
-        }
-        if ($enforceVisibilityGate && !$this->canRefreshMannyTaskFromProbe($probe, $manny)) {
-            return $manny;
-        }
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-
-        foreach ($this->taskHandlers as $handler) {
-            if ($handler->supports($manny->currentTask)) {
-                return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny {
-                    $fresh = $this->mannies->findById($manny->id) ?? $manny;
-                    if ($fresh->currentTask === null || !$handler->supports($fresh->currentTask)) {
-                        return $fresh;
-                    }
-                    if (!$this->refreshOutOfRangeScheduledTasks && !$this->canRefreshMannyTaskFromProbe($lockedProbe, $fresh)) {
-                        return $fresh;
-                    }
-
-                    return $handler->refresh($this, $fresh, $lockedProbe, $now);
-                });
-            }
-        }
-
-        return $manny;
+        return $this->taskRefresher->refreshAllowingOutOfRange($manny, $probe);
     }
 
     private function canRefreshMannyTaskFromProbe(NeumannProbe $probe, Manny $manny): bool
     {
-        if ($this->refreshOutOfRangeScheduledTasks) {
+        if ($this->taskRefresher->allowsOutOfRangeTasks()) {
             return true;
         }
 

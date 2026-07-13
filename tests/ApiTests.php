@@ -372,6 +372,7 @@ $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
+$mannyTaskRefresherSource = file_get_contents($root . '/src/Service/Manny/MannyTaskRefresher.php');
 $probeMovementServiceSource = file_get_contents($root . '/src/Service/ProbeMovementService.php');
 $probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oauth-remember"'), 'OAuth login view exposes the remember-me checkbox');
@@ -590,7 +591,7 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_installations'), 'schema stores completed probe improvements by probe');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvements ('), 'schema no longer creates the legacy mixed probe_improvements table');
 $test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
-$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
+$test->assert(is_string($mannyTaskRefresherSource) && str_contains($mannyTaskRefresherSource, 'return ($this->withProbeLock)($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
 $test->assert(is_string($probeStorageServiceSource) && str_contains($probeStorageServiceSource, 'private function moveResourceLocked'), 'resource storage moves run through a locked implementation');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
