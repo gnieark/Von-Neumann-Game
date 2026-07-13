@@ -14,6 +14,7 @@ final class TaskHandlerRegistry
         DetachStorageContainerTaskHandler $detachStorageContainer,
         DropStorageContainerTaskHandler $dropStorageContainer,
         InspectSectorObjectTaskHandler $inspectSectorObject,
+        ProbeAssemblyTaskHandler $probeAssembly,
         DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
         DeuteriumTransferTaskHandler $deuteriumTransfer,
     ): array
@@ -33,7 +34,7 @@ final class TaskHandlerRegistry
             new StorageMoveTaskHandler(),
             new ScutRelayTurnOnTaskHandler(),
             new ProbeImprovementTaskHandler(),
-            new ProbeAssemblyTaskHandler(),
+            $probeAssembly,
             $deuteriumTransfer,
         ];
     }

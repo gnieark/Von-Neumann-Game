@@ -30,6 +30,7 @@ use VonNeumannGame\Service\Manny\InspectSectorObjectTaskHandler;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRefresher;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
+use VonNeumannGame\Service\Manny\ProbeAssemblyTaskHandler;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
@@ -85,6 +86,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly DetachStorageContainerTaskHandler $detachStorageContainerTaskHandler;
     private readonly DropStorageContainerTaskHandler $dropStorageContainerTaskHandler;
     private readonly InspectSectorObjectTaskHandler $inspectSectorObjectTaskHandler;
+    private readonly ProbeAssemblyTaskHandler $probeAssemblyTaskHandler;
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
 
@@ -234,6 +236,48 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->probeAssemblyTaskHandler = new ProbeAssemblyTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(NeumannProbe $probe): array => $this->probeAssemblyPlan($probe),
+            fn(NeumannProbe $probe, array $containerIds): array => $this->storage->consumeEmptyAdditionalContainers($probe, $containerIds),
+            function (NeumannProbe $probe, array $plan): void {
+                $this->consumeProbeAssemblyPlan($probe, $plan);
+            },
+            fn(): int => self::PROBE_ASSEMBLY_SECONDS,
+            fn(): array => $this->probeAssemblyComponentRequirements(),
+            function (Manny $manny): void {
+                $this->storage->releaseMannyFromStorage($manny);
+            },
+            function (Manny $manny): void {
+                $this->removeMannyFromSector($manny);
+            },
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(int $playerId): string => $this->nextDroneProbeName($playerId),
+            fn(int $playerId, string $name, SectorCoordinates $sector): NeumannProbe => $this->probes->createForPlayer($playerId, $name, $sector),
+            function (NeumannProbe $probe): void {
+                $this->storage->ensureProbeStorage($probe);
+            },
+            fn(NeumannProbe $probe, Manny $manny): bool => $this->storage->placeMannyOnProbe($probe, $manny),
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->deuteriumTankRefillTaskHandler = new DeuteriumTankRefillTaskHandler(
             function (NeumannProbe $probe): void {
                 $this->ensureProbeAcceptsMannyOrders($probe);
@@ -294,6 +338,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->detachStorageContainerTaskHandler,
                 $this->dropStorageContainerTaskHandler,
                 $this->inspectSectorObjectTaskHandler,
+                $this->probeAssemblyTaskHandler,
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
             ),
@@ -672,41 +717,7 @@ final class MannyService implements MannyTaskRuntime
      */
     private function startProbeAssemblyLocked(NeumannProbe $probe, string $uid, array $containerIds): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to assemble a new probe.');
-        }
-
-        $plan = $this->probeAssemblyPlan($probe);
-        $consumedContainers = $this->storage->consumeEmptyAdditionalContainers($probe, $containerIds);
-        $this->consumeProbeAssemblyPlan($probe, $plan);
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $manny->locationType = Manny::LOCATION_SECTOR;
-        $manny->sector = $probe->currentSector;
-        $manny->currentTask = Manny::TASK_ASSEMBLING_PROBE;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . self::PROBE_ASSEMBLY_SECONDS . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'durationSeconds' => self::PROBE_ASSEMBLY_SECONDS,
-            'components' => $this->probeAssemblyComponentRequirements(),
-            'consumedItems' => $plan['consumedItems'],
-            'consumedContainers' => $consumedContainers,
-            'result' => 'pending',
-        ];
-        $manny->cargoDeuterium = 0.0;
-        $manny->cargoMetals = 0.0;
-        $manny->cargoIce = 0.0;
-        $manny->cargoOrganicCompounds = 0.0;
-        $this->storage->releaseMannyFromStorage($manny);
-        $this->removeMannyFromSector($manny);
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->probeAssemblyTaskHandler->start($probe, $uid, $containerIds);
     }
 
     public function startSalvage(NeumannProbe $probe, string $uid, string $objectId): Manny
@@ -2464,34 +2475,6 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshProbeAssembly(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $droneName = $this->nextDroneProbeName($probe->playerId);
-        $newProbe = $this->probes->createForPlayer($probe->playerId, $droneName, $manny->sector ?? $probe->currentSector);
-        $this->storage->ensureProbeStorage($newProbe);
-        $this->removeMannyFromSector($manny);
-        $manny->probeId = $newProbe->id;
-        $manny->storageContainerId = null;
-        $manny->locationType = Manny::LOCATION_PROBE;
-        $manny->sector = null;
-        $this->storage->placeMannyOnProbe($newProbe, $manny);
-        $this->clearTask($manny, [
-            'lastTask' => Manny::TASK_ASSEMBLING_PROBE,
-            'result' => 'success',
-            'probe' => [
-                'id' => $newProbe->id,
-                'name' => $newProbe->name,
-            ],
-        ]);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
