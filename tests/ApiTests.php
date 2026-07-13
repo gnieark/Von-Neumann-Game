@@ -541,6 +541,7 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.manny-action-group >
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_relay": tr("scutRelayObject"'), 'mannies JS labels SCUT relay sector objects');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.salvageable === true'), 'mannies JS only lists explicitly salvageable sector objects');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "scut_relay" && object.status !== "off"'), 'mannies JS excludes active SCUT relays from salvage targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "drifting_item" && Number.isFinite(containerSpace) && containerSpace > MANNY_CARGO_CAPACITY'), 'mannies JS excludes drifting items too large for Manny salvage');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "detached_container" && object.mode === "hidden_on_asteroid"'), 'mannies JS excludes hidden detached containers from generic salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
@@ -556,7 +557,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260713-manny-salvage-scut-relay-filter"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260713-manny-salvage-target-filter"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1286,7 +1287,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(87, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(88, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5247,6 +5248,23 @@ if ($createdProbe !== null) {
     ));
     $test->assertEquals(1, count($scanScutRelays), 'current-sector scan exposes the jettisoned SCUT relay');
     $test->assertEquals(true, $scanScutRelays[0]['salvageable'] ?? null, 'inactive SCUT relays are exposed as salvageable for Manny recovery forms');
+    $sectorWithLegacyDriftingRelay = $sectorRepository->load($createdProbe->currentSector);
+    $sectorWithLegacyDriftingRelay->addObject(new SectorDriftingItem(
+        SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_RELAY),
+        ProbeItem::SCUT_RELAY_NAME,
+        ProbeItem::TYPE_SCUT_RELAY,
+        1,
+        CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
+    ));
+    $sectorRepository->save($sectorWithLegacyDriftingRelay);
+    $scanWithLegacyDriftingRelay = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $legacyDriftingRelays = array_values(array_filter(
+        $scanWithLegacyDriftingRelay->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'drifting_item'
+            && ($object['itemType'] ?? null) === ProbeItem::TYPE_SCUT_RELAY
+    ));
+    $test->assertEquals(1, count($legacyDriftingRelays), 'current-sector scan can expose legacy drifting SCUT relay item stacks');
+    $test->assertEquals(false, $legacyDriftingRelays[0]['salvageable'] ?? null, 'oversized drifting SCUT relay item stacks are not exposed as salvageable');
 
     $salvageSteelBars = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
         'objectId' => $driftingObjectId,

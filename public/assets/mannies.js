@@ -3,6 +3,7 @@
     const PROGRESS_TICK_MS = 1000;
     const MINING_RESOURCE_TYPES = ["deuterium", "metals", "ice", "carbon_compounds"];
     const MANNY_MINING_AMOUNT_MAX = 0.55;
+    const MANNY_CARGO_CAPACITY = 0.05;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
     const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe", "assemble-probe", "transfer-deuterium"]);
@@ -498,10 +499,13 @@
     }
 
     function isSalvageableSectorObject(object) {
+        const containerSpace = Number(object && object.containerSpace);
+
         return Boolean(
             object && object.salvageable === true && object.id
             && !(object.type === "detached_container" && object.mode === "hidden_on_asteroid")
             && !(object.type === "scut_relay" && object.status !== "off")
+            && !(object.type === "drifting_item" && Number.isFinite(containerSpace) && containerSpace > MANNY_CARGO_CAPACITY + 0.00001)
         );
     }
 
