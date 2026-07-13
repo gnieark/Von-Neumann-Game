@@ -11,6 +11,7 @@ final class TaskHandlerRegistry
      */
     public static function defaultHandlers(
         RepairTaskHandler $repair,
+        MiningTaskHandler $mining,
         DetachStorageContainerTaskHandler $detachStorageContainer,
         DropStorageContainerTaskHandler $dropStorageContainer,
         InspectSectorObjectTaskHandler $inspectSectorObject,
@@ -27,7 +28,7 @@ final class TaskHandlerRegistry
     {
         return [
             $repair,
-            new MiningTaskHandler(),
+            $mining,
             new CraftingTaskHandler(),
             $salvage,
             $waypointBookmarkInstallation,
