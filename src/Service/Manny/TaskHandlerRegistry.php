@@ -9,25 +9,40 @@ final class TaskHandlerRegistry
     /**
      * @return list<TaskHandlerInterface>
      */
-    public static function defaultHandlers(): array
+    public static function defaultHandlers(
+        RepairTaskHandler $repair,
+        MiningTaskHandler $mining,
+        DetachStorageContainerTaskHandler $detachStorageContainer,
+        DropStorageContainerTaskHandler $dropStorageContainer,
+        InspectSectorObjectTaskHandler $inspectSectorObject,
+        ProbeImprovementTaskHandler $probeImprovement,
+        ProbeAssemblyTaskHandler $probeAssembly,
+        DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
+        DeuteriumTransferTaskHandler $deuteriumTransfer,
+        ReturningTaskHandler $returning,
+        SalvageTaskHandler $salvage,
+        ScutRelayTurnOnTaskHandler $scutRelayTurnOn,
+        StorageMoveTaskHandler $storageMove,
+        WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallation,
+    ): array
     {
         return [
-            new RepairTaskHandler(),
-            new MiningTaskHandler(),
+            $repair,
+            $mining,
             new CraftingTaskHandler(),
-            new SalvageTaskHandler(),
-            new WaypointBookmarkInstallationTaskHandler(),
-            new DetachStorageContainerTaskHandler(),
-            new DropStorageContainerTaskHandler(),
-            new InspectSectorObjectTaskHandler(),
-            new DeuteriumTankRefillTaskHandler(),
-            new ReturningTaskHandler(),
+            $salvage,
+            $waypointBookmarkInstallation,
+            $detachStorageContainer,
+            $dropStorageContainer,
+            $inspectSectorObject,
+            $deuteriumTankRefill,
+            $returning,
             new WaitingForSpaceTaskHandler(),
-            new StorageMoveTaskHandler(),
-            new ScutRelayTurnOnTaskHandler(),
-            new ProbeImprovementTaskHandler(),
-            new ProbeAssemblyTaskHandler(),
-            new DeuteriumTransferTaskHandler(),
+            $storageMove,
+            $scutRelayTurnOn,
+            $probeImprovement,
+            $probeAssembly,
+            $deuteriumTransfer,
         ];
     }
 }
