@@ -31,6 +31,7 @@ use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRefresher;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
 use VonNeumannGame\Service\Manny\ProbeAssemblyTaskHandler;
+use VonNeumannGame\Service\Manny\ProbeImprovementTaskHandler;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
@@ -87,6 +88,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly DropStorageContainerTaskHandler $dropStorageContainerTaskHandler;
     private readonly InspectSectorObjectTaskHandler $inspectSectorObjectTaskHandler;
     private readonly ProbeAssemblyTaskHandler $probeAssemblyTaskHandler;
+    private readonly ProbeImprovementTaskHandler $probeImprovementTaskHandler;
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
 
@@ -236,6 +238,44 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->probeImprovementTaskHandler = new ProbeImprovementTaskHandler(
+            function (): void {
+                if ($this->improvements === null) {
+                    throw new MannyActionException(500, 'internal_error', 'Probe improvement storage is unavailable.');
+                }
+            },
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(string $improvement): string => ProbeImprovementCatalog::normalizeId($improvement),
+            fn(string $improvement): ?array => ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig()),
+            fn(NeumannProbe $probe, string $improvement): ?\VonNeumannGame\Domain\ProbeImprovement => $this->improvements?->findForProbe($probe->id, $improvement),
+            fn(NeumannProbe $probe, array $definition): array => $this->probeImprovementPlan($probe, $definition),
+            function (NeumannProbe $probe, array $plan): void {
+                $this->consumeProbeImprovementPlan($probe, $plan);
+            },
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            function (NeumannProbe $probe, string $improvement): void {
+                $this->improvements?->markDone($probe->id, $improvement);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->probeAssemblyTaskHandler = new ProbeAssemblyTaskHandler(
             function (NeumannProbe $probe): void {
                 $this->ensureProbeAcceptsMannyOrders($probe);
@@ -338,6 +378,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->detachStorageContainerTaskHandler,
                 $this->dropStorageContainerTaskHandler,
                 $this->inspectSectorObjectTaskHandler,
+                $this->probeImprovementTaskHandler,
                 $this->probeAssemblyTaskHandler,
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
@@ -653,52 +694,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startProbeImprovementLocked(NeumannProbe $probe, string $uid, string $improvement): Manny
     {
-        if ($this->improvements === null) {
-            throw new MannyActionException(500, 'internal_error', 'Probe improvement storage is unavailable.');
-        }
-
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to improve it.');
-        }
-
-        $improvement = ProbeImprovementCatalog::normalizeId($improvement);
-        $definition = ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig());
-        if ($definition === null) {
-            throw new MannyActionException(400, 'invalid_probe_improvement', 'Unknown probe improvement.');
-        }
-
-        $state = $this->improvements->findForProbe($probe->id, $improvement);
-        if ($state === null || (!$state->available && !$state->done)) {
-            throw new MannyActionException(422, 'probe_improvement_unavailable', 'This probe improvement is not available yet.');
-        }
-        if ($state->done) {
-            throw new MannyActionException(409, 'probe_improvement_already_done', 'This probe improvement has already been completed.');
-        }
-
-        $plan = $this->probeImprovementPlan($probe, $definition);
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $this->consumeProbeImprovementPlan($probe, $plan);
-
-        $manny->currentTask = Manny::TASK_IMPROVING_PROBE;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . (int) $plan['durationSeconds'] . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'improvement' => $improvement,
-            'improvementName' => (string) ($definition['name'] ?? $improvement),
-            'durationSeconds' => (int) $plan['durationSeconds'],
-            'ingredients' => is_array($definition['ingredients'] ?? null) ? $definition['ingredients'] : [],
-            'resourceCosts' => $plan['resourceCosts'],
-            'consumedItems' => $plan['consumedItems'],
-            'effects' => is_array($definition['effects'] ?? null) ? $definition['effects'] : [],
-        ];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->probeImprovementTaskHandler->start($probe, $uid, $improvement);
     }
 
     /**
@@ -2442,36 +2438,6 @@ final class MannyService implements MannyTaskRuntime
         } catch (MannyActionException $e) {
             $result['result'] = 'failed';
             $result['failureReason'] = $e->errorCode;
-        }
-
-        $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshProbeImprovement(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-        if ($this->improvements === null) {
-            throw new MannyActionException(500, 'internal_error', 'Probe improvement storage is unavailable.');
-        }
-
-        $improvement = ProbeImprovementCatalog::normalizeId((string) ($manny->taskPayload['improvement'] ?? ''));
-        $result = [
-            'lastTask' => Manny::TASK_IMPROVING_PROBE,
-            'improvement' => $improvement,
-        ];
-
-        if (ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig()) === null) {
-            $result['result'] = 'failed';
-            $result['failureReason'] = 'invalid_probe_improvement';
-        } else {
-            $this->improvements->markDone($probe->id, $improvement);
-            $result['result'] = 'success';
-            $result['effects'] = is_array($manny->taskPayload['effects'] ?? null) ? $manny->taskPayload['effects'] : [];
         }
 
         $this->clearTask($manny, $result);
