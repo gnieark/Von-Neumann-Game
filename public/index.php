@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260712-forum-thread-chronological';
+const ASSET_VERSION = '20260713-manny-salvage-scut-relay-filter';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
