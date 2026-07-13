@@ -274,8 +274,20 @@
         return items.reduce((total, item) => total + numericCount(item[key]), 0);
     }
 
+    function selectedProbeSectorDistance(sector) {
+        const distances = Array.isArray(sector && sector.distances) ? sector.distances : [];
+        const selectedProbeId = Number(document.body.dataset.selectedProbeId || "");
+        const selected = Number.isFinite(selectedProbeId)
+            ? distances.find((entry) => entry && Number(entry.probeId) === selectedProbeId)
+            : null;
+        const fallback = selected || distances.find((entry) => entry && entry.isDefault === true);
+        const distance = Number(fallback && fallback.distance);
+
+        return Number.isFinite(distance) ? distance : Number(sector && sector.distance);
+    }
+
     function sectorContext(sector) {
-        const distance = Number(sector && sector.distance);
+        const distance = selectedProbeSectorDistance(sector);
         if (!Number.isFinite(distance)) {
             return tr("sectorContextUnavailable", "Displayed sector: unavailable.");
         }

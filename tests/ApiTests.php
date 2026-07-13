@@ -392,6 +392,8 @@ $test->assert(is_string($mainScript) && str_contains($mainScript, 'probeSelector
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'probe && probe.owned'), 'main JS ignores owned probes for current-sector probe alerts');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'probe && probe.owned'), 'sensors JS ignores owned probes for sector probe presence objects');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function selectedProbeSectorDistance'), 'sensors JS resolves the sector context distance from the selected probe');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'Number(entry.probeId) === selectedProbeId'), 'sensors JS reads the selected probe distance from sector distances');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'inaccessible'"), 'French translations include the unreachable probe selector suffix');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'unreachable'"), 'English translations include the unreachable probe selector suffix');
@@ -568,7 +570,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260713-manny-list-filters"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-sensors-selected-probe-distance"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

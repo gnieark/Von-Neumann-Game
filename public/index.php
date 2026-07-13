@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260713-manny-list-filters';
+const ASSET_VERSION = '20260714-sensors-selected-probe-distance';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);

@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - API v89 : `GET /api/sector` conserve `sector.distance` pour rétrocompatibilité en l’exprimant depuis la sonde par défaut, et ajoute `sector.distances` avec la distance du secteur demandé depuis chaque sonde possédée ainsi que la sonde effectivement utilisée pour le scan.
+- Interface : `/sensors` affiche désormais la distance du secteur scanné depuis la sonde sélectionnée par l’utilisateur, même quand `sector.distance` reste exprimé depuis la sonde par défaut pour rétrocompatibilité.
 
 ## 2026-07-13
 
