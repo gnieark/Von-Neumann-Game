@@ -497,11 +497,16 @@
         });
     }
 
-    function salvageTargetsFromObjects(objects) {
-        return (Array.isArray(objects) ? objects : []).filter((object) => (
-            object && object.salvageable && object.id
+    function isSalvageableSectorObject(object) {
+        return Boolean(
+            object && object.salvageable === true && object.id
             && !(object.type === "detached_container" && object.mode === "hidden_on_asteroid")
-        )).map((object) => ({
+            && !(object.type === "scut_relay" && object.status !== "off")
+        );
+    }
+
+    function salvageTargetsFromObjects(objects) {
+        return (Array.isArray(objects) ? objects : []).filter(isSalvageableSectorObject).map((object) => ({
             "id": object.id,
             "type": object.type || "object",
             "name": object.name || object.id || "",

@@ -539,6 +539,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeIm
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'noProbeImprovementAvailable'), 'mannies JS displays an empty probe-improvement state');
 $test->assert(is_string($appCss) && str_contains($appCss, '.manny-action-group > .manny-action-accordion-trigger'), 'mannies CSS styles grouped action accordions');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"scut_relay": tr("scutRelayObject"'), 'mannies JS labels SCUT relay sector objects');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.salvageable === true'), 'mannies JS only lists explicitly salvageable sector objects');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "scut_relay" && object.status !== "off"'), 'mannies JS excludes active SCUT relays from salvage targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "detached_container" && object.mode === "hidden_on_asteroid"'), 'mannies JS excludes hidden detached containers from generic salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
@@ -554,7 +556,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260712-forum-thread-chronological"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260713-manny-salvage-scut-relay-filter"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -2080,6 +2082,7 @@ $scutRelayObjects = array_values(array_filter(
 $test->assertEquals(1, count($scutRelayObjects), 'Current sector exposes the SCUT relay as a sector object');
 $test->assertEquals((string) $scutRelay->id, $scutRelayObjects[0]['id'] ?? null, 'SCUT relay sector object exposes a string object id');
 $test->assertEquals('on', $scutRelayObjects[0]['status'] ?? null, 'SCUT relay sector object exposes its status');
+$test->assertEquals(null, $scutRelayObjects[0]['salvageable'] ?? null, 'active SCUT relays are not exposed as salvageable sector objects');
 $test->assertEquals(ScutRelay::RADIUS_SECTORS, $scutRelayObjects[0]['coverageRadiusSectors'] ?? null, 'SCUT relay sector object exposes its coverage radius');
 $test->assertEquals($scutNetworkId, $scutRelayObjects[0]['network']['id'] ?? null, 'SCUT relay sector object exposes its network reference');
 $test->assert(is_string($scutRelayObjects[0]['activatedAt'] ?? null), 'SCUT relay sector object exposes its activation timestamp');
