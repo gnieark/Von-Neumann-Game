@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 88
+                apiVersion: 89
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -3185,8 +3185,11 @@ paths:
         the sector is current, visited, or only passively scanned from a reachable
         probe. When another owned probe is reachable from the default probe and
         is closer to the requested sector, its scan is used if it has enough
-        sensor data. During blind cruise, only already visited sectors can be
-        consulted as historical cartography.
+        sensor data. For backward compatibility, `sector.distance` remains the
+        distance from the default probe; `sector.distances` lists the distance
+        from every owned probe and marks the probe whose sensors produced the
+        scan. During blind cruise, only already visited sectors can be consulted
+        as historical cartography.
       parameters:
         - name: x
           in: query
@@ -3223,6 +3226,12 @@ paths:
                     sector:
                       relativeCoordinates: { x: 0, y: 0, z: 0 }
                       distance: 0
+                      distances:
+                        - probeId: 1
+                          probeName: Main probe
+                          distance: 0
+                          isDefault: true
+                          usedForScan: true
                       knowledgeLevel: detailed
                       confidence: 1
                       objects:
@@ -3286,6 +3295,12 @@ paths:
                     sector:
                       relativeCoordinates: { x: 1, y: 1, z: 0 }
                       distance: 1
+                      distances:
+                        - probeId: 1
+                          probeName: Main probe
+                          distance: 1
+                          isDefault: true
+                          usedForScan: true
                       knowledgeLevel: neighbor_scan
                       confidence: 0.82
                       estimatedObjects:
@@ -3304,6 +3319,12 @@ paths:
                     sector:
                       relativeCoordinates: { x: 2, y: 0, z: 0 }
                       distance: 2
+                      distances:
+                        - probeId: 1
+                          probeName: Main probe
+                          distance: 2
+                          isDefault: true
+                          usedForScan: true
                       knowledgeLevel: distant_scan
                       confidence: 0.41
                       possibleObjects: [stellar_mass_detected, dust_cloud_possible]
@@ -3317,6 +3338,12 @@ paths:
                     sector:
                       relativeCoordinates: { x: 3, y: 3, z: 0 }
                       distance: 3
+                      distances:
+                        - probeId: 1
+                          probeName: Main probe
+                          distance: 3
+                          isDefault: true
+                          usedForScan: true
                       knowledgeLevel: long_range_estimation
                       confidence: 0.12
                       navigationalRisk: high
@@ -5568,6 +5595,16 @@ components:
           $ref: '#/components/schemas/Vector'
         distance:
           type: integer
+          description: >
+            Legacy observation distance. On `/api/sector`, this is measured from
+            the player's default probe even when another owned probe supplies the
+            scan. On probe-scoped sector endpoints, it is measured from the
+            observing probe.
+        distances:
+          type: array
+          description: Per-owned-probe distances for `/api/sector` responses.
+          items:
+            $ref: '#/components/schemas/SectorObservationProbeDistance'
         knowledgeLevel:
           type: string
           enum: [detailed, neighbor_scan, distant_scan, long_range_estimation]
@@ -5619,6 +5656,21 @@ components:
               type: number
               minimum: 0
               maximum: 1
+    SectorObservationProbeDistance:
+      type: object
+      required: [probeId, probeName, distance, isDefault, usedForScan]
+      properties:
+        probeId:
+          type: integer
+        probeName:
+          type: string
+        distance:
+          type: integer
+          minimum: 0
+        isDefault:
+          type: boolean
+        usedForScan:
+          type: boolean
     SectorProbePresence:
       type: object
       required: [id, name, moving, owned]

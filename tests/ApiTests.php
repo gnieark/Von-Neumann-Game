@@ -1298,7 +1298,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(88, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(89, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1355,8 +1355,23 @@ if ($multiScanDefaultProbe !== null) {
     $multiScanResponse = $multiScanKernel->handle('GET', '/api/sector?x=' . $multiScanRelative['x'] . '&y=' . $multiScanRelative['y'] . '&z=' . $multiScanRelative['z'], $multiScanHeaders);
     $test->assertEquals(200, $multiScanResponse->status, 'GET /api/sector can use a closer reachable probe for scans');
     $test->assertEquals('distant_scan', $multiScanResponse->body['sector']['knowledgeLevel'] ?? null, 'GET /api/sector uses the closer reachable probe scan level');
-    $test->assertEquals(2, $multiScanResponse->body['sector']['distance'] ?? null, 'GET /api/sector exposes distance from the selected closer scanner');
+    $test->assertEquals(4, $multiScanResponse->body['sector']['distance'] ?? null, 'GET /api/sector keeps legacy distance from the default probe');
     $test->assertEquals(1800, $multiScanResponse->body['sector']['scan']['requiredResidenceSeconds'] ?? null, 'GET /api/sector skips closer probes with insufficient scan data before selecting another scanner');
+    $multiScanDistances = $multiScanResponse->body['sector']['distances'] ?? null;
+    $test->assert(is_array($multiScanDistances), 'GET /api/sector exposes per-owned-probe distances');
+    $test->assertEquals(3, is_array($multiScanDistances) ? count($multiScanDistances) : 0, 'GET /api/sector exposes a distance entry for each owned probe');
+    $multiScanDistanceByProbe = [];
+    foreach (is_array($multiScanDistances) ? $multiScanDistances : [] as $entry) {
+        if (is_array($entry) && isset($entry['probeId'])) {
+            $multiScanDistanceByProbe[(int) $entry['probeId']] = $entry;
+        }
+    }
+    $test->assertEquals(4, $multiScanDistanceByProbe[$multiScanDefaultProbe->id]['distance'] ?? null, 'GET /api/sector distance list includes the default probe distance');
+    $test->assertEquals(true, $multiScanDistanceByProbe[$multiScanDefaultProbe->id]['isDefault'] ?? null, 'GET /api/sector distance list marks the default probe');
+    $test->assertEquals(2, $multiScanDistanceByProbe[$multiScanTooEarlyProbe->id]['distance'] ?? null, 'GET /api/sector distance list includes a closer insufficient-data probe');
+    $test->assertEquals(false, $multiScanDistanceByProbe[$multiScanTooEarlyProbe->id]['usedForScan'] ?? null, 'GET /api/sector distance list does not mark insufficient-data probes as scan source');
+    $test->assertEquals(2, $multiScanDistanceByProbe[$multiScanBetterProbe->id]['distance'] ?? null, 'GET /api/sector distance list includes the selected scanner distance');
+    $test->assertEquals(true, $multiScanDistanceByProbe[$multiScanBetterProbe->id]['usedForScan'] ?? null, 'GET /api/sector distance list marks the probe used for the scan');
 }
 
 $privacyHome = new SectorCoordinates(1000, 1000, 0);

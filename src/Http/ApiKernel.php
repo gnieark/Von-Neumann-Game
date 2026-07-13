@@ -49,7 +49,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 88;
+    public const API_VERSION = 89;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1203,18 +1203,24 @@ final class ApiKernel
     {
         $grid = new SectorGrid();
         $defaultDistance = $grid->getDistance($defaultProbe->currentSector, $target);
+        $ownedProbes = [$defaultProbe->id => $defaultProbe];
+        foreach ($this->probes->findAllByPlayerId($player->id) as $candidate) {
+            $ownedProbes[$candidate->id] = $candidate->id === $defaultProbe->id
+                ? $defaultProbe
+                : $this->movements->refreshProbeMovementState($candidate);
+        }
+
         $candidates = [[
             'probe' => $defaultProbe,
             'distance' => $defaultDistance,
             'default' => true,
         ]];
 
-        foreach ($this->probes->findAllByPlayerId($player->id) as $candidate) {
+        foreach ($ownedProbes as $candidate) {
             if ($candidate->id === $defaultProbe->id) {
                 continue;
             }
 
-            $candidate = $this->movements->refreshProbeMovementState($candidate);
             if (in_array($candidate->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true)) {
                 continue;
             }
@@ -1243,7 +1249,11 @@ final class ApiKernel
         $insufficientScanData = null;
         foreach ($candidates as $candidate) {
             try {
-                return $this->sectorObservationFromProbe($player, $candidate['probe'], $target);
+                $observation = $this->sectorObservationFromProbe($player, $candidate['probe'], $target);
+                $observation['distance'] = $defaultDistance;
+                $observation['distances'] = $this->sectorProbeDistances($ownedProbes, $defaultProbe->id, $target, $grid, $candidate['probe']->id);
+
+                return $observation;
             } catch (ObservationAccessException $e) {
                 if ($e->errorCode !== 'insufficient_scan_data') {
                     throw $e;
@@ -1253,6 +1263,32 @@ final class ApiKernel
         }
 
         throw $insufficientScanData ?? new \RuntimeException('No sector observation candidate available.');
+    }
+
+    /**
+     * @param array<int, NeumannProbe> $ownedProbes
+     * @return list<array{probeId:int, probeName:string, distance:int, isDefault:bool, usedForScan:bool}>
+     */
+    private function sectorProbeDistances(array $ownedProbes, int $defaultProbeId, SectorCoordinates $target, SectorGrid $grid, int $scanSourceProbeId): array
+    {
+        $distances = [];
+        foreach ($ownedProbes as $probe) {
+            $distances[] = [
+                'probeId' => $probe->id,
+                'probeName' => $probe->name,
+                'distance' => $grid->getDistance($probe->currentSector, $target),
+                'isDefault' => $probe->id === $defaultProbeId,
+                'usedForScan' => $probe->id === $scanSourceProbeId,
+            ];
+        }
+
+        usort(
+            $distances,
+            static fn(array $a, array $b): int => [$a['isDefault'] ? 0 : 1, $a['distance'], $a['probeId']]
+                <=> [$b['isDefault'] ? 0 : 1, $b['distance'], $b['probeId']],
+        );
+
+        return $distances;
     }
 
     /**
