@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ResourceComposition;
@@ -247,7 +248,9 @@ final class SectorObservationService
             $data['quantity'] = $object->getQuantity();
             $data['containerSpace'] = $object->getContainerSpace();
             $data['capacityUnit'] = $object->getCapacityUnit();
-            $data['salvageable'] = $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0;
+            $data['salvageable'] = $object->getQuantity() > 0
+                && $object->getContainerSpace() > 0.0
+                && $object->getContainerSpace() <= $this->mannyCargoCapacity() + 0.00001;
         }
 
         if ($object instanceof SectorDetachedContainer) {
@@ -648,5 +651,10 @@ final class SectorObservationService
     private function scanFloat(string $path, float $default): float
     {
         return Config::float($this->scanConfig, $path, $default);
+    }
+
+    private function mannyCargoCapacity(): float
+    {
+        return max(0.0001, Config::float($this->mannyConfig, 'cargoCapacity', Manny::CARGO_CAPACITY));
     }
 }

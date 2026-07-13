@@ -6,7 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
-- Interface : `/mannies` ne propose plus les relais SCUT activés dans “Récupérer un objet à la dérive”; seuls les relais éteints explicitement récupérables restent listés.
+- API v88 : les piles d’items à la dérive dont chaque unité dépasse la capacité d’emport d’une Manny ne sont plus exposées avec `salvageable: true` dans les scans de secteur; cela masque notamment les anciens `drifting_item` `scut_relay`, tandis que les vrais relais SCUT éteints restent récupérables.
+- Interface : `/mannies` ne propose plus les relais SCUT activés ou les anciens items `scut_relay` trop volumineux dans “Récupérer un objet à la dérive”; seuls les relais éteints explicitement récupérables restent listés.
 - Gameplay : une tâche Manny “Assemble a new probe” arrivée à terme se finalise désormais même si la sonde-mère a quitté le secteur entre-temps; le drone est créé dans le secteur où la Manny assemblait la sonde.
 - API v87 : les noms API des items et stocks d’inventaire exposés par les endpoints de sonde sont désormais canoniques en anglais; exécuter `php scripts/migrate-probe-item-names.php --database-config=config/database.json` après le déploiement pour normaliser les lignes `probe_items` existantes.
 - Stats : le podium des explorateurs classe désormais les joueurs par nombre de secteurs visités, toutes leurs sondes possédées confondues.
