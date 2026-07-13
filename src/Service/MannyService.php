@@ -22,6 +22,7 @@ use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
+use VonNeumannGame\Service\Manny\DeuteriumTankRefillTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTransferTaskHandler;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRefresher;
@@ -78,6 +79,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly MannyPublicPresenter $presenter;
     private readonly MannyTaskRefresher $taskRefresher;
     private readonly RepairTaskHandler $repairTaskHandler;
+    private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
 
     public function __construct(
@@ -107,6 +109,34 @@ final class MannyService implements MannyTaskRuntime
             $this->config,
             fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
         );
+        $this->deuteriumTankRefillTaskHandler = new DeuteriumTankRefillTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            function (NeumannProbe $probe): void {
+                $this->missions?->completeReadyReturnToSpacePrograms($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            fn(NeumannProbe $probe): bool => $this->currentSectorHasDeuteriumRefuelStation($probe),
+            fn(?NeumannProbe $probe): float => $this->maxDeuteriumPercent($probe),
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            function (NeumannProbe $probe): void {
+                $this->probes->save($probe);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->deuteriumTransferTaskHandler = new DeuteriumTransferTaskHandler(
             fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
             fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
@@ -134,7 +164,11 @@ final class MannyService implements MannyTaskRuntime
             fn(NeumannProbe $probe): bool => $this->probeAcceptsMannyOrders($probe),
         );
         $this->taskRefresher = new MannyTaskRefresher(
-            $taskHandlers ?? TaskHandlerRegistry::defaultHandlers($this->repairTaskHandler, $this->deuteriumTransferTaskHandler),
+            $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
+                $this->repairTaskHandler,
+                $this->deuteriumTankRefillTaskHandler,
+                $this->deuteriumTransferTaskHandler,
+            ),
             $this,
             fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
@@ -904,32 +938,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startDeuteriumTankRefillLocked(NeumannProbe $probe, string $uid): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $this->missions?->completeReadyReturnToSpacePrograms($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to refill its deuterium tank.');
-        }
-        if (!$this->currentSectorHasDeuteriumRefuelStation($probe)) {
-            throw new MannyActionException(422, 'deuterium_refuel_station_not_found', 'No deuterium refuel station is available in the current sector.');
-        }
-        if ($probe->deuteriumStock >= $this->maxDeuteriumPercent($probe) - 0.0001) {
-            throw new MannyActionException(409, 'probe_deuterium_full', 'The probe deuterium tank is already full.');
-        }
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $manny->currentTask = Manny::TASK_REFILLING_DEUTERIUM_TANK;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . self::DEUTERIUM_TANK_REFILL_SECONDS . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'durationSeconds' => self::DEUTERIUM_TANK_REFILL_SECONDS,
-            'resourceType' => ResourceComposition::DEUTERIUM,
-        ];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->deuteriumTankRefillTaskHandler->start($probe, $uid);
     }
 
     public function startDeuteriumTransferToProbe(NeumannProbe $probe, string $uid, int $targetProbeId, float $amount): Manny
@@ -2712,24 +2721,6 @@ final class MannyService implements MannyTaskRuntime
         $manny->locationType = Manny::LOCATION_PROBE;
         $manny->sector = null;
         $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshDeuteriumTankRefill(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $probe->deuteriumStock = $this->maxDeuteriumPercent($probe);
-        $this->probes->save($probe);
-        $this->clearTask($manny, [
-            'lastTask' => Manny::TASK_REFILLING_DEUTERIUM_TANK,
-            'result' => 'success',
-            'resourceType' => ResourceComposition::DEUTERIUM,
-        ]);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;

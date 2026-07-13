@@ -23,8 +23,6 @@ interface MannyTaskRuntime
 
     public function refreshInspectSectorObject(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
-    public function refreshDeuteriumTankRefill(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
-
     public function refreshReturning(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
     public function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;

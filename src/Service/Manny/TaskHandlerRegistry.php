@@ -9,7 +9,11 @@ final class TaskHandlerRegistry
     /**
      * @return list<TaskHandlerInterface>
      */
-    public static function defaultHandlers(RepairTaskHandler $repair, DeuteriumTransferTaskHandler $deuteriumTransfer): array
+    public static function defaultHandlers(
+        RepairTaskHandler $repair,
+        DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
+        DeuteriumTransferTaskHandler $deuteriumTransfer,
+    ): array
     {
         return [
             $repair,
@@ -20,7 +24,7 @@ final class TaskHandlerRegistry
             new DetachStorageContainerTaskHandler(),
             new DropStorageContainerTaskHandler(),
             new InspectSectorObjectTaskHandler(),
-            new DeuteriumTankRefillTaskHandler(),
+            $deuteriumTankRefill,
             new ReturningTaskHandler(),
             new WaitingForSpaceTaskHandler(),
             new StorageMoveTaskHandler(),
