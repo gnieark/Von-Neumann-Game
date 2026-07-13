@@ -38,6 +38,7 @@ use VonNeumannGame\Service\Manny\SalvageTaskHandler;
 use VonNeumannGame\Service\Manny\ScutRelayTurnOnTaskHandler;
 use VonNeumannGame\Service\Manny\StorageMoveTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
+use VonNeumannGame\Service\Manny\WaypointBookmarkInstallationTaskHandler;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\DormantConstruct;
@@ -99,6 +100,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly SalvageTaskHandler $salvageTaskHandler;
     private readonly ScutRelayTurnOnTaskHandler $scutRelayTurnOnTaskHandler;
     private readonly StorageMoveTaskHandler $storageMoveTaskHandler;
+    private readonly WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallationTaskHandler;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -543,6 +545,39 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->waypointBookmarkInstallationTaskHandler = new WaypointBookmarkInstallationTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(NeumannProbe $probe): ?ProbeItem => $this->firstWaypointBookmarkItem($probe),
+            fn(NeumannProbe $probe, string $objectId): UniverseObject => $this->bookmarks->deployableTarget($probe, $objectId),
+            fn(UniverseObject $object): array => $this->bookmarkTargetArray($object),
+            function (ProbeItem $item): void {
+                $this->items->delete($item);
+            },
+            fn(): int => $this->waypointBookmarkInstallSeconds(),
+            fn(ProbeItem $item): array => $this->consumedItemPayload($item),
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(mixed $value): ?SectorCoordinates => $this->taskSectorCoordinates($value),
+            fn(NeumannProbe $probe, int $playerId, string $playerName, string $objectId, string $name, ?SectorCoordinates $sectorCoordinates): UniverseObject => $this->bookmarks->deployForPlayer($probe, $playerId, $playerName, $objectId, $name, $sectorCoordinates),
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->taskRefresher = new MannyTaskRefresher(
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
@@ -557,6 +592,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->salvageTaskHandler,
                 $this->scutRelayTurnOnTaskHandler,
                 $this->storageMoveTaskHandler,
+                $this->waypointBookmarkInstallationTaskHandler,
             ),
             $this,
             fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
@@ -1031,42 +1067,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startWaypointBookmarkInstallationLocked(NeumannProbe $probe, Player $player, string $uid, string $objectId, string $name): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to install a waypoint bookmark.');
-        }
-
-        $name = trim($name);
-        if ($name === '' || strlen($name) > 80) {
-            throw new MannyActionException(400, 'bad_request', 'Waypoint bookmark name must contain 1 to 80 characters.');
-        }
-        $item = $this->firstWaypointBookmarkItem($probe)
-            ?? throw new MannyActionException(404, 'waypoint_bookmark_not_found', 'Waypoint bookmark not found in probe inventory.');
-        $target = $this->bookmarks->deployableTarget($probe, $objectId);
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $this->items->delete($item);
-
-        $manny->currentTask = Manny::TASK_INSTALLING_WAYPOINT_BOOKMARK;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $this->waypointBookmarkInstallSeconds() . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'objectId' => $objectId,
-            'name' => $name,
-            'durationSeconds' => $this->waypointBookmarkInstallSeconds(),
-            'targetSector' => $probe->currentSector->toArray(),
-            'target' => $this->bookmarkTargetArray($target),
-            'playerId' => $player->id,
-            'playerName' => $player->displayName ?? $player->username,
-            'reservedItem' => $this->consumedItemPayload($item),
-        ];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->waypointBookmarkInstallationTaskHandler->start($probe, $player, $uid, $objectId, $name);
     }
 
     public function startDeuteriumTankRefill(NeumannProbe $probe, string $uid): Manny
@@ -2251,42 +2252,6 @@ final class MannyService implements MannyTaskRuntime
             $this->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
         }
 
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshWaypointBookmarkInstallation(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $sectorCoordinates = $this->taskSectorCoordinates($manny->taskPayload['targetSector'] ?? null) ?? $probe->currentSector;
-        $result = [
-            'lastTask' => Manny::TASK_INSTALLING_WAYPOINT_BOOKMARK,
-            'objectId' => (string) ($manny->taskPayload['objectId'] ?? ''),
-            'name' => (string) ($manny->taskPayload['name'] ?? ''),
-            'target' => $manny->taskPayload['target'] ?? null,
-        ];
-
-        try {
-            $object = $this->bookmarks->deployForPlayer(
-                $probe,
-                (int) ($manny->taskPayload['playerId'] ?? 0),
-                (string) ($manny->taskPayload['playerName'] ?? ''),
-                (string) ($manny->taskPayload['objectId'] ?? ''),
-                (string) ($manny->taskPayload['name'] ?? ''),
-                $sectorCoordinates,
-            );
-            $result['result'] = 'success';
-            $result['object'] = $object->toArray();
-        } catch (MannyActionException $e) {
-            $result['result'] = 'failed';
-            $result['failureReason'] = $e->errorCode;
-        }
-
-        $this->clearTask($manny, $result);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;

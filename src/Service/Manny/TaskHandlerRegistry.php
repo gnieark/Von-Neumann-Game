@@ -22,6 +22,7 @@ final class TaskHandlerRegistry
         SalvageTaskHandler $salvage,
         ScutRelayTurnOnTaskHandler $scutRelayTurnOn,
         StorageMoveTaskHandler $storageMove,
+        WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallation,
     ): array
     {
         return [
@@ -29,7 +30,7 @@ final class TaskHandlerRegistry
             new MiningTaskHandler(),
             new CraftingTaskHandler(),
             $salvage,
-            new WaypointBookmarkInstallationTaskHandler(),
+            $waypointBookmarkInstallation,
             $detachStorageContainer,
             $dropStorageContainer,
             $inspectSectorObject,
