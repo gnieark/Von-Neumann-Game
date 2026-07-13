@@ -35,6 +35,8 @@ use VonNeumannGame\Service\Manny\ProbeImprovementTaskHandler;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Service\Manny\ReturningTaskHandler;
 use VonNeumannGame\Service\Manny\SalvageTaskHandler;
+use VonNeumannGame\Service\Manny\ScutRelayTurnOnTaskHandler;
+use VonNeumannGame\Service\Manny\StorageMoveTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -95,6 +97,8 @@ final class MannyService implements MannyTaskRuntime
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
     private readonly ReturningTaskHandler $returningTaskHandler;
     private readonly SalvageTaskHandler $salvageTaskHandler;
+    private readonly ScutRelayTurnOnTaskHandler $scutRelayTurnOnTaskHandler;
+    private readonly StorageMoveTaskHandler $storageMoveTaskHandler;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -450,6 +454,95 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->scutRelayTurnOnTaskHandler = new ScutRelayTurnOnTaskHandler(
+            function (): void {
+                if ($this->scut === null) {
+                    throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
+                }
+            },
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(NeumannProbe $probe): bool => $this->currentSectorHasStar($probe),
+            fn(int $relayId): ?ScutRelay => $this->scut?->relayById($relayId),
+            fn(NeumannProbe $probe, string $type): ?ProbeItem => $this->firstItemOfType($probe, $type),
+            fn(ProbeItem $item): array => $this->consumedItemPayload($item),
+            function (ProbeItem $item): void {
+                $this->items->delete($item);
+            },
+            fn(): int => $this->scutRelayTurnOnSeconds(),
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            function (int $relayId, ?string $networkName): ScutRelay {
+                if ($this->scut === null) {
+                    throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
+                }
+
+                return $this->scut->turnOnRelay($relayId, $networkName);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
+        $this->storageMoveTaskHandler = new StorageMoveTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            fn(): int => $this->storageMoveSecondsPerUnit(),
+            function (NeumannProbe $probe, string $resourceType, float $amount, string $fromContainerId, string $toContainerId): void {
+                $this->storage->assertCanMoveResource($probe, $resourceType, $amount, $fromContainerId, $toContainerId);
+            },
+            function (NeumannProbe $probe, array $itemIds, string $toContainerId): void {
+                $this->storage->assertCanMoveItems($probe, $itemIds, $toContainerId);
+            },
+            function (NeumannProbe $probe, array $mannyIds, string $toContainerId): void {
+                $this->storage->assertCanMoveMannies($probe, $mannyIds, $toContainerId);
+            },
+            fn(string $kind, float $amount): int => $this->storage->storageMoveDurationSeconds($kind, $amount),
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            function (NeumannProbe $probe, string $resourceType, float $amount, string $fromContainerId, string $toContainerId, int $mannyId): void {
+                $this->storage->moveResource($probe, $resourceType, $amount, $fromContainerId, $toContainerId, $mannyId);
+            },
+            function (NeumannProbe $probe, array $itemIds, string $toContainerId, int $mannyId): void {
+                $this->storage->moveItems($probe, $itemIds, $toContainerId, $mannyId);
+            },
+            function (NeumannProbe $probe, string $itemId, string $toContainerId, int $mannyId): void {
+                $this->storage->moveItem($probe, $itemId, $toContainerId, $mannyId);
+            },
+            function (NeumannProbe $probe, array $mannyIds, string $toContainerId, int $mannyId): void {
+                $this->storage->moveStoredMannies($probe, $mannyIds, $toContainerId, $mannyId);
+            },
+            function (NeumannProbe $probe, string $targetMannyId, string $toContainerId, int $mannyId): void {
+                $this->storage->moveStoredManny($probe, $targetMannyId, $toContainerId, $mannyId);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->taskRefresher = new MannyTaskRefresher(
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
@@ -462,6 +555,8 @@ final class MannyService implements MannyTaskRuntime
                 $this->deuteriumTransferTaskHandler,
                 $this->returningTaskHandler,
                 $this->salvageTaskHandler,
+                $this->scutRelayTurnOnTaskHandler,
+                $this->storageMoveTaskHandler,
             ),
             $this,
             fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
@@ -1010,51 +1105,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startScutRelayTurnOnLocked(NeumannProbe $probe, string $uid, int $relayId, ?string $networkName = null): Manny
     {
-        if ($this->scut === null) {
-            throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
-        }
-
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to turn on a SCUT relay.');
-        }
-        if (!$this->currentSectorHasStar($probe)) {
-            throw new MannyActionException(422, 'scut_relay_requires_star', 'A SCUT relay needs solar energy and can only be turned on in a sector with a star.');
-        }
-
-        $relay = $this->scut->relayById($relayId)
-            ?? throw new MannyActionException(404, 'scut_relay_not_found', 'SCUT relay not found.');
-        if (!$relay->sector->equals($probe->currentSector)) {
-            throw new MannyActionException(422, 'scut_relay_not_in_sector', 'SCUT relay must be in the current sector.');
-        }
-        if ($relay->isOn()) {
-            throw new MannyActionException(409, 'scut_relay_already_on', 'SCUT relay is already on.');
-        }
-
-        $circuit = $this->firstItemOfType($probe, ProbeItem::TYPE_INTEGRATED_CIRCUIT);
-        if ($circuit === null) {
-            throw new MannyActionException(422, 'missing_electronic_card', 'A SCUT relay requires one integrated circuit.');
-        }
-        $this->items->delete($circuit);
-
-        $durationSeconds = $this->scutRelayTurnOnSeconds();
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $manny->currentTask = Manny::TASK_TURNING_ON_SCUT_RELAY;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'relayId' => $relay->id,
-            'networkName' => $networkName !== null ? trim($networkName) : null,
-            'durationSeconds' => $durationSeconds,
-            'consumedItem' => $this->consumedItemPayload($circuit),
-        ];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->scutRelayTurnOnTaskHandler->start($probe, $uid, $relayId, $networkName);
     }
 
     /**
@@ -1073,92 +1124,7 @@ final class MannyService implements MannyTaskRuntime
      */
     private function startStorageMoveLocked(NeumannProbe $probe, string $uid, array $payload): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to move storage.');
-        }
-
-        $kind = strtolower(trim((string) ($payload['kind'] ?? '')));
-        if ($kind === '') {
-            $kind = isset($payload['resourceType']) ? 'resource' : (isset($payload['targetMannyId']) ? 'manny' : 'item');
-        }
-        $toContainerId = (string) ($payload['toContainerId'] ?? $payload['toContainer'] ?? '');
-        if ($toContainerId === '') {
-            throw new MannyActionException(400, 'bad_request', 'Storage move target container is required.');
-        }
-
-        $movePayload = [
-            'kind' => $kind,
-            'toContainerId' => $toContainerId,
-        ];
-        $durationSeconds = $this->storageMoveSecondsPerUnit();
-
-        if ($kind === 'resource') {
-            $fromContainerId = (string) ($payload['fromContainerId'] ?? $payload['fromContainer'] ?? '');
-            $resourceType = (string) ($payload['resourceType'] ?? $payload['type'] ?? '');
-            $amount = isset($payload['amount']) && is_numeric($payload['amount']) ? round((float) $payload['amount'], 4) : 0.0;
-            if ($fromContainerId === '' || $resourceType === '' || $amount <= 0.0) {
-                throw new MannyActionException(400, 'bad_request', 'Resource storage move requires fromContainerId, toContainerId, resourceType and amount.');
-            }
-            $this->storage->assertCanMoveResource($probe, $resourceType, $amount, $fromContainerId, $toContainerId);
-            $durationSeconds = $this->storage->storageMoveDurationSeconds('resource', $amount);
-            $movePayload += [
-                'fromContainerId' => $fromContainerId,
-                'resourceType' => $resourceType,
-                'amount' => $amount,
-            ];
-        } elseif ($kind === 'item') {
-            $itemIds = $this->stringListPayload($payload['itemIds'] ?? null);
-            $itemId = (string) ($payload['itemId'] ?? $payload['targetId'] ?? '');
-            if ($itemIds === [] && $itemId !== '') {
-                $itemIds = [$itemId];
-            }
-            $quantity = isset($payload['quantity']) && is_numeric($payload['quantity'])
-                ? max(1, (int) floor((float) $payload['quantity']))
-                : count($itemIds);
-            $itemIds = array_slice($itemIds, 0, $quantity);
-            if ($itemIds === []) {
-                throw new MannyActionException(400, 'bad_request', 'Item storage move requires itemId and toContainerId.');
-            }
-            $this->storage->assertCanMoveItems($probe, $itemIds, $toContainerId);
-            $durationSeconds = $this->storage->storageMoveDurationSeconds('item', count($itemIds));
-            $movePayload['itemIds'] = $itemIds;
-            $movePayload['quantity'] = count($itemIds);
-        } elseif ($kind === 'manny') {
-            $targetMannyIds = $this->stringListPayload($payload['targetMannyIds'] ?? $payload['mannyIds'] ?? null);
-            $targetMannyId = (string) ($payload['targetMannyId'] ?? $payload['mannyId'] ?? $payload['targetId'] ?? '');
-            if ($targetMannyIds === [] && $targetMannyId !== '') {
-                $targetMannyIds = [$targetMannyId];
-            }
-            $quantity = isset($payload['quantity']) && is_numeric($payload['quantity'])
-                ? max(1, (int) floor((float) $payload['quantity']))
-                : count($targetMannyIds);
-            $targetMannyIds = array_slice($targetMannyIds, 0, $quantity);
-            if ($targetMannyIds === []) {
-                throw new MannyActionException(400, 'bad_request', 'Manny storage move requires targetMannyId and toContainerId.');
-            }
-            if (in_array($uid, $targetMannyIds, true)) {
-                throw new MannyActionException(422, 'invalid_storage_move', 'A Manny cannot move its own storage slot while executing the order.');
-            }
-            $this->storage->assertCanMoveMannies($probe, $targetMannyIds, $toContainerId);
-            $durationSeconds = $this->storage->storageMoveDurationSeconds('manny', count($targetMannyIds));
-            $movePayload['targetMannyIds'] = $targetMannyIds;
-            $movePayload['quantity'] = count($targetMannyIds);
-        } else {
-            throw new MannyActionException(400, 'bad_request', 'Storage move kind must be resource, item or manny.');
-        }
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $manny->currentTask = Manny::TASK_MOVING_STORAGE;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
-        $manny->taskPayload = $movePayload + ['durationSeconds' => $durationSeconds];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->storageMoveTaskHandler->start($probe, $uid, $payload);
     }
 
     public function recallManny(NeumannProbe $probe, string $uid): Manny
@@ -2290,95 +2256,6 @@ final class MannyService implements MannyTaskRuntime
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    public function refreshStorageMove(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $kind = (string) ($manny->taskPayload['kind'] ?? '');
-        try {
-            if ($kind === 'resource') {
-                $this->storage->moveResource(
-                    $probe,
-                    (string) ($manny->taskPayload['resourceType'] ?? ''),
-                    (float) ($manny->taskPayload['amount'] ?? 0.0),
-                    (string) ($manny->taskPayload['fromContainerId'] ?? ''),
-                    (string) ($manny->taskPayload['toContainerId'] ?? ''),
-                    $manny->id,
-                );
-            } elseif ($kind === 'item') {
-                $itemIds = $this->stringListPayload($manny->taskPayload['itemIds'] ?? null);
-                if ($itemIds !== []) {
-                    $this->storage->moveItems($probe, $itemIds, (string) ($manny->taskPayload['toContainerId'] ?? ''), $manny->id);
-                } else {
-                    $this->storage->moveItem(
-                        $probe,
-                        (string) ($manny->taskPayload['itemId'] ?? ''),
-                        (string) ($manny->taskPayload['toContainerId'] ?? ''),
-                        $manny->id,
-                    );
-                }
-            } elseif ($kind === 'manny') {
-                $targetMannyIds = $this->stringListPayload($manny->taskPayload['targetMannyIds'] ?? null);
-                if ($targetMannyIds !== []) {
-                    $this->storage->moveStoredMannies($probe, $targetMannyIds, (string) ($manny->taskPayload['toContainerId'] ?? ''), $manny->id);
-                } else {
-                    $this->storage->moveStoredManny(
-                        $probe,
-                        (string) ($manny->taskPayload['targetMannyId'] ?? ''),
-                        (string) ($manny->taskPayload['toContainerId'] ?? ''),
-                        $manny->id,
-                    );
-                }
-            }
-            $this->clearTask($manny);
-        } catch (MannyActionException $exception) {
-            $this->clearTask($manny, [
-                'result' => 'failed',
-                'failureReason' => $exception->errorCode,
-            ]);
-        }
-
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshScutRelayTurnOn(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-        if ($this->scut === null) {
-            throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
-        }
-
-        $relayId = (int) ($manny->taskPayload['relayId'] ?? 0);
-        $networkName = isset($manny->taskPayload['networkName']) && is_string($manny->taskPayload['networkName'])
-            ? $manny->taskPayload['networkName']
-            : null;
-        $result = [
-            'lastTask' => Manny::TASK_TURNING_ON_SCUT_RELAY,
-            'relayId' => $relayId,
-        ];
-
-        try {
-            $relay = $this->scut->turnOnRelay($relayId, $networkName);
-            $result['result'] = 'success';
-            $result['networkId'] = $relay->networkId;
-            $result['status'] = $relay->status;
-        } catch (MannyActionException $e) {
-            $result['result'] = 'failed';
-            $result['failureReason'] = $e->errorCode;
-        }
-
-        $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
     public function refreshWaypointBookmarkInstallation(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
         if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
@@ -2429,24 +2306,6 @@ final class MannyService implements MannyTaskRuntime
     private function currentSectorHasStar(NeumannProbe $probe): bool
     {
         return $this->sectors->getOrCreateSector($probe->currentSector)->hasStar();
-    }
-
-    /**
-     * @return array<string>
-     */
-    private function stringListPayload(mixed $value): array
-    {
-        if (is_string($value)) {
-            $value = [$value];
-        }
-        if (!is_array($value)) {
-            return [];
-        }
-
-        return array_values(array_unique(array_filter(array_map(
-            static fn(mixed $item): string => trim((string) $item),
-            $value,
-        ), static fn(string $item): bool => $item !== '')));
     }
 
     private function taskSectorCoordinates(mixed $value): ?\VonNeumannGame\Sector\SectorCoordinates
