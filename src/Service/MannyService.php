@@ -22,6 +22,7 @@ use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
+use VonNeumannGame\Service\Manny\DetachStorageContainerTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTankRefillTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTransferTaskHandler;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
@@ -79,6 +80,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly MannyPublicPresenter $presenter;
     private readonly MannyTaskRefresher $taskRefresher;
     private readonly RepairTaskHandler $repairTaskHandler;
+    private readonly DetachStorageContainerTaskHandler $detachStorageContainerTaskHandler;
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
 
@@ -108,6 +110,39 @@ final class MannyService implements MannyTaskRuntime
             $this->storage,
             $this->config,
             fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+        );
+        $this->detachStorageContainerTaskHandler = new DetachStorageContainerTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(NeumannProbe $probe, string $objectId): ?UniverseObject => $this->findObjectInCurrentSector($probe, $objectId),
+            fn(NeumannProbe $probe, string $containerId, int $ownerPlayerId): array => $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, $ownerPlayerId),
+            fn(): int => $this->detachStorageContainerSeconds(),
+            fn(mixed $target): array => $target instanceof UniverseObject ? $this->bookmarkTargetArray($target) : [],
+            fn(string $objectId, ?string $targetObjectId): array => $this->hiddenDetachedContainerDetectionPayload($objectId, $targetObjectId),
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
+            function (SectorContent $sector): void {
+                $this->sectors->saveSector($sector);
+            },
+            fn(SectorDetachedContainer $container): array => $this->detachedContainerPublicArray($container),
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
         $this->deuteriumTankRefillTaskHandler = new DeuteriumTankRefillTaskHandler(
             function (NeumannProbe $probe): void {
@@ -166,6 +201,7 @@ final class MannyService implements MannyTaskRuntime
         $this->taskRefresher = new MannyTaskRefresher(
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
+                $this->detachStorageContainerTaskHandler,
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
             ),
@@ -643,54 +679,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startDetachStorageContainerLocked(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $mode, ?string $objectId = null): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to detach storage.');
-        }
-
-        $mode = strtolower(trim($mode));
-        if (!in_array($mode, [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID], true)) {
-            throw new MannyActionException(400, 'bad_request', 'Detach mode must be drifting or hidden_on_asteroid.');
-        }
-
-        $target = null;
-        if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
-            if ($objectId === null || trim($objectId) === '') {
-                throw new MannyActionException(400, 'bad_request', 'objectId is required for hidden_on_asteroid mode.');
-            }
-            $target = $this->findObjectInCurrentSector($probe, $objectId);
-            if (!$target instanceof Asteroid) {
-                throw new MannyActionException(422, 'invalid_asteroid_target', 'Hidden containers must be attached to an asteroid in the current sector.');
-            }
-        }
-
-        $snapshot = $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, $ownerPlayerId);
-        $objectId = $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID ? $objectId : null;
-        $detachedObjectId = SectorDetachedContainer::objectIdForContainer((string) $snapshot['sourceContainerId']);
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $durationSeconds = $this->detachStorageContainerSeconds();
-
-        $manny->currentTask = Manny::TASK_DETACHING_STORAGE_CONTAINER;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'containerId' => $containerId,
-            'objectId' => $detachedObjectId,
-            'mode' => $mode,
-            'targetObjectId' => $objectId,
-            'durationSeconds' => $durationSeconds,
-            'snapshot' => $snapshot,
-            'target' => $target instanceof Asteroid ? $this->bookmarkTargetArray($target) : null,
-        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
-            ? ['artificialObjectDetected' => $this->hiddenDetachedContainerDetectionPayload($detachedObjectId, (string) $objectId)]
-            : []);
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->detachStorageContainerTaskHandler->start($probe, $ownerPlayerId, $uid, $containerId, $mode, $objectId);
     }
 
     public function startDropStorageContainerOnPlanet(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $planetId): Manny
@@ -2530,67 +2519,6 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshDetachStorageContainer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $snapshot = is_array($manny->taskPayload['snapshot'] ?? null) ? $manny->taskPayload['snapshot'] : [];
-        $mode = (string) ($manny->taskPayload['mode'] ?? SectorDetachedContainer::MODE_DRIFTING);
-        $objectId = (string) ($manny->taskPayload['objectId'] ?? SectorDetachedContainer::objectIdForContainer((string) ($snapshot['sourceContainerId'] ?? 'storage')));
-        $targetObjectId = isset($manny->taskPayload['targetObjectId']) ? (string) $manny->taskPayload['targetObjectId'] : null;
-        $sectorCoordinates = $probe->currentSector;
-        $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
-        $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
-
-        $object = new SectorDetachedContainer(
-            $objectId,
-            (string) ($containerData['label'] ?? 'Detached storage container'),
-            $mode,
-            (int) ($snapshot['ownerProbeId'] ?? $probe->id),
-            (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
-            null,
-            $targetObjectId,
-            (float) ($containerData['capacity'] ?? 0.0),
-            ProbeInventory::CAPACITY_UNIT,
-            gmdate('c'),
-            $snapshot + [
-                'mode' => $mode,
-                'sector' => $sectorCoordinates->toArray(),
-                'targetObjectId' => $targetObjectId,
-            ],
-            $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
-                ? 'Detached storage container hidden on an asteroid.'
-                : 'Detached storage container drifting in open space.',
-            [],
-            $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID ? [(int) ($snapshot['ownerPlayerId'] ?? $probe->playerId)] : [],
-        );
-
-        if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
-            $sector->addHiddenDetachedContainer($object);
-        } else {
-            if (!$sector->replaceObject($object)) {
-                $sector->addObject($object);
-            }
-        }
-        $this->sectors->saveSector($sector);
-
-        $this->clearTask($manny, [
-            'lastTask' => Manny::TASK_DETACHING_STORAGE_CONTAINER,
-            'result' => 'success',
-            'objectId' => $object->getId(),
-            'mode' => $mode,
-            'targetObjectId' => $targetObjectId,
-            'detachedContainer' => $this->detachedContainerPublicArray($object),
-        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
-            ? ['artificialObjectDetected' => $this->hiddenDetachedContainerDetectionPayload($object->getId(), $targetObjectId)]
-            : []));
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
