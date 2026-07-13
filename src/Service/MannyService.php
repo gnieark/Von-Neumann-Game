@@ -34,6 +34,7 @@ use VonNeumannGame\Service\Manny\ProbeAssemblyTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeImprovementTaskHandler;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Service\Manny\ReturningTaskHandler;
+use VonNeumannGame\Service\Manny\SalvageTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -93,6 +94,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
     private readonly ReturningTaskHandler $returningTaskHandler;
+    private readonly SalvageTaskHandler $salvageTaskHandler;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -402,6 +404,52 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->salvageTaskHandler = new SalvageTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(NeumannProbe $probe, string $objectId): UniverseObject|ScutRelay|null => $this->findObjectInCurrentSector($probe, $objectId) ?? $this->findScutRelayInCurrentSector($probe, $objectId),
+            fn(UniverseObject|ScutRelay $target): bool => $this->isSalvageableTarget($target),
+            function (NeumannProbe $probe, ScutRelay $target, int $actorMannyId): void {
+                $this->ensureScutRelayNotAlreadyBeingSalvaged($probe, $target, $actorMannyId);
+            },
+            fn(NeumannProbe $probe, SectorDriftingItem $target): array => $this->reserveDriftingItemForSalvage($probe, $target),
+            fn(NeumannProbe $probe, SectorDetachedContainer $target): array => $this->reserveDetachedContainerForSalvage($probe, $target),
+            fn(UniverseObject|ScutRelay $target): array => $this->salvageTargetArray($target),
+            fn(): int => $this->salvageSeconds(),
+            function (Manny $manny): void {
+                $this->storage->releaseMannyFromStorage($manny);
+            },
+            function (Manny $manny): void {
+                $this->removeMannyFromSector($manny);
+            },
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
+            fn(Manny $manny): ?array => $this->reservedSalvageItemPayload($manny),
+            fn(Manny $manny): ?array => $this->reservedDetachedContainerPayload($manny),
+            fn(SectorContent $sector, string $objectId): ?ScutRelay => $this->findScutRelayInSector($sector, $objectId),
+            fn(NeumannProbe $probe, SectorContent $sector, UniverseObject|ScutRelay $target): array => $this->completeSalvageTarget($probe, $sector, $target),
+            function (Manny $manny, NeumannProbe $probe, array $resultPayload): void {
+                $this->finishSalvageActor($manny, $probe, $resultPayload);
+            },
+            function (NeumannProbe $probe): void {
+                $this->probes->save($probe);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->taskRefresher = new MannyTaskRefresher(
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
@@ -413,6 +461,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
                 $this->returningTaskHandler,
+                $this->salvageTaskHandler,
             ),
             $this,
             fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
@@ -757,46 +806,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startSalvageLocked(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-
-        $target = $this->findObjectInCurrentSector($probe, $objectId) ?? $this->findScutRelayInCurrentSector($probe, $objectId);
-        if ($target === null || !$this->isSalvageableTarget($target)) {
-            throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
-        }
-        if ($target instanceof ScutRelay) {
-            $this->ensureScutRelayNotAlreadyBeingSalvaged($probe, $target, $manny->id);
-        }
-
-        $reservedItem = $target instanceof SectorDriftingItem
-            ? $this->reserveDriftingItemForSalvage($probe, $target)
-            : null;
-        $reservedDetachedContainer = $target instanceof SectorDetachedContainer
-            ? $this->reserveDetachedContainerForSalvage($probe, $target)
-            : null;
-
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $manny->locationType = Manny::LOCATION_SECTOR;
-        $manny->sector = $probe->currentSector;
-        $manny->currentTask = Manny::TASK_SALVAGE;
-        $manny->taskStartedAt = $now->format('c');
-        $salvageSeconds = $this->salvageSeconds();
-        $manny->taskEndsAt = $now->modify('+' . $salvageSeconds . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'objectId' => $objectId,
-            'durationSeconds' => $salvageSeconds,
-            'target' => $this->salvageTargetArray($target),
-            'result' => 'pending',
-        ] + ($reservedItem !== null ? ['reservedItem' => $reservedItem] : [])
-            + ($reservedDetachedContainer !== null ? ['reservedDetachedContainer' => $reservedDetachedContainer] : []);
-        $this->storage->releaseMannyFromStorage($manny);
-        $this->removeMannyFromSector($manny);
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->salvageTaskHandler->start($probe, $uid, $objectId);
     }
 
     public function startDetachStorageContainer(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $mode, ?string $objectId = null): Manny
@@ -1504,78 +1514,6 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $this->clearTask($manny);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshSalvage(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
-        $sectorCoordinates = $manny->sector ?? $probe->currentSector;
-        $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
-        $reservedItem = $this->reservedSalvageItemPayload($manny);
-        $result = [
-            'lastTask' => Manny::TASK_SALVAGE,
-            'objectId' => $objectId,
-            'target' => $manny->taskPayload['target'] ?? null,
-        ];
-
-        if ($reservedItem !== null) {
-            $result['result'] = 'success';
-            $result['reservedItem'] = $reservedItem;
-            $result['salvaged'] = [
-                'type' => $reservedItem['type'],
-                'name' => $reservedItem['name'],
-                'quantity' => $reservedItem['quantity'],
-                'containerSpace' => $reservedItem['containerSpace'],
-            ];
-            $this->finishSalvageActor($manny, $probe, $result);
-            $this->probes->save($probe);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
-        }
-        $reservedDetachedContainer = $this->reservedDetachedContainerPayload($manny);
-        if ($reservedDetachedContainer !== null) {
-            $result['result'] = 'success';
-            $result['reservedDetachedContainer'] = $reservedDetachedContainer;
-            $result['salvaged'] = [
-                'type' => 'detached_storage_container',
-                'id' => $reservedDetachedContainer['objectId'],
-                'mode' => $reservedDetachedContainer['mode'],
-                'capacity' => $reservedDetachedContainer['capacity'],
-                'capacityUnit' => $reservedDetachedContainer['capacityUnit'],
-            ];
-            $this->finishSalvageActor($manny, $probe, $result);
-            $this->probes->save($probe);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
-        }
-
-        $target = $objectId !== '' ? $sector->findObjectById($objectId) : null;
-        if ($target === null) {
-            $target = $this->findScutRelayInSector($sector, $objectId);
-        }
-        if ($target === null || !$this->isSalvageableTarget($target)) {
-            $result['result'] = 'failed';
-            $result['failureReason'] = 'target_unavailable';
-            $this->finishSalvageActor($manny, $probe, $result);
-            $this->probes->save($probe);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
-        }
-
-        $salvageResult = $this->completeSalvageTarget($probe, $sector, $target);
-        $result = array_merge($result, $salvageResult);
-        $this->finishSalvageActor($manny, $probe, $result);
-        $this->probes->save($probe);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;

@@ -13,8 +13,6 @@ interface MannyTaskRuntime
 
     public function refreshCrafting(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
-    public function refreshSalvage(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
-
     public function refreshWaypointBookmarkInstallation(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
     public function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;

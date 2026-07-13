@@ -19,13 +19,14 @@ final class TaskHandlerRegistry
         DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
         DeuteriumTransferTaskHandler $deuteriumTransfer,
         ReturningTaskHandler $returning,
+        SalvageTaskHandler $salvage,
     ): array
     {
         return [
             $repair,
             new MiningTaskHandler(),
             new CraftingTaskHandler(),
-            new SalvageTaskHandler(),
+            $salvage,
             new WaypointBookmarkInstallationTaskHandler(),
             $detachStorageContainer,
             $dropStorageContainer,
