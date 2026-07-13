@@ -12,6 +12,7 @@ final class TaskHandlerRegistry
     public static function defaultHandlers(
         RepairTaskHandler $repair,
         DetachStorageContainerTaskHandler $detachStorageContainer,
+        DropStorageContainerTaskHandler $dropStorageContainer,
         DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
         DeuteriumTransferTaskHandler $deuteriumTransfer,
     ): array
@@ -23,7 +24,7 @@ final class TaskHandlerRegistry
             new SalvageTaskHandler(),
             new WaypointBookmarkInstallationTaskHandler(),
             $detachStorageContainer,
-            new DropStorageContainerTaskHandler(),
+            $dropStorageContainer,
             new InspectSectorObjectTaskHandler(),
             $deuteriumTankRefill,
             new ReturningTaskHandler(),

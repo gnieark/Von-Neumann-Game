@@ -25,6 +25,7 @@ use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Service\Manny\DetachStorageContainerTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTankRefillTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTransferTaskHandler;
+use VonNeumannGame\Service\Manny\DropStorageContainerTaskHandler;
 use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRefresher;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
@@ -81,6 +82,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly MannyTaskRefresher $taskRefresher;
     private readonly RepairTaskHandler $repairTaskHandler;
     private readonly DetachStorageContainerTaskHandler $detachStorageContainerTaskHandler;
+    private readonly DropStorageContainerTaskHandler $dropStorageContainerTaskHandler;
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
 
@@ -144,6 +146,45 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->dropStorageContainerTaskHandler = new DropStorageContainerTaskHandler(
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(NeumannProbe $probe, string $objectId): ?UniverseObject => $this->findObjectInCurrentSector($probe, $objectId),
+            fn(NeumannProbe $probe): ?ProbeItem => $this->firstItemOfType($probe, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT),
+            fn(ProbeItem $item): array => $this->consumedItemPayload($item),
+            fn(NeumannProbe $probe, string $containerId, int $ownerPlayerId): array => $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, $ownerPlayerId),
+            function (ProbeItem $item): void {
+                $this->items->delete($item);
+            },
+            fn(): int => $this->dropStorageContainerSeconds(),
+            fn(mixed $target): array => $target instanceof UniverseObject ? $this->bookmarkTargetArray($target) : [],
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
+            function (SectorContent $sector): void {
+                $this->sectors->saveSector($sector);
+            },
+            function (NeumannProbe $probe, SectorContent $sector, string $planetId, int $playerId, string $containerObjectId, array $resources): void {
+                $this->missions?->handleReturnToSpaceProgramMaterialDrop($probe, $sector, $planetId, $playerId, $containerObjectId, $resources);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->deuteriumTankRefillTaskHandler = new DeuteriumTankRefillTaskHandler(
             function (NeumannProbe $probe): void {
                 $this->ensureProbeAcceptsMannyOrders($probe);
@@ -202,6 +243,7 @@ final class MannyService implements MannyTaskRuntime
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
                 $this->detachStorageContainerTaskHandler,
+                $this->dropStorageContainerTaskHandler,
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
             ),
@@ -692,52 +734,7 @@ final class MannyService implements MannyTaskRuntime
 
     private function startDropStorageContainerOnPlanetLocked(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $planetId): Manny
     {
-        $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
-        $this->ensureMannyInRange($manny, $probe);
-        $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
-        if (!$manny->isOnProbe()) {
-            throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to drop storage.');
-        }
-
-        $target = $this->findObjectInCurrentSector($probe, $planetId);
-        if (!$target instanceof Planet) {
-            throw new MannyActionException(422, 'invalid_planet_target', 'Storage containers can only be dropped on a planet in the current sector.');
-        }
-
-        $kit = $this->firstItemOfType($probe, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT);
-        if ($kit === null) {
-            throw new MannyActionException(422, 'missing_atmospheric_drop_kit', 'An atmospheric drop kit is required in probe inventory.');
-        }
-
-        $kitPayload = $this->consumedItemPayload($kit);
-        $snapshot = $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, $ownerPlayerId);
-        $snapshot['items'] = array_values(array_filter(
-            is_array($snapshot['items'] ?? null) ? $snapshot['items'] : [],
-            static fn(array $item): bool => ($item['uid'] ?? null) !== $kit->uid,
-        ));
-        $this->items->delete($kit);
-        $detachedObjectId = SectorDetachedContainer::planetDropObjectIdForContainer((string) $snapshot['sourceContainerId']);
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $durationSeconds = $this->dropStorageContainerSeconds();
-
-        $manny->currentTask = Manny::TASK_DROPPING_STORAGE_CONTAINER;
-        $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
-        $manny->taskPayload = [
-            'containerId' => $containerId,
-            'objectId' => $detachedObjectId,
-            'planetId' => $planetId,
-            'targetObjectId' => $planetId,
-            'durationSeconds' => $durationSeconds,
-            'snapshot' => $snapshot,
-            'consumedKit' => $kitPayload,
-            'target' => $this->bookmarkTargetArray($target),
-        ];
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->dropStorageContainerTaskHandler->start($probe, $ownerPlayerId, $uid, $containerId, $planetId);
     }
 
     public function startInspectSectorObject(NeumannProbe $probe, string $uid, string $objectId): Manny
@@ -2519,63 +2516,6 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $this->clearTask($manny, $result);
-        $this->mannies->save($manny);
-
-        return $this->mannies->findById($manny->id) ?? $manny;
-    }
-
-    public function refreshDropStorageContainer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
-    {
-        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
-            return $manny;
-        }
-
-        $snapshot = is_array($manny->taskPayload['snapshot'] ?? null) ? $manny->taskPayload['snapshot'] : [];
-        $objectId = (string) ($manny->taskPayload['objectId'] ?? SectorDetachedContainer::planetDropObjectIdForContainer((string) ($snapshot['sourceContainerId'] ?? 'storage')));
-        $targetObjectId = (string) ($manny->taskPayload['targetObjectId'] ?? $manny->taskPayload['planetId'] ?? '');
-        $sectorCoordinates = $probe->currentSector;
-        $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
-        $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
-
-        $object = new SectorDetachedContainer(
-            $objectId,
-            (string) ($containerData['label'] ?? 'Planet-dropped storage container'),
-            SectorDetachedContainer::MODE_DROPPED_ON_PLANET,
-            (int) ($snapshot['ownerProbeId'] ?? $probe->id),
-            (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
-            $probe->id,
-            $targetObjectId !== '' ? $targetObjectId : null,
-            (float) ($containerData['capacity'] ?? 0.0),
-            ProbeInventory::CAPACITY_UNIT,
-            gmdate('c'),
-            $snapshot + [
-                'mode' => SectorDetachedContainer::MODE_DROPPED_ON_PLANET,
-                'sector' => $sectorCoordinates->toArray(),
-                'targetObjectId' => $targetObjectId,
-                'originProbeId' => $probe->id,
-                'consumedKit' => $manny->taskPayload['consumedKit'] ?? null,
-            ],
-            'Storage container dropped on a planet with an atmospheric descent kit.',
-        );
-
-        $sector->addPlanetDroppedContainer($object);
-        $this->missions?->handleReturnToSpaceProgramMaterialDrop(
-            $probe,
-            $sector,
-            $targetObjectId,
-            (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
-            $object->getId(),
-            is_array($snapshot['resources'] ?? null) ? $snapshot['resources'] : [],
-        );
-        $this->sectors->saveSector($sector);
-
-        $this->clearTask($manny, [
-            'lastTask' => Manny::TASK_DROPPING_STORAGE_CONTAINER,
-            'result' => 'success',
-            'objectId' => $object->getId(),
-            'mode' => SectorDetachedContainer::MODE_DROPPED_ON_PLANET,
-            'targetObjectId' => $targetObjectId,
-        ]);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
