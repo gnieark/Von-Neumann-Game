@@ -1215,6 +1215,95 @@ button.account-menu-item {
     background: rgba(209, 139, 117, .1);
 }
 
+.probe-logbook {
+    display: grid;
+    gap: 0;
+    margin-top: 16px;
+}
+
+.probe-logbook-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 50px;
+    margin-top: 0;
+}
+
+.probe-logbook-button {
+    width: 34px;
+    min-height: 34px;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.probe-logbook-title.sector-summary {
+    border-radius: 0;
+    color: #e6ff99;
+    font-size: 1.05rem;
+}
+
+.probe-logbook-content {
+    min-height: 96px;
+    margin: 0;
+    padding: 10px 14px 14px;
+    border: 1px solid rgba(99, 150, 115, .34);
+    border-top: 0;
+    border-radius: 0 0 3px 3px;
+    background:
+        linear-gradient(rgba(155, 255, 139, .035) 1px, transparent 1px) 0 0 / 100% 6px,
+        linear-gradient(180deg, #050806, #030604);
+    color: rgba(217, 239, 208, .88);
+    font-family: "Lucida Console", "Courier New", monospace;
+    font-size: .92rem;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    text-shadow: 0 0 5px rgba(140, 255, 129, .14);
+}
+
+.probe-logbook-position {
+    margin: 0 0 8px;
+    color: rgba(172, 217, 161, .62);
+    font-size: .82rem;
+}
+
+.probe-logbook-page-content {
+    margin: 0;
+}
+
+.probe-logbook-form {
+    display: grid;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid rgba(99, 150, 115, .34);
+    border-top: 0;
+    background: #071009;
+}
+
+.probe-logbook-form[hidden] {
+    display: none;
+}
+
+.probe-logbook-form textarea {
+    min-height: 150px;
+}
+
+.probe-logbook-form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.probe-logbook-status {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: .9rem;
+}
+
+.probe-logbook-status-error {
+    color: var(--error);
+}
+
 .probe-instance-accordion {
     display: grid;
     gap: 0;

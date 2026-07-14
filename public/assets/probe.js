@@ -11,6 +11,16 @@
     let probeImprovementsLoadPromise = null;
     let probeList = null;
     let probeNotice = null;
+    let currentProbeId = "";
+    let logbookProbeId = "";
+    let logbookLoading = false;
+    let logbookState = {
+        "page": null,
+        "offset": 0,
+        "total": 0,
+        "mode": "",
+        "notice": "",
+    };
 
     function withVng(callback) {
         if (window.VNG) {
@@ -63,6 +73,126 @@
             window.clearTimeout(movementTickTimer);
             movementTickTimer = null;
         }
+    }
+
+    function resolveLogbookProbeId() {
+        const selected = typeof window.VNG.selectedProbeId === "function" ? window.VNG.selectedProbeId() : "";
+
+        return currentProbeId || selected || "";
+    }
+
+    function logbookApiPath(suffix) {
+        const probeId = resolveLogbookProbeId();
+        if (!probeId) {
+            return "";
+        }
+
+        const normalizedSuffix = suffix ? (String(suffix).startsWith("/") ? String(suffix) : "/" + String(suffix)) : "";
+
+        return "/api/probe/" + encodeURIComponent(String(probeId)) + normalizedSuffix;
+    }
+
+    function logbookContentHtml(content) {
+        const escaped = window.VNG.escapeHtml(content || "");
+
+        return escaped.replace(/\r\n|\r|\n/g, "<br>");
+    }
+
+    function logbookCurrentPosition() {
+        if (logbookState.total <= 0) {
+            return "";
+        }
+
+        return window.VNG.numberValue(logbookState.offset + 1) + "/" + window.VNG.numberValue(logbookState.total);
+    }
+
+    function setLogbookStatus(message, isError) {
+        const node = document.getElementById("probe-logbook-status");
+        if (!node) {
+            return;
+        }
+        node.hidden = !message;
+        node.textContent = message || "";
+        node.classList.toggle("probe-logbook-status-error", isError === true);
+    }
+
+    function setLogbookForm(mode) {
+        const form = document.getElementById("probe-logbook-form");
+        if (!form) {
+            return;
+        }
+
+        logbookState.mode = mode || "";
+        if (!mode) {
+            form.hidden = true;
+            form.reset();
+            return;
+        }
+
+        const page = logbookState.page || {};
+        const titleInput = form.querySelector("input[name=\"title\"]");
+        const contentInput = form.querySelector("textarea[name=\"content\"]");
+        form.hidden = false;
+        form.dataset.mode = mode;
+        if (titleInput) {
+            titleInput.value = mode === "edit" ? String(page.title || "") : "";
+            titleInput.focus();
+        }
+        if (contentInput) {
+            contentInput.value = mode === "edit" ? String(page.content || "") : "";
+        }
+    }
+
+    function renderLogbook() {
+        const panel = document.getElementById("probe-logbook");
+        if (!panel) {
+            return;
+        }
+
+        const page = logbookState.page;
+        const hasPage = page && page.id;
+        const titleNode = document.getElementById("probe-logbook-title");
+        const contentNode = document.getElementById("probe-logbook-content");
+        const previousButton = document.getElementById("probe-logbook-prev");
+        const nextButton = document.getElementById("probe-logbook-next");
+        const addButton = document.getElementById("probe-logbook-add");
+        const editButton = document.getElementById("probe-logbook-edit");
+        const deleteButton = document.getElementById("probe-logbook-delete");
+
+        if (previousButton) {
+            previousButton.disabled = logbookLoading || logbookState.offset <= 0;
+        }
+        if (nextButton) {
+            nextButton.disabled = logbookLoading || logbookState.total <= 0 || logbookState.offset >= logbookState.total - 1;
+        }
+        if (addButton) {
+            addButton.disabled = logbookLoading || !resolveLogbookProbeId();
+        }
+        if (editButton) {
+            editButton.disabled = logbookLoading || !hasPage;
+        }
+        if (deleteButton) {
+            deleteButton.disabled = logbookLoading || !hasPage;
+        }
+
+        if (titleNode) {
+            titleNode.textContent = hasPage
+                ? String(page.title || translate("logbookUntitledPage", "Untitled log"))
+                : translate("logbookEmptyTitle", "Journal de bord");
+        }
+        if (contentNode) {
+            if (logbookLoading && !hasPage) {
+                contentNode.textContent = translate("logbookLoading", "Chargement du journal...");
+            } else if (hasPage) {
+                const position = logbookCurrentPosition();
+                contentNode.innerHTML = (position ? "<p class=\"probe-logbook-position\">" + window.VNG.escapeHtml(position) + "</p>" : "")
+                    + "<p class=\"probe-logbook-page-content\">" + logbookContentHtml(page.content || "") + "</p>";
+            } else {
+                contentNode.textContent = translate("logbookEmptyContent", "Aucune note consignée pour cette sonde.");
+            }
+        }
+
+        setLogbookStatus(logbookState.notice, false);
     }
 
     function scheduleRefresh(delayMs) {
@@ -370,6 +500,7 @@
 
     function renderProbeMetrics(data) {
         const probe = data && data.probe ? data.probe : {};
+        currentProbeId = probe && probe.id ? String(probe.id) : currentProbeId;
         const nav = probe.navigation || {};
         const movement = probe.movement || null;
         const sector = probe.sector && probe.sector.relative ? probe.sector.relative : null;
@@ -438,6 +569,184 @@
         renderDeuteriumMaxHint(probe);
 
         scheduleLiveMovementUpdates();
+    }
+
+    async function fetchLogbookPageAt(offset) {
+        const listPath = logbookApiPath("/logbook-pages");
+        if (!listPath) {
+            logbookState.page = null;
+            logbookState.total = 0;
+            logbookState.offset = 0;
+            logbookState.notice = translate("logbookUnavailable", "Journal de bord indisponible.");
+            renderLogbook();
+            return;
+        }
+
+        logbookLoading = true;
+        renderLogbook();
+
+        try {
+            const list = await window.VNG.apiJson(listPath + "?limit=1&offset=" + encodeURIComponent(String(Math.max(0, offset))), {"method": "GET"});
+            const pagination = list && list.pagination ? list.pagination : {};
+            const total = Number(pagination.total || 0);
+            const safeTotal = Number.isFinite(total) ? Math.max(0, total) : 0;
+            const safeOffset = safeTotal > 0 ? Math.max(0, Math.min(Math.max(0, offset), safeTotal - 1)) : 0;
+            const summary = Array.isArray(list && list.pages) ? list.pages[0] : null;
+
+            logbookState.total = safeTotal;
+            logbookState.offset = safeOffset;
+            logbookState.notice = "";
+
+            if (safeTotal > 0 && safeOffset !== Number(pagination.offset || 0)) {
+                await fetchLogbookPageAt(safeOffset);
+                return;
+            }
+
+            if (safeTotal === 0 || !summary || !summary.id) {
+                logbookState.page = null;
+                logbookProbeId = resolveLogbookProbeId();
+                return;
+            }
+
+            const detail = await window.VNG.apiJson(logbookApiPath("/logbook-page/" + encodeURIComponent(String(summary.id))), {"method": "GET"});
+            logbookState.page = detail && detail.page ? detail.page : null;
+            logbookProbeId = resolveLogbookProbeId();
+        } catch (error) {
+            logbookState.page = null;
+            logbookState.total = 0;
+            logbookState.offset = 0;
+            logbookState.notice = error && error.message ? error.message : translate("requestDenied", "Request denied");
+            setLogbookForm("");
+        } finally {
+            logbookLoading = false;
+            renderLogbook();
+        }
+    }
+
+    async function loadLatestLogbookPage() {
+        const listPath = logbookApiPath("/logbook-pages");
+        if (!listPath) {
+            renderLogbook();
+            return;
+        }
+
+        logbookLoading = true;
+        renderLogbook();
+        try {
+            const list = await window.VNG.apiJson(listPath + "?limit=1&offset=0", {"method": "GET"});
+            const total = Number(list && list.pagination ? list.pagination.total : 0);
+            const safeTotal = Number.isFinite(total) ? Math.max(0, total) : 0;
+            if (safeTotal <= 0) {
+                logbookState.page = null;
+                logbookState.total = 0;
+                logbookState.offset = 0;
+                logbookState.notice = "";
+                logbookProbeId = resolveLogbookProbeId();
+                return;
+            }
+            await fetchLogbookPageAt(safeTotal - 1);
+        } catch (error) {
+            logbookState.page = null;
+            logbookState.total = 0;
+            logbookState.offset = 0;
+            logbookState.notice = error && error.message ? error.message : translate("requestDenied", "Request denied");
+            logbookProbeId = resolveLogbookProbeId();
+        } finally {
+            logbookLoading = false;
+            renderLogbook();
+        }
+    }
+
+    function ensureLogbookLoadedForCurrentProbe() {
+        const probeId = resolveLogbookProbeId();
+        if (!probeId || logbookLoading || logbookProbeId === probeId) {
+            return;
+        }
+
+        setLogbookForm("");
+        logbookState.page = null;
+        logbookState.offset = 0;
+        logbookState.total = 0;
+        logbookState.notice = "";
+        renderLogbook();
+        loadLatestLogbookPage();
+    }
+
+    async function submitLogbookForm(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const mode = form.dataset.mode || logbookState.mode || "create";
+        const title = form.querySelector("input[name=\"title\"]")?.value || "";
+        const content = form.querySelector("textarea[name=\"content\"]")?.value || "";
+        const page = logbookState.page || {};
+        const endpoint = mode === "edit" && page.id
+            ? logbookApiPath("/logbook-page/" + encodeURIComponent(String(page.id)))
+            : logbookApiPath("/logbook-page");
+        const submit = form.querySelector("button[type=\"submit\"]");
+
+        if (!endpoint) {
+            return;
+        }
+        if (submit) {
+            submit.disabled = true;
+        }
+
+        try {
+            await window.VNG.apiJson(endpoint, {
+                "method": mode === "edit" ? "PATCH" : "POST",
+                "body": JSON.stringify({"title": title, "content": content}),
+            });
+            setLogbookForm("");
+            const successNotice = mode === "edit"
+                ? translate("logbookUpdated", "Page mise à jour.")
+                : translate("logbookCreated", "Page ajoutée.");
+            if (mode === "edit") {
+                await fetchLogbookPageAt(logbookState.offset);
+            } else {
+                await loadLatestLogbookPage();
+            }
+            logbookState.notice = successNotice;
+            renderLogbook();
+        } catch (error) {
+            logbookState.notice = error && error.message ? error.message : translate("requestDenied", "Request denied");
+            renderLogbook();
+        } finally {
+            if (submit) {
+                submit.disabled = false;
+            }
+        }
+    }
+
+    async function deleteCurrentLogbookPage() {
+        const page = logbookState.page || {};
+        if (!page.id || !window.confirm(translate("logbookDeleteConfirm", "Supprimer cette page du journal ?"))) {
+            return;
+        }
+
+        const endpoint = logbookApiPath("/logbook-page/" + encodeURIComponent(String(page.id)));
+        if (!endpoint) {
+            return;
+        }
+
+        try {
+            await window.VNG.apiJson(endpoint, {"method": "DELETE"});
+            setLogbookForm("");
+            const successNotice = translate("logbookDeleted", "Page supprimée.");
+            if (logbookState.total <= 1) {
+                logbookState.page = null;
+                logbookState.total = 0;
+                logbookState.offset = 0;
+                logbookState.notice = successNotice;
+                renderLogbook();
+                return;
+            }
+            await fetchLogbookPageAt(Math.max(0, Math.min(logbookState.offset, logbookState.total - 2)));
+            logbookState.notice = successNotice;
+            renderLogbook();
+        } catch (error) {
+            logbookState.notice = error && error.message ? error.message : translate("requestDenied", "Request denied");
+            renderLogbook();
+        }
     }
 
     function renderProbeError(error) {
@@ -526,6 +835,7 @@
             ]);
             probeList = listed;
             renderProbeMetrics(data);
+            ensureLogbookLoadedForCurrentProbe();
             scheduleRefresh(window.VNG.nextRefreshDelay(data, DEFAULT_REFRESH_MS, MIN_REFRESH_MS, REFRESH_CUSHION_MS));
         } catch (error) {
             renderProbeError(error);
@@ -539,6 +849,38 @@
         document.querySelector("[data-refresh=\"probe\"]")?.addEventListener("click", () => {
             loadProbe();
         });
+    }
+
+    function bindLogbook() {
+        const panel = document.getElementById("probe-logbook");
+        if (!panel || panel.dataset.logbookBound === "1") {
+            return;
+        }
+        panel.dataset.logbookBound = "1";
+
+        document.getElementById("probe-logbook-prev")?.addEventListener("click", () => {
+            setLogbookForm("");
+            fetchLogbookPageAt(Math.max(0, logbookState.offset - 1));
+        });
+        document.getElementById("probe-logbook-next")?.addEventListener("click", () => {
+            setLogbookForm("");
+            fetchLogbookPageAt(Math.min(logbookState.total - 1, logbookState.offset + 1));
+        });
+        document.getElementById("probe-logbook-add")?.addEventListener("click", () => {
+            setLogbookForm("create");
+        });
+        document.getElementById("probe-logbook-edit")?.addEventListener("click", () => {
+            if (logbookState.page && logbookState.page.id) {
+                setLogbookForm("edit");
+            }
+        });
+        document.getElementById("probe-logbook-delete")?.addEventListener("click", () => {
+            deleteCurrentLogbookPage();
+        });
+        document.getElementById("probe-logbook-cancel")?.addEventListener("click", () => {
+            setLogbookForm("");
+        });
+        document.getElementById("probe-logbook-form")?.addEventListener("submit", submitLogbookForm);
     }
 
     function bindProbeIdentity() {
@@ -643,6 +985,8 @@
             await loadProbeImprovementsOnce();
             bindRefreshButton();
             bindProbeIdentity();
+            bindLogbook();
+            renderLogbook();
             loadProbe();
         });
     });

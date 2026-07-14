@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260714-sensors-selected-probe-distance';
+const ASSET_VERSION = '20260714-probe-logbook-ui';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);

@@ -414,7 +414,19 @@ $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeIm
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPath("/probe-improvements-available")'), 'probe JS reads installed probe improvements for the selected probe');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'improvement.done === true'), 'probe JS lists completed probe improvements only');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'installed.slice(0, 2)'), 'probe JS summarizes installed probe improvements after two entries');
+$test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="probe-logbook"'), 'Probe template exposes the probe logbook panel');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'function logbookApiPath'), 'probe JS builds explicit probe-scoped logbook endpoints');
+$test->assert(is_string($probeScript) && str_contains($probeScript, '"/api/probe/" + encodeURIComponent(String(probeId)) + normalizedSuffix'), 'probe JS uses explicit probe ids for logbook API calls on / and /{probeId}');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'ensureLogbookLoadedForCurrentProbe();'), 'probe JS loads the logbook lazily when the current probe is known');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'logbookLoading || logbookProbeId === probeId'), 'probe JS does not poll the logbook on regular probe refreshes');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'logbookContentHtml'), 'probe JS renders logbook content through an escaped multiline formatter');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'escaped.replace(/\\r\\n|\\r|\\n/g, "<br>")'), 'probe JS applies nl2br after escaping logbook content');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'await loadLatestLogbookPage();'), 'probe JS reloads the logbook after creating a page');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'await fetchLogbookPageAt(logbookState.offset);'), 'probe JS reloads the current logbook page after editing');
 $test->assert(is_string($appCss) && str_contains($appCss, '.metric .metric-secondary'), 'probe metric CSS styles secondary metric text');
+$test->assert(is_string($appCss) && str_contains($appCss, '.probe-logbook-actions'), 'probe logbook CSS styles the action icon row');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'logbookEmptyContent' => 'Aucune note consignée pour cette sonde.'"), 'French translations include the empty logbook message');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'logbookEmptyContent' => 'No note recorded for this probe.'"), 'English translations include the empty logbook message');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
@@ -571,7 +583,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-sensors-selected-probe-distance"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-probe-logbook-ui"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
