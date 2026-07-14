@@ -415,6 +415,7 @@ $test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPat
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'improvement.done === true'), 'probe JS lists completed probe improvements only');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'installed.slice(0, 2)'), 'probe JS summarizes installed probe improvements after two entries');
 $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="probe-logbook"'), 'Probe template exposes the probe logbook panel');
+$test->assert(is_string($probeTemplate) && str_contains($probeTemplate, '<h3 class="probe-logbook-heading">Logbook</h3>'), 'Probe template exposes the Logbook panel heading');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'function logbookApiPath'), 'probe JS builds explicit probe-scoped logbook endpoints');
 $test->assert(is_string($probeScript) && str_contains($probeScript, '"/api/probe/" + encodeURIComponent(String(probeId)) + normalizedSuffix'), 'probe JS uses explicit probe ids for logbook API calls on / and /{probeId}');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'ensureLogbookLoadedForCurrentProbe();'), 'probe JS loads the logbook lazily when the current probe is known');
