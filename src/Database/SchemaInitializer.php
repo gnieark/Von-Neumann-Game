@@ -234,6 +234,17 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient ON probe_messages(recipient_probe_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_probe_messages_sender ON probe_messages(sender_probe_id, created_at)",
+            "CREATE TABLE IF NOT EXISTS probe_logbook_pages (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                title $text NOT NULL,
+                content TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_probe_logbook_pages_probe_order ON probe_logbook_pages(probe_id, sort_order, id)",
             "CREATE TABLE IF NOT EXISTS probe_missions (
                 id $id,
                 uid $text NOT NULL UNIQUE,
@@ -488,6 +499,7 @@ final class SchemaInitializer
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureProbeMessageSchema($pdo);
+            $this->ensureProbeLogbookSchema($pdo);
             $this->ensureScutSchema($pdo);
             $this->ensureProbeImprovementSchema($pdo);
             $this->ensureProbeMovementActiveConstraint($pdo);
@@ -526,6 +538,7 @@ final class SchemaInitializer
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureMysqlProbeDamageWarningMovementNullable($pdo);
             $this->ensureProbeMessageSchema($pdo);
+            $this->ensureProbeLogbookSchema($pdo);
             $this->ensureScutSchema($pdo);
             $this->ensureProbeImprovementSchema($pdo);
             $this->ensureProbeMovementActiveConstraint($pdo);
@@ -806,6 +819,34 @@ final class SchemaInitializer
         $this->backfillProbeMessageEndpoints($pdo);
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type(32), recipient_id(191), status(32), created_at(32))');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type(32), sender_id(191), created_at(32))');
+    }
+
+    private function ensureProbeLogbookSchema(PDO $pdo): void
+    {
+        $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS probe_logbook_pages (
+                id $id,
+                probe_id INTEGER NOT NULL,
+                title $text NOT NULL,
+                content TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
+            )"
+        );
+
+        if ($this->driver === 'mysql' && !$this->mysqlIndexExists($pdo, 'probe_logbook_pages', 'idx_probe_logbook_pages_probe_order')) {
+            $pdo->exec('CREATE INDEX idx_probe_logbook_pages_probe_order ON probe_logbook_pages(probe_id, sort_order, id)');
+            return;
+        }
+
+        if ($this->driver === 'sqlite') {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_logbook_pages_probe_order ON probe_logbook_pages(probe_id, sort_order, id)');
+        }
     }
 
     private function backfillProbeMessageEndpoints(PDO $pdo): void

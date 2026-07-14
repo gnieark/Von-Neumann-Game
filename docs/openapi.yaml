@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '87'
+  version: '90'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 89
+                apiVersion: 90
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -994,6 +994,159 @@ paths:
       - $ref: '#/components/parameters/ProbeMessageId'
     patch:
       $ref: '#/paths/~1api~1probe~1messages~1%7BmessageId%7D~1read/patch'
+  /api/probe/{probeId}/logbook-pages:
+    get:
+      summary: List probe logbook pages
+      description: >
+        Returns the selected probe's logbook pages, sorted by probe-local
+        order. The default page size is 10 entries; use `limit` and `offset`
+        to retrieve more.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of logbook pages to return. Defaults to 10.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: offset
+          in: query
+          required: false
+          description: Number of logbook pages to skip before returning the page.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Probe logbook pages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeLogbookPagesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Probe is owned but outside same-sector or same-SCUT reach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/logbook-page:
+    post:
+      summary: Create a probe logbook page
+      description: Creates a page in the selected probe's logbook.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeLogbookPageRequest'
+            example:
+              title: Premier relais SCUT
+              content: Le relais est stable. Manny pretend que ce n'est pas une lampe de chevet.
+      responses:
+        '201':
+          description: Probe logbook page created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeLogbookPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Probe is owned but outside same-sector or same-SCUT reach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/logbook-page/{logbookPageId}:
+    get:
+      summary: Get a probe logbook page
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/LogbookPageId'
+      responses:
+        '200':
+          description: Probe logbook page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeLogbookPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Probe is owned but outside same-sector or same-SCUT reach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a probe logbook page
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/LogbookPageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeLogbookPageUpdateRequest'
+            example:
+              title: Premier relais SCUT, addendum
+              content: Le relais est stable. La lampe de chevet aussi.
+      responses:
+        '200':
+          description: Probe logbook page updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeLogbookPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Probe is owned but outside same-sector or same-SCUT reach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete a probe logbook page
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/LogbookPageId'
+      responses:
+        '204':
+          description: Probe logbook page deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Probe is owned but outside same-sector or same-SCUT reach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/alerts:
     get:
       summary: List persistent probe alerts
@@ -3425,6 +3578,14 @@ components:
         type: integer
         minimum: 1
       example: 12
+    LogbookPageId:
+      name: logbookPageId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 42
     ScutNetworkId:
       name: scutNetworkId
       in: path
@@ -4390,6 +4551,75 @@ components:
             $ref: '#/components/schemas/ProbeSentMessage'
         pagination:
           $ref: '#/components/schemas/Pagination'
+    ProbeLogbookPageRequest:
+      type: object
+      required: [title, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        content:
+          type: string
+          minLength: 1
+          maxLength: 20000
+    ProbeLogbookPageUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        content:
+          type: string
+          minLength: 1
+          maxLength: 20000
+    ProbeLogbookPageResponse:
+      type: object
+      required: [page]
+      properties:
+        page:
+          $ref: '#/components/schemas/ProbeLogbookPage'
+    ProbeLogbookPagesResponse:
+      type: object
+      required: [pages, pagination]
+      properties:
+        pages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeLogbookPageSummary'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    ProbeLogbookPageSummary:
+      type: object
+      required: [id, probeId, title, sortOrder, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        probeId:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+        sortOrder:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ProbeLogbookPage:
+      allOf:
+        - $ref: '#/components/schemas/ProbeLogbookPageSummary'
+        - type: object
+          required: [content]
+          properties:
+            content:
+              type: string
     Pagination:
       type: object
       required: [limit, offset, count, total, hasMore]
