@@ -13,6 +13,7 @@ use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeInventory;
+use VonNeumannGame\Domain\ProbeLogbookPage;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
@@ -28,6 +29,7 @@ use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\ProbeLogbookRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MannyActionException;
@@ -49,7 +51,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 89;
+    public const API_VERSION = 90;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -66,6 +68,7 @@ final class ApiKernel
         private readonly ProbeItemRepository $items,
         private readonly ProbeStorageService $storage,
         private readonly ProbeMessageRepository $messages,
+        private readonly ProbeLogbookRepository $logbook,
         private readonly ProbeDamageWarningRepository $damageWarnings,
         private readonly ForumRepository $forum,
         private readonly MissionService $missions,
@@ -143,6 +146,26 @@ final class ApiKernel
             ApiRoute::regex('#^/api/probe/missions/([^/]+)/abandon$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionAbandonResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/messages/(\d+)/read$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMessageReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
             ApiRoute::regex('#^/api/probe/messages/(\d+)/read$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMessageReadResponse($player, $ctx->intParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/logbook-pages/(\d+)$#', ['GET', 'PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => match ($ctx->method) {
+                    'GET' => $this->probeLogbookPageResponse($player, $ctx->intParam(1), $probe),
+                    'PATCH' => $this->probeLogbookPageUpdateResponse($player, $ctx->intParam(1), $ctx->body, $probe),
+                    'DELETE' => $this->probeLogbookPageDeleteResponse($player, $ctx->intParam(1), $probe),
+                },
+                $ctx->intParam(0),
+                ['GET', 'PATCH', 'DELETE'],
+            )),
+            ApiRoute::regex('#^/api/probe/(\d+)/logbook-page/(\d+)$#', ['GET', 'PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => match ($ctx->method) {
+                    'GET' => $this->probeLogbookPageResponse($player, $ctx->intParam(1), $probe),
+                    'PATCH' => $this->probeLogbookPageUpdateResponse($player, $ctx->intParam(1), $ctx->body, $probe),
+                    'DELETE' => $this->probeLogbookPageDeleteResponse($player, $ctx->intParam(1), $probe),
+                },
+                $ctx->intParam(0),
+                ['GET', 'PATCH', 'DELETE'],
+            )),
             ApiRoute::regex('#^/api/probe/(\d+)/alerts/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeAlertReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
             ApiRoute::regex('#^/api/probe/alerts/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAlertReadResponse($player, $ctx->intParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeDamageWarningReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
@@ -197,6 +220,15 @@ final class ApiKernel
                 $ctx->intParam(0),
                 ['GET', 'POST'],
             )),
+            ApiRoute::regex('#^/api/probe/(\d+)/logbook-pages$#', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => $ctx->method === 'POST'
+                    ? $this->probeLogbookPageCreateResponse($player, $ctx->body, $probe)
+                    : $this->probeLogbookPagesResponse($player, $ctx->query, $probe),
+                $ctx->intParam(0),
+                ['GET', 'POST'],
+            )),
+            ApiRoute::regex('#^/api/probe/(\d+)/logbook-page$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeLogbookPageCreateResponse($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/alerts$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeAlertsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeDamageWarningsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/visited-sectors$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeVisitedSectorsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
@@ -848,6 +880,110 @@ final class ApiKernel
         }
 
         return new ApiResponse(200, ['message' => $this->probeMessageArray($player, $this->messages->markRead($message))]);
+    }
+
+    private function probeLogbookPagesResponse(Player $player, array $query, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $this->movements->ensureProbeOperational($probe);
+        $limit = $this->messagePaginationParameter($query, 'limit', 10, 1, 100);
+        if ($limit instanceof ApiResponse) {
+            return $limit;
+        }
+        $offset = $this->messagePaginationParameter($query, 'offset', 0, 0);
+        if ($offset instanceof ApiResponse) {
+            return $offset;
+        }
+
+        $pages = $this->logbookRepository()->listByProbe($probe->id, $limit, $offset);
+        $total = $this->logbookRepository()->countByProbe($probe->id);
+
+        return new ApiResponse(200, [
+            'pages' => array_map(fn(ProbeLogbookPage $page): array => $this->probeLogbookPageArray($page, includeContent: false), $pages),
+            'pagination' => [
+                'limit' => $limit,
+                'offset' => $offset,
+                'count' => count($pages),
+                'total' => $total,
+                'hasMore' => $offset + count($pages) < $total,
+            ],
+        ]);
+    }
+
+    private function probeLogbookPageResponse(Player $player, int $pageId, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $this->movements->ensureProbeOperational($probe);
+        $page = $this->logbookRepository()->findByIdForProbe($pageId, $probe->id);
+        if ($page === null) {
+            return ApiResponse::error(404, 'not_found', 'Logbook page not found.');
+        }
+
+        return new ApiResponse(200, ['page' => $this->probeLogbookPageArray($page)]);
+    }
+
+    private function probeLogbookPageCreateResponse(Player $player, ?string $body, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $this->movements->ensureProbeOperational($probe);
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a logbook page.');
+        }
+
+        $payload = $this->probeLogbookPagePayload($data, requireBoth: true);
+        if ($payload instanceof ApiResponse) {
+            return $payload;
+        }
+
+        $page = $this->logbookRepository()->create($probe->id, $payload['title'], $payload['content']);
+
+        return new ApiResponse(201, ['page' => $this->probeLogbookPageArray($page)]);
+    }
+
+    private function probeLogbookPageUpdateResponse(Player $player, int $pageId, ?string $body, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $this->movements->ensureProbeOperational($probe);
+        $page = $this->logbookRepository()->findByIdForProbe($pageId, $probe->id);
+        if ($page === null) {
+            return ApiResponse::error(404, 'not_found', 'Logbook page not found.');
+        }
+
+        $data = $this->decodeJsonBody($body);
+        if (!is_array($data)) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a logbook page update.');
+        }
+
+        $payload = $this->probeLogbookPagePayload($data, requireBoth: false);
+        if ($payload instanceof ApiResponse) {
+            return $payload;
+        }
+        if (!array_key_exists('title', $payload) && !array_key_exists('content', $payload)) {
+            return ApiResponse::error(400, 'bad_request', 'Logbook page update must contain title or content.');
+        }
+
+        return new ApiResponse(200, [
+            'page' => $this->probeLogbookPageArray($this->logbookRepository()->update(
+                $page,
+                $payload['title'] ?? null,
+                $payload['content'] ?? null,
+            )),
+        ]);
+    }
+
+    private function probeLogbookPageDeleteResponse(Player $player, int $pageId, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $this->movements->ensureProbeOperational($probe);
+        $page = $this->logbookRepository()->findByIdForProbe($pageId, $probe->id);
+        if ($page === null) {
+            return ApiResponse::error(404, 'not_found', 'Logbook page not found.');
+        }
+
+        $this->logbookRepository()->delete($page);
+
+        return new ApiResponse(204, []);
     }
 
     private function probeDamageWarningsResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
@@ -1754,6 +1890,64 @@ final class ApiKernel
         }
 
         return $payload;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function probeLogbookPageArray(ProbeLogbookPage $page, bool $includeContent = true): array
+    {
+        $payload = [
+            'id' => $page->id,
+            'probeId' => $page->probeId,
+            'title' => $page->title,
+            'sortOrder' => $page->sortOrder,
+            'createdAt' => $page->createdAt,
+            'updatedAt' => $page->updatedAt,
+        ];
+
+        if ($includeContent) {
+            $payload['content'] = $page->content;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{title?: string, content?: string}|ApiResponse
+     */
+    private function probeLogbookPagePayload(array $data, bool $requireBoth): array|ApiResponse
+    {
+        $payload = [];
+        foreach (['title', 'content'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                if ($requireBoth) {
+                    return ApiResponse::error(400, 'bad_request', 'Logbook page requires title and content.');
+                }
+                continue;
+            }
+            if (!is_string($data[$field])) {
+                return ApiResponse::error(400, 'bad_request', 'Logbook page title and content must be strings.');
+            }
+
+            $value = trim($data[$field]);
+            $maxLength = $field === 'title' ? 120 : 20000;
+            if ($value === '' || strlen($value) > $maxLength) {
+                return ApiResponse::error(400, 'bad_request', $field === 'title'
+                    ? 'Logbook page title must contain 1 to 120 characters.'
+                    : 'Logbook page content must contain 1 to 20000 characters.');
+            }
+
+            $payload[$field] = $value;
+        }
+
+        return $payload;
+    }
+
+    private function logbookRepository(): ProbeLogbookRepository
+    {
+        return $this->logbook;
     }
 
     private function probeMessageEndpointArray(string $type, string $id, ?string $name, ?int $probeId, SectorCoordinates $sector): array

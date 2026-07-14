@@ -37,6 +37,7 @@ use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\ProbeLogbookRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScutNetworkRepository;
@@ -413,7 +414,20 @@ $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeIm
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPath("/probe-improvements-available")'), 'probe JS reads installed probe improvements for the selected probe');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'improvement.done === true'), 'probe JS lists completed probe improvements only');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'installed.slice(0, 2)'), 'probe JS summarizes installed probe improvements after two entries');
+$test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="probe-logbook"'), 'Probe template exposes the probe logbook panel');
+$test->assert(is_string($probeTemplate) && str_contains($probeTemplate, '<h3 class="probe-logbook-heading">Logbook</h3>'), 'Probe template exposes the Logbook panel heading');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'function logbookApiPath'), 'probe JS builds explicit probe-scoped logbook endpoints');
+$test->assert(is_string($probeScript) && str_contains($probeScript, '"/api/probe/" + encodeURIComponent(String(probeId)) + normalizedSuffix'), 'probe JS uses explicit probe ids for logbook API calls on / and /{probeId}');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'ensureLogbookLoadedForCurrentProbe();'), 'probe JS loads the logbook lazily when the current probe is known');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'logbookLoading || logbookProbeId === probeId'), 'probe JS does not poll the logbook on regular probe refreshes');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'logbookContentHtml'), 'probe JS renders logbook content through an escaped multiline formatter');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'escaped.replace(/\\r\\n|\\r|\\n/g, "<br>")'), 'probe JS applies nl2br after escaping logbook content');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'await loadLatestLogbookPage();'), 'probe JS reloads the logbook after creating a page');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'await fetchLogbookPageAt(logbookState.offset);'), 'probe JS reloads the current logbook page after editing');
 $test->assert(is_string($appCss) && str_contains($appCss, '.metric .metric-secondary'), 'probe metric CSS styles secondary metric text');
+$test->assert(is_string($appCss) && str_contains($appCss, '.probe-logbook-actions'), 'probe logbook CSS styles the action icon row');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'logbookEmptyContent' => 'Aucune note consignée pour cette sonde.'"), 'French translations include the empty logbook message');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'logbookEmptyContent' => 'No note recorded for this probe.'"), 'English translations include the empty logbook message');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'movement-risk-warning'), 'movement view exposes the long-jump risk warning container');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
@@ -570,7 +584,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-sensors-selected-probe-distance"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-probe-logbook-ui"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1060,6 +1074,14 @@ $probeImprovementInstallationSchemaColumns = array_map(
 );
 $test->assert(in_array('probe_id', $probeImprovementInstallationSchemaColumns, true), 'probe improvement installations store their probe id');
 $test->assert(in_array('improvement', $probeImprovementInstallationSchemaColumns, true), 'probe improvement installations store their canonical improvement id');
+$logbookSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(probe_logbook_pages)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('probe_id', $logbookSchemaColumns, true), 'probe logbook pages store their probe id');
+$test->assert(in_array('title', $logbookSchemaColumns, true), 'probe logbook pages store their title');
+$test->assert(in_array('content', $logbookSchemaColumns, true), 'probe logbook pages store their content');
+$test->assert(in_array('sort_order', $logbookSchemaColumns, true), 'probe logbook pages store their sort order');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -1076,6 +1098,7 @@ $missions = new MissionRepository($pdo);
 $damageWarnings = new ProbeDamageWarningRepository($pdo);
 $forum = new ForumRepository($pdo);
 $storageContainers = new StorageContainerRepository($pdo);
+$logbook = new ProbeLogbookRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $apiKeys = new ApiKeyRepository($pdo);
@@ -1090,7 +1113,7 @@ $movementService = new ProbeMovementService($probes, $movements, $visitedSectors
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
-$kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
+$kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
 
 $multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
 $primaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Primary future probe', $multiProbePlayer->homeSector);
@@ -1249,6 +1272,51 @@ $messageToSameScutProbe = $kernel->handle('POST', '/api/probe/messages', $multiP
 $test->assertEquals(201, $messageToSameScutProbe->status, 'default probe can send a message to a same-SCUT owned probe');
 $sameScutProbeReadMessage = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/messages/' . (int) ($messageToSameScutProbe->body['message']['id'] ?? 0) . '/read', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeReadMessage->status, 'PATCH /api/probe/{probeId}/messages/{messageId}/read marks same-SCUT owned probe messages read');
+$createdLogbookIds = [];
+for ($i = 1; $i <= 12; $i++) {
+    $createLogbookPage = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/logbook-page', $multiProbeHeaders, json_encode([
+        'title' => 'Log entry ' . $i,
+        'content' => 'Content for log entry ' . $i,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(201, $createLogbookPage->status, 'POST /api/probe/{probeId}/logbook-page creates a probe logbook page');
+    $createdLogbookIds[] = (int) ($createLogbookPage->body['page']['id'] ?? 0);
+}
+$defaultLogbookList = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/logbook-pages', $multiProbeHeaders);
+$test->assertEquals(200, $defaultLogbookList->status, 'GET /api/probe/{probeId}/logbook-pages lists probe logbook pages');
+$test->assertEquals(10, count($defaultLogbookList->body['pages'] ?? []), 'logbook page list defaults to 10 entries');
+$test->assertEquals(12, $defaultLogbookList->body['pagination']['total'] ?? null, 'logbook page list exposes total count');
+$test->assertEquals(true, $defaultLogbookList->body['pagination']['hasMore'] ?? null, 'logbook page list exposes hasMore for default limit');
+$test->assert(!array_key_exists('content', $defaultLogbookList->body['pages'][0] ?? []), 'logbook page list omits full content');
+$expandedLogbookList = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/logbook-pages?limit=12&offset=0', $multiProbeHeaders);
+$test->assertEquals(200, $expandedLogbookList->status, 'GET /api/probe/{probeId}/logbook-pages accepts a larger limit');
+$test->assertEquals(12, count($expandedLogbookList->body['pages'] ?? []), 'larger logbook page limit returns more than the default');
+$logbookPageId = $createdLogbookIds[0] ?? 0;
+$logbookDetail = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/logbook-pages/' . $logbookPageId, $multiProbeHeaders);
+$test->assertEquals(200, $logbookDetail->status, 'GET /api/probe/{probeId}/logbook-pages/{logbookPageId} returns a logbook page');
+$test->assertEquals('Content for log entry 1', $logbookDetail->body['page']['content'] ?? null, 'logbook page detail includes content');
+$updatedLogbook = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/logbook-page/' . $logbookPageId, $multiProbeHeaders, json_encode([
+    'title' => 'Renamed log entry',
+    'content' => 'Updated log content',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $updatedLogbook->status, 'PATCH /api/probe/{probeId}/logbook-page/{logbookPageId} updates a logbook page');
+$test->assertEquals('Renamed log entry', $updatedLogbook->body['page']['title'] ?? null, 'logbook page PATCH persists title');
+$test->assertEquals('Updated log content', $updatedLogbook->body['page']['content'] ?? null, 'logbook page PATCH persists content');
+$otherProbeLogbookPage = $kernel->handle('POST', '/api/probe/' . $primaryProbe->id . '/logbook-pages', $multiProbeHeaders, json_encode([
+    'title' => 'Primary log entry',
+    'content' => 'Primary probe content',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $otherProbeLogbookPage->status, 'POST /api/probe/{probeId}/logbook-pages creates a logbook page through the canonical collection path');
+$wrongProbeLogbookDetail = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/logbook-pages/' . (int) ($otherProbeLogbookPage->body['page']['id'] ?? 0), $multiProbeHeaders);
+$test->assertEquals(404, $wrongProbeLogbookDetail->status, 'logbook pages cannot be read through another owned probe');
+$foreignProbeLogbook = $kernel->handle('POST', '/api/probe/' . $foreignProbe->id . '/logbook-page', $multiProbeHeaders, json_encode([
+    'title' => 'Foreign log entry',
+    'content' => 'Foreign probe content',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(404, $foreignProbeLogbook->status, 'probe logbook endpoints hide probes owned by another player');
+$deleteLogbook = $kernel->handle('DELETE', '/api/probe/' . $sameSectorProbe->id . '/logbook-page/' . $logbookPageId, $multiProbeHeaders);
+$test->assertEquals(204, $deleteLogbook->status, 'DELETE /api/probe/{probeId}/logbook-page/{logbookPageId} deletes a logbook page');
+$deletedLogbookDetail = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/logbook-pages/' . $logbookPageId, $multiProbeHeaders);
+$test->assertEquals(404, $deletedLogbookDetail->status, 'deleted logbook pages are no longer readable');
 $sameScutProbeAlert = $damageWarnings->createMannyReportAlert($sameSectorProbe->id, $sameSectorProbe->currentSector, 'remote-report', 'Remote report', 'Remote report ready.');
 $sameScutProbeAlerts = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeAlerts->status, 'GET /api/probe/{probeId}/alerts lists same-SCUT owned probe alerts');
@@ -1300,7 +1368,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(89, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(90, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1323,6 +1391,7 @@ $multiScanMissions = new MissionRepository($multiScanPdo);
 $multiScanWarnings = new ProbeDamageWarningRepository($multiScanPdo);
 $multiScanForum = new ForumRepository($multiScanPdo);
 $multiScanStorageContainers = new StorageContainerRepository($multiScanPdo);
+$multiScanLogbook = new ProbeLogbookRepository($multiScanPdo);
 $multiScanMovements = new ProbeMovementRepository($multiScanPdo);
 $multiScanSessions = new SessionRepository($multiScanPdo);
 $multiScanApiKeys = new ApiKeyRepository($multiScanPdo);
@@ -1337,7 +1406,7 @@ $multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $mult
 $multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, worldSeed: 'multi-scan-world');
 $multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
 $multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents);
-$multiScanKernel = new ApiKernel($multiScanAuth, $multiScanPlayers, $multiScanProbes, new SectorObservationService($multiScanSectorService, $multiScanVisited, mannies: $multiScanMannies), $multiScanMovementService, $multiScanVisited, $multiScanMannyService, $multiScanItems, $multiScanStorage, $multiScanMessages, $multiScanWarnings, $multiScanForum, $multiScanMissionService, $multiScanReinstantiation, $multiScanScut, improvements: $multiScanProbeImprovements);
+$multiScanKernel = new ApiKernel($multiScanAuth, $multiScanPlayers, $multiScanProbes, new SectorObservationService($multiScanSectorService, $multiScanVisited, mannies: $multiScanMannies), $multiScanMovementService, $multiScanVisited, $multiScanMannyService, $multiScanItems, $multiScanStorage, $multiScanMessages, $multiScanLogbook, $multiScanWarnings, $multiScanForum, $multiScanMissionService, $multiScanReinstantiation, $multiScanScut, improvements: $multiScanProbeImprovements);
 $multiScanPlayer = $multiScanAuth->registerPlayerWithPassword('multi-scan-observer', 'secret', 'Multi Scan Observer', 'Multi scan default');
 $multiScanDefaultProbe = $multiScanProbes->findByPlayerId($multiScanPlayer->id);
 if ($multiScanDefaultProbe !== null) {
@@ -5965,6 +6034,8 @@ foreach ([
     'POST /api/probe/atomic-printer/craft',
     'GET /api/probe/messages',
     'GET /api/probe/messages/sent',
+    'GET /api/probe/1/logbook-pages',
+    'POST /api/probe/1/logbook-page',
     'GET /api/probe/visited-sectors',
     'GET /api/probe/sector',
     'GET /api/sector?x=0&y=0&z=0',

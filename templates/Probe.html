@@ -34,4 +34,25 @@
     </div>
     <div id="probe-identity" class="probe-identity" aria-live="polite"></div>
     <p id="sector-context" class="sector-context" hidden></p>
+    <h3 class="probe-logbook-heading">Logbook</h3>
+    <section id="probe-logbook" class="probe-logbook" aria-live="polite">
+        <div class="probe-logbook-actions sector-context">
+            <button id="probe-logbook-prev" class="icon-button probe-logbook-button" type="button" title="{{t.logbookPreviousPage}}" aria-label="{{t.logbookPreviousPage}}" disabled>‹</button>
+            <button id="probe-logbook-next" class="icon-button probe-logbook-button" type="button" title="{{t.logbookNextPage}}" aria-label="{{t.logbookNextPage}}" disabled>›</button>
+            <button id="probe-logbook-add" class="icon-button probe-logbook-button" type="button" title="{{t.logbookAddPage}}" aria-label="{{t.logbookAddPage}}">+</button>
+            <button id="probe-logbook-edit" class="icon-button probe-logbook-button" type="button" title="{{t.logbookEditPage}}" aria-label="{{t.logbookEditPage}}" disabled>✎</button>
+            <button id="probe-logbook-delete" class="icon-button probe-logbook-button" type="button" title="{{t.logbookDeletePage}}" aria-label="{{t.logbookDeletePage}}" disabled>×</button>
+        </div>
+        <p id="probe-logbook-title" class="sector-summary probe-logbook-title">{{t.logbookLoading}}</p>
+        <div id="probe-logbook-content" class="probe-logbook-content">{{t.logbookLoading}}</div>
+        <form id="probe-logbook-form" class="probe-logbook-form" hidden>
+            <label>{{t.logbookTitle}}<input name="title" maxlength="120" required></label>
+            <label>{{t.logbookContent}}<textarea name="content" rows="8" maxlength="20000" required></textarea></label>
+            <div class="probe-logbook-form-actions">
+                <button type="submit">{{t.save}}</button>
+                <button type="button" id="probe-logbook-cancel">{{t.cancel}}</button>
+            </div>
+        </form>
+        <p id="probe-logbook-status" class="probe-logbook-status" hidden></p>
+    </section>
 </article>
