@@ -170,9 +170,18 @@
     }
 
     function inventoryItemName(item) {
-        return item && item.type
+        if (!item) {
+            return "-";
+        }
+        if (item.type === "manny") {
+            const label = inventoryItemTypeLabel(item.type, item.type);
+            const name = item.name && item.name !== label ? String(item.name).trim() : "";
+            return name ? label + " " + name : label;
+        }
+
+        return item.type
             ? inventoryItemTypeLabel(item.type, item.name || item.type)
-            : (item && (item.name || item.id)) || "-";
+            : (item.name || item.id) || "-";
     }
 
     function inventoryEntryDetail(entry) {

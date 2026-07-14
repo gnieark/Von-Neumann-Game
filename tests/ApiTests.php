@@ -467,6 +467,7 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'probeApiPath("/storage-containers/" + encodeURIComponent(containerId))'), 'inventories JS renames containers through the selected-probe storage-container PATCH endpoint');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'container.label !== "Sonde"'), 'inventories JS honors custom probe-core container labels');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'label + " " + name'), 'inventories JS displays Manny names after the Manny item label');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'iconButtonPlaceholder("inventory-line-move-placeholder")'), 'inventories JS keeps a non-interactive move placeholder for additional containers');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'container.label !== "Sonde"'), 'mannies JS honors custom probe-core container labels');
@@ -584,7 +585,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-probe-logbook-ui"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-inventory-manny-name"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
