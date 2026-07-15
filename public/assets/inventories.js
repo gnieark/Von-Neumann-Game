@@ -12,6 +12,7 @@
         inventoryContainerFilter: "all",
         storageRulesDirty: false,
         storageRulesTouchedAt: 0,
+        storageRulesSignature: "",
     };
 
     let i18n = {};
@@ -481,12 +482,30 @@
         return Boolean(details && details.open);
     }
 
+    function storageRulesRecentlyTouched() {
+        return state.storageRulesTouchedAt > 0 && Date.now() - state.storageRulesTouchedAt < STORAGE_RULES_IDLE_PRESERVE_MS;
+    }
+
+    function storageRulesSignature(inventory) {
+        const containers = inventoryContainers(inventory);
+
+        return JSON.stringify(containers.map((container) => {
+            const rules = container.rules || {};
+
+            return [
+                container.id || "",
+                Array.isArray(rules.priority) ? rules.priority : [],
+                Array.isArray(rules.exclusion) ? rules.exclusion : [],
+                Array.isArray(rules.strictExclusion) ? rules.strictExclusion : [],
+            ];
+        }));
+    }
+
     function shouldPreserveStorageRules() {
         return Boolean(
             state.storageRulesDirty
             || storageRulesAreActive()
-            || storageRulesDetailsOpen()
-            || (state.storageRulesTouchedAt > 0 && Date.now() - state.storageRulesTouchedAt < STORAGE_RULES_IDLE_PRESERVE_MS)
+            || storageRulesRecentlyTouched()
         );
     }
 
@@ -497,8 +516,10 @@
         }
 
         const containers = inventoryContainers(inventory);
+        const keepOpen = storageRulesDetailsOpen();
         state.storageRulesDirty = false;
         state.storageRulesTouchedAt = 0;
+        state.storageRulesSignature = storageRulesSignature(inventory);
 
         if (!inventory || containers.length === 0) {
             node.innerHTML = "";
@@ -525,7 +546,7 @@
                 + "</select></label>";
         };
 
-        node.innerHTML = "<details class=\"storage-rules\">"
+        node.innerHTML = "<details class=\"storage-rules\"" + (keepOpen ? " open" : "") + ">"
             + "<summary>" + window.VNG.escapeHtml(tr("manageStorageRules", "Manage storage rules by container")) + "</summary>"
             + "<p class=\"storage-rules-help\">" + window.VNG.escapeHtml(tr("storageRulesHelp", "Priority routes matching new items to this container first unless it is full. Exclusion avoids this container unless no other non-strict container can accept the item. Strict exclusion prevents automatic placement into this container.")) + "</p>"
             + "<div class=\"storage-container-list\">"
@@ -656,7 +677,9 @@
         if (!state.inventoryContainerFilter) {
             state.inventoryContainerFilter = "all";
         }
-        if ((!renderOptions.preserveStorageRules && !storageRulesDetailsOpen()) || !shouldPreserveStorageRules()) {
+        const nextStorageRulesSignature = storageRulesSignature(inventory);
+        const storageRulesChanged = nextStorageRulesSignature !== state.storageRulesSignature;
+        if (!shouldPreserveStorageRules() && (!renderOptions.preserveStorageRules || !storageRulesDetailsOpen() || storageRulesChanged)) {
             renderStorageRules(inventory);
         }
         if (!inventory || typeof inventory !== "object") {

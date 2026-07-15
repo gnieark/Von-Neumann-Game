@@ -8,6 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - API v91 : `POST /api/probe/mannies/{mannyId}/detach-storage-container` accepte le mode `attach_to_probe` avec `objectId` ciblant une autre sonde possédée dans le même secteur; à la fin du délai, le container et son contenu sont réattachés à l’inventaire de cette sonde.
 - Interface : `/mannies` et `/inventories` proposent le mode “Attach to another probe” pour détacher un container puis le rattacher à une autre sonde ou drone possédé dans le même secteur.
+- Interface : `/inventories` reconstruit le panneau “Manage storage rules by container” quand les règles reçues changent, tout en conservant l’accordéon ouvert, afin de refléter les modifications faites directement via l’API.
 - API v90 : ajout du journal de bord rattaché à chaque sonde, avec stockage `probe_logbook_pages` et endpoints `GET /api/probe/{probeId}/logbook-pages`, `POST /api/probe/{probeId}/logbook-page`, `GET/PATCH/DELETE /api/probe/{probeId}/logbook-page/{logbookPageId}`.
 - Interface : la page Sonde affiche le journal de bord de la sonde sélectionnée, chargé à l’ouverture et après création, modification ou suppression, sans polling.
 - Interface : `/inventories` affiche le nom de chaque Manny directement après le libellé `Manny` dans les cartes d’inventaire.

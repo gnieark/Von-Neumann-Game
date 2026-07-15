@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260715-detach-attach-probe';
+const ASSET_VERSION = '20260715-storage-rules-refresh';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
