@@ -78,15 +78,10 @@ final class MannyService implements MannyTaskRuntime
     public const TASK_VISIBILITY_LOCAL = 'local';
     public const TASK_VISIBILITY_SCUT_NETWORK = 'scut_network';
     public const TASK_VISIBILITY_TOO_FAR = 'too_far';
-    private const PROBE_ASSEMBLY_COMPONENTS = [
-        ProbeItem::TYPE_DEUTERIUM_ENGINE => 1,
-        ProbeItem::TYPE_SCUT_RELAY => 1,
-        ProbeItem::TYPE_ELECTRIC_MOTOR => 5,
-        ProbeItem::TYPE_ATOMIC_PRINTER_PART => 2,
-        ProbeItem::TYPE_SOLAR_PANEL => 4,
-    ];
 
     private readonly WaypointBookmarkService $bookmarks;
+    private readonly MannyCraftingService $crafting;
+    private readonly MannyCargoService $cargo;
     private readonly MannyPublicPresenter $presenter;
     private readonly MannyTaskRefresher $taskRefresher;
     private readonly RepairTaskHandler $repairTaskHandler;
@@ -118,8 +113,12 @@ final class MannyService implements MannyTaskRuntime
         private readonly ?ProbeImprovementRepository $improvements = null,
         ?array $taskHandlers = null,
         private readonly ?ScheduledEventRepository $scheduledEvents = null,
+        ?MannyCraftingService $crafting = null,
+        ?MannyCargoService $cargo = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
+        $this->crafting = $crafting ?? new MannyCraftingService($mannies, $probes, $items, $storage, $config);
+        $this->cargo = $cargo ?? new MannyCargoService($mannies, $sectors, $storage, $config, $scut);
         $this->presenter = new MannyPublicPresenter(
             $this->scut,
             fn(Manny $manny): array => $this->mannyCargoArray($manny),
@@ -183,13 +182,13 @@ final class MannyService implements MannyTaskRuntime
                 $this->setMannyCargoProfile($manny, $resourceProfile, $amount);
             },
             function (Manny $manny, array $payload): void {
-                $this->waitForStorageSpace($manny, $payload);
+                $this->cargo->waitForStorageSpace($manny, $payload);
             },
             function (NeumannProbe $probe, array $resourceProfile, float $amount): void {
                 $this->transferMiningResourcesToProbe($probe, $resourceProfile, $amount);
             },
             function (Manny $manny): void {
-                $this->clearMannyCargo($manny);
+                $this->cargo->clearMannyCargo($manny);
             },
             function (Manny $manny, array $payload): void {
                 $this->clearTask($manny, $payload);
@@ -250,7 +249,7 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(NeumannProbe $probe, string $objectId): ?UniverseObject => $this->findObjectInCurrentSector($probe, $objectId),
             fn(NeumannProbe $probe): ?ProbeItem => $this->firstItemOfType($probe, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT),
-            fn(ProbeItem $item): array => $this->consumedItemPayload($item),
+            fn(ProbeItem $item): array => $this->crafting->consumedItemPayload($item),
             fn(NeumannProbe $probe, string $containerId, int $ownerPlayerId): array => $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, $ownerPlayerId),
             function (ProbeItem $item): void {
                 $this->items->delete($item);
@@ -315,7 +314,7 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(NeumannProbe $probe, Manny $manny): bool => $this->storage->placeMannyOnProbe($probe, $manny),
             function (Manny $manny, array $payload): void {
-                $this->waitForStorageSpace($manny, $payload);
+                $this->cargo->waitForStorageSpace($manny, $payload);
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
@@ -342,9 +341,9 @@ final class MannyService implements MannyTaskRuntime
             fn(string $improvement): string => ProbeImprovementCatalog::normalizeId($improvement),
             fn(string $improvement): ?array => ProbeImprovementCatalog::find($improvement, $this->probeImprovementConfig()),
             fn(NeumannProbe $probe, string $improvement): ?\VonNeumannGame\Domain\ProbeImprovement => $this->improvements?->findForProbe($probe->id, $improvement),
-            fn(NeumannProbe $probe, array $definition): array => $this->probeImprovementPlan($probe, $definition),
+            fn(NeumannProbe $probe, array $definition): array => $this->crafting->probeImprovementPlan($probe, $definition),
             function (NeumannProbe $probe, array $plan): void {
-                $this->consumeProbeImprovementPlan($probe, $plan);
+                $this->crafting->consumeProbeImprovementPlan($probe, $plan);
             },
             function (Manny $manny): void {
                 $this->mannies->save($manny);
@@ -372,13 +371,13 @@ final class MannyService implements MannyTaskRuntime
             function (NeumannProbe $probe, Manny $manny): void {
                 $this->refreshOtherMannyStates($probe, $manny);
             },
-            fn(NeumannProbe $probe): array => $this->probeAssemblyPlan($probe),
+            fn(NeumannProbe $probe): array => $this->crafting->probeAssemblyPlan($probe),
             fn(NeumannProbe $probe, array $containerIds): array => $this->storage->consumeEmptyAdditionalContainers($probe, $containerIds),
             function (NeumannProbe $probe, array $plan): void {
-                $this->consumeProbeAssemblyPlan($probe, $plan);
+                $this->crafting->consumeProbeAssemblyPlan($probe, $plan);
             },
             fn(): int => self::PROBE_ASSEMBLY_SECONDS,
-            fn(): array => $this->probeAssemblyComponentRequirements(),
+            fn(): array => $this->crafting->probeAssemblyComponentRequirements(),
             function (Manny $manny): void {
                 $this->storage->releaseMannyFromStorage($manny);
             },
@@ -454,21 +453,21 @@ final class MannyService implements MannyTaskRuntime
             fn(NeumannProbe $probe): bool => $this->probeAcceptsMannyOrders($probe),
         );
         $this->returningTaskHandler = new ReturningTaskHandler(
-            fn(NeumannProbe $probe, Manny $manny, array $payload): bool => $this->canAcceptMannyDocking($probe, $manny, $payload),
+            fn(NeumannProbe $probe, Manny $manny, array $payload): bool => $this->cargo->canAcceptMannyDocking($probe, $manny, $payload),
             function (Manny $manny, array $payload): void {
-                $this->waitForStorageSpace($manny, $payload);
+                $this->cargo->waitForStorageSpace($manny, $payload);
             },
             function (Manny $manny, NeumannProbe $probe): void {
-                $this->transferMannyCargoToProbe($manny, $probe);
+                $this->cargo->transferMannyCargoToProbe($manny, $probe);
             },
             function (NeumannProbe $probe, Manny $manny, array $payload): void {
-                $this->deliverReservedSalvageItems($probe, $manny, $payload);
+                $this->cargo->deliverReservedSalvageItems($probe, $manny, $payload);
             },
             function (NeumannProbe $probe, array $payload): void {
-                $this->deliverReservedDetachedContainer($probe, $payload);
+                $this->cargo->deliverReservedDetachedContainer($probe, $payload);
             },
-            fn(Manny $manny): bool => $this->mannyCargoIsEmpty($manny),
-            fn(Manny $manny): bool => $this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null,
+            fn(Manny $manny): bool => $this->cargo->mannyCargoIsEmpty($manny),
+            fn(Manny $manny): bool => $this->cargo->hasReservedDeliveryPayload($manny),
             fn(NeumannProbe $probe, Manny $manny): bool => $this->storage->placeMannyOnProbe($probe, $manny),
             function (Manny $manny): void {
                 $this->removeMannyFromSector($manny);
@@ -497,13 +496,13 @@ final class MannyService implements MannyTaskRuntime
                 $this->refreshOtherMannyStates($probe, $manny);
             },
             fn(NeumannProbe $probe, string $objectId): UniverseObject|ScutRelay|null => $this->findObjectInCurrentSector($probe, $objectId) ?? $this->findScutRelayInCurrentSector($probe, $objectId),
-            fn(UniverseObject|ScutRelay $target): bool => $this->isSalvageableTarget($target),
+            fn(UniverseObject|ScutRelay $target): bool => $this->cargo->isSalvageableTarget($target),
             function (NeumannProbe $probe, ScutRelay $target, int $actorMannyId): void {
                 $this->ensureScutRelayNotAlreadyBeingSalvaged($probe, $target, $actorMannyId);
             },
-            fn(NeumannProbe $probe, SectorDriftingItem $target): array => $this->reserveDriftingItemForSalvage($probe, $target),
-            fn(NeumannProbe $probe, SectorDetachedContainer $target): array => $this->reserveDetachedContainerForSalvage($probe, $target),
-            fn(UniverseObject|ScutRelay $target): array => $this->salvageTargetArray($target),
+            fn(NeumannProbe $probe, SectorDriftingItem $target): array => $this->cargo->reserveDriftingItemForSalvage($probe, $target),
+            fn(NeumannProbe $probe, SectorDetachedContainer $target): array => $this->cargo->reserveDetachedContainerForSalvage($probe, $target),
+            fn(UniverseObject|ScutRelay $target): array => $this->cargo->salvageTargetArray($target),
             fn(): int => $this->salvageSeconds(),
             function (Manny $manny): void {
                 $this->storage->releaseMannyFromStorage($manny);
@@ -515,12 +514,12 @@ final class MannyService implements MannyTaskRuntime
                 $this->mannies->save($manny);
             },
             fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
-            fn(Manny $manny): ?array => $this->reservedSalvageItemPayload($manny),
-            fn(Manny $manny): ?array => $this->reservedDetachedContainerPayload($manny),
+            fn(Manny $manny): ?array => $this->cargo->reservedSalvageItemPayload($manny),
+            fn(Manny $manny): ?array => $this->cargo->reservedDetachedContainerPayload($manny),
             fn(SectorContent $sector, string $objectId): ?ScutRelay => $this->findScutRelayInSector($sector, $objectId),
-            fn(NeumannProbe $probe, SectorContent $sector, UniverseObject|ScutRelay $target): array => $this->completeSalvageTarget($probe, $sector, $target),
+            fn(NeumannProbe $probe, SectorContent $sector, UniverseObject|ScutRelay $target): array => $this->cargo->completeSalvageTarget($probe, $sector, $target),
             function (Manny $manny, NeumannProbe $probe, array $resultPayload): void {
-                $this->finishSalvageActor($manny, $probe, $resultPayload);
+                $this->cargo->finishSalvageActor($manny, $probe, $resultPayload);
             },
             function (NeumannProbe $probe): void {
                 $this->probes->save($probe);
@@ -550,7 +549,7 @@ final class MannyService implements MannyTaskRuntime
             fn(NeumannProbe $probe): bool => $this->currentSectorHasStar($probe),
             fn(int $relayId): ?ScutRelay => $this->scut?->relayById($relayId),
             fn(NeumannProbe $probe, string $type): ?ProbeItem => $this->firstItemOfType($probe, $type),
-            fn(ProbeItem $item): array => $this->consumedItemPayload($item),
+            fn(ProbeItem $item): array => $this->crafting->consumedItemPayload($item),
             function (ProbeItem $item): void {
                 $this->items->delete($item);
             },
@@ -638,7 +637,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->items->delete($item);
             },
             fn(): int => $this->waypointBookmarkInstallSeconds(),
-            fn(ProbeItem $item): array => $this->consumedItemPayload($item),
+            fn(ProbeItem $item): array => $this->crafting->consumedItemPayload($item),
             function (Manny $manny): void {
                 $this->mannies->save($manny);
             },
@@ -768,14 +767,14 @@ final class MannyService implements MannyTaskRuntime
 
         $recipe = CraftingRecipeCatalog::normalizeId($recipe);
         $recipeDefinition = CraftingRecipeCatalog::find($recipe, $this->craftingConfig());
-        if ($recipeDefinition === null || !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_MANNY)) {
+        if ($recipeDefinition === null || !$this->crafting->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_MANNY)) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
         }
-        $craftingPlan = $this->craftingPlan($probe, $recipeDefinition);
+        $craftingPlan = $this->crafting->craftingPlan($probe, $recipeDefinition);
         $freeAfterConsumption = round(
             $this->freeCargoCapacity($probe)
-            + $this->cargoSpaceFreedByResourceCosts($craftingPlan['resourceCosts'])
-            + $this->cargoSpaceFreedByConsumedItems($craftingPlan['consumedItems']),
+            + $this->crafting->cargoSpaceFreedByResourceCosts($craftingPlan['resourceCosts'])
+            + $this->crafting->cargoSpaceFreedByConsumedItems($craftingPlan['consumedItems']),
             4,
         );
         if ($freeAfterConsumption + 0.00001 < (float) ($craftingPlan['output']['containerSpace'] ?? 0.0)) {
@@ -783,13 +782,13 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $this->consumeCraftingPlan($probe, $craftingPlan);
+        $this->crafting->consumeCraftingPlan($probe, $craftingPlan);
 
         $manny->currentTask = Manny::TASK_CRAFTING;
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
         $manny->taskPayload = [
-            'craftingRunId' => $this->newCraftingRunId(),
+            'craftingRunId' => $this->crafting->newCraftingRunId(),
             'recipe' => $recipe,
             'recipeName' => (string) ($recipeDefinition['name'] ?? $recipe),
             'durationSeconds' => (int) $craftingPlan['durationSeconds'],
@@ -825,15 +824,15 @@ final class MannyService implements MannyTaskRuntime
 
         $recipe = CraftingRecipeCatalog::normalizeId($recipe);
         $recipeDefinition = CraftingRecipeCatalog::find($recipe, $this->craftingConfig());
-        if ($recipeDefinition === null || !$this->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER)) {
+        if ($recipeDefinition === null || !$this->crafting->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER)) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown atomic-printer recipe.');
         }
 
-        $craftingPlan = $this->craftingPlan($probe, $recipeDefinition);
+        $craftingPlan = $this->crafting->craftingPlan($probe, $recipeDefinition);
         $freeAfterConsumption = round(
             $this->freeCargoCapacity($probe)
-            + $this->cargoSpaceFreedByResourceCosts($craftingPlan['resourceCosts'])
-            + $this->cargoSpaceFreedByConsumedItems($craftingPlan['consumedItems']),
+            + $this->crafting->cargoSpaceFreedByResourceCosts($craftingPlan['resourceCosts'])
+            + $this->crafting->cargoSpaceFreedByConsumedItems($craftingPlan['consumedItems']),
             4,
         );
         if ($freeAfterConsumption + 0.00001 < (float) ($craftingPlan['output']['containerSpace'] ?? 0.0)) {
@@ -841,13 +840,13 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $this->consumeCraftingPlan($probe, $craftingPlan);
+        $this->crafting->consumeCraftingPlan($probe, $craftingPlan);
 
         $manny->currentTask = Manny::TASK_ASSISTING_ATOMIC_PRINTER;
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
         $manny->taskPayload = [
-            'craftingRunId' => $this->newCraftingRunId(),
+            'craftingRunId' => $this->crafting->newCraftingRunId(),
             'recipe' => $recipe,
             'recipeName' => (string) ($recipeDefinition['name'] ?? $recipe),
             'durationSeconds' => (int) $craftingPlan['durationSeconds'],
@@ -973,7 +972,7 @@ final class MannyService implements MannyTaskRuntime
             throw new MannyActionException(404, 'detached_container_not_found', 'Detached storage container not found.');
         }
 
-        $reservedDetachedContainer = $this->reserveDetachedContainerForSalvage($probe, $target);
+        $reservedDetachedContainer = $this->cargo->reserveDetachedContainerForSalvage($probe, $target);
         $this->recallMiningManniesTargetingDetachedContainer($probe, $manny->id, $objectId);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $salvageSeconds = $this->salvageSeconds();
@@ -985,7 +984,7 @@ final class MannyService implements MannyTaskRuntime
         $manny->taskPayload = [
             'objectId' => $objectId,
             'durationSeconds' => $salvageSeconds,
-            'target' => $this->salvageTargetArray($target),
+            'target' => $this->cargo->salvageTargetArray($target),
             'result' => 'pending',
             'reservedDetachedContainer' => $reservedDetachedContainer,
         ];
@@ -1009,8 +1008,8 @@ final class MannyService implements MannyTaskRuntime
             }
 
             $returnDurationSeconds = $this->recallReturnDurationSeconds($manny, $now);
-            $droppedCargo = $this->dropWaitingMannyCargo($manny);
-            $this->clearMannyCargo($manny);
+            $droppedCargo = $this->cargo->dropWaitingMannyCargo($manny);
+            $this->cargo->clearMannyCargo($manny);
             $manny->currentTask = Manny::TASK_RETURNING;
             $manny->taskStartedAt = $now->format('c');
             $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
@@ -1126,14 +1125,14 @@ final class MannyService implements MannyTaskRuntime
             return $this->requiredManny($probe, $uid);
         }
         if ($manny->currentTask === Manny::TASK_CRAFTING || $manny->currentTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
-            $this->refundCraftingCommitment($probe, $manny);
+            $this->crafting->refundCraftingCommitment($probe, $manny);
             $this->clearTask($manny);
             $this->mannies->save($manny);
 
             return $this->requiredManny($probe, $uid);
         }
         if ($manny->currentTask === Manny::TASK_IMPROVING_PROBE) {
-            $this->refundProbeImprovementCommitment($probe, $manny);
+            $this->crafting->refundProbeImprovementCommitment($probe, $manny);
             $this->clearTask($manny);
             $this->mannies->save($manny);
 
@@ -1142,7 +1141,7 @@ final class MannyService implements MannyTaskRuntime
         if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
             $consumedItem = is_array($manny->taskPayload['consumedItem'] ?? null) ? $manny->taskPayload['consumedItem'] : null;
             if ($consumedItem !== null) {
-                $this->restoreConsumedItem($probe, $consumedItem);
+                $this->crafting->restoreConsumedItem($probe, $consumedItem);
             }
             $this->clearTask($manny);
             $this->mannies->save($manny);
@@ -1170,12 +1169,12 @@ final class MannyService implements MannyTaskRuntime
 
             return $this->requiredManny($probe, $uid);
         }
-        if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE && ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null)) {
+        if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE && $this->cargo->hasReservedDeliveryPayload($manny)) {
             return $manny;
         }
         if ($manny->currentTask === Manny::TASK_SALVAGE) {
-            $this->restoreReservedSalvageItem($manny);
-            $this->restoreReservedDetachedContainer($manny);
+            $this->cargo->restoreReservedSalvageItem($manny);
+            $this->cargo->restoreReservedDetachedContainer($manny);
         }
         if ($manny->isOnProbe()) {
             return $manny;
@@ -1234,8 +1233,8 @@ final class MannyService implements MannyTaskRuntime
     {
         $lastTask = $manny->currentTask;
         if ($manny->currentTask === Manny::TASK_SALVAGE) {
-            $this->restoreReservedSalvageItem($manny);
-            $this->restoreReservedDetachedContainer($manny);
+            $this->cargo->restoreReservedSalvageItem($manny);
+            $this->cargo->restoreReservedDetachedContainer($manny);
         }
 
         $this->clearTask($manny, [
@@ -1267,17 +1266,17 @@ final class MannyService implements MannyTaskRuntime
             throw new MannyActionException(409, 'manny_not_waiting_for_space', 'The Manny is not waiting for storage space.');
         }
 
-        $droppedCargo = $this->dropWaitingMannyCargo($manny);
+        $droppedCargo = $this->cargo->dropWaitingMannyCargo($manny);
         $resultPayload = [
             'lastTask' => 'drop_manny_cargo',
             'result' => 'success',
             'droppedCargo' => $droppedCargo,
         ];
-        $this->clearMannyCargo($manny);
+        $this->cargo->clearMannyCargo($manny);
         $manny->taskPayload = $resultPayload;
 
         if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-            $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe'] + $resultPayload);
+            $this->cargo->waitForStorageSpace($manny, ['reason' => 'return_to_probe'] + $resultPayload);
             $this->probes->save($probe);
             $this->mannies->save($manny);
 
@@ -1433,7 +1432,7 @@ final class MannyService implements MannyTaskRuntime
         }
 
         try {
-            $this->createCraftingOutput($probe, $manny, $now);
+            $this->crafting->createCraftingOutput($probe, $manny, $now);
         } catch (MannyActionException $e) {
             if ($e->errorCode !== 'insufficient_cargo_capacity') {
                 throw $e;
@@ -1455,254 +1454,6 @@ final class MannyService implements MannyTaskRuntime
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
-    /**
-     * @param array<string, mixed> $recipeDefinition
-     * @return array<string, mixed>
-     */
-    private function craftingPlan(NeumannProbe $probe, array $recipeDefinition): array
-    {
-        $output = $recipeDefinition['output'] ?? null;
-        if (!is_array($output) || !isset($output['type'])) {
-            throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
-        }
-
-        $resourceCosts = [];
-        $itemsToConsume = [];
-        $consumedItems = [];
-        $itemsByType = $this->probeItemsByType($probe);
-        $durationSeconds = $this->resolveCraftingRecipe(
-            $recipeDefinition,
-            $itemsByType,
-            $itemsToConsume,
-            $consumedItems,
-            $resourceCosts,
-        );
-
-        $this->ensureResourceCostsAvailable($probe, $resourceCosts);
-
-        return [
-            'durationSeconds' => $durationSeconds,
-            'resourceCosts' => $resourceCosts,
-            'itemsToConsume' => $itemsToConsume,
-            'consumedItems' => $consumedItems,
-            'output' => $output,
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $definition
-     * @return array<string, mixed>
-     */
-    private function probeImprovementPlan(NeumannProbe $probe, array $definition): array
-    {
-        $resourceCosts = [];
-        $itemsToConsume = [];
-        $consumedItems = [];
-        $itemsByType = $this->probeItemsByType($probe);
-        $ingredients = is_array($definition['ingredients'] ?? null) ? $definition['ingredients'] : [];
-        foreach ($ingredients as $ingredient) {
-            if (!is_array($ingredient)) {
-                continue;
-            }
-            $type = (string) ($ingredient['type'] ?? '');
-            if ($type === '') {
-                continue;
-            }
-
-            $quantity = max(0.0, (float) ($ingredient['quantity'] ?? 0));
-            if ($this->craftingIngredientKind($ingredient) !== 'item') {
-                $this->addResourceCost($resourceCosts, $this->normalizeCraftResourceType($type), $quantity);
-                continue;
-            }
-
-            $requiredCount = (int) ceil($quantity);
-            $availableItems = $itemsByType[$type] ?? [];
-            if (count($availableItems) < $requiredCount) {
-                throw new MannyActionException(422, 'insufficient_improvement_ingredients', 'Insufficient probe inventory for this improvement.');
-            }
-            for ($index = 0; $index < $requiredCount; $index++) {
-                $item = array_shift($availableItems);
-                if (!$item instanceof ProbeItem) {
-                    continue;
-                }
-                $itemsToConsume[] = $item;
-                $consumedItems[] = $this->consumedItemPayload($item);
-            }
-            $itemsByType[$type] = $availableItems;
-        }
-
-        $this->ensureResourceCostsAvailable($probe, $resourceCosts);
-
-        return [
-            'durationSeconds' => max(1, (int) ($definition['durationSeconds'] ?? 1)),
-            'resourceCosts' => $resourceCosts,
-            'itemsToConsume' => $itemsToConsume,
-            'consumedItems' => $consumedItems,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function probeAssemblyPlan(NeumannProbe $probe): array
-    {
-        $itemsByType = $this->probeItemsByType($probe);
-        $itemsToConsume = [];
-        $consumedItems = [];
-        foreach (self::PROBE_ASSEMBLY_COMPONENTS as $type => $requiredCount) {
-            $availableItems = $itemsByType[$type] ?? [];
-            if (count($availableItems) < $requiredCount) {
-                throw new MannyActionException(422, 'insufficient_probe_assembly_components', 'Insufficient probe inventory to assemble a new probe.');
-            }
-            for ($index = 0; $index < $requiredCount; $index++) {
-                $item = array_shift($availableItems);
-                if (!$item instanceof ProbeItem) {
-                    continue;
-                }
-                $itemsToConsume[] = $item;
-                $consumedItems[] = $this->consumedItemPayload($item);
-            }
-            $itemsByType[$type] = $availableItems;
-        }
-
-        return [
-            'itemsToConsume' => $itemsToConsume,
-            'consumedItems' => $consumedItems,
-        ];
-    }
-
-    /**
-     * @return list<array{type:string,name:string,quantity:int,unit:string}>
-     */
-    private function probeAssemblyComponentRequirements(): array
-    {
-        $requirements = [];
-        foreach (self::PROBE_ASSEMBLY_COMPONENTS as $type => $quantity) {
-            $requirements[] = [
-                'type' => $type,
-                'name' => $this->itemDisplayName($type),
-                'quantity' => $quantity,
-                'unit' => 'item',
-            ];
-        }
-
-        return $requirements;
-    }
-
-    /**
-     * @param array<string, mixed> $recipeDefinition
-     * @param array<string, array<ProbeItem>> $itemsByType
-     * @param array<ProbeItem> $itemsToConsume
-     * @param array<array<string, mixed>> $consumedItems
-     * @param array<string, float> $resourceCosts
-     * @param array<string> $path
-     */
-    private function resolveCraftingRecipe(
-        array $recipeDefinition,
-        array &$itemsByType,
-        array &$itemsToConsume,
-        array &$consumedItems,
-        array &$resourceCosts,
-        array $path = [],
-    ): int {
-        $recipeId = (string) ($recipeDefinition['id'] ?? ($recipeDefinition['output']['type'] ?? ''));
-        if ($recipeId === '') {
-            throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
-        }
-        if (in_array($recipeId, $path, true)) {
-            throw new MannyActionException(422, 'invalid_recipe', 'Recursive crafting recipe cycle detected.');
-        }
-
-        $durationSeconds = max(0, (int) ($recipeDefinition['durationSeconds'] ?? 0));
-        $ingredients = is_array($recipeDefinition['ingredients'] ?? null) ? $recipeDefinition['ingredients'] : [];
-        foreach ($ingredients as $ingredient) {
-            if (!is_array($ingredient)) {
-                continue;
-            }
-            $type = (string) ($ingredient['type'] ?? '');
-            if ($type === '') {
-                continue;
-            }
-
-            if ($this->craftingIngredientKind($ingredient) !== 'item') {
-                $this->addResourceCost(
-                    $resourceCosts,
-                    $this->normalizeCraftResourceType($type),
-                    max(0.0, (float) ($ingredient['quantity'] ?? 0)),
-                );
-                continue;
-            }
-
-            $requiredCount = (int) ceil(max(0.0, (float) ($ingredient['quantity'] ?? 0)));
-            $availableItems = $itemsByType[$type] ?? [];
-            $consumedCount = min($requiredCount, count($availableItems));
-            for ($index = 0; $index < $consumedCount; $index++) {
-                $item = array_shift($availableItems);
-                if (!$item instanceof ProbeItem) {
-                    continue;
-                }
-                $itemsToConsume[] = $item;
-                $consumedItems[] = $this->consumedItemPayload($item);
-            }
-            $itemsByType[$type] = $availableItems;
-
-            $missingCount = $requiredCount - $consumedCount;
-            if ($missingCount <= 0) {
-                continue;
-            }
-
-            $componentRecipe = CraftingRecipeCatalog::find($type, $this->craftingConfig());
-            if (
-                $componentRecipe === null
-                || (
-                    !$this->recipeCraftableBy($componentRecipe, CraftingRecipeCatalog::FABRICATOR_MANNY)
-                    && !$this->recipeCraftableBy($componentRecipe, CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER)
-                )
-            ) {
-                throw new MannyActionException(422, 'insufficient_crafting_ingredients', 'Insufficient crafting ingredients for this recipe.');
-            }
-
-            for ($index = 0; $index < $missingCount; $index++) {
-                $durationSeconds += $this->resolveCraftingRecipe(
-                    $componentRecipe,
-                    $itemsByType,
-                    $itemsToConsume,
-                    $consumedItems,
-                    $resourceCosts,
-                    [...$path, $recipeId],
-                );
-            }
-        }
-
-        return $durationSeconds;
-    }
-
-    /**
-     * @param array<string, mixed> $ingredient
-     */
-    private function craftingIngredientKind(array $ingredient): string
-    {
-        if (isset($ingredient['kind'])) {
-            return (string) $ingredient['kind'];
-        }
-
-        return ($ingredient['unit'] ?? null) === 'item' ? 'item' : 'resource';
-    }
-
-    /**
-     * @return array<string, array<ProbeItem>>
-     */
-    private function probeItemsByType(NeumannProbe $probe): array
-    {
-        $itemsByType = [];
-        foreach ($this->items->findByProbeId($probe->id) as $item) {
-            $itemsByType[$item->type] ??= [];
-            $itemsByType[$item->type][] = $item;
-        }
-
-        return $itemsByType;
-    }
-
     private function firstWaypointBookmarkItem(NeumannProbe $probe): ?ProbeItem
     {
         return $this->firstItemOfType($probe, ProbeItem::TYPE_WAYPOINT_BOOKMARK);
@@ -1719,359 +1470,19 @@ final class MannyService implements MannyTaskRuntime
         return null;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function consumedItemPayload(ProbeItem $item): array
-    {
-        return [
-            'type' => $item->type,
-            'name' => $item->name,
-            'containerSpace' => $item->containerSpace,
-            'metadata' => $item->metadata,
-        ];
-    }
-
-    /**
-     * @param array<string, float> $resourceCosts
-     */
-    private function addResourceCost(array &$resourceCosts, string $type, float $quantity): void
-    {
-        $quantity = round(max(0.0, $quantity), 4);
-        if ($quantity <= 0.0) {
-            return;
-        }
-
-        $resourceCosts[$type] = round((float) ($resourceCosts[$type] ?? 0.0) + $quantity, 4);
-    }
-
-    private function normalizeCraftResourceType(string $type): string
-    {
-        try {
-            return ResourceComposition::normalizeSelection($type)[0];
-        } catch (\InvalidArgumentException) {
-            return $type;
-        }
-    }
-
-    /**
-     * @param array<string, float> $resourceCosts
-     */
-    private function ensureResourceCostsAvailable(NeumannProbe $probe, array $resourceCosts): void
-    {
-        foreach ($resourceCosts as $type => $quantity) {
-            if ($this->resourceStock($probe, $type) + 0.00001 < $quantity) {
-                throw new MannyActionException(422, 'insufficient_' . $type, 'Insufficient resources in probe inventory for this recipe.');
-            }
-        }
-    }
-
-    private function resourceStock(NeumannProbe $probe, string $type): float
-    {
-        return $this->storage->resourceStock($probe, $type);
-    }
-
-    /**
-     * @param array<string, mixed> $recipeDefinition
-     */
-    private function recipeCraftableBy(array $recipeDefinition, string $fabricator): bool
-    {
-        $craftableBy = $recipeDefinition['craftableBy'] ?? [];
-        if (!is_array($craftableBy)) {
-            return false;
-        }
-
-        return in_array($fabricator, $craftableBy, true);
-    }
-
-    /**
-     * @param array<string, mixed> $craftingPlan
-     */
-    private function consumeCraftingPlan(NeumannProbe $probe, array $craftingPlan): void
-    {
-        $resourceCosts = is_array($craftingPlan['resourceCosts'] ?? null) ? $craftingPlan['resourceCosts'] : [];
-        foreach ($resourceCosts as $type => $quantity) {
-            $this->subtractResourceFromProbe($probe, (string) $type, (float) $quantity);
-        }
-
-        $itemsToConsume = is_array($craftingPlan['itemsToConsume'] ?? null) ? $craftingPlan['itemsToConsume'] : [];
-        foreach ($itemsToConsume as $item) {
-            if ($item instanceof ProbeItem) {
-                $this->items->delete($item);
-            }
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $plan
-     */
-    private function consumeProbeImprovementPlan(NeumannProbe $probe, array $plan): void
-    {
-        $this->consumeCraftingPlan($probe, $plan);
-    }
-
-    /**
-     * @param array<string, mixed> $plan
-     */
-    private function consumeProbeAssemblyPlan(NeumannProbe $probe, array $plan): void
-    {
-        $this->consumeCraftingPlan($probe, $plan);
-    }
-
-    private function subtractResourceFromProbe(NeumannProbe $probe, string $type, float $quantity): void
-    {
-        $quantity = round(max(0.0, $quantity), 4);
-        if ($quantity <= 0.0) {
-            return;
-        }
-
-        $this->storage->consumeResource($probe, $type, $quantity);
-    }
-
-    /**
-     * @param array<string, float> $resourceCosts
-     */
-    private function cargoSpaceFreedByResourceCosts(array $resourceCosts): float
-    {
-        $freed = 0.0;
-        foreach ($resourceCosts as $type => $quantity) {
-            if ($type !== ResourceComposition::DEUTERIUM) {
-                $freed += max(0.0, (float) $quantity);
-            }
-        }
-
-        return round($freed, 4);
-    }
-
-    /**
-     * @param array<array<string, mixed>> $consumedItems
-     */
-    private function cargoSpaceFreedByConsumedItems(array $consumedItems): float
-    {
-        return round(array_reduce(
-            $consumedItems,
-            static fn(float $total, array $item): float => $total + max(0.0, (float) ($item['containerSpace'] ?? 0.0)),
-            0.0,
-        ), 4);
-    }
-
-    private function createCraftingOutput(NeumannProbe $probe, Manny $manny, \DateTimeImmutable $now): void
-    {
-        $output = $manny->taskPayload['output'] ?? null;
-        if (!is_array($output)) {
-            $recipeDefinition = CraftingRecipeCatalog::find((string) ($manny->taskPayload['recipe'] ?? ''), $this->craftingConfig());
-            $output = is_array($recipeDefinition) && is_array($recipeDefinition['output'] ?? null)
-                ? $recipeDefinition['output']
-                : null;
-        }
-        if (!is_array($output)) {
-            return;
-        }
-
-        $type = (string) ($output['type'] ?? '');
-        if ($type === '') {
-            return;
-        }
-        if ($type === 'manny') {
-            $this->createCraftedManny($probe, $manny, $now);
-            return;
-        }
-
-        $outputUid = $this->craftingOutputUid($manny, $type, 'itm_craft_');
-        if ($this->items->findByUidForProbe($probe->id, $outputUid) !== null) {
-            return;
-        }
-
-        $metadata = [
-            'recipe' => (string) ($manny->taskPayload['recipe'] ?? $type),
-            'craftingRunId' => $this->craftingRunId($manny, $type),
-            'craftedByMannyId' => $manny->uid,
-            'craftedByMannyName' => $manny->name,
-            'craftedAt' => $now->format('c'),
-        ];
-        if (isset($manny->taskPayload['fabricator']) && is_string($manny->taskPayload['fabricator'])) {
-            $metadata['fabricator'] = $manny->taskPayload['fabricator'];
-        }
-        $capacityBonus = round(max(0.0, (float) ($output['capacityBonus'] ?? 0.0)), 4);
-        if ($capacityBonus > 0.0) {
-            $metadata['capacityBonus'] = $capacityBonus;
-            $metadata['capacityBonusUnit'] = ProbeInventory::CAPACITY_UNIT;
-        }
-
-        try {
-            $this->storage->addItem(
-                $probe,
-                $type,
-                (string) ($output['name'] ?? $type),
-                round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
-                $metadata,
-                $outputUid,
-            );
-        } catch (\RuntimeException $e) {
-            if ($this->items->findByUidForProbe($probe->id, $outputUid) !== null) {
-                return;
-            }
-
-            throw $e;
-        }
-    }
-
-    private function createCraftedManny(NeumannProbe $probe, Manny $craftingManny, \DateTimeImmutable $now): void
-    {
-        $uid = $this->craftingOutputUid($craftingManny, 'manny', 'mny_craft_');
-        $existing = $this->mannies->findByUid($uid);
-        if ($existing !== null) {
-            $this->ensureCraftedMannyStored($probe, $existing);
-            return;
-        }
-
-        $name = $this->nextCraftedMannyName($probe);
-        try {
-            $newManny = $this->mannies->createForProbe($probe->id, $name, uid: $uid);
-        } catch (\RuntimeException $e) {
-            if ($this->mannies->findByUid($uid) !== null) {
-                return;
-            }
-
-            throw $e;
-        }
-        if (!$this->storage->placeMannyOnProbe($probe, $newManny)) {
-            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted Manny.');
-        }
-        $newManny->taskPayload = [
-            'craftedFromRecipe' => (string) ($craftingManny->taskPayload['recipe'] ?? 'manny'),
-            'craftingRunId' => $this->craftingRunId($craftingManny, 'manny'),
-            'craftedByMannyId' => $craftingManny->uid,
-            'craftedByMannyName' => $craftingManny->name,
-            'craftedAt' => $now->format('c'),
-        ];
-        $this->mannies->save($newManny);
-    }
-
-    private function ensureCraftedMannyStored(NeumannProbe $probe, Manny $manny): void
-    {
-        if ($manny->probeId !== $probe->id || !$manny->isOnProbe()) {
-            throw new \RuntimeException('Crafted Manny uid already exists for another location.');
-        }
-        if ($manny->storageContainerId !== null) {
-            return;
-        }
-        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted Manny.');
-        }
-
-        $this->mannies->save($manny);
-    }
-
-    private function newCraftingRunId(): string
-    {
-        return 'craft_' . bin2hex(random_bytes(12));
-    }
-
-    private function craftingRunId(Manny $manny, string $outputType): string
-    {
-        $runId = $manny->taskPayload['craftingRunId'] ?? null;
-        if (is_string($runId) && $runId !== '') {
-            return $runId;
-        }
-
-        return hash('sha256', implode('|', [
-            $manny->uid,
-            (string) $manny->taskStartedAt,
-            (string) ($manny->taskPayload['recipe'] ?? $outputType),
-            $outputType,
-            (string) ($manny->taskPayload['fabricator'] ?? CraftingRecipeCatalog::FABRICATOR_MANNY),
-        ]));
-    }
-
-    private function craftingOutputUid(Manny $manny, string $outputType, string $prefix): string
-    {
-        return $prefix . substr(hash('sha256', $this->craftingRunId($manny, $outputType) . '|' . $outputType), 0, 24);
-    }
-
-    private function nextCraftedMannyName(NeumannProbe $probe): string
-    {
-        $names = array_fill_keys(array_map(
-            static fn(Manny $manny): string => strtolower($manny->name),
-            $this->mannies->findByProbeId($probe->id),
-        ), true);
-
-        for ($index = 1; $index <= 9999; $index++) {
-            $name = 'manny-' . $index;
-            if (!isset($names[strtolower($name)])) {
-                return $name;
-            }
-        }
-
-        return 'manny-' . bin2hex(random_bytes(4));
-    }
-
-    private function refundCraftingCommitment(NeumannProbe $probe, Manny $manny): void
-    {
-        $consumedItems = is_array($manny->taskPayload['consumedItems'] ?? null) ? $manny->taskPayload['consumedItems'] : [];
-        foreach ($consumedItems as $item) {
-            if (is_array($item)) {
-                $this->restoreConsumedItem($probe, $item);
-            }
-        }
-
-        $resourceCosts = is_array($manny->taskPayload['resourceCosts'] ?? null) ? $manny->taskPayload['resourceCosts'] : [];
-        if ($resourceCosts === [] && (float) ($manny->taskPayload['metalsCost'] ?? 0.0) > 0.0) {
-            $resourceCosts = [ResourceComposition::METALS => (float) $manny->taskPayload['metalsCost']];
-        }
-
-        $refundedResources = false;
-        foreach ($resourceCosts as $type => $quantity) {
-            if ((float) $quantity <= 0.0) {
-                continue;
-            }
-
-            $this->transferResourceToProbe($probe, (string) $type, (float) $quantity);
-            $refundedResources = true;
-        }
-        if ($refundedResources) {
-            $this->probes->save($probe);
-        }
-    }
-
-    private function refundProbeImprovementCommitment(NeumannProbe $probe, Manny $manny): void
-    {
-        $this->refundCraftingCommitment($probe, $manny);
-    }
-
-    /**
-     * @param array<string, mixed> $item
-     */
-    private function restoreConsumedItem(NeumannProbe $probe, array $item): void
-    {
-        $type = (string) ($item['type'] ?? '');
-        if ($type === '') {
-            return;
-        }
-
-        $metadata = $item['metadata'] ?? [];
-        $this->storage->addItem(
-            $probe,
-            $type,
-            (string) ($item['name'] ?? $type),
-            round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4),
-            is_array($metadata) ? $metadata : [],
-        );
-    }
-
     public function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
-        if (!$this->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
+        if (!$this->cargo->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
             return $manny;
         }
 
-        $this->transferMannyCargoToProbe($manny, $probe);
-        $this->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
-        $this->deliverReservedDetachedContainer($probe, $manny->taskPayload);
-        if ($this->mannyCargoIsEmpty($manny)) {
-            $finalPayload = ($this->reservedSalvageItemPayload($manny) !== null || $this->reservedDetachedContainerPayload($manny) !== null) ? $manny->taskPayload : [];
+        $this->cargo->transferMannyCargoToProbe($manny, $probe);
+        $this->cargo->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
+        $this->cargo->deliverReservedDetachedContainer($probe, $manny->taskPayload);
+        if ($this->cargo->mannyCargoIsEmpty($manny)) {
+            $finalPayload = $this->cargo->hasReservedDeliveryPayload($manny) ? $manny->taskPayload : [];
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-                $this->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
+                $this->cargo->waitForStorageSpace($manny, ['reason' => 'return_to_probe']);
                 $this->mannies->save($manny);
 
                 return $this->mannies->findById($manny->id) ?? $manny;
@@ -2081,7 +1492,7 @@ final class MannyService implements MannyTaskRuntime
             $manny->sector = null;
             $this->clearTask($manny, $finalPayload);
         } else {
-            $this->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
+            $this->cargo->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
         }
 
         $this->mannies->save($manny);
@@ -2241,14 +1652,6 @@ final class MannyService implements MannyTaskRuntime
             || ($object instanceof Planet && $object->getMass() <= $this->mineablePlanetMaxMass());
     }
 
-    private function isSalvageableTarget(UniverseObject|ScutRelay $object): bool
-    {
-        return ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_ABANDONED)
-            || ($object instanceof SectorDriftingItem && $object->getQuantity() > 0 && $object->getContainerSpace() > 0.0)
-            || ($object instanceof SectorDetachedContainer && $object->getMode() === SectorDetachedContainer::MODE_DRIFTING)
-            || ($object instanceof ScutRelay && !$object->isOn());
-    }
-
     private function ensureScutRelayNotAlreadyBeingSalvaged(NeumannProbe $probe, ScutRelay $target, int $actorMannyId): void
     {
         $targetId = (string) $target->id;
@@ -2265,39 +1668,6 @@ final class MannyService implements MannyTaskRuntime
                 throw new MannyActionException(422, 'invalid_salvage_target', 'This SCUT relay is already being recovered.');
             }
         }
-    }
-
-    private function salvageTargetArray(UniverseObject|ScutRelay $object): array
-    {
-        if ($object instanceof ScutRelay) {
-            return [
-                'id' => (string) $object->id,
-                'type' => ProbeItem::TYPE_SCUT_RELAY,
-                'name' => ProbeItem::SCUT_RELAY_NAME,
-                'status' => $object->status,
-                'containerSpace' => CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
-                'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
-            ];
-        }
-
-        return [
-            'id' => $object->getId(),
-            'type' => $object->getType()->value,
-            'name' => $object->getName(),
-        ] + ($object instanceof SectorManny ? [
-            'mannyUid' => $object->getMannyUid(),
-            'mannyState' => $object->getState(),
-        ] : []) + ($object instanceof SectorDriftingItem ? [
-            'itemType' => $object->getItemType(),
-            'quantity' => $object->getQuantity(),
-            'containerSpace' => $object->getContainerSpace(),
-            'capacityUnit' => $object->getCapacityUnit(),
-        ] : []) + ($object instanceof SectorDetachedContainer ? [
-            'mode' => $object->getMode(),
-            'capacity' => $object->getCapacity(),
-            'capacityUnit' => $object->getCapacityUnit(),
-            'targetObjectId' => $object->getTargetObjectId(),
-        ] : []);
     }
 
     private function bookmarkTargetArray(UniverseObject $object): array
@@ -2483,337 +1853,6 @@ final class MannyService implements MannyTaskRuntime
         return rtrim(rtrim(number_format($amount, 4, '.', ''), '0'), '.') . ' ECE';
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function scutRelayReservedItemPayload(ScutRelay $relay): array
-    {
-        return [
-            'objectId' => (string) $relay->id,
-            'type' => ProbeItem::TYPE_SCUT_RELAY,
-            'name' => ProbeItem::SCUT_RELAY_NAME,
-            'quantity' => 1,
-            'containerSpace' => CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
-            'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function completeSalvageTarget(NeumannProbe $probe, SectorContent $sector, UniverseObject|ScutRelay $target): array
-    {
-        if ($target instanceof ScutRelay) {
-            return $this->completeScutRelaySalvageTarget($probe, $sector, $target);
-        }
-
-        if (!$target instanceof SectorManny || $target->getState() !== SectorManny::STATE_ABANDONED) {
-            return [
-                'result' => 'failed',
-                'failureReason' => 'target_unavailable',
-            ];
-        }
-
-        $recovered = $this->mannies->findByUid($target->getMannyUid());
-        if (
-            $recovered === null
-            || $recovered->probeId !== null
-            || $recovered->sector === null
-            || !$recovered->sector->equals($sector->getCoordinates())
-        ) {
-            return [
-                'result' => 'failed',
-                'failureReason' => 'target_unavailable',
-            ];
-        }
-
-        if (!$sector->removeObjectById($target->getId())) {
-            return [
-                'result' => 'failed',
-                'failureReason' => 'target_unavailable',
-            ];
-        }
-        $this->sectors->saveSector($sector);
-
-        $recovered->probeId = $probe->id;
-        $recovered->name = $this->uniqueMannyNameForProbe($probe, $recovered->name, $recovered->id);
-        $recovered->locationType = Manny::LOCATION_SECTOR;
-        $recovered->sector = $sector->getCoordinates();
-        $this->clearTask($recovered);
-        $this->mannies->save($recovered);
-
-        return [
-            'result' => 'success',
-            'salvaged' => [
-                'type' => 'manny',
-                'id' => $recovered->uid,
-                'name' => $recovered->name,
-            ],
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function completeScutRelaySalvageTarget(NeumannProbe $probe, SectorContent $sector, ScutRelay $target): array
-    {
-        if ($this->scut === null) {
-            return [
-                'result' => 'failed',
-                'failureReason' => 'target_unavailable',
-            ];
-        }
-        $relay = $this->scut->relayById($target->id);
-        if ($relay === null || $relay->isOn() || !$relay->sector->equals($sector->getCoordinates())) {
-            return [
-                'result' => 'failed',
-                'failureReason' => 'target_unavailable',
-            ];
-        }
-
-        $this->scut->deleteRelay($relay->id);
-        $reservedItem = $this->scutRelayReservedItemPayload($relay);
-
-        return [
-            'result' => 'success',
-            'reservedItem' => $reservedItem,
-            'salvaged' => [
-                'type' => ProbeItem::TYPE_SCUT_RELAY,
-                'name' => ProbeItem::SCUT_RELAY_NAME,
-                'quantity' => 1,
-                'containerSpace' => $reservedItem['containerSpace'],
-            ],
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $resultPayload
-     */
-    private function finishSalvageActor(Manny $manny, NeumannProbe $probe, array $resultPayload): void
-    {
-        if (!$this->canAcceptMannyDocking($probe, $manny, $resultPayload)) {
-            $this->waitForStorageSpace($manny, ['reason' => 'salvage_return'] + $resultPayload);
-            return;
-        }
-
-        $this->transferMannyCargoToProbe($manny, $probe);
-        $this->deliverReservedSalvageItems($probe, $manny, $resultPayload);
-        $this->deliverReservedDetachedContainer($probe, $resultPayload);
-        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-            $this->waitForStorageSpace($manny, ['reason' => 'salvage_return'] + $resultPayload);
-            return;
-        }
-        $this->removeMannyFromSector($manny);
-        $manny->locationType = Manny::LOCATION_PROBE;
-        $manny->sector = null;
-        $this->clearTask($manny, $resultPayload);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function reserveDriftingItemForSalvage(NeumannProbe $probe, SectorDriftingItem $target): array
-    {
-        $containerSpace = round(max(0.0, $target->getContainerSpace()), 4);
-        if ($containerSpace <= 0.0) {
-            throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
-        }
-
-        $maximumQuantity = (int) floor(($this->mannyCargoCapacity() + 0.00001) / $containerSpace);
-        if ($maximumQuantity <= 0) {
-            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'This drifting object is too large for a Manny to carry.');
-        }
-
-        $quantity = min($target->getQuantity(), $maximumQuantity);
-        if ($quantity <= 0) {
-            throw new MannyActionException(422, 'invalid_salvage_target', 'This object cannot be recovered by a Manny.');
-        }
-
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        $remaining = $target->getQuantity() - $quantity;
-        if ($remaining > 0) {
-            $sector->replaceObject($target->withQuantity($remaining));
-        } else {
-            $sector->removeObjectById($target->getId());
-        }
-        $this->sectors->saveSector($sector);
-
-        return [
-            'objectId' => $target->getId(),
-            'type' => $target->getItemType(),
-            'name' => $target->getName() ?? $this->itemDisplayName($target->getItemType()),
-            'quantity' => $quantity,
-            'containerSpace' => $containerSpace,
-            'capacityUnit' => $target->getCapacityUnit(),
-        ];
-    }
-
-    private function restoreReservedSalvageItem(Manny $manny): void
-    {
-        $reservedItem = $this->reservedSalvageItemPayload($manny);
-        if ($reservedItem === null || $manny->sector === null) {
-            return;
-        }
-
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        $this->addDriftingItemToSector(
-            $sector,
-            (string) $reservedItem['type'],
-            (string) $reservedItem['name'],
-            (float) $reservedItem['containerSpace'],
-            (int) $reservedItem['quantity'],
-        );
-        $this->sectors->saveSector($sector);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function reserveDetachedContainerForSalvage(NeumannProbe $probe, SectorDetachedContainer $target): array
-    {
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        if ($target->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
-            $removed = $sector->removeHiddenDetachedContainerById($target->getId());
-        } else {
-            $removed = $sector->removeObjectById($target->getId()) ? $target : null;
-        }
-        if (!$removed instanceof SectorDetachedContainer) {
-            throw new MannyActionException(422, 'detached_container_not_recoverable', 'This detached container is no longer recoverable.');
-        }
-        $this->sectors->saveSector($sector);
-
-        return $this->detachedContainerReservedPayload($removed);
-    }
-
-    private function restoreReservedDetachedContainer(Manny $manny): void
-    {
-        $reserved = $this->reservedDetachedContainerPayload($manny);
-        if ($reserved === null || $manny->sector === null) {
-            return;
-        }
-
-        $container = SectorDetachedContainer::fromArray($reserved['object']);
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        if ($container->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
-            if ($sector->findHiddenDetachedContainerById($container->getId()) === null) {
-                $sector->addHiddenDetachedContainer($container);
-            }
-        } elseif (!$sector->replaceObject($container)) {
-            $sector->addObject($container);
-        }
-        $this->sectors->saveSector($sector);
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function dropWaitingMannyCargo(Manny $manny): array
-    {
-        $dropped = [];
-        $resourceCargo = $this->mannyResourceCargo($manny);
-        if ($resourceCargo !== []) {
-            $dropped[] = [
-                'type' => 'resources',
-                'resources' => $resourceCargo,
-            ];
-        }
-
-        $reservedItem = $this->reservedSalvageItemPayload($manny);
-        if ($reservedItem !== null) {
-            $this->restoreReservedSalvageItem($manny);
-            $dropped[] = [
-                'type' => 'drifting_item',
-                'objectId' => $reservedItem['objectId'],
-                'itemType' => $reservedItem['type'],
-                'name' => $reservedItem['name'],
-                'quantity' => $reservedItem['quantity'],
-                'containerSpace' => $reservedItem['containerSpace'],
-                'capacityUnit' => $reservedItem['capacityUnit'],
-            ];
-        }
-
-        $reservedDetachedContainer = $this->reservedDetachedContainerPayload($manny);
-        if ($reservedDetachedContainer !== null) {
-            $this->restoreReservedDetachedContainer($manny);
-            $dropped[] = [
-                'type' => 'detached_storage_container',
-                'objectId' => $reservedDetachedContainer['objectId'],
-                'mode' => $reservedDetachedContainer['mode'],
-                'capacity' => $reservedDetachedContainer['capacity'],
-                'capacityUnit' => $reservedDetachedContainer['capacityUnit'],
-                'targetObjectId' => $reservedDetachedContainer['targetObjectId'],
-            ];
-        }
-
-        $salvagedManny = $this->restoreSalvagedMannyCargo($manny);
-        if ($salvagedManny !== null) {
-            $dropped[] = $salvagedManny;
-        }
-
-        return $dropped;
-    }
-
-    /**
-     * @return array<string, float>
-     */
-    private function mannyResourceCargo(Manny $manny): array
-    {
-        $resources = [
-            ResourceComposition::DEUTERIUM => $manny->cargoDeuterium,
-            ResourceComposition::METALS => $manny->cargoMetals,
-            ResourceComposition::ICE => $manny->cargoIce,
-            ResourceComposition::CARBON_COMPOUNDS => $manny->cargoOrganicCompounds,
-        ];
-
-        return array_filter(
-            array_map(static fn(float $amount): float => round(max(0.0, $amount), 4), $resources),
-            static fn(float $amount): bool => $amount > 0.0001,
-        );
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function restoreSalvagedMannyCargo(Manny $manny): ?array
-    {
-        $salvaged = $manny->taskPayload['salvaged'] ?? null;
-        if (!is_array($salvaged) || ($salvaged['type'] ?? null) !== 'manny' || !is_string($salvaged['id'] ?? null) || $manny->sector === null) {
-            return null;
-        }
-
-        $recovered = $this->mannies->findByUid($salvaged['id']);
-        if ($recovered === null || $recovered->id === $manny->id || $recovered->sector === null || !$recovered->sector->equals($manny->sector)) {
-            return null;
-        }
-
-        $recovered->probeId = null;
-        $recovered->storageContainerId = null;
-        $recovered->locationType = Manny::LOCATION_SECTOR;
-        $recovered->sector = $manny->sector;
-        $this->clearTask($recovered);
-        $this->mannies->save($recovered);
-
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        $object = new SectorManny(
-            SectorManny::objectIdForUid($recovered->uid),
-            $recovered->name,
-            $recovered->uid,
-            SectorManny::STATE_ABANDONED,
-            $this->mannyCargoArray($recovered),
-            'Manny abandoned after its carrier dropped cargo.',
-        );
-        if (!$sector->replaceObject($object)) {
-            $sector->addObject($object);
-        }
-        $this->sectors->saveSector($sector);
-
-        return [
-            'type' => 'manny',
-            'id' => $recovered->uid,
-            'name' => $recovered->name,
-        ];
-    }
-
     private function restoreConsumedDropKit(NeumannProbe $probe, Manny $manny): void
     {
         $kit = $manny->taskPayload['consumedKit'] ?? null;
@@ -2828,176 +1867,6 @@ final class MannyService implements MannyTaskRuntime
             round(max(0.0, (float) ($kit['containerSpace'] ?? CraftingRecipeCatalog::ATMOSPHERIC_DROP_KIT_CONTAINER_SPACE)), 4),
             is_array($kit['metadata'] ?? null) ? $kit['metadata'] : [],
         );
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private function deliverReservedSalvageItems(NeumannProbe $probe, Manny $manny, array $payload): void
-    {
-        $reservedItem = $this->reservedSalvageItemPayloadFrom($payload);
-        if ($reservedItem === null) {
-            return;
-        }
-
-        $quantity = (int) $reservedItem['quantity'];
-        for ($index = 0; $index < $quantity; $index++) {
-            $this->storage->addItem(
-                $probe,
-                (string) $reservedItem['type'],
-                (string) $reservedItem['name'],
-                (float) $reservedItem['containerSpace'],
-                [
-                    'source' => 'salvaged_drifting_item',
-                    'recoveredByMannyId' => $manny->uid,
-                    'recoveredByMannyName' => $manny->name,
-                    'recoveredAt' => gmdate('c'),
-                ],
-            );
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private function deliverReservedDetachedContainer(NeumannProbe $probe, array $payload): void
-    {
-        $reserved = $this->reservedDetachedContainerPayloadFrom($payload);
-        if ($reserved === null) {
-            return;
-        }
-
-        $object = is_array($reserved['object'] ?? null) ? $reserved['object'] : [];
-        $snapshot = is_array($object['payload'] ?? null) ? $object['payload'] : [];
-        $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
-    }
-
-    private function reservedSalvageItemPayload(Manny $manny): ?array
-    {
-        return $this->reservedSalvageItemPayloadFrom($manny->taskPayload);
-    }
-
-    private function reservedDetachedContainerPayload(Manny $manny): ?array
-    {
-        return $this->reservedDetachedContainerPayloadFrom($manny->taskPayload);
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     * @return array<string, mixed>|null
-     */
-    private function reservedSalvageItemPayloadFrom(array $payload): ?array
-    {
-        $reservedItem = $payload['reservedItem'] ?? null;
-        if (!is_array($reservedItem)) {
-            return null;
-        }
-
-        $type = (string) ($reservedItem['type'] ?? '');
-        $name = (string) ($reservedItem['name'] ?? $this->itemDisplayName($type));
-        $quantity = max(0, (int) ($reservedItem['quantity'] ?? 0));
-        $containerSpace = round(max(0.0, (float) ($reservedItem['containerSpace'] ?? 0.0)), 4);
-        if ($type === '' || $quantity <= 0 || $containerSpace <= 0.0) {
-            return null;
-        }
-
-        return [
-            'objectId' => (string) ($reservedItem['objectId'] ?? SectorDriftingItem::objectIdForItemType($type)),
-            'type' => $type,
-            'name' => $name,
-            'quantity' => $quantity,
-            'containerSpace' => $containerSpace,
-            'capacityUnit' => (string) ($reservedItem['capacityUnit'] ?? ProbeInventory::CAPACITY_UNIT),
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     * @return array<string, mixed>|null
-     */
-    private function reservedDetachedContainerPayloadFrom(array $payload): ?array
-    {
-        $reserved = $payload['reservedDetachedContainer'] ?? null;
-        if (!is_array($reserved) || !is_array($reserved['object'] ?? null)) {
-            return null;
-        }
-        $object = SectorDetachedContainer::fromArray($reserved['object']);
-
-        return [
-            'objectId' => $object->getId(),
-            'mode' => $object->getMode(),
-            'capacity' => $object->getCapacity(),
-            'capacityUnit' => $object->getCapacityUnit(),
-            'targetObjectId' => $object->getTargetObjectId(),
-            'object' => $object->toArray(),
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function detachedContainerReservedPayload(SectorDetachedContainer $container): array
-    {
-        return [
-            'objectId' => $container->getId(),
-            'mode' => $container->getMode(),
-            'capacity' => $container->getCapacity(),
-            'capacityUnit' => $container->getCapacityUnit(),
-            'targetObjectId' => $container->getTargetObjectId(),
-            'object' => $container->toArray(),
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private function reservedSalvageItemContainerSpace(array $payload): float
-    {
-        $reservedItem = $this->reservedSalvageItemPayloadFrom($payload);
-        if ($reservedItem === null) {
-            return 0.0;
-        }
-
-        return round((float) $reservedItem['containerSpace'] * (int) $reservedItem['quantity'], 4);
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     * @return list<array{type:string, space:float}>
-     */
-    private function reservedSalvageItemUnits(array $payload): array
-    {
-        $reservedItem = $this->reservedSalvageItemPayloadFrom($payload);
-        if ($reservedItem === null) {
-            return [];
-        }
-
-        $units = [];
-        for ($index = 0; $index < (int) $reservedItem['quantity']; $index++) {
-            $units[] = [
-                'type' => (string) $reservedItem['type'],
-                'space' => (float) $reservedItem['containerSpace'],
-            ];
-        }
-
-        return $units;
-    }
-
-    private function uniqueMannyNameForProbe(NeumannProbe $probe, string $name, int $exceptId): string
-    {
-        $base = trim($name) !== '' ? trim($name) : 'Manny récupérée';
-        if (!$this->mannies->nameExistsForProbe($probe->id, $base, $exceptId)) {
-            return $base;
-        }
-
-        for ($index = 2; $index <= 999; $index++) {
-            $candidate = $base . ' ' . $index;
-            if (!$this->mannies->nameExistsForProbe($probe->id, $candidate, $exceptId)) {
-                return $candidate;
-            }
-        }
-
-        return $base . ' ' . bin2hex(random_bytes(3));
     }
 
     /**
@@ -3275,22 +2144,6 @@ final class MannyService implements MannyTaskRuntime
         return round(max(0.0, min(1.0, $ratio)) * max(0.0, $requestedTotal), 4);
     }
 
-    private function canAcceptMannyDocking(NeumannProbe $probe, Manny $manny, array $payload = []): bool
-    {
-        return $this->storage->canStoreIncoming(
-            $probe,
-            [
-                ResourceComposition::METALS => $manny->cargoMetals,
-                ResourceComposition::ICE => $manny->cargoIce,
-                ResourceComposition::CARBON_COMPOUNDS => $manny->cargoOrganicCompounds,
-            ],
-            [
-                ...$this->reservedSalvageItemUnits($payload),
-                ['type' => 'manny', 'space' => $this->mannyContainerSpace()],
-            ],
-        );
-    }
-
     /**
      * @param array<string, float> $profile
      */
@@ -3299,32 +2152,6 @@ final class MannyService implements MannyTaskRuntime
         $units = $includeManny ? [['type' => 'manny', 'space' => $this->mannyContainerSpace()]] : [];
 
         return $this->storage->canStoreIncoming($probe, $this->resourceAmountsForTotal($amount, $profile), $units);
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private function waitForStorageSpace(Manny $manny, array $payload = []): void
-    {
-        if ($manny->sector === null) {
-            return;
-        }
-
-        $manny->currentTask = Manny::TASK_WAITING_FOR_SPACE;
-        $manny->taskStartedAt ??= gmdate('c');
-        $manny->taskEndsAt = null;
-        $manny->taskPayload = array_merge($manny->taskPayload, [
-            'reason' => 'return_to_probe',
-            'waitingFor' => 'storage_space',
-        ], $payload);
-    }
-
-    private function transferMannyCargoToProbe(Manny $manny, NeumannProbe $probe): void
-    {
-        $manny->cargoDeuterium = round($manny->cargoDeuterium - $this->transferResourceToProbe($probe, 'deuterium', $manny->cargoDeuterium), 4);
-        $manny->cargoMetals = round($manny->cargoMetals - $this->transferResourceToProbe($probe, 'metals', $manny->cargoMetals), 4);
-        $manny->cargoIce = round($manny->cargoIce - $this->transferResourceToProbe($probe, 'ice', $manny->cargoIce), 4);
-        $manny->cargoOrganicCompounds = round($manny->cargoOrganicCompounds - $this->transferResourceToProbe($probe, 'carbon_compounds', $manny->cargoOrganicCompounds), 4);
     }
 
     private function transferResourceToProbe(NeumannProbe $probe, string $resourceType, float $amount): float
@@ -3399,7 +2226,7 @@ final class MannyService implements MannyTaskRuntime
      */
     private function setMannyCargoProfile(Manny $manny, array $profile, float $amount): void
     {
-        $this->clearMannyCargo($manny);
+        $this->cargo->clearMannyCargo($manny);
         $amounts = $this->resourceAmountsForTotal($amount, $profile);
         $manny->cargoDeuterium = $amounts[ResourceComposition::DEUTERIUM] ?? 0.0;
         $manny->cargoMetals = $amounts[ResourceComposition::METALS] ?? 0.0;
@@ -3517,22 +2344,6 @@ final class MannyService implements MannyTaskRuntime
         }
 
         return round($total, 4);
-    }
-
-    private function clearMannyCargo(Manny $manny): void
-    {
-        $manny->cargoDeuterium = 0.0;
-        $manny->cargoMetals = 0.0;
-        $manny->cargoIce = 0.0;
-        $manny->cargoOrganicCompounds = 0.0;
-    }
-
-    private function mannyCargoIsEmpty(Manny $manny): bool
-    {
-        return $manny->cargoDeuterium <= 0.0001
-            && $manny->cargoMetals <= 0.0001
-            && $manny->cargoIce <= 0.0001
-            && $manny->cargoOrganicCompounds <= 0.0001;
     }
 
     private function isJettisonableDriftingItemType(string $type): bool
