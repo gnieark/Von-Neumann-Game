@@ -2816,9 +2816,10 @@ paths:
         The target must be an additional storage container, never probe-core.
         The container, its stored resources/items, and routing rules are
         removed from the probe inventory when the order is accepted. On
-        completion it becomes either a visible drifting detached container or a
-        hidden container attached to an asteroid. Hidden-asteroid detaches
-        expose artificialObjectDetected in the Manny task/result so clients can
+        completion it becomes either a visible drifting detached container, a
+        hidden container attached to an asteroid, or a container attached to
+        another owned probe in the same sector. Hidden-asteroid detaches expose
+        artificialObjectDetected in the Manny task/result so clients can
         immediately reference the hidden detached container id.
       parameters:
         - $ref: '#/components/parameters/MannyId'
@@ -2838,6 +2839,11 @@ paths:
                   containerId: container-itm_extra
                   mode: hidden_on_asteroid
                   objectId: asteroid-abc123
+              attachToProbe:
+                value:
+                  containerId: container-itm_extra
+                  mode: attach_to_probe
+                  objectId: '42'
       responses:
         '202':
           description: Detach task accepted
@@ -5477,10 +5483,10 @@ components:
           example: container-itm_extra
         mode:
           type: string
-          enum: [drifting, hidden_on_asteroid]
+          enum: [drifting, hidden_on_asteroid, attach_to_probe]
         objectId:
           type: string
-          description: Required when mode is hidden_on_asteroid; must be an asteroid id in the current sector.
+          description: Required when mode is hidden_on_asteroid or attach_to_probe. For hidden_on_asteroid, this must be an asteroid id in the current sector. For attach_to_probe, this must be another owned probe id in the same sector.
     MannyDropStorageContainerRequest:
       type: object
       required: [containerId, planetId]

@@ -67,6 +67,7 @@ use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
+use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorGrid;
@@ -452,6 +453,7 @@ $test->assert(str_contains($openApi, '/api/probe/{probeId}'), 'OpenAPI documents
 $test->assert(str_contains($openApi, 'summary: Update a Neumann probe'), 'OpenAPI documents the probe update endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
+$test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attach_to_probe]'), 'OpenAPI documents attach-to-probe storage detachment mode');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
@@ -551,6 +553,9 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/transf
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-transfer-deuterium-form'), 'mannies JS renders the deuterium transfer form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshProbeTransferTargets'), 'mannies JS loads same-sector probe transfer targets lazily');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'currentSectorProbes'), 'mannies JS includes public same-sector probes as deuterium transfer targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'storageAttachProbeTargets'), 'mannies JS lists owned same-sector probes for attach-to-probe detachment');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"attach_to_probe"'), 'mannies JS can submit attach-to-probe detachment');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"attach_to_probe"'), 'inventories JS can submit attach-to-probe detachment');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasProbeTransferTargetFuel'), 'mannies JS hides target deuterium values when they are not accessible');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'transferDeuteriumToProbeActionTitle'), 'mannies JS labels the deuterium transfer action');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-action-group-trigger'), 'mannies JS groups task actions inside parent accordions');
@@ -585,7 +590,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260714-inventory-manny-name"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260715-detach-attach-probe"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1369,7 +1374,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(90, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(91, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -3137,6 +3142,54 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 static fn(array $object): bool => ($object['id'] ?? null) === $hiddenDetachedObjectId,
             ));
             $test->assertEquals(1, count($scoutHiddenAfter), 'discovered hidden detached containers appear in sector observation for the discovering player');
+        }
+
+        $attachTargetProbe = $probes->createForPlayer($detachPlayer->id, 'Container receiver drone', $detachProbe->currentSector);
+        $attachContainerItem = $storage->addItem($detachProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+        $attachContainerId = 'container-' . $attachContainerItem->uid;
+        $attachContainer = $storageContainers->findByUidForProbe($detachProbe->id, $attachContainerId);
+        if ($attachContainer !== null) {
+            $storageContainers->setResourceAmount($attachContainer->id, 'ice', 0.12);
+            $attachedStoredPlate = $items->create($detachProbe->id, ProbeItem::TYPE_STEEL_PLATE, ProbeItem::STEEL_PLATE_NAME, 0.01, ['test' => 'attach-to-probe'], $attachContainer->id);
+            if ($scoutProbe !== null) {
+                $attachForeignProbe = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/detach-storage-container', $detachHeaders, json_encode([
+                    'containerId' => $attachContainerId,
+                    'mode' => 'attach_to_probe',
+                    'objectId' => (string) $scoutProbe->id,
+                ], JSON_THROW_ON_ERROR));
+                $test->assertEquals(404, $attachForeignProbe->status, 'attach-to-probe detach rejects another player probe in the same sector');
+                $test->assertEquals('target_probe_not_found', $attachForeignProbe->body['error']['code'] ?? null, 'foreign attach-to-probe target returns a target-probe error');
+            }
+
+            $attachToProbe = $kernel->handle('POST', '/api/probe/' . $detachProbe->id . '/mannies/' . rawurlencode($detachThirdMannyId) . '/detach-storage-container', $detachHeaders, json_encode([
+                'containerId' => $attachContainerId,
+                'mode' => 'attach_to_probe',
+                'objectId' => (string) $attachTargetProbe->id,
+            ], JSON_THROW_ON_ERROR));
+            $test->assertEquals(202, $attachToProbe->status, 'Manny can detach a storage container and attach it to another owned same-sector probe');
+            $test->assertEquals('attach_to_probe', $attachToProbe->body['manny']['task']['mode'] ?? null, 'attach-to-probe detach stores the public mode');
+            $test->assertEquals((string) $attachTargetProbe->id, $attachToProbe->body['manny']['task']['targetObjectId'] ?? null, 'attach-to-probe detach stores objectId as the target probe id');
+            $test->assertEquals(360, $attachToProbe->body['manny']['task']['durationSeconds'] ?? null, 'attach-to-probe detach takes the same duration as hidden detachment');
+            $test->assert($storageContainers->findByUidForProbe($detachProbe->id, $attachContainerId) === null, 'attach-to-probe detach removes the source storage container immediately');
+            $attachRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+            $attachRow->execute(['uid' => $detachThirdMannyId]);
+            $attachMannyDbId = (int) $attachRow->fetchColumn();
+            $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+                'id' => $attachMannyDbId,
+                'ended' => gmdate('c', time() - 1),
+            ]);
+            $completedAttachList = $kernel->handle('GET', '/api/probe/' . $detachProbe->id . '/mannies', $detachHeaders);
+            $completedAttachManny = array_values(array_filter(
+                $completedAttachList->body['mannies'] ?? [],
+                static fn(array $manny): bool => ($manny['id'] ?? null) === $detachThirdMannyId,
+            ))[0] ?? null;
+            $test->assertEquals('success', $completedAttachManny['task']['result'] ?? null, 'completed attach-to-probe detach reports success');
+            $test->assertEquals($attachTargetProbe->id, $completedAttachManny['task']['targetProbeId'] ?? null, 'completed attach-to-probe result exposes the target probe id');
+            $targetRestoredContainer = $storageContainers->findByUidForProbe($attachTargetProbe->id, $attachContainerId);
+            $test->assert($targetRestoredContainer !== null, 'completed attach-to-probe detach creates the storage container on the target probe');
+            $test->assertEquals(0.12, $targetRestoredContainer !== null ? ($storageContainers->resourceAmounts($targetRestoredContainer->id)['ice'] ?? null) : null, 'completed attach-to-probe detach transfers stored resources to the target probe');
+            $test->assertEquals($targetRestoredContainer?->id, $items->findByUidForProbe($attachTargetProbe->id, $attachedStoredPlate->uid)?->storageContainerId, 'completed attach-to-probe detach transfers stored items inside the target container');
+            $test->assertEquals(null, $sectorRepository->load($detachProbe->currentSector)->findObjectById(SectorDetachedContainer::objectIdForContainer($attachContainerId)), 'attach-to-probe detach does not leave a detached container sector object');
         }
 
         $mineHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([

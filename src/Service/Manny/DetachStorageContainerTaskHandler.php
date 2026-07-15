@@ -25,6 +25,9 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
      * @param \Closure(NeumannProbe, string, int): array<string, mixed> $detachAdditionalContainerSnapshot
      * @param \Closure(): int $detachStorageContainerSeconds
      * @param \Closure(mixed): array<string, mixed> $targetArray
+     * @param \Closure(int): ?NeumannProbe $findProbeById
+     * @param \Closure(NeumannProbe): bool $probeAcceptsMannyOrders
+     * @param \Closure(NeumannProbe, array<string, mixed>): void $restoreDetachedContainerSnapshot
      * @param \Closure(string, ?string): array<string, mixed> $hiddenDetachedContainerDetectionPayload
      * @param \Closure(Manny): void $saveManny
      * @param \Closure(mixed): SectorContent $getOrCreateSector
@@ -44,6 +47,9 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
         private readonly \Closure $detachAdditionalContainerSnapshot,
         private readonly \Closure $detachStorageContainerSeconds,
         private readonly \Closure $targetArray,
+        private readonly \Closure $findProbeById,
+        private readonly \Closure $probeAcceptsMannyOrders,
+        private readonly \Closure $restoreDetachedContainerSnapshot,
         private readonly \Closure $hiddenDetachedContainerDetectionPayload,
         private readonly \Closure $saveManny,
         private readonly \Closure $getOrCreateSector,
@@ -71,8 +77,8 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
         }
 
         $mode = strtolower(trim($mode));
-        if (!in_array($mode, [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID], true)) {
-            throw new MannyActionException(400, 'bad_request', 'Detach mode must be drifting or hidden_on_asteroid.');
+        if (!in_array($mode, [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_ATTACH_TO_PROBE], true)) {
+            throw new MannyActionException(400, 'bad_request', 'Detach mode must be drifting, hidden_on_asteroid, or attach_to_probe.');
         }
 
         $target = null;
@@ -84,10 +90,26 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
             if (!$target instanceof Asteroid) {
                 throw new MannyActionException(422, 'invalid_asteroid_target', 'Hidden containers must be attached to an asteroid in the current sector.');
             }
+        } elseif ($mode === SectorDetachedContainer::MODE_ATTACH_TO_PROBE) {
+            if ($objectId === null || trim($objectId) === '') {
+                throw new MannyActionException(400, 'bad_request', 'objectId is required for attach_to_probe mode.');
+            }
+            $targetProbeId = filter_var($objectId, FILTER_VALIDATE_INT);
+            if ($targetProbeId === false || $targetProbeId <= 0 || $targetProbeId === $probe->id) {
+                throw new MannyActionException(422, 'invalid_target_probe', 'Target probe must reference another owned probe in the current sector.');
+            }
+            $target = ($this->findProbeById)((int) $targetProbeId);
+            if (!$target instanceof NeumannProbe || $target->playerId !== $ownerPlayerId) {
+                throw new MannyActionException(404, 'target_probe_not_found', 'Target probe not found.');
+            }
+            ($this->ensureProbeAcceptsMannyOrders)($target);
+            if (!$target->currentSector->equals($probe->currentSector)) {
+                throw new MannyActionException(422, 'probe_not_in_same_sector', 'Target probe must be in the same sector as the source probe.');
+            }
         }
 
         $snapshot = ($this->detachAdditionalContainerSnapshot)($probe, $containerId, $ownerPlayerId);
-        $objectId = $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID ? $objectId : null;
+        $targetObjectId = in_array($mode, [SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_ATTACH_TO_PROBE], true) ? $objectId : null;
         $detachedObjectId = SectorDetachedContainer::objectIdForContainer((string) $snapshot['sourceContainerId']);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $durationSeconds = ($this->detachStorageContainerSeconds)();
@@ -99,12 +121,16 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
             'containerId' => $containerId,
             'objectId' => $detachedObjectId,
             'mode' => $mode,
-            'targetObjectId' => $objectId,
+            'targetObjectId' => $targetObjectId,
             'durationSeconds' => $durationSeconds,
             'snapshot' => $snapshot,
             'target' => $target instanceof Asteroid ? ($this->targetArray)($target) : null,
+            'targetProbe' => $target instanceof NeumannProbe ? [
+                'id' => $target->id,
+                'name' => $target->name,
+            ] : null,
         ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
-            ? ['artificialObjectDetected' => ($this->hiddenDetachedContainerDetectionPayload)($detachedObjectId, (string) $objectId)]
+            ? ['artificialObjectDetected' => ($this->hiddenDetachedContainerDetectionPayload)($detachedObjectId, (string) $targetObjectId)]
             : []);
         ($this->saveManny)($manny);
 
@@ -124,6 +150,41 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
         $sectorCoordinates = $probe->currentSector;
         $sector = ($this->getOrCreateSector)($sectorCoordinates);
         $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
+
+        if ($mode === SectorDetachedContainer::MODE_ATTACH_TO_PROBE) {
+            $targetProbeId = filter_var($targetObjectId, FILTER_VALIDATE_INT);
+            $targetProbe = $targetProbeId !== false && $targetProbeId > 0 ? ($this->findProbeById)((int) $targetProbeId) : null;
+            if (
+                !$targetProbe instanceof NeumannProbe
+                || $targetProbe->playerId !== (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId)
+                || !$targetProbe->currentSector->equals($probe->currentSector)
+                || !($this->probeAcceptsMannyOrders)($targetProbe)
+            ) {
+                ($this->clearTask)($manny, [
+                    'lastTask' => Manny::TASK_DETACHING_STORAGE_CONTAINER,
+                    'result' => 'failed',
+                    'failureReason' => $targetProbe instanceof NeumannProbe ? 'target_probe_unavailable' : 'target_probe_not_found',
+                    'mode' => $mode,
+                    'targetObjectId' => $targetObjectId,
+                ]);
+                ($this->saveManny)($manny);
+
+                return ($this->findMannyById)($manny->id) ?? $manny;
+            }
+
+            ($this->restoreDetachedContainerSnapshot)($targetProbe, $snapshot);
+            ($this->clearTask)($manny, [
+                'lastTask' => Manny::TASK_DETACHING_STORAGE_CONTAINER,
+                'result' => 'success',
+                'mode' => $mode,
+                'targetObjectId' => $targetObjectId,
+                'targetProbeId' => $targetProbe->id,
+                'targetProbeName' => $targetProbe->name,
+            ]);
+            ($this->saveManny)($manny);
+
+            return ($this->findMannyById)($manny->id) ?? $manny;
+        }
 
         $object = new SectorDetachedContainer(
             $objectId,

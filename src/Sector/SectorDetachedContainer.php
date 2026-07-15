@@ -10,6 +10,7 @@ final class SectorDetachedContainer extends UniverseObject
 {
     public const MODE_DRIFTING = 'drifting';
     public const MODE_HIDDEN_ON_ASTEROID = 'hidden_on_asteroid';
+    public const MODE_ATTACH_TO_PROBE = 'attach_to_probe';
     public const MODE_DROPPED_ON_PLANET = 'dropped_on_planet';
 
     /**
