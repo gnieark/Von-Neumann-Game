@@ -2289,6 +2289,7 @@
     function renderDetachStorageContainerForm() {
         const containers = detachableStorageContainers();
         const asteroids = asteroidTargets();
+        const targetProbes = storageAttachProbeTargets();
         const hasContainer = containers.length > 0;
 
         return "<form class=\"manny-detach-storage-container-form manny-form\">"
@@ -2296,11 +2297,14 @@
             + "<label>" + escaped(tr("detachStorageMode", "Mode")) + "<select class=\"manny-detach-storage-mode\" name=\"mode\" required>"
             + "<option value=\"drifting\">" + escaped(tr("detachModeDrifting", "Leave drifting")) + "</option>"
             + "<option value=\"hidden_on_asteroid\">" + escaped(tr("detachModeHiddenOnAsteroid", "Hide on an asteroid")) + "</option>"
+            + "<option value=\"attach_to_probe\">" + escaped(tr("detachModeAttachToProbe", "Attach to another probe")) + "</option>"
             + "</select></label>"
             + "<label class=\"manny-detach-asteroid-label\" hidden>" + escaped(tr("asteroidObject", "Asteroid")) + "<select class=\"manny-detach-asteroid-target\" name=\"objectId\">" + asteroidTargetOptions("") + "</select></label>"
+            + "<label class=\"manny-detach-probe-label\" hidden>" + escaped(tr("detachStorageTargetProbe", "Target probe")) + "<select class=\"manny-detach-probe-target\" name=\"targetProbeObjectId\">" + storageAttachProbeTargetOptions("") + "</select></label>"
             + "<button class=\"manny-detach-storage-button\" type=\"submit\"" + (hasContainer ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("detachStorageContainerShort", "Detach")) + "</button>"
             + "<p class=\"manny-detach-storage-hint\">" + escaped(hasContainer ? tr("detachStorageHint", "The container and its content leave the probe when the order is accepted.") : tr("noDetachableContainer", "No additional container can be detached."))
-            + (asteroids.length === 0 ? " " + escaped(tr("noAsteroidTarget", "No asteroid available in the current sector.")) : "") + "</p>"
+            + (asteroids.length === 0 ? " " + escaped(tr("noAsteroidTarget", "No asteroid available in the current sector.")) : "")
+            + (targetProbes.length === 0 ? " " + escaped(tr("noSameSectorAttachProbe", "No owned probe or drone is available in this sector.")) : "") + "</p>"
             + "</form>";
     }
 
@@ -2440,6 +2444,28 @@
 
             return "<option value=\"" + escaped(id) + "\"" + (isSelected ? " selected" : "") + ">"
                 + escaped(probeTransferTargetLabel(target))
+                + "</option>";
+        }).join("");
+    }
+
+    function storageAttachProbeTargets() {
+        const currentId = Number(state.currentProbeId);
+        return (Array.isArray(state.currentSectorProbes) ? state.currentSectorProbes : [])
+            .filter((probe) => probe && probe.id && probe.owned === true && Number(probe.id) !== currentId);
+    }
+
+    function storageAttachProbeTargetOptions(selected) {
+        const targets = storageAttachProbeTargets();
+        if (targets.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return targets.map((target, index) => {
+            const id = String(target.id || "");
+            const isSelected = id === String(selected || "") || (!selected && index === 0);
+
+            return "<option value=\"" + escaped(id) + "\"" + (isSelected ? " selected" : "") + ">"
+                + escaped(target.name || id)
                 + "</option>";
         }).join("");
     }
@@ -3083,13 +3109,18 @@
             const modeSelect = form.querySelector(".manny-detach-storage-mode");
             const asteroidLabel = form.querySelector(".manny-detach-asteroid-label");
             const asteroidSelect = form.querySelector(".manny-detach-asteroid-target");
+            const probeLabel = form.querySelector(".manny-detach-probe-label");
+            const probeSelect = form.querySelector(".manny-detach-probe-target");
             const button = form.querySelector(".manny-detach-storage-button");
             const hint = form.querySelector(".manny-detach-storage-hint");
             const selectedContainer = containerSelect ? containerSelect.value : "";
             const selectedAsteroid = asteroidSelect ? asteroidSelect.value : "";
+            const selectedProbe = probeSelect ? probeSelect.value : "";
             const containers = detachableStorageContainers();
             const asteroids = asteroidTargets();
+            const targetProbes = storageAttachProbeTargets();
             const hiddenMode = modeSelect && modeSelect.value === "hidden_on_asteroid";
+            const attachMode = modeSelect && modeSelect.value === "attach_to_probe";
 
             if (containerSelect) {
                 containerSelect.innerHTML = detachStorageContainerOptions(selectedContainer);
@@ -3105,11 +3136,22 @@
                 asteroidSelect.required = Boolean(hiddenMode);
                 asteroidSelect.disabled = !hiddenMode;
             }
+            if (probeSelect) {
+                probeSelect.innerHTML = storageAttachProbeTargetOptions(selectedProbe);
+                if (!targetProbes.some((target) => String(target.id) === String(probeSelect.value))) {
+                    probeSelect.value = targetProbes[0] ? String(targetProbes[0].id) : "";
+                }
+                probeSelect.required = Boolean(attachMode);
+                probeSelect.disabled = !attachMode;
+            }
             if (asteroidLabel) {
                 asteroidLabel.hidden = !hiddenMode;
             }
+            if (probeLabel) {
+                probeLabel.hidden = !attachMode;
+            }
             if (button) {
-                const disabled = containers.length === 0 || (hiddenMode && asteroids.length === 0);
+                const disabled = containers.length === 0 || (hiddenMode && asteroids.length === 0) || (attachMode && targetProbes.length === 0);
                 button.disabled = disabled;
                 button.setAttribute("aria-disabled", disabled ? "true" : "false");
             }
@@ -3118,7 +3160,9 @@
                     ? tr("noDetachableContainer", "No additional container can be detached.")
                     : (hiddenMode && asteroids.length === 0
                         ? tr("noAsteroidTarget", "No asteroid available in the current sector.")
-                        : tr("detachStorageHint", "The container and its content leave the probe when the order is accepted."));
+                        : (attachMode && targetProbes.length === 0
+                            ? tr("noSameSectorAttachProbe", "No owned probe or drone is available in this sector.")
+                            : tr("detachStorageHint", "The container and its content leave the probe when the order is accepted.")));
             }
         });
     }
@@ -3314,7 +3358,7 @@
             try {
                 if (panel.dataset.actionId === "improve-probe") {
                     await Promise.all([refreshProbeInventory(), refreshProbeImprovements()]);
-                } else if (panel.dataset.actionId === "transfer-deuterium") {
+                } else if (panel.dataset.actionId === "transfer-deuterium" || panel.dataset.actionId === "detach-storage") {
                     await refreshProbeInventory();
                     await refreshProbeTransferTargets();
                 } else {
@@ -3513,8 +3557,10 @@
             updateMannyDetachStorageContainerForms();
             const containerId = String(formData.get("containerId") || "");
             const mode = String(formData.get("mode") || "");
-            const objectId = String(formData.get("objectId") || "");
-            if (!containerId || !["drifting", "hidden_on_asteroid"].includes(mode) || (mode === "hidden_on_asteroid" && !objectId)) {
+            const objectId = mode === "attach_to_probe"
+                ? String(formData.get("targetProbeObjectId") || "")
+                : String(formData.get("objectId") || "");
+            if (!containerId || !["drifting", "hidden_on_asteroid", "attach_to_probe"].includes(mode) || (mode !== "drifting" && !objectId)) {
                 setStatus(tr("invalidDetachStorageOrder", "Invalid container detachment order."));
                 return null;
             }
@@ -3524,7 +3570,7 @@
                 "body": JSON.stringify({
                     containerId,
                     mode,
-                    ...(mode === "hidden_on_asteroid" ? {objectId} : {}),
+                    ...(mode !== "drifting" ? {objectId} : {}),
                 }),
             });
         }
@@ -3741,7 +3787,7 @@
             if (event.target.classList.contains("manny-inspect-sector-object-target")) {
                 updateMannyInspectSectorObjectForms();
             }
-            if (event.target.classList.contains("manny-detach-container") || event.target.classList.contains("manny-detach-storage-mode") || event.target.classList.contains("manny-detach-asteroid-target")) {
+            if (event.target.classList.contains("manny-detach-container") || event.target.classList.contains("manny-detach-storage-mode") || event.target.classList.contains("manny-detach-asteroid-target") || event.target.classList.contains("manny-detach-probe-target")) {
                 updateMannyDetachStorageContainerForms();
             }
             if (event.target.classList.contains("manny-drop-container") || event.target.classList.contains("manny-drop-planet-target")) {

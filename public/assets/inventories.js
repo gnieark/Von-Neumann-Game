@@ -8,6 +8,7 @@
         currentInventory: null,
         currentMannies: [],
         currentSectorObjects: [],
+        currentSectorProbes: [],
         inventoryContainerFilter: "all",
         storageRulesDirty: false,
         storageRulesTouchedAt: 0,
@@ -849,6 +850,8 @@
         const containers = detachableStorageContainers();
         const preferredContainer = containers.find((container) => storageContainerMatchesItemIds(container, itemIds)) || containers[0] || null;
         const asteroids = asteroidTargets();
+        const targetProbes = (Array.isArray(state.currentSectorProbes) ? state.currentSectorProbes : [])
+            .filter((probe) => probe && probe.id && probe.owned === true);
         const hasFormChoices = mannies.length > 0 && containers.length > 0;
         const mannyOptions = mannies.map((manny) => (
             "<option value=\"" + window.VNG.escapeHtml(manny.id) + "\">" + window.VNG.escapeHtml(manny.name || manny.id) + "</option>"
@@ -863,6 +866,11 @@
             : asteroids.map((target) => (
                 "<option value=\"" + window.VNG.escapeHtml(target.id) + "\">" + window.VNG.escapeHtml([objectTypeLabel(target.type), target.name || target.id].filter(Boolean).join(" ")) + "</option>"
             )).join("");
+        const targetProbeOptions = targetProbes.length === 0
+            ? "<option value=\"\">-</option>"
+            : targetProbes.map((target) => (
+                "<option value=\"" + window.VNG.escapeHtml(String(target.id)) + "\">" + window.VNG.escapeHtml(target.name || String(target.id)) + "</option>"
+            )).join("");
         const unavailableMessage = mannies.length === 0 ? tr("noAvailableManny", "No available Manny.") : tr("noDetachableContainer", "No additional container can be detached.");
 
         slot.innerHTML = "<form class=\"inventory-detach-container-form\">"
@@ -871,8 +879,10 @@
             + "<label>" + window.VNG.escapeHtml(tr("detachStorageMode", "Mode")) + "<select class=\"detach-storage-mode\" name=\"mode\" required>"
             + "<option value=\"drifting\">" + window.VNG.escapeHtml(tr("detachModeDrifting", "Leave drifting")) + "</option>"
             + "<option value=\"hidden_on_asteroid\">" + window.VNG.escapeHtml(tr("detachModeHiddenOnAsteroid", "Hide on an asteroid")) + "</option>"
+            + "<option value=\"attach_to_probe\">" + window.VNG.escapeHtml(tr("detachModeAttachToProbe", "Attach to another probe")) + "</option>"
             + "</select></label>"
             + "<label class=\"detach-asteroid-label\" hidden>" + window.VNG.escapeHtml(tr("asteroidObject", "Asteroid")) + "<select class=\"detach-asteroid-target\" name=\"objectId\">" + asteroidOptions + "</select></label>"
+            + "<label class=\"detach-probe-label\" hidden>" + window.VNG.escapeHtml(tr("detachStorageTargetProbe", "Target probe")) + "<select class=\"detach-probe-target\" name=\"targetProbeObjectId\">" + targetProbeOptions + "</select></label>"
             + "<button class=\"detach-storage-button\" type=\"submit\"" + (hasFormChoices ? "" : " disabled aria-disabled=\"true\"") + ">" + window.VNG.escapeHtml(tr("detachStorageContainerShort", "Detach")) + "</button>"
             + (hasFormChoices ? "" : "<p class=\"inventory-muted\">" + window.VNG.escapeHtml(unavailableMessage) + "</p>")
             + "</form>";
@@ -886,8 +896,11 @@
         const mode = form.querySelector(".detach-storage-mode");
         const asteroidLabel = form.querySelector(".detach-asteroid-label");
         const asteroid = form.querySelector(".detach-asteroid-target");
+        const probeLabel = form.querySelector(".detach-probe-label");
+        const probe = form.querySelector(".detach-probe-target");
         const button = form.querySelector(".detach-storage-button");
         const hiddenMode = mode && mode.value === "hidden_on_asteroid";
+        const attachMode = mode && mode.value === "attach_to_probe";
         if (asteroidLabel) {
             asteroidLabel.hidden = !hiddenMode;
         }
@@ -895,12 +908,20 @@
             asteroid.required = Boolean(hiddenMode);
             asteroid.disabled = !hiddenMode;
         }
+        if (probeLabel) {
+            probeLabel.hidden = !attachMode;
+        }
+        if (probe) {
+            probe.required = Boolean(attachMode);
+            probe.disabled = !attachMode;
+        }
         if (button) {
             const formData = new FormData(form);
             const coherent = Boolean(formData.get("containerId"))
                 && Boolean(formData.get("actorMannyId"))
                 && Boolean(formData.get("mode"))
-                && (!hiddenMode || Boolean(asteroid && asteroid.value));
+                && (!hiddenMode || Boolean(asteroid && asteroid.value))
+                && (!attachMode || Boolean(probe && probe.value));
             button.disabled = !coherent;
             button.setAttribute("aria-disabled", coherent ? "false" : "true");
         }
@@ -912,11 +933,13 @@
         const actorMannyId = String(formData.get("actorMannyId") || "");
         const containerId = String(formData.get("containerId") || "");
         const mode = String(formData.get("mode") || "");
-        const objectId = String(formData.get("objectId") || "");
-        if (!actorMannyId || !containerId || !["drifting", "hidden_on_asteroid"].includes(mode)) {
+        const objectId = mode === "attach_to_probe"
+            ? String(formData.get("targetProbeObjectId") || "")
+            : String(formData.get("objectId") || "");
+        if (!actorMannyId || !containerId || !["drifting", "hidden_on_asteroid", "attach_to_probe"].includes(mode)) {
             return null;
         }
-        if (mode === "hidden_on_asteroid" && !objectId) {
+        if (mode !== "drifting" && !objectId) {
             return null;
         }
 
@@ -925,7 +948,7 @@
             "payload": {
                 "containerId": containerId,
                 "mode": mode,
-                ...(mode === "hidden_on_asteroid" ? {"objectId": objectId} : {}),
+                ...(mode !== "drifting" ? {"objectId": objectId} : {}),
             },
         };
     }
@@ -1014,9 +1037,11 @@
         try {
             const data = await window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"});
             state.currentSectorObjects = Array.isArray(data.sector && data.sector.objects) ? data.sector.objects : [];
+            state.currentSectorProbes = Array.isArray(data.sector && data.sector.probes) ? data.sector.probes : [];
             return data;
         } catch (error) {
             state.currentSectorObjects = [];
+            state.currentSectorProbes = [];
             return null;
         }
     }

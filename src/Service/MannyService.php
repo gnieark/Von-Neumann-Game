@@ -218,6 +218,11 @@ final class MannyService implements MannyTaskRuntime
             fn(NeumannProbe $probe, string $containerId, int $ownerPlayerId): array => $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, $ownerPlayerId),
             fn(): int => $this->detachStorageContainerSeconds(),
             fn(mixed $target): array => $target instanceof UniverseObject ? $this->bookmarkTargetArray($target) : [],
+            fn(int $probeId): ?NeumannProbe => $this->probes->findById($probeId),
+            fn(NeumannProbe $probe): bool => $this->probeAcceptsMannyOrders($probe),
+            function (NeumannProbe $probe, array $snapshot): void {
+                $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+            },
             fn(string $objectId, ?string $targetObjectId): array => $this->hiddenDetachedContainerDetectionPayload($objectId, $targetObjectId),
             function (Manny $manny): void {
                 $this->mannies->save($manny);
