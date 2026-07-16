@@ -19,6 +19,7 @@ final class TaskHandlerRegistry
         ProbeAssemblyTaskHandler $probeAssembly,
         DeuteriumTankRefillTaskHandler $deuteriumTankRefill,
         DeuteriumTransferTaskHandler $deuteriumTransfer,
+        ProbeTransferTaskHandler $probeTransfer,
         ReturningTaskHandler $returning,
         SalvageTaskHandler $salvage,
         ScutRelayTurnOnTaskHandler $scutRelayTurnOn,
@@ -43,6 +44,7 @@ final class TaskHandlerRegistry
             $probeImprovement,
             $probeAssembly,
             $deuteriumTransfer,
+            $probeTransfer,
         ];
     }
 }

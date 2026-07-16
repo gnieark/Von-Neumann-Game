@@ -33,6 +33,7 @@ use VonNeumannGame\Service\Manny\MannyTaskRuntime;
 use VonNeumannGame\Service\Manny\MiningTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeAssemblyTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeImprovementTaskHandler;
+use VonNeumannGame\Service\Manny\ProbeTransferTaskHandler;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Service\Manny\ReturningTaskHandler;
 use VonNeumannGame\Service\Manny\SalvageTaskHandler;
@@ -91,6 +92,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly InspectSectorObjectTaskHandler $inspectSectorObjectTaskHandler;
     private readonly ProbeAssemblyTaskHandler $probeAssemblyTaskHandler;
     private readonly ProbeImprovementTaskHandler $probeImprovementTaskHandler;
+    private readonly ProbeTransferTaskHandler $probeTransferTaskHandler;
     private readonly DeuteriumTankRefillTaskHandler $deuteriumTankRefillTaskHandler;
     private readonly DeuteriumTransferTaskHandler $deuteriumTransferTaskHandler;
     private readonly ReturningTaskHandler $returningTaskHandler;
@@ -653,6 +655,7 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->probeTransferTaskHandler = new ProbeTransferTaskHandler();
         $this->taskRefresher = new MannyTaskRefresher(
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
@@ -664,6 +667,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->probeAssemblyTaskHandler,
                 $this->deuteriumTankRefillTaskHandler,
                 $this->deuteriumTransferTaskHandler,
+                $this->probeTransferTaskHandler,
                 $this->returningTaskHandler,
                 $this->salvageTaskHandler,
                 $this->scutRelayTurnOnTaskHandler,
@@ -1069,6 +1073,72 @@ final class MannyService implements MannyTaskRuntime
         return $this->deuteriumTransferTaskHandler->start($probe, $uid, $targetProbeId, $amount);
     }
 
+    public function startMannyTransferToProbe(NeumannProbe $probe, string $uid, int $targetProbeId): Manny
+    {
+        return $this->withProbeLock(
+            $probe,
+            fn(NeumannProbe $lockedProbe): Manny => $this->startMannyTransferToProbeLocked($lockedProbe, $uid, $targetProbeId),
+        );
+    }
+
+    private function startMannyTransferToProbeLocked(NeumannProbe $probe, string $uid, int $targetProbeId): Manny
+    {
+        $this->ensureProbeAcceptsMannyOrders($probe);
+        $manny = $this->requiredManny($probe, $uid);
+        if ($manny->isInSameSectorAs($probe)) {
+            $manny = $this->refreshMannyState($manny, $probe);
+        }
+
+        if ($targetProbeId <= 0 || $targetProbeId === $probe->id) {
+            throw new MannyActionException(400, 'bad_request', 'Target probe id must reference another owned probe.');
+        }
+
+        $targetProbe = $this->probes->findById($targetProbeId);
+        if (!$targetProbe instanceof NeumannProbe || $targetProbe->playerId !== $probe->playerId) {
+            throw new MannyActionException(404, 'target_probe_not_found', 'Target probe not found.');
+        }
+        $this->ensureProbeAcceptsMannyOrders($targetProbe);
+
+        $mannySector = $manny->isOnProbe() ? $probe->currentSector : $manny->sector;
+        if ($mannySector === null) {
+            throw new MannyActionException(409, 'manny_out_of_range', 'The Manny has no reachable sector.');
+        }
+        if (!$targetProbe->currentSector->equals($mannySector)) {
+            throw new MannyActionException(422, 'probe_not_in_same_sector', 'Target probe must be in the same sector as the Manny.');
+        }
+
+        $sameSectorTransfer = $probe->currentSector->equals($targetProbe->currentSector) && $mannySector->equals($probe->currentSector);
+        $remoteScutTransfer = !$mannySector->equals($probe->currentSector)
+            && $this->scut !== null
+            && $this->scut->canSectorsCommunicate($probe->currentSector, $mannySector);
+        if (!$sameSectorTransfer && !$remoteScutTransfer) {
+            throw new MannyActionException(409, 'manny_out_of_range', 'The Manny must be in the source probe sector or reachable through SCUT in the target probe sector.');
+        }
+
+        $transferPayload = $this->cancelMannyTaskForProbeTransfer($probe, $manny);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $durationSeconds = $this->detachStorageContainerSeconds();
+        $this->removeMannyFromSector($manny);
+        $this->storage->releaseMannyFromStorage($manny);
+        $manny->probeId = $targetProbe->id;
+        $manny->locationType = Manny::LOCATION_SECTOR;
+        $manny->sector = $mannySector;
+        $manny->currentTask = Manny::TASK_TRANSFERRING_TO_PROBE;
+        $manny->taskStartedAt = $now->format('c');
+        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
+        $manny->taskPayload = array_merge($transferPayload, [
+            'durationSeconds' => $durationSeconds,
+            'sourceProbeId' => $probe->id,
+            'sourceProbeName' => $probe->name,
+            'targetProbeId' => $targetProbe->id,
+            'targetProbeName' => $targetProbe->name,
+            'result' => 'pending',
+        ]);
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
     public function startScutRelayTurnOn(NeumannProbe $probe, string $uid, int $relayId, ?string $networkName = null): Manny
     {
         return $this->withProbeLock(
@@ -1206,6 +1276,73 @@ final class MannyService implements MannyTaskRuntime
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function cancelMannyTaskForProbeTransfer(NeumannProbe $probe, Manny $manny): array
+    {
+        $lastTask = $manny->currentTask;
+        if ($lastTask === null) {
+            return [];
+        }
+
+        if ($lastTask === Manny::TASK_REPAIR) {
+            $metalsCost = round(max(0.0, (float) ($manny->taskPayload['metalsCost'] ?? 0.0)), 4);
+            if ($metalsCost > 0.0) {
+                $this->transferResourceToProbe($probe, 'metals', $metalsCost);
+                $this->probes->save($probe);
+            }
+        } elseif ($lastTask === Manny::TASK_CRAFTING || $lastTask === Manny::TASK_ASSISTING_ATOMIC_PRINTER) {
+            $this->crafting->refundCraftingCommitment($probe, $manny);
+        } elseif ($lastTask === Manny::TASK_IMPROVING_PROBE) {
+            $this->crafting->refundProbeImprovementCommitment($probe, $manny);
+        } elseif ($lastTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
+            $consumedItem = is_array($manny->taskPayload['consumedItem'] ?? null) ? $manny->taskPayload['consumedItem'] : null;
+            if ($consumedItem !== null) {
+                $this->crafting->restoreConsumedItem($probe, $consumedItem);
+            }
+        } elseif ($lastTask === Manny::TASK_DETACHING_STORAGE_CONTAINER) {
+            $snapshot = is_array($manny->taskPayload['snapshot'] ?? null) ? $manny->taskPayload['snapshot'] : null;
+            if ($snapshot !== null) {
+                $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+            }
+        } elseif ($lastTask === Manny::TASK_DROPPING_STORAGE_CONTAINER) {
+            $snapshot = is_array($manny->taskPayload['snapshot'] ?? null) ? $manny->taskPayload['snapshot'] : null;
+            if ($snapshot !== null) {
+                $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+            }
+            $this->restoreConsumedDropKit($probe, $manny);
+        } elseif ($lastTask === Manny::TASK_TRANSFERRING_DEUTERIUM_TO_PROBE) {
+            $reservedAmount = round(max(0.0, (float) ($manny->taskPayload['reservedAmount'] ?? $manny->taskPayload['requestedAmount'] ?? 0.0)), 4);
+            if ($reservedAmount > 0.0) {
+                $probe->deuteriumStock = round($probe->deuteriumStock + $reservedAmount, 4);
+                $this->probes->save($probe);
+            }
+        } elseif ($lastTask === Manny::TASK_SALVAGE) {
+            $this->cargo->restoreReservedSalvageItem($manny);
+            $this->cargo->restoreReservedDetachedContainer($manny);
+        }
+
+        $droppedAssemblyIngredients = [];
+        if ($lastTask === Manny::TASK_ASSEMBLING_PROBE) {
+            $droppedAssemblyIngredients = $this->cargo->restoreProbeAssemblyIngredientsAsDrifting($manny);
+        }
+
+        $deliveryPayload = in_array($lastTask, [Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)
+            ? $manny->taskPayload
+            : [];
+        $payload = array_merge($deliveryPayload, [
+            'previousTask' => $lastTask,
+            'previousResult' => 'cancelled',
+            'reason' => 'transfer_to_probe',
+        ]);
+        if ($droppedAssemblyIngredients !== []) {
+            $payload['droppedIngredients'] = $droppedAssemblyIngredients;
+        }
+
+        return $payload;
     }
 
     private function canRecallRemoteMannyViaScut(NeumannProbe $probe, Manny $manny): bool
@@ -1516,6 +1653,59 @@ final class MannyService implements MannyTaskRuntime
             $this->cargo->waitForStorageSpace($manny, ['reason' => 'cargo_delivery']);
         }
 
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
+    public function refreshMannyProbeTransfer(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
+    {
+        if (!$this->isAtOrAfter($now, $manny->taskEndsAt)) {
+            return $manny;
+        }
+
+        if ($manny->sector === null || !$probe->currentSector->equals($manny->sector) || !$this->probeAcceptsMannyOrders($probe)) {
+            $this->clearTask($manny, array_merge($manny->taskPayload, [
+                'lastTask' => Manny::TASK_TRANSFERRING_TO_PROBE,
+                'result' => 'failed',
+                'failureReason' => 'target_probe_unavailable',
+            ]));
+            if ($manny->sector !== null) {
+                $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
+            }
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+
+        if (!$this->cargo->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
+            $this->cargo->waitForStorageSpace($manny, array_merge($manny->taskPayload, ['reason' => 'transfer_to_probe']));
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+
+        $this->cargo->transferMannyCargoToProbe($manny, $probe);
+        $this->cargo->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
+        $this->cargo->deliverReservedDetachedContainer($probe, $manny->taskPayload);
+        if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
+            $this->cargo->waitForStorageSpace($manny, array_merge($manny->taskPayload, ['reason' => 'transfer_to_probe']));
+            $this->mannies->save($manny);
+
+            return $this->mannies->findById($manny->id) ?? $manny;
+        }
+
+        $this->removeMannyFromSector($manny);
+        $manny->locationType = Manny::LOCATION_PROBE;
+        $manny->sector = null;
+        $this->clearTask($manny, [
+            'lastTask' => Manny::TASK_TRANSFERRING_TO_PROBE,
+            'result' => 'success',
+            'sourceProbeId' => (int) ($manny->taskPayload['sourceProbeId'] ?? 0),
+            'sourceProbeName' => (string) ($manny->taskPayload['sourceProbeName'] ?? ''),
+            'targetProbeId' => $probe->id,
+            'targetProbeName' => $probe->name,
+        ]);
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;

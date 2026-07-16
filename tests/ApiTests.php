@@ -453,6 +453,8 @@ $test->assert(str_contains($openApi, '/api/probe/{probeId}'), 'OpenAPI documents
 $test->assert(str_contains($openApi, 'summary: Update a Neumann probe'), 'OpenAPI documents the probe update endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
+$test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/transfer-to-probe'), 'OpenAPI documents the Manny probe transfer endpoint');
+$test->assert(str_contains($openApi, 'transferring_to_probe'), 'OpenAPI documents the Manny probe transfer task type');
 $test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attach_to_probe]'), 'OpenAPI documents attach-to-probe storage detachment mode');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
@@ -504,6 +506,9 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'integra
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'inactiveScutRelayTargets()'), 'mannies JS detects inactive SCUT relay activation targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'networkName'), 'mannies JS renders the optional SCUT network name field');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'turning_on_scut_relay'), 'mannies JS displays SCUT relay activation tasks');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-transfer-probe-form'), 'mannies JS renders the Manny probe transfer form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/transfer-to-probe'), 'mannies JS posts Manny probe transfer orders');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'transferMannyToProbeActionTitle'"), 'translations include the Manny probe transfer action title');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyTaskVisibleViaScut'), 'mannies JS keeps remote SCUT-visible tasks expanded with live progress');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannySectorVisibleViaScut'), 'mannies JS labels idle remote same-SCUT Mannys without marking them too far');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyRemoteScutTask'), 'mannies JS labels remote SCUT-visible Manny tasks');
@@ -591,7 +596,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260715-storage-rules-refresh"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260716-manny-transfer-probe"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1375,7 +1380,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(92, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(93, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -3339,6 +3344,31 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(null, $remoteScutForgottenManny['currentTask'] ?? null, 'GET /api/probe/mannies exposes remote same-SCUT forgotten Mannys as inactive');
         $test->assertEquals('scut_network', $remoteScutForgottenManny['taskVisibility'] ?? null, 'GET /api/probe/mannies keeps same-SCUT forgotten Manny location telemetry visible');
         $test->assertEquals(false, $remoteScutForgottenManny['canReceiveOrders'] ?? null, 'GET /api/probe/mannies does not allow remote same-SCUT forgotten Mannys to receive orders');
+        $remoteTransferSector = $remoteScutRecalledManny?->sector ?? $detachProbe->currentSector;
+        $remoteProbeTransferManny = $mannies->createForProbe($detachProbe->id, 'remote-transfer-manny');
+        $remoteProbeTransferManny->locationType = Manny::LOCATION_SECTOR;
+        $remoteProbeTransferManny->sector = $remoteTransferSector;
+        $remoteProbeTransferManny->storageContainerId = null;
+        $mannies->save($remoteProbeTransferManny);
+        $remoteProbeTransferTarget = $probes->createForPlayer($detachPlayer->id, 'Remote Manny receiver', $remoteTransferSector);
+        $remoteMannyProbeTransfer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($remoteProbeTransferManny->uid) . '/transfer-to-probe', $detachHeaders, json_encode([
+            'targetProbeId' => $remoteProbeTransferTarget->id,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $remoteMannyProbeTransfer->status, 'remote same-SCUT Manny can transfer to a target probe in its sector');
+        $test->assertEquals('transferring_to_probe', $remoteMannyProbeTransfer->body['manny']['currentTask'] ?? null, 'remote same-SCUT transfer starts the Manny probe transfer task');
+        $test->assertEquals('scut_network', $remoteMannyProbeTransfer->body['manny']['taskVisibility'] ?? null, 'remote same-SCUT transfer remains visible through SCUT telemetry');
+        $test->assertEquals($remoteProbeTransferTarget->id, $mannies->findByUid($remoteProbeTransferManny->uid)?->probeId, 'remote same-SCUT transfer immediately reassigns the Manny to the target probe');
+        $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+            'uid' => $remoteProbeTransferManny->uid,
+            'ended' => gmdate('c', time() - 1),
+        ]);
+        $remoteTargetMannies = $kernel->handle('GET', '/api/probe/' . $remoteProbeTransferTarget->id . '/mannies', $detachHeaders);
+        $remoteCompletedTransfer = array_values(array_filter(
+            $remoteTargetMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $remoteProbeTransferManny->uid,
+        ))[0] ?? null;
+        $test->assertEquals('probe', $remoteCompletedTransfer['location']['type'] ?? null, 'completed remote same-SCUT transfer docks the Manny on the target probe');
+        $test->assertEquals(null, $remoteCompletedTransfer['currentTask'] ?? null, 'completed remote same-SCUT transfer clears the transfer task');
         $remoteScutMineWithoutContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
             'resource' => 'metals',
@@ -4694,6 +4724,38 @@ if ($createdProbe !== null) {
     $test->assertEquals(5, $transferAfterCompletion->body['mannies'][0]['task']['returnedAmount'] ?? null, 'completed deuterium transfer returns target-capacity surplus');
     $test->assertEquals(45.0, $probes->findById($createdProbe->id)?->deuteriumStock, 'deuterium transfer returns surplus to the source probe');
     $test->assertEquals(100.0, $probes->findById($transferTargetProbe->id)?->deuteriumStock, 'deuterium transfer fills the target probe to its maximum');
+
+    $probeTransferManny = $mannies->createForProbe($createdProbe->id, 'probe-transfer-manny');
+    $mannyProbeTransfer = $kernel->handle('POST', '/api/probe/' . $createdProbe->id . '/mannies/' . rawurlencode($probeTransferManny->uid) . '/transfer-to-probe', $headers, json_encode([
+        'targetProbeId' => $transferTargetProbe->id,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $mannyProbeTransfer->status, 'POST /api/probe/{probeId}/mannies/{id}/transfer-to-probe starts a Manny probe transfer task');
+    $test->assertEquals('transferring_to_probe', $mannyProbeTransfer->body['manny']['currentTask'] ?? null, 'Manny probe transfer task is exposed on Manny');
+    $test->assertEquals(360, $mannyProbeTransfer->body['manny']['task']['durationSeconds'] ?? null, 'Manny probe transfer uses the storage detach duration');
+    $test->assertEquals($transferTargetProbe->id, $mannyProbeTransfer->body['manny']['task']['targetProbeId'] ?? null, 'Manny probe transfer stores the target probe id');
+    $transferringMannyRow = $mannies->findByUid($probeTransferManny->uid);
+    $test->assertEquals($transferTargetProbe->id, $transferringMannyRow?->probeId, 'Manny probe transfer immediately reassigns ownership to the target probe');
+    $test->assertEquals('sector', $transferringMannyRow?->locationType, 'Manny probe transfer removes the Manny from the source probe inventory during transit');
+    $test->assertEquals(null, $transferringMannyRow?->storageContainerId, 'Manny probe transfer frees the source storage slot during transit');
+    $sourceManniesDuringTransfer = $kernel->handle('GET', '/api/probe/' . $createdProbe->id . '/mannies', $headers);
+    $sourceTransferIds = array_map(static fn(array $manny): string => (string) ($manny['id'] ?? ''), $sourceManniesDuringTransfer->body['mannies'] ?? []);
+    $test->assert(!in_array($probeTransferManny->uid, $sourceTransferIds, true), 'source probe Manny list no longer includes a Manny transferring to another probe');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+        'uid' => $probeTransferManny->uid,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $transferTargetMannies = $kernel->handle('GET', '/api/probe/' . $transferTargetProbe->id . '/mannies', $headers);
+    $completedProbeTransfer = null;
+    foreach ($transferTargetMannies->body['mannies'] ?? [] as $mannyPayload) {
+        if (($mannyPayload['id'] ?? null) === $probeTransferManny->uid) {
+            $completedProbeTransfer = $mannyPayload;
+            break;
+        }
+    }
+    $test->assert($completedProbeTransfer !== null, 'target probe Manny list includes the transferred Manny after completion');
+    $test->assertEquals(null, $completedProbeTransfer['currentTask'] ?? null, 'completed Manny probe transfer clears the transfer task');
+    $test->assertEquals('probe', $completedProbeTransfer['location']['type'] ?? null, 'completed Manny probe transfer docks the Manny on the target probe');
+    $test->assert($mannies->findByUid($probeTransferManny->uid)?->storageContainerId !== null, 'completed Manny probe transfer stores the Manny in a target probe container');
 
     $foreignTransferPlayer = $auth->registerPlayerWithPassword('foreign-deuterium-receiver', 'secret', 'Foreign Deuterium Receiver');
     $foreignTransferProbe = $probes->createForPlayer($foreignTransferPlayer->id, 'Foreign receiver probe', $createdProbe->currentSector);

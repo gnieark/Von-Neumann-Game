@@ -6,7 +6,7 @@
     const MANNY_CARGO_CAPACITY = 0.05;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe", "assemble-probe", "transfer-deuterium"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe", "assemble-probe", "transfer-deuterium", "transfer-manny"]);
     const PROBE_ASSEMBLY_COMPONENTS = [
         {"type": "deuterium_engine", "quantity": 1},
         {"type": "scut_relay", "quantity": 1},
@@ -24,6 +24,7 @@
         currentProbeDeuterium: 0,
         currentProbeId: null,
         currentProbeMaxDeuterium: 100,
+        currentProbeDetails: [],
         currentProbeImprovements: [],
         currentProbeSectorRelative: null,
         currentProbeTransferTargets: [],
@@ -107,9 +108,10 @@
                 }
             }));
 
+        state.currentProbeDetails = details.filter((probe) => probe && probe.id);
         const targets = new Map();
         state.currentSectorProbes
-            .filter((probe) => probe && probe.id && Number(probe.id) !== currentId)
+            .filter((probe) => probe && probe.id && probe.owned === true && Number(probe.id) !== currentId)
             .forEach((probe) => {
                 targets.set(String(probe.id), {
                     "id": Number(probe.id),
@@ -270,6 +272,7 @@
             "inspecting_asteroid": tr("inspectingSectorObject", "Inspecting sector object"),
             "refilling_deuterium_tank": tr("refillingDeuteriumTank", "Refilling deuterium tank"),
             "transferring_deuterium_to_probe": tr("transferringDeuteriumToProbe", "Transferring deuterium"),
+            "transferring_to_probe": tr("transferringMannyToProbe", "Transferring to probe"),
             "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
             "improving_probe": tr("improvingProbe", "Improving probe"),
             "assembling_probe": tr("assemblingProbe", "Assembling probe"),
@@ -1862,6 +1865,15 @@
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
         }
+        if (manny.currentTask === "transferring_to_probe") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("mannyTransferInProgress", "Manny transfer in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("mannyTransferTaskDetail", "The Manny is joining {target}."), {
+                    "target": payload.targetProbeName || payload.targetProbeId || tr("tabProbe", "Probe"),
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "</section>";
+        }
 
         return "<section class=\"manny-task-panel\">"
             + "<h4>" + escaped(taskLabel(manny.currentTask)) + "</h4>"
@@ -2495,6 +2507,72 @@
             + "</form>";
     }
 
+    function mannyTransferTargets(manny) {
+        const currentId = Number(state.currentProbeId);
+        const mannySector = manny && manny.location && manny.location.type === "sector"
+            ? mannyRelativeSector(manny)
+            : state.currentProbeSectorRelative;
+        if (!currentId || !mannySector) {
+            return [];
+        }
+
+        const targets = new Map();
+        if (sameRelativeSector(mannySector, state.currentProbeSectorRelative)) {
+            probeTransferTargets().forEach((target) => {
+                targets.set(String(target.id), target);
+            });
+        }
+        (Array.isArray(state.currentProbeDetails) ? state.currentProbeDetails : [])
+            .filter((probe) => (
+                probe
+                && probe.id
+                && Number(probe.id) !== currentId
+                && !["dead", "trapped_by_black_hole", "out_of_scut_range"].includes(probe.status)
+                && sameRelativeSector(probe.sector && probe.sector.relative, mannySector)
+            ))
+            .forEach((probe) => {
+                targets.set(String(probe.id), {
+                    "id": Number(probe.id),
+                    "name": probe.name || String(probe.id),
+                    "status": probe.status || "",
+                });
+            });
+
+        return Array.from(targets.values());
+    }
+
+    function mannyTransferTargetOptions(manny, selected) {
+        const targets = mannyTransferTargets(manny);
+        if (targets.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return targets.map((target, index) => {
+            const id = String(target.id || "");
+            const isSelected = id === String(selected || "") || (!selected && index === 0);
+
+            return "<option value=\"" + escaped(id) + "\"" + (isSelected ? " selected" : "") + ">"
+                + escaped(target.name || id)
+                + "</option>";
+        }).join("");
+    }
+
+    function mannyTransferHint(manny) {
+        return mannyTransferTargets(manny).length > 0
+            ? tr("transferMannyToProbeHint", "The Manny exits and joins another owned probe in this sector. Duration: container detach time.")
+            : tr("noMannyTransferProbe", "No owned probe is available in this Manny sector.");
+    }
+
+    function renderMannyTransferForm(manny) {
+        const targets = mannyTransferTargets(manny);
+
+        return "<form class=\"manny-transfer-probe-form manny-form\">"
+            + "<label>" + escaped(tr("mannyTransferTargetProbe", "Target probe or drone")) + "<select class=\"manny-transfer-probe-target\" name=\"targetProbeId\" required>" + mannyTransferTargetOptions(manny, "") + "</select></label>"
+            + "<button class=\"manny-transfer-probe-button\" type=\"submit\"" + (targets.length === 0 ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("transferMannyToProbe", "Transfer Manny")) + "</button>"
+            + "<p class=\"manny-transfer-probe-hint\">" + escaped(mannyTransferHint(manny)) + "</p>"
+            + "</form>";
+    }
+
     function scutRelayTargetOptions(selected) {
         const targets = inactiveScutRelayTargets();
         if (targets.length === 0) {
@@ -2545,7 +2623,7 @@
         )).join("");
     }
 
-    function renderMannyActionForms(idPrefix) {
+    function renderMannyActionForms(idPrefix, manny) {
         const prefix = String(idPrefix || "manny-actions").replace(/[^a-zA-Z0-9_-]/g, "-");
         const renderAction = (action) => renderMannyActionAccordion(
             prefix + "-" + action.id,
@@ -2558,6 +2636,7 @@
             {"id": "improve-probe", "title": tr("improveProbeActionTitle", "Improve the probe"), "render": renderImproveProbeForm},
         ];
         const sectorActions = [
+            {"id": "transfer-manny", "title": tr("transferMannyToProbeActionTitle", "Transfer Manny to a probe"), "render": () => renderMannyTransferForm(manny)},
             {"id": "mine", "title": tr("miningActionTitle", "Mine the sector"), "render": renderMineForm},
             {"id": "salvage", "title": tr("salvageActionTitle", "Recover a drifting object"), "render": renderSalvageForm},
             {"id": "inspect-sector-object", "title": tr("inspectSectorObjectActionTitle", "Inspect a sector object"), "render": renderInspectSectorObjectForm},
@@ -2590,6 +2669,12 @@
     function renderRemoteMannyActionForms(idPrefix, manny) {
         const prefix = String(idPrefix || "manny-remote-actions").replace(/[^a-zA-Z0-9_-]/g, "-");
         const sectorActions = [
+            renderMannyActionAccordion(
+                prefix + "-transfer-manny",
+                tr("transferMannyToProbeActionTitle", "Transfer Manny to a probe"),
+                "transfer-manny",
+                ""
+            ),
             renderMannyActionAccordion(
                 prefix + "-mine",
                 tr("miningActionTitle", "Mine the sector"),
@@ -2629,7 +2714,7 @@
             + "</form>";
     }
 
-    function renderLazyActionForm(actionId) {
+    function renderLazyActionForm(actionId, manny) {
         return {
             "detach-storage": renderDetachStorageContainerForm,
             "drop-storage": renderDropStorageContainerForm,
@@ -2640,6 +2725,7 @@
             "improve-probe": renderImproveProbeForm,
             "assemble-probe": renderAssembleProbeForm,
             "transfer-deuterium": renderDeuteriumTransferForm,
+            "transfer-manny": () => renderMannyTransferForm(manny),
         }[actionId]?.() || "";
     }
 
@@ -2809,7 +2895,7 @@
                 + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
                 + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"
                 + "</form>"
-                + (busy ? renderMannyTaskPanel(manny) : (canReceiveOrders ? renderMannyActionForms(panelId) : (remoteIdleViaScut ? renderRemoteMannyActionForms(panelId, manny) : "")));
+                + (busy ? renderMannyTaskPanel(manny) : (canReceiveOrders ? renderMannyActionForms(panelId, manny) : (remoteIdleViaScut ? renderRemoteMannyActionForms(panelId, manny) : "")));
 
         return "<article class=\"manny-card " + rackStatusClass + "\" data-manny-id=\"" + escaped(manny.id) + "\" data-manny-hash=\"" + escaped(manny[MANNY_HASH_FIELD] || "") + "\">"
             + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
@@ -3264,6 +3350,34 @@
         });
     }
 
+    function updateMannyTransferForms() {
+        document.querySelectorAll(".manny-transfer-probe-form").forEach((form) => {
+            const card = form.closest(".manny-card");
+            const mannyId = card ? String(card.dataset.mannyId || "") : "";
+            const manny = state.currentMannies.find((entry) => String(entry.id || "") === mannyId) || null;
+            const targetSelect = form.querySelector(".manny-transfer-probe-target");
+            const button = form.querySelector(".manny-transfer-probe-button");
+            const hint = form.querySelector(".manny-transfer-probe-hint");
+            const selected = targetSelect ? targetSelect.value : "";
+            const targets = mannyTransferTargets(manny);
+
+            if (targetSelect) {
+                targetSelect.innerHTML = mannyTransferTargetOptions(manny, selected);
+                if (!targets.some((target) => String(target.id) === String(targetSelect.value))) {
+                    targetSelect.value = targets[0] ? String(targets[0].id) : "";
+                }
+            }
+            if (button) {
+                const disabled = targets.length === 0;
+                button.disabled = disabled;
+                button.setAttribute("aria-disabled", disabled ? "true" : "false");
+            }
+            if (hint) {
+                hint.textContent = mannyTransferHint(manny);
+            }
+        });
+    }
+
     function updateMannyBookmarkForms() {
         document.querySelectorAll(".manny-bookmark-form").forEach((form) => {
             const targetSelect = form.querySelector(".manny-bookmark-target");
@@ -3349,6 +3463,9 @@
         if (form.classList.contains("manny-transfer-deuterium-form")) {
             updateDeuteriumTransferForms();
         }
+        if (form.classList.contains("manny-transfer-probe-form")) {
+            updateMannyTransferForms();
+        }
     }
 
     async function openMannyActionAccordion(button, panel) {
@@ -3356,15 +3473,18 @@
             panel.innerHTML = "";
             button.disabled = true;
             try {
+                const card = panel.closest(".manny-card");
+                const mannyId = card ? String(card.dataset.mannyId || "") : "";
+                const manny = state.currentMannies.find((entry) => String(entry.id || "") === mannyId) || null;
                 if (panel.dataset.actionId === "improve-probe") {
                     await Promise.all([refreshProbeInventory(), refreshProbeImprovements()]);
-                } else if (panel.dataset.actionId === "transfer-deuterium" || panel.dataset.actionId === "detach-storage") {
+                } else if (panel.dataset.actionId === "transfer-deuterium" || panel.dataset.actionId === "transfer-manny" || panel.dataset.actionId === "detach-storage") {
                     await refreshProbeInventory();
                     await refreshProbeTransferTargets();
                 } else {
                     await refreshProbeInventory();
                 }
-                panel.innerHTML = renderLazyActionForm(panel.dataset.actionId || "");
+                panel.innerHTML = renderLazyActionForm(panel.dataset.actionId || "", manny);
                 updateActionForm(panel);
             } catch (error) {
                 setStatus(error.message || tr("requestDenied", "Request denied"));
@@ -3538,6 +3658,19 @@
             return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/transfer-deuterium-to-probe"), {
                 "method": "POST",
                 "body": JSON.stringify({targetProbeId, amount}),
+            });
+        }
+        if (form.classList.contains("manny-transfer-probe-form")) {
+            updateMannyTransferForms();
+            const targetProbeId = Number.parseInt(String(formData.get("targetProbeId") || ""), 10);
+            if (!Number.isFinite(targetProbeId) || targetProbeId <= 0) {
+                setStatus(tr("invalidMannyTransferOrder", "Select a target probe."));
+                return null;
+            }
+
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/transfer-to-probe"), {
+                "method": "POST",
+                "body": JSON.stringify({targetProbeId}),
             });
         }
         if (form.classList.contains("manny-inspect-sector-object-form")) {
@@ -3812,6 +3945,9 @@
             }
             if (event.target.classList.contains("manny-transfer-deuterium-target") || event.target.classList.contains("manny-transfer-deuterium-amount")) {
                 updateDeuteriumTransferForms();
+            }
+            if (event.target.classList.contains("manny-transfer-probe-target")) {
+                updateMannyTransferForms();
             }
         });
 
