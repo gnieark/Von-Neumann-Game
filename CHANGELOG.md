@@ -8,6 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - API v93 : ajout de `POST /api/probe/mannies/{mannyId}/transfer-to-probe` et de sa variante avec `{probeId}` pour transférer une Manny vers une autre sonde possédée du même secteur, ou vers une sonde dans le secteur distant de la Manny via SCUT; la durée est celle d’un détachement de container et les tâches en cours sont annulées avec la logique de recall avant le transfert.
 - Interface : `/mannies` ajoute l’ordre “Transférer la Manny vers une sonde” dans le groupe Secteur, avec sélection paresseuse des sondes ou drones possédés disponibles dans le secteur de la Manny.
+- Interface : les erreurs de craft Manny dues au stockage insuffisant sont affichées comme un problème de place, et non comme un manque générique de ressources.
 - API v92 : lorsqu’un assemblage de sonde par Manny est annulé via `POST /api/probe/mannies/{mannyId}/recall`, les composants et les deux containers consommés au démarrage sont désormais relâchés comme piles d’items à la dérive dans le secteur d’assemblage.
 - Maintenance : ajout de `scripts/generate-threejs-point-cloud-sectors.php` pour exporter les secteurs générés, visités, occupés par une sonde et couverts par SCUT en nuages de points JSON chargeables par Three.js, dont une scène `sector-point-clouds-threejs-editor.json` importable dans l’éditeur Three.js.
 

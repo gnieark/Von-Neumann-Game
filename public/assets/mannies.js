@@ -169,6 +169,16 @@
         setText("manny-status", value);
     }
 
+    function mannyActionErrorMessage(form, error) {
+        const isCraftForm = form
+            && (form.classList.contains("manny-craft-form") || form.classList.contains("printer-craft-form"));
+        if (isCraftForm && error && error.errorCode === "insufficient_cargo_capacity") {
+            return tr("insufficientCraftStorage", "Insufficient storage for the crafted output.");
+        }
+
+        return (error && error.message) || tr("requestDenied", "Request denied");
+    }
+
     function stableHashPayload(value) {
         if (Array.isArray(value)) {
             return "[" + value.map(stableHashPayload).join(",") + "]";
@@ -3903,7 +3913,7 @@
                     await loadManniesPage();
                 }
             } catch (error) {
-                setStatus(error.message || tr("requestDenied", "Request denied"));
+                setStatus(mannyActionErrorMessage(event.target, error));
             }
         });
 
