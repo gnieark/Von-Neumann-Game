@@ -63,10 +63,9 @@ final class ProbeReinstantiationService
             static fn(Manny $manny): bool => !$manny->isOnProbe() && $manny->sector !== null,
         ));
 
-        $this->removeDetachedMannyObjects($detachedMannies);
-
         $this->pdo->beginTransaction();
         try {
+            $this->abandonDetachedMannies($detachedMannies, 'Manny abandoned after its probe was destroyed.');
             $this->deleteProbeData($terminalProbe->id);
 
             $player->homeSector = $newHome;
@@ -95,15 +94,29 @@ final class ProbeReinstantiationService
 
     public function switchDefaultProbeAfterTerminalLoss(NeumannProbe $terminalProbe, string $reason): ?NeumannProbe
     {
+        return $this->handleTerminalProbeLoss($terminalProbe, $reason);
+    }
+
+    public function handleTerminalProbeLoss(NeumannProbe $terminalProbe, string $reason): ?NeumannProbe
+    {
+        if (!in_array($terminalProbe->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true)) {
+            throw new ProbeReinstantiationException('Probe terminal-loss cleanup is only available after probe destruction or black-hole entrapment.');
+        }
+
         $player = $this->players->findById($terminalProbe->playerId);
-        if ($player === null || $player->defaultProbeId !== $terminalProbe->id) {
+        if ($player === null) {
             return null;
         }
 
-        $replacement = $this->replacementProbeFor($player, $terminalProbe);
-        if ($replacement === null) {
+        $survivors = $this->replacementProbesFor($player, $terminalProbe);
+        if ($survivors === []) {
             return null;
         }
+
+        $terminalWasDefault = $player->defaultProbeId === $terminalProbe->id;
+        $replacement = $this->nearestReplacementProbe($survivors, $terminalProbe);
+        $alertProbe = $terminalWasDefault ? $replacement : $this->currentDefaultProbe($player, $terminalProbe, $survivors);
+        $detachedMannies = $this->detachedManniesForProbe($terminalProbe->id);
 
         $ownsTransaction = !$this->pdo->inTransaction();
         if ($ownsTransaction) {
@@ -111,15 +124,30 @@ final class ProbeReinstantiationService
         }
 
         try {
-            $player->defaultProbeId = $replacement->id;
-            $this->players->save($player);
-            $this->damageWarnings?->createMindSnapshotTransferredAlert(
-                $replacement->id,
-                $replacement->currentSector,
-                $terminalProbe->id,
-                $reason,
-                $this->mindSnapshotTransferMessage($reason),
-            );
+            if ($terminalWasDefault || $player->defaultProbeId === null || $alertProbe->id !== $player->defaultProbeId) {
+                $player->defaultProbeId = $alertProbe->id;
+                $this->players->save($player);
+            }
+
+            if ($terminalWasDefault) {
+                $this->damageWarnings?->createMindSnapshotTransferredAlert(
+                    $alertProbe->id,
+                    $alertProbe->currentSector,
+                    $terminalProbe->id,
+                    $reason,
+                    $this->mindSnapshotTransferMessage($reason),
+                );
+            } else {
+                $this->damageWarnings?->createProbeDestroyedAlert(
+                    $alertProbe->id,
+                    $alertProbe->currentSector,
+                    $terminalProbe->id,
+                    $reason,
+                    $this->probeDestroyedMessage($terminalProbe, $reason),
+                );
+            }
+
+            $this->abandonDetachedMannies($detachedMannies, 'Manny abandoned after its probe was destroyed.');
             $this->deleteProbeData($terminalProbe->id);
 
             if ($ownsTransaction) {
@@ -132,11 +160,15 @@ final class ProbeReinstantiationService
             throw $error;
         }
 
-        return $this->probes->findById($replacement->id) ?? $replacement;
+        return $this->probes->findById($alertProbe->id) ?? $alertProbe;
     }
 
-    private function replacementProbeFor(Player $player, NeumannProbe $terminalProbe): ?NeumannProbe
+    /**
+     * @return array<NeumannProbe>
+     */
+    private function replacementProbesFor(Player $player, NeumannProbe $terminalProbe): array
     {
+        $replacements = [];
         foreach ($this->probes->findAllByPlayerId($player->id) as $probe) {
             if ($probe->id === $terminalProbe->id) {
                 continue;
@@ -145,10 +177,43 @@ final class ProbeReinstantiationService
                 continue;
             }
 
-            return $probe;
+            $replacements[] = $probe;
         }
 
-        return null;
+        return $replacements;
+    }
+
+    /**
+     * @param array<NeumannProbe> $survivors
+     */
+    private function nearestReplacementProbe(array $survivors, NeumannProbe $terminalProbe): NeumannProbe
+    {
+        usort(
+            $survivors,
+            fn(NeumannProbe $left, NeumannProbe $right): int => [
+                $this->grid->getDistance($left->currentSector, $terminalProbe->currentSector),
+                $left->id,
+            ] <=> [
+                $this->grid->getDistance($right->currentSector, $terminalProbe->currentSector),
+                $right->id,
+            ],
+        );
+
+        return $survivors[0] ?? throw new \RuntimeException('No replacement probe available.');
+    }
+
+    /**
+     * @param array<NeumannProbe> $survivors
+     */
+    private function currentDefaultProbe(Player $player, NeumannProbe $terminalProbe, array $survivors): NeumannProbe
+    {
+        foreach ($survivors as $probe) {
+            if ($probe->id === $player->defaultProbeId) {
+                return $probe;
+            }
+        }
+
+        return $this->nearestReplacementProbe($survivors, $terminalProbe);
     }
 
     private function mindSnapshotTransferMessage(string $reason): string
@@ -160,25 +225,15 @@ final class ProbeReinstantiationService
         };
     }
 
-    /**
-     * @param array<Manny> $mannies
-     */
-    private function removeDetachedMannyObjects(array $mannies): void
+    private function probeDestroyedMessage(NeumannProbe $terminalProbe, string $reason): string
     {
-        if ($this->sectors === null) {
-            return;
-        }
+        $cause = match ($reason) {
+            self::TERMINAL_REASON_BLACK_HOLE => 'black-hole entrapment beyond the escape threshold',
+            self::TERMINAL_REASON_COLLISION => 'a high-velocity collision during intersector movement',
+            default => 'an unrecoverable terminal event',
+        };
 
-        foreach ($mannies as $manny) {
-            if ($manny->sector === null) {
-                continue;
-            }
-
-            $sector = $this->sectors->getOrCreateSector($manny->sector);
-            if ($sector->removeObjectById(SectorManny::objectIdForUid($manny->uid))) {
-                $this->sectors->saveSector($sector);
-            }
-        }
+        return "Probe lost: {$terminalProbe->name} (#{$terminalProbe->id}) was destroyed by {$cause}. The destroyed probe has been removed from your fleet; no absolute coordinates are attached to this alert.";
     }
 
     private function deleteProbeData(int $probeId): void
@@ -219,6 +274,77 @@ final class ProbeReinstantiationService
         $this->execute('DELETE FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM probe_improvement_installations WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM neumann_probes WHERE id = :probe_id', ['probe_id' => $probeId]);
+    }
+
+    /**
+     * @return array<Manny>
+     */
+    private function detachedManniesForProbe(int $probeId): array
+    {
+        return array_values(array_filter(
+            $this->mannies->findByProbeId($probeId),
+            static fn(Manny $manny): bool => !$manny->isOnProbe() && $manny->sector !== null,
+        ));
+    }
+
+    /**
+     * @param array<Manny> $mannies
+     */
+    private function abandonDetachedMannies(array $mannies, string $description): void
+    {
+        foreach ($mannies as $manny) {
+            $this->registerAbandonedManny($manny, $description);
+            $this->detachManny($manny);
+        }
+    }
+
+    private function registerAbandonedManny(Manny $manny, string $description): void
+    {
+        if ($this->sectors === null || $manny->sector === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($manny->sector);
+        $object = new SectorManny(
+            SectorManny::objectIdForUid($manny->uid),
+            $manny->name,
+            $manny->uid,
+            SectorManny::STATE_ABANDONED,
+            $manny->cargoArray(),
+            $description,
+        );
+
+        if (!$sector->replaceObject($object)) {
+            $sector->addObject($object);
+        }
+        $this->sectors->saveSector($sector);
+    }
+
+    private function detachManny(Manny $manny): void
+    {
+        $this->execute(
+            'DELETE FROM scheduled_events WHERE entity_type = :entity_type AND entity_id = :manny_id',
+            ['entity_type' => 'manny', 'manny_id' => $manny->id],
+        );
+        $this->execute(
+            'UPDATE mannies
+             SET probe_id = NULL,
+                 storage_container_id = NULL,
+                 location_type = :location_type,
+                 current_task = NULL,
+                 task_started_at = NULL,
+                 task_ends_at = NULL,
+                 task_scheduled_event_id = NULL,
+                 task_payload_json = :task_payload_json,
+                 updated_at = :updated_at
+             WHERE id = :id',
+            [
+                'id' => $manny->id,
+                'location_type' => Manny::LOCATION_SECTOR,
+                'task_payload_json' => '{}',
+                'updated_at' => gmdate('c'),
+            ],
+        );
     }
 
     private function deleteVisitedSectors(int $playerId): void

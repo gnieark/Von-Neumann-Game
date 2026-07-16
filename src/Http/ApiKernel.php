@@ -51,7 +51,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 93;
+    public const API_VERSION = 94;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -353,6 +353,11 @@ final class ApiKernel
         }
 
         $probe = $this->movements->refreshProbeMovementState($probe);
+        $probe = $this->probes->findById($probeId);
+        if ($probe === null || $probe->playerId !== $player->id) {
+            return ApiResponse::error(404, 'not_found', 'Probe not found.');
+        }
+
         if (!$this->scut->canSectorsCommunicate($defaultProbe->currentSector, $probe->currentSector)) {
             return ApiResponse::error(422, 'probe_not_in_same_sector', 'This probe can only be controlled when it is in the same sector as the default probe or inside the same SCUT network coverage.');
         }
@@ -383,7 +388,17 @@ final class ApiKernel
         }
 
         $defaultProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $probe = $this->probes->findById($probeId);
+        if ($probe === null || $probe->playerId !== $player->id) {
+            return ApiResponse::error(404, 'not_found', 'Probe not found.');
+        }
+
         $probe = $this->movements->refreshProbeMovementState($probe);
+        $probe = $this->probes->findById($probeId);
+        if ($probe === null || $probe->playerId !== $player->id) {
+            return ApiResponse::error(404, 'not_found', 'Probe not found.');
+        }
+
         if ($probe->id !== $defaultProbe->id && !$this->scut->canSectorsCommunicate($defaultProbe->currentSector, $probe->currentSector)) {
             $relative = PlayerReferenceFrame::atGlobalCoordinates(
                 $player->homeSector->getX(),
@@ -514,7 +529,13 @@ final class ApiKernel
 
     private function probeListResponse(Player $player): ApiResponse
     {
+        foreach ($this->probes->findAllByPlayerId($player->id) as $probe) {
+            $this->movements->refreshProbeMovementState($probe);
+        }
+
+        $player = $this->players->findById($player->id) ?? $player;
         $defaultProbe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
+        $player = $this->players->findById($player->id) ?? $player;
 
         return new ApiResponse(200, [
             'defaultProbeId' => $player->defaultProbeId,
@@ -2107,6 +2128,13 @@ final class ApiKernel
         if ($warning->type === ProbeDamageWarning::TYPE_MIND_SNAPSHOT_TRANSFERRED) {
             $alert['instanceSwitch'] = [
                 'previousProbeId' => ctype_digit($warning->objectId) ? (int) $warning->objectId : null,
+                'reason' => $warning->containerId !== '' ? $warning->containerId : null,
+            ];
+        }
+
+        if ($warning->type === ProbeDamageWarning::TYPE_PROBE_DESTROYED) {
+            $alert['destroyedProbe'] = [
+                'probeId' => ctype_digit($warning->objectId) ? (int) $warning->objectId : null,
                 'reason' => $warning->containerId !== '' ? $warning->containerId : null,
             ];
         }

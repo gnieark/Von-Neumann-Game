@@ -12,6 +12,7 @@ final class ProbeDamageWarning
     public const TYPE_ANOMALY_DETECTED = 'anomaly_detected';
     public const TYPE_MANNY_REPORT = 'manny_report';
     public const TYPE_MIND_SNAPSHOT_TRANSFERRED = 'mind_snapshot_transferred';
+    public const TYPE_PROBE_DESTROYED = 'probe_destroyed';
     public const STATUS_UNREAD = 'unread';
     public const STATUS_READ = 'read';
 

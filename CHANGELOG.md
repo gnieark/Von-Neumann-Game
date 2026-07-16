@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v94 : lorsqu’une sonde secondaire est détruite ou piégée alors que le joueur possède d’autres sondes, elle est supprimée immédiatement et une alerte `probe_destroyed` est créée sur la sonde principale sans coordonnées absolues; lorsqu’une sonde principale est détruite, le basculement automatique choisit désormais la sonde survivante la plus proche. Les Mannys déjà hors de la sonde détruite deviennent des objets de secteur `abandoned`, détachés de leur ancienne sonde et récupérables par une sonde de passage.
+- Maintenance : ajout de `scripts/delete-probe.php` pour supprimer une sonde terminale par id, avec `--database-config`, `--dry-run`, refus de supprimer la dernière sonde du joueur, et conservation des données rattachées au joueur.
 - API v93 : ajout de `POST /api/probe/mannies/{mannyId}/transfer-to-probe` et de sa variante avec `{probeId}` pour transférer une Manny vers une autre sonde possédée du même secteur, ou vers une sonde dans le secteur distant de la Manny via SCUT; la durée est celle d’un détachement de container et les tâches en cours sont annulées avec la logique de recall avant le transfert.
 - Interface : `/mannies` ajoute l’ordre “Transférer la Manny vers une sonde” dans le groupe Secteur, avec sélection paresseuse des sondes ou drones possédés disponibles dans le secteur de la Manny.
 - Interface : les erreurs de craft Manny dues au stockage insuffisant sont affichées comme un problème de place, et non comme un manque générique de ressources.

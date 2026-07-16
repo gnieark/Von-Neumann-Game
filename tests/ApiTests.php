@@ -464,6 +464,7 @@ $test->assert(str_contains($openApi, 'transferring_to_probe'), 'OpenAPI document
 $test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attach_to_probe]'), 'OpenAPI documents attach-to-probe storage detachment mode');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
+$test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'data-forum-jump-last'), 'forum JS exposes a jump-to-last-post button for long threads');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'forumJumpLastPost' => 'atteindre le dernier post'"), 'French translations include the forum last-post jump label');
@@ -1387,7 +1388,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(93, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(94, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -6050,7 +6051,8 @@ $instanceSwitchPlayer = $auth->registerPlayerWithPassword('instance-switch-colli
 $instanceSwitchHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($instanceSwitchPlayer)['token']];
 $instanceSwitchProbe = $probes->findByPlayerId($instanceSwitchPlayer->id);
 if ($instanceSwitchProbe !== null && $createdProbe !== null) {
-    $instanceSwitchDrone = $probes->createForPlayer($instanceSwitchPlayer->id, 'Collision fallback drone', new SectorCoordinates(80, 0, 0));
+    $farInstanceSwitchDrone = $probes->createForPlayer($instanceSwitchPlayer->id, 'Far collision fallback drone', $instanceSwitchProbe->currentSector->add(120, 0, 0));
+    $instanceSwitchDrone = $probes->createForPlayer($instanceSwitchPlayer->id, 'Collision fallback drone', $instanceSwitchProbe->currentSector->add(80, 0, 0));
     $instanceSwitchMission = $missionService->startMission($instanceSwitchProbe, 'instance_switch_collision', 'Instance switch collision', steps: [['title' => 'Keep player mission']]);
     $instanceSwitchCategory = $forum->createCategory('Instance switch collision');
     $instanceSwitchPost = $forum->createPost($instanceSwitchPlayer, $instanceSwitchCategory->id, 'Mind backup report', 'Please keep this forum post.');
@@ -6091,8 +6093,9 @@ if ($instanceSwitchProbe !== null && $createdProbe !== null) {
 
         $instanceSwitchResponse = $kernel->handle('GET', '/api/probe', $instanceSwitchHeaders);
         $test->assertEquals(200, $instanceSwitchResponse->status, 'collision instance switch returns an operational default probe');
-        $test->assertEquals($instanceSwitchDrone->id, $instanceSwitchResponse->body['probe']['id'] ?? null, 'collision instance switch selects another owned probe as default');
-        $test->assertEquals($instanceSwitchDrone->id, $players->findById($instanceSwitchPlayer->id)?->defaultProbeId, 'collision instance switch persists the new default probe');
+        $test->assertEquals($instanceSwitchDrone->id, $instanceSwitchResponse->body['probe']['id'] ?? null, 'collision instance switch selects the nearest owned probe as default');
+        $test->assertEquals($instanceSwitchDrone->id, $players->findById($instanceSwitchPlayer->id)?->defaultProbeId, 'collision instance switch persists the nearest probe as default');
+        $test->assert($probes->findById($farInstanceSwitchDrone->id) !== null, 'collision instance switch keeps farther surviving probes visible');
         $test->assert($probes->findById($instanceSwitchProbe->id) === null, 'collision instance switch deletes the destroyed default probe');
         $test->assert($missions->findByUidForPlayer($instanceSwitchPlayer->id, $instanceSwitchMission->uid) !== null, 'collision instance switch keeps player missions');
         $test->assert($forum->findPostById($instanceSwitchPost->id) !== null, 'collision instance switch keeps forum posts linked to the player');
@@ -6107,6 +6110,111 @@ if ($instanceSwitchProbe !== null && $createdProbe !== null) {
         $test->assertEquals(1, count($collisionTransferAlerts), 'collision instance switch creates one transfer alert on the new probe');
         $test->assert(str_contains((string) ($collisionTransferAlerts[0]['message'] ?? ''), 'high-velocity collision'), 'collision transfer alert explains the collision cause in English');
         $test->assertEquals($instanceSwitchProbe->id, $collisionTransferAlerts[0]['instanceSwitch']['previousProbeId'] ?? null, 'collision transfer alert identifies the previous probe');
+    }
+}
+
+$secondaryLossPlayer = $auth->registerPlayerWithPassword('secondary-loss-collision', 'secret', 'Secondary Loss Collision');
+$secondaryLossHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($secondaryLossPlayer)['token']];
+$secondaryLossDefaultProbe = $probes->findByPlayerId($secondaryLossPlayer->id);
+if ($secondaryLossDefaultProbe !== null) {
+    $secondaryLossProbe = $probes->createForPlayer($secondaryLossPlayer->id, 'Expendable drone', $secondaryLossDefaultProbe->currentSector);
+    $secondaryLossOutsideManny = $mannies->createForProbe($secondaryLossProbe->id, 'outside-loss-manny');
+    $pdo->prepare(
+        'UPDATE mannies
+         SET storage_container_id = NULL,
+             location_type = :location_type,
+             sector_x = :sector_x,
+             sector_y = :sector_y,
+             sector_z = :sector_z,
+             current_task = :current_task,
+             task_started_at = :task_started_at,
+             task_ends_at = :task_ends_at,
+             task_payload_json = :task_payload_json
+         WHERE id = :id'
+    )->execute([
+        'id' => $secondaryLossOutsideManny->id,
+        'location_type' => Manny::LOCATION_SECTOR,
+        'sector_x' => $secondaryLossDefaultProbe->currentSector->getX(),
+        'sector_y' => $secondaryLossDefaultProbe->currentSector->getY(),
+        'sector_z' => $secondaryLossDefaultProbe->currentSector->getZ(),
+        'current_task' => Manny::TASK_MINING,
+        'task_started_at' => gmdate('c', time() - 60),
+        'task_ends_at' => gmdate('c', time() + 600),
+        'task_payload_json' => '{}',
+    ]);
+    $visitedBeforeSecondaryLoss = count($visitedSectors->listVisited($secondaryLossPlayer));
+
+    $secondaryLossMove = $kernel->handle('POST', '/api/probe/' . $secondaryLossProbe->id . '/move', $secondaryLossHeaders, json_encode(['target' => ['x' => 8, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $secondaryLossMove->status, 'secondary collision movement starts');
+    $secondaryLossMovement = $movements->findActiveByProbeId($secondaryLossProbe->id);
+    if ($secondaryLossMovement !== null) {
+        $base = time();
+        $chosenStartedAt = gmdate('c', $base - 240 * 60);
+        for ($i = 0; $i < 2000; $i++) {
+            $candidate = gmdate('c', $base - (240 * 60) - $i);
+            $payload = implode('|', [
+                'api-test-world',
+                $secondaryLossMovement->probeId,
+                $secondaryLossMovement->id,
+                $secondaryLossMovement->origin->toKey(),
+                $secondaryLossMovement->target->toKey(),
+                $candidate,
+            ]);
+            $roll = hexdec(substr(hash('sha256', $payload), 0, 15)) / hexdec(str_repeat('f', 15));
+            if ($roll < 0.40) {
+                $chosenStartedAt = $candidate;
+                break;
+            }
+        }
+
+        $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
+            'id' => $secondaryLossMovement->id,
+            'started' => $chosenStartedAt,
+            'prep' => gmdate('c', $base - 230 * 60),
+            'accel' => gmdate('c', $base - 110 * 60),
+            'cruise' => gmdate('c', $base + 70 * 60),
+            'decel' => gmdate('c', $base + 190 * 60),
+            'arrival' => gmdate('c', $base + 190 * 60),
+        ]);
+
+        $secondaryLossResponse = $kernel->handle('GET', '/api/probe/' . $secondaryLossProbe->id, $secondaryLossHeaders);
+        $test->assertEquals(404, $secondaryLossResponse->status, 'destroyed secondary probe is no longer addressable by id');
+        $test->assertEquals($secondaryLossDefaultProbe->id, $players->findById($secondaryLossPlayer->id)?->defaultProbeId, 'destroyed secondary probe does not change the default probe');
+        $test->assert($probes->findById($secondaryLossProbe->id) === null, 'destroyed secondary probe is deleted');
+        $test->assertEquals($visitedBeforeSecondaryLoss, count($visitedSectors->listVisited($secondaryLossPlayer)), 'destroyed secondary probe keeps player-owned visited sectors');
+        $abandonedOutsideManny = $mannies->findByUid($secondaryLossOutsideManny->uid);
+        $test->assert($abandonedOutsideManny !== null, 'destroyed secondary probe keeps outside Mannys as abandoned records');
+        $test->assertEquals(null, $abandonedOutsideManny?->probeId, 'destroyed secondary probe detaches outside Mannys from the deleted probe');
+        $test->assertEquals(Manny::LOCATION_SECTOR, $abandonedOutsideManny?->locationType, 'destroyed secondary probe leaves outside Mannys in their sector');
+        $test->assertEquals(null, $abandonedOutsideManny?->currentTask, 'destroyed secondary probe clears abandoned Manny tasks');
+        $secondaryLossSector = $sectorRepository->load($secondaryLossDefaultProbe->currentSector);
+        $secondaryLossSectorManny = $secondaryLossSector->findObjectById(SectorManny::objectIdForUid($secondaryLossOutsideManny->uid));
+        $test->assertEquals(SectorManny::STATE_ABANDONED, $secondaryLossSectorManny?->toArray()['state'] ?? null, 'destroyed secondary probe marks outside Mannys as abandoned sector objects');
+
+        $secondaryLossList = $kernel->handle('GET', '/api/probes', $secondaryLossHeaders);
+        $secondaryLossProbeIds = array_map(static fn(array $probe): int => (int) ($probe['id'] ?? 0), $secondaryLossList->body['probes'] ?? []);
+        $test->assert(!in_array($secondaryLossProbe->id, $secondaryLossProbeIds, true), 'destroyed secondary probe is not visible in the probe list');
+
+        $secondaryLossSectorScan = $kernel->handle('GET', '/api/probe/sector', $secondaryLossHeaders);
+        $secondaryLossScannedManny = null;
+        foreach ($secondaryLossSectorScan->body['sector']['objects'] ?? [] as $object) {
+            if (($object['id'] ?? null) === SectorManny::objectIdForUid($secondaryLossOutsideManny->uid)) {
+                $secondaryLossScannedManny = $object;
+                break;
+            }
+        }
+        $test->assertEquals(SectorManny::STATE_ABANDONED, $secondaryLossScannedManny['mannyState'] ?? null, 'destroyed secondary probe exposes abandoned outside Mannys in sector scans');
+        $test->assertEquals(true, $secondaryLossScannedManny['salvageable'] ?? null, 'destroyed secondary probe makes outside Mannys recoverable by passing probes');
+
+        $secondaryLossAlerts = $kernel->handle('GET', '/api/probe/alerts', $secondaryLossHeaders);
+        $secondaryDestroyedAlerts = array_values(array_filter(
+            $secondaryLossAlerts->body['alerts'] ?? [],
+            static fn(array $alert): bool => ($alert['type'] ?? null) === 'probe_destroyed'
+        ));
+        $test->assertEquals(1, count($secondaryDestroyedAlerts), 'destroyed secondary probe creates one alert on the default probe');
+        $test->assertEquals($secondaryLossProbe->id, $secondaryDestroyedAlerts[0]['destroyedProbe']['probeId'] ?? null, 'secondary destruction alert identifies the deleted probe');
+        $test->assert(str_contains((string) ($secondaryDestroyedAlerts[0]['message'] ?? ''), 'high-velocity collision'), 'secondary destruction alert explains the collision cause');
+        $test->assert(!str_contains(json_encode($secondaryDestroyedAlerts[0], JSON_THROW_ON_ERROR), 'sector_x'), 'secondary destruction alert does not expose absolute coordinates');
     }
 }
 
