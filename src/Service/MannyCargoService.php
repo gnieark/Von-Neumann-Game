@@ -250,6 +250,64 @@ final class MannyCargoService
     /**
      * @return list<array<string, mixed>>
      */
+    public function restoreProbeAssemblyIngredientsAsDrifting(Manny $manny): array
+    {
+        if ($manny->sector === null) {
+            return [];
+        }
+
+        $ingredients = [];
+        $consumedItems = is_array($manny->taskPayload['consumedItems'] ?? null) ? $manny->taskPayload['consumedItems'] : [];
+        foreach ($consumedItems as $item) {
+            if (is_array($item)) {
+                $ingredients[] = $item;
+            }
+        }
+
+        $consumedContainers = is_array($manny->taskPayload['consumedContainers'] ?? null) ? $manny->taskPayload['consumedContainers'] : [];
+        foreach ($consumedContainers as $container) {
+            if (is_array($container) && is_array($container['item'] ?? null)) {
+                $ingredients[] = $container['item'];
+            }
+        }
+
+        if ($ingredients === []) {
+            return [];
+        }
+
+        $sector = $this->sectors->getOrCreateSector($manny->sector);
+        $dropped = [];
+        foreach ($ingredients as $item) {
+            $type = (string) ($item['type'] ?? '');
+            if ($type === '') {
+                continue;
+            }
+
+            $name = (string) ($item['name'] ?? $this->itemDisplayName($type));
+            $containerSpace = round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4);
+            $drifting = $this->addDriftingItemToSector($sector, $type, $name, $containerSpace, 1);
+            $dropped[] = [
+                'type' => 'drifting_item',
+                'itemType' => $type,
+                'name' => $drifting->getName(),
+                'quantity' => 1,
+                'driftingQuantity' => $drifting->getQuantity(),
+                'objectId' => $drifting->getId(),
+                'containerSpace' => $drifting->getContainerSpace(),
+                'capacityUnit' => $drifting->getCapacityUnit(),
+            ];
+        }
+
+        if ($dropped !== []) {
+            $this->sectors->saveSector($sector);
+        }
+
+        return $dropped;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
     public function dropWaitingMannyCargo(Manny $manny): array
     {
         $dropped = [];

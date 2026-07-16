@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-16
+
+### Changed
+
+- API v92 : lorsqu’un assemblage de sonde par Manny est annulé via `POST /api/probe/mannies/{mannyId}/recall`, les composants et les deux containers consommés au démarrage sont désormais relâchés comme piles d’items à la dérive dans le secteur d’assemblage.
+
 ## 2026-07-14
 
 ### Changed

@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 90
+                apiVersion: 92
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2673,7 +2673,9 @@ paths:
         When the task completes, a new owned drone probe is created in the
         assembly sector and the Manny is transferred from the old probe to the
         new one. If the original probe leaves the sector before completion, the
-        exterior Manny can be left behind as a forgotten Manny.
+        exterior Manny can be left behind as a forgotten Manny. If the task is
+        cancelled by recall, consumed assembly ingredients are left as drifting
+        item stacks in the assembly sector.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -3137,7 +3139,9 @@ paths:
         Manny is outside the probe. By default the return lasts one Manny travel
         time. If the cancelled task has been running for less than that travel
         time, the Manny turns around and the return duration matches the elapsed
-        task time. When the Manny is in a different sector that shares SCUT
+        task time. Cancelling a probe assembly task leaves its consumed
+        ingredients as drifting item stacks in the assembly sector. When the
+        Manny is in a different sector that shares SCUT
         network coverage with the probe sector, the order is accepted remotely:
         the task is cancelled, the Manny stays in that sector, and it is
         registered there as forgotten instead of returning.

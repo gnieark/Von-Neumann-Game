@@ -1181,6 +1181,10 @@ final class MannyService implements MannyTaskRuntime
             $this->cargo->restoreReservedSalvageItem($manny);
             $this->cargo->restoreReservedDetachedContainer($manny);
         }
+        $droppedAssemblyIngredients = [];
+        if ($manny->currentTask === Manny::TASK_ASSEMBLING_PROBE) {
+            $droppedAssemblyIngredients = $this->cargo->restoreProbeAssemblyIngredientsAsDrifting($manny);
+        }
         if ($manny->isOnProbe()) {
             return $manny;
         }
@@ -1195,6 +1199,9 @@ final class MannyService implements MannyTaskRuntime
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
         $manny->taskPayload = ['reason' => 'recall'];
+        if ($droppedAssemblyIngredients !== []) {
+            $manny->taskPayload['droppedIngredients'] = $droppedAssemblyIngredients;
+        }
         $this->removeMannyFromSector($manny);
         $this->mannies->save($manny);
 
@@ -1241,12 +1248,21 @@ final class MannyService implements MannyTaskRuntime
             $this->cargo->restoreReservedSalvageItem($manny);
             $this->cargo->restoreReservedDetachedContainer($manny);
         }
+        $droppedAssemblyIngredients = [];
+        if ($manny->currentTask === Manny::TASK_ASSEMBLING_PROBE) {
+            $droppedAssemblyIngredients = $this->cargo->restoreProbeAssemblyIngredientsAsDrifting($manny);
+        }
 
-        $this->clearTask($manny, [
+        $payload = [
             'lastTask' => $lastTask,
             'result' => 'forgotten',
             'reason' => 'remote_scut_recall',
-        ]);
+        ];
+        if ($droppedAssemblyIngredients !== []) {
+            $payload['droppedIngredients'] = $droppedAssemblyIngredients;
+        }
+
+        $this->clearTask($manny, $payload);
         $manny->locationType = Manny::LOCATION_SECTOR;
         $this->registerMannyInSector($manny, SectorManny::STATE_FORGOTTEN);
         $this->mannies->save($manny);

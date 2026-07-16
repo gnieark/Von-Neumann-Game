@@ -1375,7 +1375,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(91, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(92, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -4927,6 +4927,47 @@ if ($createdProbe !== null) {
     $test->assertEquals($assemblyDrone?->id, $assemblyMannyAfterCompletion?->probeId, 'completed probe assembly transfers the Manny to the new drone');
     $test->assertEquals(Manny::LOCATION_PROBE, $assemblyMannyAfterCompletion?->locationType, 'transferred assembly Manny is aboard the new drone');
     $test->assert($assemblyMannyAfterCompletion?->storageContainerId !== null, 'transferred assembly Manny is stored in the new drone cargo');
+
+    $assemblyRecallPlayer = $auth->registerPlayerWithPassword('probe-assembly-recall-user', 'secret', 'Probe Assembly Recall User');
+    $assemblyRecallHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($assemblyRecallPlayer)['token']];
+    $assemblyRecallProbe = $probes->findByPlayerId($assemblyRecallPlayer->id) ?? throw new RuntimeException('Expected assembly recall probe.');
+    $assemblyRecallProbe->currentSector = new SectorCoordinates(4700, 0, 0);
+    $probes->save($assemblyRecallProbe);
+    $sectorRepository->save(new SectorContent($assemblyRecallProbe->currentSector, []));
+    $assemblyRecallMannyList = $kernel->handle('GET', '/api/probe/mannies', $assemblyRecallHeaders);
+    $assemblyRecallMannyId = (string) ($assemblyRecallMannyList->body['mannies'][0]['id'] ?? '');
+    $assemblyRecallContainerItemA = $storage->addItem($assemblyRecallProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $assemblyRecallContainerItemB = $storage->addItem($assemblyRecallProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    foreach ($assemblyComponents as [$type, $name, $space, $count]) {
+        for ($index = 0; $index < $count; $index++) {
+            $storage->addItem($assemblyRecallProbe, $type, $name, $space);
+        }
+    }
+    $assemblyRecallStart = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyRecallMannyId) . '/assemble-probe', $assemblyRecallHeaders, json_encode([
+        'containerIds' => ['container-' . $assemblyRecallContainerItemA->uid, 'container-' . $assemblyRecallContainerItemB->uid],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $assemblyRecallStart->status, 'probe assembly can start before recall ingredient drift test');
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started WHERE uid = :uid')->execute([
+        'uid' => $assemblyRecallMannyId,
+        'started' => gmdate('c', time() - 300),
+    ]);
+    $assemblyRecall = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($assemblyRecallMannyId) . '/recall', $assemblyRecallHeaders, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $assemblyRecall->status, 'recalling an assembling Manny is accepted');
+    $test->assertEquals(Manny::TASK_RETURNING, $assemblyRecall->body['manny']['currentTask'] ?? null, 'recalling an assembly task starts a returning task');
+    $test->assertEquals(15, count($assemblyRecall->body['manny']['task']['droppedIngredients'] ?? []), 'recalling an assembly task reports all dropped ingredients');
+    $assemblyRecallSector = $sectorRepository->load($assemblyRecallProbe->currentSector);
+    foreach ([
+        ProbeItem::TYPE_DEUTERIUM_ENGINE => 1,
+        ProbeItem::TYPE_SCUT_RELAY => 1,
+        ProbeItem::TYPE_ELECTRIC_MOTOR => 5,
+        ProbeItem::TYPE_ATOMIC_PRINTER_PART => 2,
+        ProbeItem::TYPE_SOLAR_PANEL => 4,
+        ProbeItem::TYPE_ADDITIONAL_CONTAINER => 2,
+    ] as $itemType => $expectedQuantity) {
+        $driftingIngredient = $assemblyRecallSector->findObjectById(SectorDriftingItem::objectIdForItemType($itemType));
+        $test->assert($driftingIngredient instanceof SectorDriftingItem, 'recalled probe assembly drops ' . $itemType . ' as a drifting item');
+        $test->assertEquals($expectedQuantity, $driftingIngredient instanceof SectorDriftingItem ? $driftingIngredient->getQuantity() : null, 'recalled probe assembly drops the expected ' . $itemType . ' quantity');
+    }
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $visitedPlanetSector);
