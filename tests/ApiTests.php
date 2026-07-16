@@ -371,6 +371,7 @@ $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
+$sectorPointCloudScript = file_get_contents($root . '/scripts/generate-threejs-point-cloud-sectors.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
@@ -381,6 +382,9 @@ $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'id="oau
 $test->assert(is_string($loginTemplate) && str_contains($loginTemplate, 'data-oauth-url='), 'OAuth login links keep their base URL for remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'bindOAuthRememberChoice'), 'main JS binds OAuth remember-me synchronization');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'url.searchParams.set("remember", "1")'), 'main JS sends remember=1 when OAuth remember-me is checked');
+$test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, 'vng-sector-point-cloud'), 'Three.js sector point-cloud CLI declares its JSON format');
+$test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, "'positions' => \$positions"), 'Three.js sector point-cloud CLI exports flat BufferGeometry positions');
+$test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, 'sector-point-clouds.json'), 'Three.js sector point-cloud CLI writes a manifest');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut(?:/\\d+)?$#'"), 'front routes expose the SCUT Network page with optional probe id');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT'"), 'SCUT route keeps the requested short nav title');
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js'), 'SCUT front route loads the SCUT page script');
