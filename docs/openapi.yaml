@@ -1955,7 +1955,7 @@ paths:
                   - id: 11
                     type: probe_destroyed
                     status: unread
-                    message: 'Probe lost: Expendable drone (#43) was destroyed by a high-velocity collision during intersector movement. The destroyed probe has been removed from your fleet; no absolute coordinates are attached to this alert.'
+                    message: 'Probe lost: Expendable drone (#43) was destroyed by a high-velocity collision during intersector movement. The destroyed probe has been removed from your fleet. Attempted movement: from relative sector 0:0:0 to relative sector 8:0:0.'
                     phase: probe_loss
                     scheduledAt: '2026-06-12T16:05:00+00:00'
                     sector:

@@ -6214,6 +6214,8 @@ if ($secondaryLossDefaultProbe !== null) {
         $test->assertEquals(1, count($secondaryDestroyedAlerts), 'destroyed secondary probe creates one alert on the default probe');
         $test->assertEquals($secondaryLossProbe->id, $secondaryDestroyedAlerts[0]['destroyedProbe']['probeId'] ?? null, 'secondary destruction alert identifies the deleted probe');
         $test->assert(str_contains((string) ($secondaryDestroyedAlerts[0]['message'] ?? ''), 'high-velocity collision'), 'secondary destruction alert explains the collision cause');
+        $test->assert(str_contains((string) ($secondaryDestroyedAlerts[0]['message'] ?? ''), 'Attempted movement: from relative sector 0:0:0 to relative sector 8:0:0.'), 'secondary destruction alert reports the attempted relative movement');
+        $test->assert(!str_contains((string) ($secondaryDestroyedAlerts[0]['message'] ?? ''), 'no absolute coordinates'), 'secondary destruction alert does not mention coordinate privacy wording');
         $test->assert(!str_contains(json_encode($secondaryDestroyedAlerts[0], JSON_THROW_ON_ERROR), 'sector_x'), 'secondary destruction alert does not expose absolute coordinates');
     }
 }

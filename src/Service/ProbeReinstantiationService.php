@@ -143,7 +143,7 @@ final class ProbeReinstantiationService
                     $alertProbe->currentSector,
                     $terminalProbe->id,
                     $reason,
-                    $this->probeDestroyedMessage($terminalProbe, $reason),
+                    $this->probeDestroyedMessage($player, $terminalProbe, $reason),
                 );
             }
 
@@ -225,15 +225,54 @@ final class ProbeReinstantiationService
         };
     }
 
-    private function probeDestroyedMessage(NeumannProbe $terminalProbe, string $reason): string
+    private function probeDestroyedMessage(Player $player, NeumannProbe $terminalProbe, string $reason): string
     {
         $cause = match ($reason) {
             self::TERMINAL_REASON_BLACK_HOLE => 'black-hole entrapment beyond the escape threshold',
             self::TERMINAL_REASON_COLLISION => 'a high-velocity collision during intersector movement',
             default => 'an unrecoverable terminal event',
         };
+        $movement = $this->latestMovementAttemptForProbe($terminalProbe->id);
+        $movementSummary = $movement !== null
+            ? ' Attempted movement: from relative sector '
+                . $this->relativeSectorKey($movement['origin'], $player)
+                . ' to relative sector '
+                . $this->relativeSectorKey($movement['target'], $player)
+                . '.'
+            : '';
 
-        return "Probe lost: {$terminalProbe->name} (#{$terminalProbe->id}) was destroyed by {$cause}. The destroyed probe has been removed from your fleet; no absolute coordinates are attached to this alert.";
+        return "Probe lost: {$terminalProbe->name} (#{$terminalProbe->id}) was destroyed by {$cause}. The destroyed probe has been removed from your fleet.{$movementSummary}";
+    }
+
+    /**
+     * @return array{origin:SectorCoordinates,target:SectorCoordinates}|null
+     */
+    private function latestMovementAttemptForProbe(int $probeId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT origin_x, origin_y, origin_z, target_x, target_y, target_z
+             FROM probe_movements
+             WHERE probe_id = :probe_id
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $stmt->execute(['probe_id' => $probeId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'origin' => new SectorCoordinates((int) $row['origin_x'], (int) $row['origin_y'], (int) $row['origin_z']),
+            'target' => new SectorCoordinates((int) $row['target_x'], (int) $row['target_y'], (int) $row['target_z']),
+        ];
+    }
+
+    private function relativeSectorKey(SectorCoordinates $sector, Player $player): string
+    {
+        $relative = $sector->subtract($player->homeSector);
+
+        return $relative['x'] . ':' . $relative['y'] . ':' . $relative['z'];
     }
 
     private function deleteProbeData(int $probeId): void
