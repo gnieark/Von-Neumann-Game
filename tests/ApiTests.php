@@ -385,6 +385,8 @@ $test->assert(is_string($mainScript) && str_contains($mainScript, 'url.searchPar
 $test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, 'vng-sector-point-cloud'), 'Three.js sector point-cloud CLI declares its JSON format');
 $test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, "'positions' => \$positions"), 'Three.js sector point-cloud CLI exports flat BufferGeometry positions');
 $test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, 'sector-point-clouds.json'), 'Three.js sector point-cloud CLI writes a manifest');
+$test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, 'sector-point-clouds-threejs-editor.json'), 'Three.js sector point-cloud CLI writes an editor-importable scene');
+$test->assert(is_string($sectorPointCloudScript) && str_contains($sectorPointCloudScript, "'type' => 'Points'"), 'Three.js sector point-cloud CLI exports Points objects for the editor');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, "'uriPattern' => '#^/scut(?:/\\d+)?$#'"), 'front routes expose the SCUT Network page with optional probe id');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, "'name'  => 'SCUT'"), 'SCUT route keeps the requested short nav title');
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js'), 'SCUT front route loads the SCUT page script');

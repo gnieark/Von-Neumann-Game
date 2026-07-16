@@ -26,6 +26,7 @@ try {
     $outputDir = generateSectorPointCloudAbsolutePath($root, $options['outputDir']);
     $outputs = [
         'manifest' => generateSectorPointCloudOutputPath($root, $outputDir, $options['manifestOutput'], 'sector-point-clouds.json'),
+        'editorScene' => generateSectorPointCloudOutputPath($root, $outputDir, $options['editorSceneOutput'], 'sector-point-clouds-threejs-editor.json'),
         'generated' => generateSectorPointCloudOutputPath($root, $outputDir, $options['generatedOutput'], 'generated-sectors.json'),
         'visited' => generateSectorPointCloudOutputPath($root, $outputDir, $options['visitedOutput'], 'visited-sectors.json'),
         'probes' => generateSectorPointCloudOutputPath($root, $outputDir, $options['probesOutput'], 'probe-sectors.json'),
@@ -89,9 +90,15 @@ try {
         generateSectorPointCloudManifest($outputs, $clouds, $options['scale'], $options['pointSize']),
         $options['pretty'],
     );
+    generateSectorPointCloudWriteJson(
+        $outputs['editorScene'],
+        generateSectorPointCloudThreeJsEditorScene($clouds, $options['scale'], $options['pointSize']),
+        $options['pretty'],
+    );
 
     echo "Three.js sector point-cloud exports written.\n";
     echo '- manifest: ' . $outputs['manifest'] . "\n";
+    echo '- Three.js editor scene: ' . $outputs['editorScene'] . "\n";
     foreach (['generated', 'visited', 'probes', 'scut'] as $key) {
         echo '- ' . $clouds[$key]['title'] . ': ' . count($clouds[$key]['coordinates']) . ' -> ' . $outputs[$key] . "\n";
     }
@@ -111,6 +118,7 @@ try {
  *     universePath:?string,
  *     outputDir:string,
  *     manifestOutput:?string,
+ *     editorSceneOutput:?string,
  *     generatedOutput:?string,
  *     visitedOutput:?string,
  *     probesOutput:?string,
@@ -128,6 +136,7 @@ function generateSectorPointCloudParseArguments(array $argv): array
         'universePath' => null,
         'outputDir' => 'var/point-clouds',
         'manifestOutput' => null,
+        'editorSceneOutput' => null,
         'generatedOutput' => null,
         'visitedOutput' => null,
         'probesOutput' => null,
@@ -167,6 +176,10 @@ function generateSectorPointCloudParseArguments(array $argv): array
         }
         if (str_starts_with($argument, '--manifest-output=')) {
             $options['manifestOutput'] = generateSectorPointCloudNonEmptyPath(substr($argument, strlen('--manifest-output=')), 'manifest output');
+            continue;
+        }
+        if (str_starts_with($argument, '--editor-scene-output=')) {
+            $options['editorSceneOutput'] = generateSectorPointCloudNonEmptyPath(substr($argument, strlen('--editor-scene-output=')), 'Three.js editor scene output');
             continue;
         }
         if (str_starts_with($argument, '--generated-output=')) {
@@ -212,6 +225,7 @@ Options:
   --universe-path=<path>          Use another universe storage path.
   --output-dir=<path>             Output directory (default: var/point-clouds).
   --manifest-output=<path>        Output path for the point-cloud manifest.
+  --editor-scene-output=<path>    Output path for the Three.js editor scene.
   --generated-output=<path>       Output path for all generated sectors.
   --visited-output=<path>         Output path for visited sectors.
   --probes-output=<path>          Output path for sectors containing a probe.
@@ -226,7 +240,13 @@ Each cloud file contains a flat "positions" array for THREE.BufferGeometry:
 multiplied by --scale. The manifest lists the generated files and suggested
 colors.
 
-Minimal Three.js usage when the files are served from public/point-clouds:
+To import directly in https://threejs.org/editor/, use the generated
+sector-point-clouds-threejs-editor.json file. If the imported points are hard to
+see, regenerate with for example --scale=0.05 --point-size=4, then use the
+editor's frame/focus command on the imported scene.
+
+Minimal custom Three.js usage when the data files are served from
+public/point-clouds:
 
   import * as THREE from 'three';
 
@@ -393,6 +413,87 @@ function generateSectorPointCloudManifest(array $outputs, array $clouds, float $
 }
 
 /**
+ * @param array<string, array{title:string, color:string, coordinates:array<SectorCoordinates>}> $clouds
+ * @return array<string, mixed>
+ */
+function generateSectorPointCloudThreeJsEditorScene(array $clouds, float $scale, float $pointSize): array
+{
+    $geometries = [];
+    $materials = [];
+    $children = [];
+    foreach (['generated', 'visited', 'probes', 'scut'] as $key) {
+        $geometryUuid = generateSectorPointCloudUuid('geometry|' . $key);
+        $materialUuid = generateSectorPointCloudUuid('material|' . $key);
+        $positions = generateSectorPointCloudPositions($clouds[$key]['coordinates'], $scale);
+        $geometryData = [
+            'attributes' => [
+                'position' => [
+                    'itemSize' => 3,
+                    'type' => 'Float32Array',
+                    'array' => $positions,
+                    'normalized' => false,
+                ],
+            ],
+        ];
+        $boundingSphere = generateSectorPointCloudBoundingSphere($clouds[$key]['coordinates'], $scale);
+        if ($boundingSphere !== null) {
+            $geometryData['boundingSphere'] = $boundingSphere;
+        }
+        $geometries[] = [
+            'uuid' => $geometryUuid,
+            'type' => 'BufferGeometry',
+            'name' => $clouds[$key]['title'] . ' geometry',
+            'data' => $geometryData,
+        ];
+        $materials[] = [
+            'uuid' => $materialUuid,
+            'type' => 'PointsMaterial',
+            'name' => $clouds[$key]['title'] . ' material',
+            'color' => generateSectorPointCloudColorInteger($clouds[$key]['color']),
+            'size' => $pointSize,
+            'sizeAttenuation' => true,
+        ];
+        $children[] = [
+            'uuid' => generateSectorPointCloudUuid('object|' . $key),
+            'type' => 'Points',
+            'name' => $clouds[$key]['title'],
+            'geometry' => $geometryUuid,
+            'material' => $materialUuid,
+            'userData' => [
+                'count' => count($clouds[$key]['coordinates']),
+                'source' => $key,
+            ],
+        ];
+    }
+
+    return [
+        'metadata' => [
+            'version' => 4.7,
+            'type' => 'Object',
+            'generator' => 'scripts/generate-threejs-point-cloud-sectors.php',
+        ],
+        'geometries' => $geometries,
+        'materials' => $materials,
+        'object' => [
+            'uuid' => generateSectorPointCloudUuid('scene|sector-point-clouds'),
+            'type' => 'Scene',
+            'name' => 'VNG sector point clouds',
+            'userData' => [
+                'format' => 'vng-sector-point-cloud-threejs-editor',
+                'version' => 1,
+                'generatedAt' => gmdate('c'),
+                'coordinateSystem' => [
+                    'source' => 'absolute_sector_coordinates',
+                    'scale' => $scale,
+                    'positionUnits' => 'sector * scale',
+                ],
+            ],
+            'children' => $children,
+        ],
+    ];
+}
+
+/**
  * @param array<SectorCoordinates> $coordinates
  * @return array{min:array{float|int, float|int, float|int}, max:array{float|int, float|int, float|int}}|null
  */
@@ -434,6 +535,85 @@ function generateSectorPointCloudScaledNumber(int $value, float $scale): float|i
     $scaled = $value * $scale;
 
     return floor($scaled) === $scaled ? (int) $scaled : $scaled;
+}
+
+/**
+ * @param array<SectorCoordinates> $coordinates
+ * @return array<int, float|int>
+ */
+function generateSectorPointCloudPositions(array $coordinates, float $scale): array
+{
+    $positions = [];
+    foreach ($coordinates as $coordinate) {
+        $positions[] = generateSectorPointCloudScaledNumber($coordinate->getX(), $scale);
+        $positions[] = generateSectorPointCloudScaledNumber($coordinate->getY(), $scale);
+        $positions[] = generateSectorPointCloudScaledNumber($coordinate->getZ(), $scale);
+    }
+
+    return $positions;
+}
+
+/**
+ * @param array<SectorCoordinates> $coordinates
+ * @return array{center:array{float|int, float|int, float|int}, radius:float}|null
+ */
+function generateSectorPointCloudBoundingSphere(array $coordinates, float $scale): ?array
+{
+    $bounds = generateSectorPointCloudBounds($coordinates, $scale);
+    if ($bounds === null) {
+        return null;
+    }
+
+    $center = [
+        ($bounds['min'][0] + $bounds['max'][0]) / 2,
+        ($bounds['min'][1] + $bounds['max'][1]) / 2,
+        ($bounds['min'][2] + $bounds['max'][2]) / 2,
+    ];
+    $radius = 0.0;
+    foreach ($coordinates as $coordinate) {
+        $x = generateSectorPointCloudScaledNumber($coordinate->getX(), $scale);
+        $y = generateSectorPointCloudScaledNumber($coordinate->getY(), $scale);
+        $z = generateSectorPointCloudScaledNumber($coordinate->getZ(), $scale);
+        $radius = max($radius, sqrt(($x - $center[0]) ** 2 + ($y - $center[1]) ** 2 + ($z - $center[2]) ** 2));
+    }
+
+    return [
+        'center' => [
+            generateSectorPointCloudWholeNumberAsInt($center[0]),
+            generateSectorPointCloudWholeNumberAsInt($center[1]),
+            generateSectorPointCloudWholeNumberAsInt($center[2]),
+        ],
+        'radius' => $radius,
+    ];
+}
+
+function generateSectorPointCloudWholeNumberAsInt(float|int $value): float|int
+{
+    return floor($value) === (float) $value ? (int) $value : $value;
+}
+
+function generateSectorPointCloudColorInteger(string $hexColor): int
+{
+    if (preg_match('/\A#[0-9a-fA-F]{6}\z/', $hexColor) !== 1) {
+        throw new RuntimeException('Invalid Three.js material color: ' . $hexColor);
+    }
+
+    return hexdec(substr($hexColor, 1));
+}
+
+function generateSectorPointCloudUuid(string $seed): string
+{
+    $hash = sha1('vng-sector-point-cloud|' . $seed);
+
+    return sprintf(
+        '%s-%s-4%s-%s%s-%s',
+        substr($hash, 0, 8),
+        substr($hash, 8, 4),
+        substr($hash, 13, 3),
+        dechex((hexdec($hash[16]) & 0x3) | 0x8),
+        substr($hash, 17, 3),
+        substr($hash, 20, 12),
+    );
 }
 
 /**
