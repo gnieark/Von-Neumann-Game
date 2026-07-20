@@ -148,6 +148,7 @@
                     + "<span>ID " + window.VNG.escapeHtml(relay.id || "-") + "</span>"
                     + "<span>" + window.VNG.escapeHtml(tr("scutRelativeCoordinates", "Relative coordinates")) + " " + window.VNG.escapeHtml(window.VNG.coordinate(sector)) + "</span>"
                     + "<span>" + window.VNG.escapeHtml(tr("status", "Status")) + " " + window.VNG.escapeHtml(relay.status || "-") + "</span>"
+                    + "<span>" + window.VNG.escapeHtml(tr("scutTransitBeaconStatus", "Transit beacon")) + " " + window.VNG.escapeHtml(relay.isTransitBeacon === true ? tr("scutTransitBeaconEquipped", "equipped") : tr("scutTransitBeaconMissing", "not installed")) + "</span>"
                     + "<span>" + window.VNG.escapeHtml(tr("scutRelayActivatedAt", "Activated")) + " " + window.VNG.escapeHtml(formatDate(relay.activatedAt)) + "</span>"
                 + "</div>"
             + "</article>";

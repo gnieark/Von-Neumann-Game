@@ -6,7 +6,7 @@
     const MANNY_CARGO_CAPACITY = 0.05;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "improve-probe", "assemble-probe", "transfer-deuterium", "transfer-manny"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "install-scut-transit-beacon", "improve-probe", "assemble-probe", "transfer-deuterium", "transfer-manny"]);
     const PROBE_ASSEMBLY_COMPONENTS = [
         {"type": "deuterium_engine", "quantity": 1},
         {"type": "scut_relay", "quantity": 1},
@@ -211,6 +211,8 @@
             "actions": {
                 "deuteriumRefuelStationAvailable": sectorHasDeuteriumRefuelStation(),
                 "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
+                "scutTransitBeaconTargets": scutTransitBeaconRelayTargets().map((relay) => relay.id).join(","),
+                "scutTransitBeaconStock": scutTransitBeaconItems().length,
                 "remoteSectorMine": remoteMannyMineStateHash(item),
                 "remoteSectorInspect": remoteMannyInspectStateHash(item),
                 "deuteriumTransfer": [
@@ -743,6 +745,11 @@
             .filter((object) => object && object.type === "scut_relay" && object.status === "off" && object.id);
     }
 
+    function scutTransitBeaconRelayTargets() {
+        return (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
+            .filter((object) => object && object.type === "scut_relay" && object.status === "on" && object.isTransitBeacon !== true && object.id);
+    }
+
     function bookmarkTargetLabel(target) {
         return [objectTypeLabel(target.type || "object"), target.name || target.id].filter(Boolean).join(" ");
     }
@@ -976,6 +983,12 @@
     function integratedCircuitItems() {
         return Array.isArray(state.currentInventory && state.currentInventory.items)
             ? state.currentInventory.items.filter((item) => item.type === "integrated_circuit")
+            : [];
+    }
+
+    function scutTransitBeaconItems() {
+        return Array.isArray(state.currentInventory && state.currentInventory.items)
+            ? state.currentInventory.items.filter((item) => item.type === "scut_transit_beacon")
             : [];
     }
 
@@ -2608,6 +2621,19 @@
         )).join("");
     }
 
+    function scutTransitBeaconRelayTargetOptions(selected) {
+        const targets = scutTransitBeaconRelayTargets();
+        if (targets.length === 0) {
+            return "<option value=\"\">-</option>";
+        }
+
+        return targets.map((target) => (
+            "<option value=\"" + escaped(target.id) + "\"" + (String(target.id) === String(selected) ? " selected" : "") + ">"
+            + escaped([objectTypeLabel("scut_relay"), target.name || target.id].filter(Boolean).join(" "))
+            + "</option>"
+        )).join("");
+    }
+
     function turnOnRelayHint(relayCount, circuitCount) {
         if (relayCount === 0) {
             return tr("noInactiveScutRelay", "No inactive SCUT relay is present in this sector.");
@@ -2629,6 +2655,29 @@
             + "<label>" + escaped(tr("scutNetworkNameOptional", "Network name to create (optional)")) + "<input name=\"networkName\" maxlength=\"80\"></label>"
             + "<button class=\"manny-turn-on-relay-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("turnOnScutRelay", "Activate relay")) + "</button>"
             + "<p class=\"manny-turn-on-relay-hint\">" + escaped(turnOnRelayHint(relays.length, circuits.length)) + "</p>"
+            + "</form>";
+    }
+
+    function scutTransitBeaconInstallHint(relayCount, beaconCount) {
+        if (relayCount === 0) {
+            return tr("noActiveScutRelayForBeacon", "No active SCUT relay can receive a beacon in this sector.");
+        }
+        if (beaconCount === 0) {
+            return tr("missingScutTransitBeacon", "A SCUT transit beacon is required in stock.");
+        }
+
+        return tr("installScutTransitBeaconHint", "A Manny mounts the beacon on the active relay.");
+    }
+
+    function renderScutTransitBeaconInstallForm() {
+        const relays = scutTransitBeaconRelayTargets();
+        const beacons = scutTransitBeaconItems();
+        const disabled = relays.length === 0 || beacons.length === 0;
+
+        return "<form class=\"manny-install-scut-transit-beacon-form manny-form\">"
+            + "<label>" + escaped(tr("scutRelayObject", "SCUT relay")) + "<select class=\"manny-install-scut-transit-beacon-target\" name=\"relayId\" required>" + scutTransitBeaconRelayTargetOptions("") + "</select></label>"
+            + "<button class=\"manny-install-scut-transit-beacon-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("installScutTransitBeacon", "Install beacon")) + "</button>"
+            + "<p class=\"manny-install-scut-transit-beacon-hint\">" + escaped(scutTransitBeaconInstallHint(relays.length, beacons.length)) + "</p>"
             + "</form>";
     }
 
@@ -2664,6 +2713,7 @@
             {"id": "inspect-sector-object", "title": tr("inspectSectorObjectActionTitle", "Inspect a sector object"), "render": renderInspectSectorObjectForm},
             {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint bookmark"), "render": renderBookmarkForm},
             {"id": "turn-on-relay", "title": tr("turnOnScutRelayActionTitle", "Activate a SCUT relay"), "render": renderTurnOnRelayForm},
+            {"id": "install-scut-transit-beacon", "title": tr("installScutTransitBeaconActionTitle", "Beacon a SCUT relay"), "render": renderScutTransitBeaconInstallForm},
         ];
         if (sectorHasDeuteriumRefuelStation()) {
             sectorActions.unshift({"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
@@ -2744,6 +2794,7 @@
             "craft": renderCraftForm,
             "atomic-printer-craft": renderAtomicPrinterCraftForm,
             "turn-on-relay": renderTurnOnRelayForm,
+            "install-scut-transit-beacon": renderScutTransitBeaconInstallForm,
             "improve-probe": renderImproveProbeForm,
             "assemble-probe": renderAssembleProbeForm,
             "transfer-deuterium": renderDeuteriumTransferForm,
@@ -3065,6 +3116,7 @@
             updateProbeImprovementForms();
             updatePrinterCraftForms();
             updateMannyBookmarkForms();
+            updateScutTransitBeaconInstallForms();
             updateMannyInspectSectorObjectForms();
             updateMannyDetachStorageContainerForms();
             updateMannyDropStorageContainerForms();
@@ -3428,6 +3480,31 @@
         });
     }
 
+    function updateScutTransitBeaconInstallForms() {
+        document.querySelectorAll(".manny-install-scut-transit-beacon-form").forEach((form) => {
+            const targetSelect = form.querySelector(".manny-install-scut-transit-beacon-target");
+            const button = form.querySelector(".manny-install-scut-transit-beacon-button");
+            const hint = form.querySelector(".manny-install-scut-transit-beacon-hint");
+            const selected = targetSelect ? targetSelect.value : "";
+            const targets = scutTransitBeaconRelayTargets();
+            const hasBeacon = scutTransitBeaconItems().length > 0;
+            if (targetSelect) {
+                targetSelect.innerHTML = scutTransitBeaconRelayTargetOptions(selected);
+                if (!targets.some((target) => String(target.id) === String(targetSelect.value))) {
+                    targetSelect.value = targets[0] ? String(targets[0].id) : "";
+                }
+            }
+            if (button) {
+                const disabled = targets.length === 0 || !hasBeacon;
+                button.disabled = disabled;
+                button.setAttribute("aria-disabled", disabled ? "true" : "false");
+            }
+            if (hint) {
+                hint.textContent = scutTransitBeaconInstallHint(targets.length, scutTransitBeaconItems().length);
+            }
+        });
+    }
+
     function updatePrinterCraftForms() {
         document.querySelectorAll(".printer-craft-form").forEach((form) => {
             const select = form.querySelector(".manny-craft-recipe");
@@ -3475,6 +3552,9 @@
         }
         if (form.classList.contains("manny-bookmark-form")) {
             updateMannyBookmarkForms();
+        }
+        if (form.classList.contains("manny-install-scut-transit-beacon-form")) {
+            updateScutTransitBeaconInstallForms();
         }
         if (form.classList.contains("manny-improve-probe-form")) {
             updateProbeImprovementForm(form);
@@ -3781,6 +3861,23 @@
             return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/turn-on-relay"), {
                 "method": "POST",
                 "body": JSON.stringify(body),
+            });
+        }
+        if (form.classList.contains("manny-install-scut-transit-beacon-form")) {
+            updateScutTransitBeaconInstallForms();
+            const targetSelect = form.querySelector(".manny-install-scut-transit-beacon-target");
+            if (scutTransitBeaconItems().length === 0) {
+                setStatus(tr("missingScutTransitBeacon", "A SCUT transit beacon is required in stock."));
+                return null;
+            }
+            if (!targetSelect || !targetSelect.value) {
+                setStatus(tr("noActiveScutRelayForBeacon", "No active SCUT relay can receive a beacon in this sector."));
+                return null;
+            }
+
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/install-scut-transit-beacon"), {
+                "method": "POST",
+                "body": JSON.stringify({"relayId": Number.parseInt(String(formData.get("relayId") || ""), 10)}),
             });
         }
         if (form.classList.contains("manny-improve-probe-form")) {

@@ -411,6 +411,9 @@ $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="sec
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/sector")'), 'SCUT page reads selected probe current sector coverage');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/scut-network/"'), 'SCUT page reads selected probe network details');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.isTransitBeacon === true'), 'SCUT page renders relay transit beacon status');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitBeaconStatus' => 'Balise transit'"), 'French translations include SCUT relay transit beacon status label');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitBeaconStatus' => 'Transit beacon'"), 'English translations include SCUT relay transit beacon status label');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigationScutCoverage'), 'main JS can set SCUT nav LED state');
 $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
@@ -594,6 +597,14 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installingScutTransitBeacon' => 'Installation de balise transit SCUT'"), 'French translations include the SCUT transit beacon installation task label');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installingScutTransitBeacon' => 'Installing SCUT transit beacon'"), 'English translations include the SCUT transit beacon installation task label');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-install-scut-transit-beacon-form'), 'mannies JS renders the SCUT transit beacon installation form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/install-scut-transit-beacon'), 'mannies JS posts SCUT transit beacon installation orders');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.status === "on" && object.isTransitBeacon !== true'), 'mannies JS lists active SCUT relays without transit beacon as installation targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scutTransitBeaconItems().length === 0'), 'mannies JS blocks SCUT transit beacon installation without stock');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installScutTransitBeaconActionTitle' => 'Baliser un relais SCUT'"), 'French translations include the SCUT transit beacon install action title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installScutTransitBeaconActionTitle' => 'Beacon a SCUT relay'"), 'English translations include the SCUT transit beacon install action title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missingScutTransitBeacon' => 'Une balise de transit SCUT doit être en stock.'"), 'French translations include the missing SCUT transit beacon hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missingScutTransitBeacon' => 'A SCUT transit beacon is required in stock.'"), 'English translations include the missing SCUT transit beacon hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installedProbeImprovements' => 'Améliorations installées'"), 'French translations include the installed probe improvements metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installedProbeImprovements' => 'Installed upgrades'"), 'English translations include the installed probe improvements metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noProbeImprovementAvailable' => 'Aucune amélioration n\\'est disponible'"), 'French translations include the empty probe-improvement message');
@@ -607,7 +618,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260720-scut-transit-beacon-install"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260720-scut-relay-beacon-status"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
