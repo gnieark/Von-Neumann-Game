@@ -787,6 +787,7 @@ $statsRankingFactory->initializeSchema($statsRankingPdo);
 $statsRankingPlayers = new PlayerRepository($statsRankingPdo);
 $statsRankingProbes = new NeumannProbeRepository($statsRankingPdo);
 $statsRankingVisitedSectors = new VisitedSectorRepository($statsRankingPdo);
+$statsRankingMissions = new MissionRepository($statsRankingPdo);
 $statsRankingProbeRows = [];
 $statsRankingPlayerRows = [];
 for ($ranking = 1; $ranking <= 10; $ranking++) {
@@ -803,6 +804,18 @@ for ($ranking = 1; $ranking <= 10; $ranking++) {
     }
 }
 $statsRankingProbes->createForPlayer($statsRankingPlayerRows[1]->id, 'Stats Ranking Secondary Probe', new SectorCoordinates(202, 2, 0));
+$statsCompletedMissionOne = $statsRankingMissions->create($statsRankingPlayerRows[1]->id, 'stats_completed', 'Stats completed mission');
+$statsCompletedMissionTwo = $statsRankingMissions->create($statsRankingPlayerRows[2]->id, 'stats_completed', 'Stats completed mission');
+$statsFailedMission = $statsRankingMissions->create($statsRankingPlayerRows[3]->id, 'stats_failed', 'Stats failed mission');
+$statsHiddenMissionPlayer = $statsRankingPlayers->createPlayer('stats-hidden-mission', 'Stats Hidden Mission', null, new SectorCoordinates(250, 0, 0));
+$statsHiddenMissionProbe = $statsRankingProbes->createForPlayer($statsHiddenMissionPlayer->id, 'Stats Hidden Mission Probe', $statsHiddenMissionPlayer->homeSector);
+$statsHiddenMissionProbe->excludeFromStats = true;
+$statsRankingProbes->save($statsHiddenMissionProbe);
+$statsHiddenCompletedMission = $statsRankingMissions->create($statsHiddenMissionPlayer->id, 'stats_hidden_completed', 'Stats hidden completed mission');
+$statsRankingMissions->markCompleted($statsCompletedMissionOne);
+$statsRankingMissions->markCompleted($statsCompletedMissionTwo);
+$statsRankingMissions->markCompleted($statsHiddenCompletedMission);
+$statsRankingMissions->markFailed($statsFailedMission);
 $statsScutNetworkInsert = $statsRankingPdo->prepare(
     'INSERT INTO scut_networks (name, created_at, updated_at)
      VALUES (:name, :created_at, :updated_at)'
@@ -876,6 +889,8 @@ $test->assertEquals(10, $topRankingPlayers[0]['visitedSectors'] ?? null, 'public
 $test->assert(!in_array('Stats Ranking 10', array_column($topRankingPlayers, 'playerName'), true), 'public stats top-nine ranking excludes the tenth row');
 $test->assertEquals(1, count(array_filter($topRankingPlayers, static fn(array $row): bool => ($row['playerName'] ?? null) === 'Stats Ranking 1')), 'public stats explorer podium keeps one row per player even with several probes');
 $test->assertEquals(4, $rankingStats['metrics']['scutCoveredSectors'] ?? null, 'public stats count sectors covered by at least one SCUT network once');
+$test->assertEquals(2, $rankingStats['metrics']['successfulMissions'] ?? null, 'public stats count completed missions from included players');
+$test->assertEquals(1, $rankingStats['metrics']['failedMissions'] ?? null, 'public stats count failed missions from included players');
 $topScutRelayActivators = $rankingStats['metrics']['topScutRelayActivators'] ?? [];
 $test->assertEquals('Stats Ranking Probe 1', $topScutRelayActivators[0]['probeName'] ?? null, 'public stats SCUT activator podium ranks relay creators');
 $test->assertEquals(2, $topScutRelayActivators[0]['activatedRelays'] ?? null, 'public stats SCUT activator podium counts online relays only');

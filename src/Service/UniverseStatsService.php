@@ -7,6 +7,7 @@ namespace VonNeumannGame\Service;
 use PDO;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -35,6 +36,7 @@ final class UniverseStatsService
         $waypointStats = $this->waypointStats();
         $intelligentLifeStats = $this->intelligentLifeDiscoveryStats();
         $scutStats = $this->scutStats();
+        $missionStats = $this->missionTerminalStats();
 
         $topVisitedPlayers = $this->topVisitedPlayers();
 
@@ -57,8 +59,8 @@ final class UniverseStatsService
                 'waypointBookmarksInstalled' => $waypointStats['installed'],
                 'intelligentLifeWorlds' => $intelligentLifeStats['worlds'],
                 'scutCoveredSectors' => $scutStats['coveredSectors'],
-                'successfulMissions' => 0,
-                'failedMissions' => 0,
+                'successfulMissions' => $missionStats['successful'],
+                'failedMissions' => $missionStats['failed'],
                 'topVisitedPlayers' => $topVisitedPlayers,
                 'topVisitedProbes' => $this->legacyTopVisitedProbeRows($topVisitedPlayers),
                 'topWaypointPlayers' => $waypointStats['topPlayers'],
@@ -67,6 +69,43 @@ final class UniverseStatsService
                 'topScutNetworksByCoverage' => $scutStats['topNetworks'],
             ],
         ];
+    }
+
+    /**
+     * @return array{successful: int, failed: int}
+     */
+    private function missionTerminalStats(): array
+    {
+        $stats = [
+            'successful' => 0,
+            'failed' => 0,
+        ];
+        $stmt = $this->pdo->prepare(
+            'SELECT probe_missions.status, COUNT(*) AS mission_count
+             FROM probe_missions
+             WHERE probe_missions.status IN (:completed_status, :failed_status)
+               AND EXISTS (
+                   SELECT 1
+                   FROM neumann_probes
+                   WHERE neumann_probes.player_id = probe_missions.player_id
+                     AND neumann_probes.exclude_from_stats = 0
+               )
+             GROUP BY probe_missions.status'
+        );
+        $stmt->execute([
+            'completed_status' => Mission::STATUS_COMPLETED,
+            'failed_status' => Mission::STATUS_FAILED,
+        ]);
+
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (($row['status'] ?? null) === Mission::STATUS_COMPLETED) {
+                $stats['successful'] = max(0, (int) $row['mission_count']);
+            } elseif (($row['status'] ?? null) === Mission::STATUS_FAILED) {
+                $stats['failed'] = max(0, (int) $row['mission_count']);
+            }
+        }
+
+        return $stats;
     }
 
     /**
