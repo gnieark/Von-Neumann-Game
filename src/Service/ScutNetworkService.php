@@ -146,6 +146,26 @@ final class ScutNetworkService
         return false;
     }
 
+    public function hasTransitBeaconCorridor(SectorCoordinates $a, SectorCoordinates $b): bool
+    {
+        if ($a->equals($b)) {
+            return true;
+        }
+
+        $originNetworkIds = $this->transitBeaconNetworkIdsInSector($a);
+        if ($originNetworkIds === []) {
+            return false;
+        }
+
+        foreach (array_keys($this->transitBeaconNetworkIdsInSector($b)) as $networkId) {
+            if (isset($originNetworkIds[$networkId])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function networkById(int $id): ?ScutNetwork
     {
         return $this->networks->findById($id);
@@ -199,6 +219,21 @@ final class ScutNetworkService
             static fn(SectorCoordinates $covered): array => $covered->toArray(),
             $this->grid->getSectorsWithinDistance($sector, ScutRelay::RADIUS_SECTORS),
         );
+    }
+
+    /**
+     * @return array<int, true>
+     */
+    private function transitBeaconNetworkIdsInSector(SectorCoordinates $sector): array
+    {
+        $networkIds = [];
+        foreach ($this->relays->findBySector($sector) as $relay) {
+            if ($relay->isOn() && $relay->isTransitBeacon && $relay->networkId !== null) {
+                $networkIds[$relay->networkId] = true;
+            }
+        }
+
+        return $networkIds;
     }
 
     /**

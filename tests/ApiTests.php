@@ -1148,7 +1148,7 @@ $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSect
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, worldSeed: 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
@@ -1442,7 +1442,7 @@ $multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $mult
 $multiScanStorage = new ProbeStorageService($multiScanStorageContainers, $multiScanItems, $multiScanMannies, $multiScanProbes, improvements: $multiScanProbeImprovements);
 $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMessages, [], 'multi-scan-world', $multiScanSectorService, $multiScanProbes, $multiScanPlayers);
 $multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanSectorService, $multiScanWarnings);
-$multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, worldSeed: 'multi-scan-world');
+$multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, scut: $multiScanScut, worldSeed: 'multi-scan-world');
 $multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
 $multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents);
 $multiScanKernel = new ApiKernel($multiScanAuth, $multiScanPlayers, $multiScanProbes, new SectorObservationService($multiScanSectorService, $multiScanVisited, mannies: $multiScanMannies), $multiScanMovementService, $multiScanVisited, $multiScanMannyService, $multiScanItems, $multiScanStorage, $multiScanMessages, $multiScanLogbook, $multiScanWarnings, $multiScanForum, $multiScanMissionService, $multiScanReinstantiation, $multiScanScut, improvements: $multiScanProbeImprovements);
@@ -6054,6 +6054,81 @@ if ($riskProbe !== null) {
             'arrival' => gmdate('c', $base - 60),
         ]);
         $kernel->handle('GET', '/api/probe', $riskHeaders);
+    }
+
+    $protectedRiskPlayer = $auth->registerPlayerWithPassword('scut-transit-protected-risk', 'secret', 'SCUT Transit Protected Risk', 'SCUT transit protected probe');
+    $protectedRiskSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'scut-transit-protected-risk', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+    $protectedRiskHeaders = ['Authorization' => 'Bearer ' . (string) ($protectedRiskSession->body['token'] ?? '')];
+    $protectedRiskProbe = $probes->findByPlayerId($protectedRiskPlayer->id);
+    if ($protectedRiskProbe !== null) {
+        $protectedRiskTarget = new SectorCoordinates(
+            $protectedRiskProbe->currentSector->getX() + 8,
+            $protectedRiskProbe->currentSector->getY(),
+            $protectedRiskProbe->currentSector->getZ(),
+        );
+        $protectedOriginRelay = $scut->turnOnRelay(
+            $scut->createOffRelay($protectedRiskProbe->currentSector, $protectedRiskProbe->id)->id,
+            'Protected transit',
+        );
+        $protectedOriginRelay = $scut->installTransitBeacon($protectedOriginRelay->id);
+        $protectedTargetRelay = $scut->turnOnRelay(
+            $scut->createOffRelay($protectedRiskTarget, $protectedRiskProbe->id)->id,
+            'Protected transit',
+        );
+        $protectedTargetRelay = $scut->installTransitBeacon($protectedTargetRelay->id);
+        $test->assertEquals($protectedOriginRelay->networkId, $protectedTargetRelay->networkId, 'SCUT transit protection test relays share the same network');
+        $test->assert($protectedOriginRelay->isTransitBeacon && $protectedTargetRelay->isTransitBeacon, 'SCUT transit protection test relays are equipped with transit beacons');
+        $test->assert($scut->hasTransitBeaconCorridor($protectedRiskProbe->currentSector, $protectedRiskTarget), 'SCUT transit protection helper detects an equipped same-network corridor');
+        for ($index = 0; $index < 14; $index++) {
+            $storage->addItem($protectedRiskProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+        }
+
+        $protectedRiskTargetRelative = $protectedRiskTarget->subtract($protectedRiskPlayer->homeSector);
+        $protectedRiskMove = $kernel->handle('POST', '/api/probe/move', $protectedRiskHeaders, json_encode(['target' => $protectedRiskTargetRelative], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $protectedRiskMove->status, 'long SCUT transit-beacon movement can start');
+        $protectedRiskWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $protectedRiskHeaders);
+        $test->assertEquals(100.0, $protectedRiskWarnings->body['damageWarnings'][0]['risk']['percent'] ?? null, 'SCUT transit protection keeps fragile-container break warnings active');
+
+        $protectedMovement = $movements->findActiveByProbeId($protectedRiskProbe->id);
+        if ($protectedMovement !== null) {
+            $test->assert($protectedMovement->origin->equals($protectedRiskProbe->currentSector), 'protected movement starts from the equipped origin sector');
+            $test->assert($protectedMovement->target->equals($protectedRiskTarget), 'protected movement targets the equipped destination sector');
+            $base = time();
+            $chosenStartedAt = gmdate('c', $base - 240 * 60);
+            for ($i = 0; $i < 2000; $i++) {
+                $candidate = gmdate('c', $base - (240 * 60) - $i);
+                $payload = implode('|', [
+                    'api-test-world',
+                    $protectedMovement->probeId,
+                    $protectedMovement->id,
+                    $protectedMovement->origin->toKey(),
+                    $protectedMovement->target->toKey(),
+                    $candidate,
+                ]);
+                $roll = hexdec(substr(hash('sha256', $payload), 0, 15)) / hexdec(str_repeat('f', 15));
+                if ($roll < 0.40) {
+                    $chosenStartedAt = $candidate;
+                    break;
+                }
+            }
+
+            $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
+                'id' => $protectedMovement->id,
+                'started' => $chosenStartedAt,
+                'prep' => gmdate('c', $base - 230 * 60),
+                'accel' => gmdate('c', $base - 110 * 60),
+                'cruise' => gmdate('c', $base + 70 * 60),
+                'decel' => gmdate('c', $base + 190 * 60),
+                'arrival' => gmdate('c', $base + 190 * 60),
+            ]);
+
+            $protectedCruiseProbe = $kernel->handle('GET', '/api/probe', $protectedRiskHeaders);
+            $protectedCruiseMovement = $movements->findActiveByProbeId($protectedRiskProbe->id);
+            $test->assertEquals('cruising', $protectedCruiseProbe->body['probe']['status'] ?? null, 'SCUT transit-beacon corridor prevents deterministic movement destruction');
+            $test->assertEquals('cruising', $protectedCruiseMovement?->status, 'protected movement remains active after destruction check');
+            $test->assert($protectedCruiseMovement?->destructionCheckedAt !== null, 'protected movement still records the destruction check');
+            $test->assertEquals(null, $protectedCruiseMovement?->destroyedAt, 'protected movement does not record destruction');
+        }
     }
 
     $longRiskMove = $kernel->handle('POST', '/api/probe/move', $riskHeaders, json_encode(['target' => ['x' => 8, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));

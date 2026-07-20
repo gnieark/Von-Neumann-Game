@@ -52,6 +52,7 @@ final class ProbeMovementService
         private readonly ?MissionService $missions = null,
         private readonly ?ProbeImprovementRepository $improvements = null,
         private readonly ?ProbeReinstantiationService $reinstantiation = null,
+        private readonly ?ScutNetworkService $scut = null,
         private readonly MovementDurationCalculator $durations = new MovementDurationCalculator(),
         private readonly DeterministicRiskRoll $riskRoll = new DeterministicRiskRoll(),
         private readonly string $worldSeed = 'default-world',
@@ -334,7 +335,7 @@ final class ProbeMovementService
         }
 
         $movement->destructionCheckedAt = $now->format('c');
-        $risk = $this->destructionRiskForDistance($movement->distance);
+        $risk = $this->isProtectedByScutTransitBeaconCorridor($movement) ? 0.0 : $this->destructionRiskForDistance($movement->distance);
 
         if ($risk > 0 && $this->riskRoll->roll($this->worldSeed, $movement) < $risk) {
             $movement->status = 'destroyed';
@@ -358,6 +359,12 @@ final class ProbeMovementService
         $this->movements->save($movement);
 
         return null;
+    }
+
+    private function isProtectedByScutTransitBeaconCorridor(ProbeMovement $movement): bool
+    {
+        return $this->scut !== null
+            && $this->scut->hasTransitBeaconCorridor($movement->origin, $movement->target);
     }
 
     private function registerForgottenMannies(NeumannProbe $probe): void
