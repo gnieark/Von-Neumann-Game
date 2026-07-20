@@ -257,6 +257,7 @@
             "atomic_printer_part": tr("atomicPrinterPart", "Atomic printer part"),
             "deuterium_engine": tr("deuteriumEngine", "Deuterium engine"),
             "solar_panel": tr("solarPanel", "Solar panel"),
+            "scut_transit_beacon": tr("scutTransitBeacon", "SCUT transit beacon"),
             "thermal_protection_shell": tr("thermalProtectionShell", "Thermal protection shell"),
             "parachute_pack": tr("parachutePack", "Parachute pack"),
             "descent_guidance_module": tr("descentGuidanceModule", "Descent guidance module"),
@@ -284,6 +285,7 @@
             "transferring_deuterium_to_probe": tr("transferringDeuteriumToProbe", "Transferring deuterium"),
             "transferring_to_probe": tr("transferringMannyToProbe", "Transferring to probe"),
             "turning_on_scut_relay": tr("turningOnScutRelay", "Activating SCUT relay"),
+            "installing_scut_transit_beacon": tr("installingScutTransitBeacon", "Installing SCUT transit beacon"),
             "improving_probe": tr("improvingProbe", "Improving probe"),
             "assembling_probe": tr("assemblingProbe", "Assembling probe"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
@@ -1067,6 +1069,7 @@
             "linear_actuator": "recipeDescriptionLinearActuator",
             "atomic_printer_part": "recipeDescriptionAtomicPrinterPart",
             "deuterium_engine": "recipeDescriptionDeuteriumEngine",
+            "scut_transit_beacon": "recipeDescriptionScutTransitBeacon",
             "thermal_protection_shell": "recipeDescriptionThermalProtectionShell",
             "parachute_pack": "recipeDescriptionParachutePack",
             "descent_guidance_module": "recipeDescriptionDescentGuidanceModule",
@@ -1812,6 +1815,15 @@
                 + "<h4>" + escaped(tr("turningOnScutRelayInProgress", "SCUT relay activation in progress")) + "</h4>"
                 + "<p>" + escaped(window.VNG.formatText(tr("turningOnScutRelayTaskDetail", "{target} is receiving its final circuit."), {
                     "target": payload.target ? salvageTargetLabel(payload.target) : (payload.relayId || tr("scutRelayObject", "SCUT relay")),
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "</section>";
+        }
+        if (manny.currentTask === "installing_scut_transit_beacon") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("scutTransitBeaconInstallInProgress", "SCUT transit beacon installation in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("scutTransitBeaconInstallTaskDetail", "{target} is receiving its transit beacon."), {
+                    "target": payload.relayId || tr("scutRelayObject", "SCUT relay"),
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";

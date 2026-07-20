@@ -22,6 +22,7 @@ final class ProbeItem
     public const TYPE_DEUTERIUM_ENGINE = 'deuterium_engine';
     public const TYPE_SOLAR_PANEL = 'solar_panel';
     public const TYPE_SCUT_RELAY = 'scut_relay';
+    public const TYPE_SCUT_TRANSIT_BEACON = 'scut_transit_beacon';
     public const TYPE_THERMAL_PROTECTION_SHELL = 'thermal_protection_shell';
     public const TYPE_PARACHUTE_PACK = 'parachute_pack';
     public const TYPE_DESCENT_GUIDANCE_MODULE = 'descent_guidance_module';
@@ -42,6 +43,7 @@ final class ProbeItem
     public const DEUTERIUM_ENGINE_NAME = 'Deuterium engine';
     public const SOLAR_PANEL_NAME = 'Solar panel';
     public const SCUT_RELAY_NAME = 'SCUT relay';
+    public const SCUT_TRANSIT_BEACON_NAME = 'SCUT transit beacon';
     public const THERMAL_PROTECTION_SHELL_NAME = 'Thermal protection shell';
     public const PARACHUTE_PACK_NAME = 'Parachute pack';
     public const DESCENT_GUIDANCE_MODULE_NAME = 'Descent guidance module';
@@ -69,6 +71,7 @@ final class ProbeItem
             self::TYPE_DEUTERIUM_ENGINE => self::DEUTERIUM_ENGINE_NAME,
             self::TYPE_SOLAR_PANEL => self::SOLAR_PANEL_NAME,
             self::TYPE_SCUT_RELAY => self::SCUT_RELAY_NAME,
+            self::TYPE_SCUT_TRANSIT_BEACON => self::SCUT_TRANSIT_BEACON_NAME,
             self::TYPE_THERMAL_PROTECTION_SHELL => self::THERMAL_PROTECTION_SHELL_NAME,
             self::TYPE_PARACHUTE_PACK => self::PARACHUTE_PACK_NAME,
             self::TYPE_DESCENT_GUIDANCE_MODULE => self::DESCENT_GUIDANCE_MODULE_NAME,

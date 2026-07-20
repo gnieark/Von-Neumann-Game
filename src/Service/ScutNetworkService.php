@@ -83,6 +83,23 @@ final class ScutNetworkService
         return $this->relays->findById($relay->id) ?? $relay;
     }
 
+    public function installTransitBeacon(int $relayId): ScutRelay
+    {
+        $relay = $this->relays->findById($relayId)
+            ?? throw new MannyActionException(404, 'scut_relay_not_found', 'SCUT relay not found.');
+        if (!$relay->isOn()) {
+            throw new MannyActionException(422, 'scut_relay_not_active', 'SCUT relay must be active before installing a transit beacon.');
+        }
+        if ($relay->isTransitBeacon) {
+            throw new MannyActionException(409, 'scut_transit_beacon_already_installed', 'SCUT relay already has a transit beacon.');
+        }
+
+        $relay->isTransitBeacon = true;
+        $this->relays->save($relay);
+
+        return $this->relays->findById($relay->id) ?? $relay;
+    }
+
     /**
      * @return array<ScutNetwork>
      */

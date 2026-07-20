@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '90'
+  version: '96'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 94
+                apiVersion: 96
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -277,6 +277,32 @@ paths:
                       type: scut_relay
                       name: SCUT relay
                       containerSpace: 0.12
+                      containerSpaceUnit: earth_container_equivalent
+                  - id: scut_transit_beacon
+                    name: SCUT transit beacon
+                    description: A synchronized SCUT transit module that can later be mounted on an active relay to help secure travel toward another equipped relay.
+                    craftableBy: [manny]
+                    ingredients:
+                      - type: integrated_circuit
+                        quantity: 1
+                        unit: item
+                      - type: battery_pack
+                        quantity: 1
+                        unit: item
+                      - type: micro_conductor
+                        quantity: 1
+                        unit: item
+                      - type: steel_plate
+                        quantity: 2
+                        unit: item
+                      - type: deuterium
+                        quantity: 0.05
+                        unit: earth_container_equivalent
+                    durationSeconds: 3600
+                    output:
+                      type: scut_transit_beacon
+                      name: SCUT transit beacon
+                      containerSpace: 0.025
                       containerSpaceUnit: earth_container_equivalent
                   - id: manny
                     name: Manny
@@ -1398,6 +1424,12 @@ paths:
       - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1turn-on-relay/post'
+  /api/probe/{probeId}/mannies/{mannyId}/install-scut-transit-beacon:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
+    post:
+      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1install-scut-transit-beacon/post'
   /api/probe/mind-snapshot/reassign:
     post:
       summary: Reassign a terminal probe mind snapshot
@@ -3411,6 +3443,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/mannies/{mannyId}/install-scut-transit-beacon:
+    post:
+      summary: Send a Manny to install a SCUT transit beacon
+      description: >
+        Starts a five-minute Manny task that equips an active SCUT relay in the
+        probe current sector with a scut_transit_beacon. The task consumes one
+        scut_transit_beacon item from the probe inventory.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyScutTransitBeaconInstallRequest'
+            example:
+              relayId: 12
+      responses:
+        '202':
+          description: SCUT transit beacon installation task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable, probe moving, or relay already has a transit beacon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Relay is not in the current sector, relay is inactive, or the probe lacks a SCUT transit beacon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sector:
     get:
       summary: Observe a sector by player-relative coordinates
@@ -3779,7 +3859,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, missing_electronic_card, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_relay_not_active, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -3853,7 +3933,7 @@ components:
       properties:
         id:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, scut_transit_beacon, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         description:
@@ -3898,7 +3978,7 @@ components:
       properties:
         type:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, scut_transit_beacon, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
         name:
           type: string
         containerSpace:
@@ -5322,7 +5402,7 @@ components:
           properties:
             type:
               type: string
-              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+              enum: [deuterium, metals, ice, carbon_compounds, waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, scut_transit_beacon, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
             amount:
               type: number
               description: Present for discarded resources and deuterium.
@@ -5365,7 +5445,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, scut_transit_beacon, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         containerSpace:
@@ -5397,7 +5477,7 @@ components:
           type: string
         type:
           type: string
-          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [atomic_3d_printer, manny, waypoint_bookmark, steel_bar, steel_plate, additional_container, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, scut_transit_beacon, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
         name:
           type: string
         currentTask:
@@ -5456,6 +5536,14 @@ components:
           nullable: true
           maxLength: 255
           description: Optional name for a newly isolated network. Ignored when the relay joins existing coverage.
+    MannyScutTransitBeaconInstallRequest:
+      type: object
+      required: [relayId]
+      properties:
+        relayId:
+          type: integer
+          minimum: 1
+          description: Id of an active SCUT relay in the probe current sector.
     MannyDeuteriumTransferRequest:
       type: object
       required: [targetProbeId, amount]
@@ -5524,7 +5612,7 @@ components:
       properties:
         recipe:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, additional_container, electric_motor, battery_pack, linear_actuator, deuterium_engine, solar_panel, scut_relay, scut_transit_beacon, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit, manny]
           description: >
             Crafting recipe to start. Manny craftable items can be jettisoned
             later, except additional containers whose jettison mechanic is
@@ -5740,7 +5828,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -5833,7 +5921,7 @@ components:
           type: string
     ScutRelay:
       type: object
-      required: [id, type, name, status, sector, coverageRadiusSectors]
+      required: [id, type, name, status, isTransitBeacon, sector, coverageRadiusSectors]
       properties:
         id:
           type: integer
@@ -5846,6 +5934,9 @@ components:
         status:
           type: string
           enum: [off, on]
+        isTransitBeacon:
+          type: boolean
+          description: Whether this relay is equipped with a scut_transit_beacon.
         sector:
           type: object
           required: [relative]
@@ -6023,7 +6114,7 @@ components:
       properties:
         id:
           type: string
-          description: Opaque object id. Clients must not parse coordinates from it. For scut_relay objects this is the relay integer id serialized as a string; pass it as an integer relayId to turn-on-relay.
+          description: Opaque object id. Clients must not parse coordinates from it. For scut_relay objects this is the relay integer id serialized as a string; pass it as an integer relayId to turn-on-relay or install-scut-transit-beacon.
         type:
           type: string
           enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container, deuterium_refuel_station, dormant_construct, scut_relay]
@@ -6115,7 +6206,7 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         itemType:
           type: string
-          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
+          enum: [waypoint_bookmark, steel_bar, steel_plate, micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, electric_motor, battery_pack, linear_actuator, atomic_printer_part, deuterium_engine, solar_panel, scut_relay, scut_transit_beacon, thermal_protection_shell, parachute_pack, descent_guidance_module, atmospheric_drop_kit]
           description: Present only for drifting item stacks.
         quantity:
           type: integer
