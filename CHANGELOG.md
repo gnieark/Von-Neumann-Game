@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - Performance : la page `/mannies` abandonne le polling fixe à 5 secondes et utilise désormais le délai adaptatif partagé, basé sur les échéances renvoyées par les payloads sonde, Mannies et secteur.
+- Performance : les refreshs de tâches Manny en minage calculent désormais la télémétrie de lecture sans réécrire systématiquement la ligne Manny ni l’événement planifié; seules les extractions, livraisons, blocages et fins de tâche persistent l’état.
 - Performance : les lectures API de sonde calculent désormais les phases de mouvement en cours sans verrou ni réécriture systématique; seules les arrivées, les checks de destruction et les événements scheduler persistent les transitions.
 - Performance : l’authentification par session ou clef API ne réécrit plus `last_used_at` à chaque requête; la trace d’usage est désormais rafraîchie au plus toutes les 5 minutes par token.
 

@@ -5419,6 +5419,41 @@ if ($createdProbe !== null) {
     $mixedRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $mixedRow->execute(['uid' => $thirdMannyId]);
     $mixedMannyDbId = (int) $mixedRow->fetchColumn();
+    $stableMiningReadTimestamp = '2000-01-01T00:00:00+00:00';
+    $pdo->prepare('UPDATE mannies SET updated_at = :updated_at WHERE id = :id')->execute([
+        'id' => $mixedMannyDbId,
+        'updated_at' => $stableMiningReadTimestamp,
+    ]);
+    $mixedMiningEventRow = $pdo->prepare(
+        'SELECT se.id, se.updated_at, se.payload_json
+         FROM mannies m
+         INNER JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.id = :id'
+    );
+    $mixedMiningEventRow->execute(['id' => $mixedMannyDbId]);
+    $mixedMiningEventBefore = $mixedMiningEventRow->fetch(PDO::FETCH_ASSOC);
+    $pdo->prepare('UPDATE scheduled_events SET updated_at = :updated_at WHERE id = :id')->execute([
+        'id' => (int) ($mixedMiningEventBefore['id'] ?? 0),
+        'updated_at' => $stableMiningReadTimestamp,
+    ]);
+    $readonlyMiningRefresh = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $readonlyMixedManny = array_values(array_filter(
+        $readonlyMiningRefresh->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $thirdMannyId,
+    ))[0] ?? null;
+    $test->assertEquals('outbound', $readonlyMixedManny['task']['phase'] ?? null, 'GET /api/probe/mannies computes active mining phase without persisting it');
+    $test->assertEquals(0.0, $readonlyMixedManny['cargo']['metals'] ?? null, 'GET /api/probe/mannies exposes computed outbound mining cargo');
+    $miningReadPersistenceRow = $pdo->prepare(
+        'SELECT m.updated_at AS manny_updated_at, se.updated_at AS event_updated_at, se.payload_json
+         FROM mannies m
+         INNER JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.id = :id'
+    );
+    $miningReadPersistenceRow->execute(['id' => $mixedMannyDbId]);
+    $miningReadPersistence = $miningReadPersistenceRow->fetch(PDO::FETCH_ASSOC);
+    $test->assertEquals($stableMiningReadTimestamp, $miningReadPersistence['manny_updated_at'] ?? null, 'GET /api/probe/mannies does not rewrite the Manny row for computed-only mining telemetry');
+    $test->assertEquals($stableMiningReadTimestamp, $miningReadPersistence['event_updated_at'] ?? null, 'GET /api/probe/mannies does not rewrite the Manny scheduled event for computed-only mining telemetry');
+    $test->assert(!str_contains((string) ($miningReadPersistence['payload_json'] ?? ''), '"phase"'), 'computed-only mining telemetry is not persisted in the scheduled event payload');
     $pdo->prepare('UPDATE mannies SET task_started_at = :started WHERE id = :id')->execute([
         'id' => $mixedMannyDbId,
         'started' => gmdate('c', time() - 1500),
