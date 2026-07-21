@@ -520,7 +520,9 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'progres
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'updateLiveProgressValues'), 'mannies JS updates progress percentages without refreshing data');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remainingMinutesText'), 'mannies JS shows remaining task time next to progress percentages');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/ 60000'), 'mannies JS rounds remaining task time to minutes');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'MANNY_REFRESH_MS = 5000'), 'mannies JS refreshes Manny data every five seconds');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'DEFAULT_REFRESH_MS = 15000'), 'mannies JS uses the shared adaptive refresh default');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'window.VNG.nextRefreshDelay'), 'mannies JS schedules refreshes from API timing hints');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector}'), 'mannies JS feeds probe, Manny, and sector timing data into adaptive refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scheduleMannyRefresh'), 'mannies JS schedules repeated Manny refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'PROBE_INVENTORY_ACTIONS'), 'mannies JS tracks actions whose forms depend on probe inventory');
@@ -634,7 +636,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-movement-scut-transit-direct-jump"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-manny-adaptive-refresh"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -5417,6 +5419,41 @@ if ($createdProbe !== null) {
     $mixedRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $mixedRow->execute(['uid' => $thirdMannyId]);
     $mixedMannyDbId = (int) $mixedRow->fetchColumn();
+    $stableMiningReadTimestamp = '2000-01-01T00:00:00+00:00';
+    $pdo->prepare('UPDATE mannies SET updated_at = :updated_at WHERE id = :id')->execute([
+        'id' => $mixedMannyDbId,
+        'updated_at' => $stableMiningReadTimestamp,
+    ]);
+    $mixedMiningEventRow = $pdo->prepare(
+        'SELECT se.id, se.updated_at, se.payload_json
+         FROM mannies m
+         INNER JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.id = :id'
+    );
+    $mixedMiningEventRow->execute(['id' => $mixedMannyDbId]);
+    $mixedMiningEventBefore = $mixedMiningEventRow->fetch(PDO::FETCH_ASSOC);
+    $pdo->prepare('UPDATE scheduled_events SET updated_at = :updated_at WHERE id = :id')->execute([
+        'id' => (int) ($mixedMiningEventBefore['id'] ?? 0),
+        'updated_at' => $stableMiningReadTimestamp,
+    ]);
+    $readonlyMiningRefresh = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $readonlyMixedManny = array_values(array_filter(
+        $readonlyMiningRefresh->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $thirdMannyId,
+    ))[0] ?? null;
+    $test->assertEquals('outbound', $readonlyMixedManny['task']['phase'] ?? null, 'GET /api/probe/mannies computes active mining phase without persisting it');
+    $test->assertEquals(0.0, $readonlyMixedManny['cargo']['metals'] ?? null, 'GET /api/probe/mannies exposes computed outbound mining cargo');
+    $miningReadPersistenceRow = $pdo->prepare(
+        'SELECT m.updated_at AS manny_updated_at, se.updated_at AS event_updated_at, se.payload_json
+         FROM mannies m
+         INNER JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.id = :id'
+    );
+    $miningReadPersistenceRow->execute(['id' => $mixedMannyDbId]);
+    $miningReadPersistence = $miningReadPersistenceRow->fetch(PDO::FETCH_ASSOC);
+    $test->assertEquals($stableMiningReadTimestamp, $miningReadPersistence['manny_updated_at'] ?? null, 'GET /api/probe/mannies does not rewrite the Manny row for computed-only mining telemetry');
+    $test->assertEquals($stableMiningReadTimestamp, $miningReadPersistence['event_updated_at'] ?? null, 'GET /api/probe/mannies does not rewrite the Manny scheduled event for computed-only mining telemetry');
+    $test->assert(!str_contains((string) ($miningReadPersistence['payload_json'] ?? ''), '"phase"'), 'computed-only mining telemetry is not persisted in the scheduled event payload');
     $pdo->prepare('UPDATE mannies SET task_started_at = :started WHERE id = :id')->execute([
         'id' => $mixedMannyDbId,
         'started' => gmdate('c', time() - 1500),

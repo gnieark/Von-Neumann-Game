@@ -226,12 +226,14 @@ final class MiningTaskHandler implements TaskHandlerInterface
         $targetContainerId = ($this->miningTaskTargetContainerId)($manny);
         $plannedExtracted = round(min($targetAmount, (float) $progress['deliveredAmount'] + (float) $progress['cargoAmount']), 4);
         $extracted = round((float) ($manny->taskPayload['extractedAmount'] ?? 0), 4);
+        $shouldSave = false;
         if ($plannedExtracted > $extracted) {
             $requestedDelta = round($plannedExtracted - $extracted, 4);
             $actualDelta = ($this->depleteMiningTarget)($manny, $resourceProfile, $requestedDelta);
             $extracted = round($extracted + $actualDelta, 4);
             $manny->taskPayload['extractedAmount'] = $extracted;
             $manny->taskPayload['extractedResources'] = ($this->resourceAmountsForTotal)($extracted, $resourceProfile);
+            $shouldSave = true;
             if ($actualDelta + 0.00001 < $requestedDelta) {
                 $manny->taskPayload['sourceExhausted'] = true;
             }
@@ -245,6 +247,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
             if ($targetContainerId !== null) {
                 $acceptedDelivery = ($this->transferMiningResourcesToDetachedContainer)($manny, $resourceProfile, $deliveryAmount);
                 $delivered = round($deposited + $acceptedDelivery, 4);
+                $shouldSave = true;
                 if ($acceptedDelivery + 0.00001 < $deliveryAmount) {
                     $complete = true;
                     $manny->taskPayload['targetContainerFull'] = true;
@@ -263,6 +266,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
 
             if ($targetContainerId === null) {
                 ($this->transferMiningResourcesToProbe)($probe, $resourceProfile, $deliveryAmount);
+                $shouldSave = true;
             }
             $manny->taskPayload['depositedAmount'] = $delivered;
             $manny->taskPayload['depositedResources'] = ($this->resourceAmountsForTotal)((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
@@ -274,6 +278,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
         $manny->taskPayload['tripIndex'] = $progress['tripIndex'];
 
         if ($complete) {
+            $shouldSave = true;
             $remaining = round((float) ($manny->taskPayload['extractedAmount'] ?? 0) - (float) ($manny->taskPayload['depositedAmount'] ?? 0), 4);
             if ($targetContainerId !== null) {
                 $acceptedRemaining = ($this->transferMiningResourcesToDetachedContainer)($manny, $resourceProfile, $remaining);
@@ -318,6 +323,10 @@ final class MiningTaskHandler implements TaskHandlerInterface
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
             ($this->clearTask)($manny, []);
+        }
+
+        if (!$shouldSave) {
+            return $manny;
         }
 
         ($this->saveManny)($manny);

@@ -744,12 +744,19 @@ final class MannyService implements MannyTaskRuntime
     public function manniesForProbe(NeumannProbe $probe): array
     {
         $this->storage->ensureProbeStorage($probe);
+        $refreshedById = [];
         foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
-            $this->refreshMannyState($manny, $probe);
+            $refreshed = $this->refreshMannyState($manny, $probe);
+            if ($refreshed->currentTask !== null) {
+                $refreshedById[$refreshed->id] = $refreshed;
+            }
         }
         $this->recoverForgottenManniesInCurrentSector($probe);
 
-        return $this->mannies->findByProbeId($probe->id);
+        return array_map(
+            static fn(Manny $manny): Manny => $refreshedById[$manny->id] ?? $manny,
+            $this->mannies->findByProbeId($probe->id),
+        );
     }
 
     public function maxDeuteriumPercentForProbe(NeumannProbe $probe): float
