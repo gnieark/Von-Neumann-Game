@@ -1,5 +1,7 @@
 (function () {
-    const MANNY_REFRESH_MS = 5000;
+    const DEFAULT_REFRESH_MS = 15000;
+    const MIN_REFRESH_MS = 750;
+    const REFRESH_CUSHION_MS = 500;
     const PROGRESS_TICK_MS = 1000;
     const MINING_RESOURCE_TYPES = ["deuterium", "metals", "ice", "carbon_compounds"];
     const MANNY_MINING_AMOUNT_MAX = 0.55;
@@ -3599,11 +3601,16 @@
         return true;
     }
 
-    function scheduleMannyRefresh() {
+    function scheduleMannyRefresh(data) {
         if (refreshTimer !== null) {
             window.clearTimeout(refreshTimer);
         }
-        refreshTimer = window.setTimeout(loadManniesPage, MANNY_REFRESH_MS);
+        refreshTimer = window.setTimeout(loadManniesPage, window.VNG.nextRefreshDelay(
+            data,
+            DEFAULT_REFRESH_MS,
+            MIN_REFRESH_MS,
+            REFRESH_CUSHION_MS
+        ));
     }
 
     async function loadRemoteMannySectorScans(mannies) {
@@ -3640,6 +3647,7 @@
             refreshTimer = null;
         }
 
+        let refreshPayload = null;
         try {
             const [probeData, mannyData, sectorData] = await Promise.all([
                 window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"}),
@@ -3655,6 +3663,7 @@
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentSectorProbes = Array.isArray(sector.probes) ? sector.probes : [];
             const rawMannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
+            refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector};
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);
@@ -3672,7 +3681,7 @@
             if (loadRequestedWhileInProgress) {
                 loadManniesPage();
             } else {
-                scheduleMannyRefresh();
+                scheduleMannyRefresh(refreshPayload);
             }
         }
     }

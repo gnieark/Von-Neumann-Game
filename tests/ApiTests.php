@@ -520,7 +520,9 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'progres
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'updateLiveProgressValues'), 'mannies JS updates progress percentages without refreshing data');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remainingMinutesText'), 'mannies JS shows remaining task time next to progress percentages');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/ 60000'), 'mannies JS rounds remaining task time to minutes');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'MANNY_REFRESH_MS = 5000'), 'mannies JS refreshes Manny data every five seconds');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'DEFAULT_REFRESH_MS = 15000'), 'mannies JS uses the shared adaptive refresh default');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'window.VNG.nextRefreshDelay'), 'mannies JS schedules refreshes from API timing hints');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector}'), 'mannies JS feeds probe, Manny, and sector timing data into adaptive refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scheduleMannyRefresh'), 'mannies JS schedules repeated Manny refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'PROBE_INVENTORY_ACTIONS'), 'mannies JS tracks actions whose forms depend on probe inventory');
@@ -634,7 +636,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-movement-scut-transit-direct-jump"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-manny-adaptive-refresh"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
