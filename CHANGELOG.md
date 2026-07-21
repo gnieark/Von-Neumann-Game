@@ -8,6 +8,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - API v96 : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/install-scut-transit-beacon` et de sa variante sonde par défaut pour installer, via une Manny, un `scut_transit_beacon` sur un relais SCUT actif du secteur courant; l’action dure 5 minutes, consomme le module, et les payloads de relais SCUT exposent désormais `isTransitBeacon`.
 - Gameplay : un trajet entre deux secteurs qui contiennent chacun un relais SCUT actif équipé d’un `scut_transit_beacon` dans le même réseau SCUT ignore désormais le risque de destruction de la sonde, tout en conservant les risques de détachement des containers.
+- WebUI : la page `/movement` liste désormais les corridors SCUT sécurisés disponibles depuis le secteur courant quand un relais actif équipé d’une balise de transit mène vers d’autres relais équipés du même réseau.
+- WebUI : la page `/sensors` précise désormais quand un relais SCUT détecté est équipé d’une balise de transit.
 - WebUI : la page `/mannies` expose maintenant l’action de secteur `Baliser un relais SCUT`, avec choix d’un relais actif non équipé et validation conditionnée à la présence d’un `scut_transit_beacon` en inventaire.
 - WebUI : la page `/scut` indique désormais, dans la liste des relais, si chaque relais possède une balise de transit SCUT.
 - Debug : `scripts/add-inventory-item.php` cible désormais une sonde avec `<probe-id>` ou `--probe-id=<id>`; `--player-id=<id>` reste disponible comme raccourci legacy vers la sonde par défaut.

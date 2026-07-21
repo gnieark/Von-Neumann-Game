@@ -2272,6 +2272,33 @@ button.account-menu-item {
     gap: 12px;
 }
 
+.scut-transit-panel {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 16px;
+}
+
+.scut-transit-panel h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.scut-transit-destinations:empty {
+    display: none;
+}
+
+.scut-transit-empty {
+    margin: 0;
+    color: rgba(172, 217, 161, .72);
+    font-family: "Lucida Console", "Courier New", monospace;
+    font-size: .9rem;
+    line-height: 1.45;
+}
+
+.scut-transit-empty[hidden] {
+    display: none;
+}
+
 .checklist-value {
     font-weight: 800;
 }

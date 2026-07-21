@@ -106,6 +106,108 @@
         );
     }
 
+    function movementUrl(target) {
+        const probeId = document.body.dataset.selectedProbeId || "";
+        const probeSegment = /^\d+$/.test(probeId) ? "/" + encodeURIComponent(probeId) : "";
+
+        return "/movement" + probeSegment + "/" + encodeURIComponent(String(target.x)) + "/" + encodeURIComponent(String(target.y)) + "/" + encodeURIComponent(String(target.z));
+    }
+
+    function isTransitRelay(relay) {
+        return relay && relay.type === "scut_relay" && relay.status === "on" && relay.isTransitBeacon === true;
+    }
+
+    function relayNetworkId(relay) {
+        const id = relay && relay.network && relay.network.id;
+
+        return id === undefined || id === null || id === "" ? null : String(id);
+    }
+
+    function relayRelativeSector(relay) {
+        return relativeCoordinates(relay && relay.sector && relay.sector.relative);
+    }
+
+    function scutTransitDestinationTile(destination) {
+        const sector = relayRelativeSector(destination.relay);
+        const networkName = destination.network && destination.network.name
+            ? destination.network.name
+            : window.VNG.formatText(tr("scutTransitNetworkFallback", "SCUT network {id}"), {"id": String(destination.network && destination.network.id || "-")});
+
+        return "<article class=\"neighbor-sector-tile scut-transit-tile\">"
+            + "<h4>" + window.VNG.escapeHtml(window.VNG.coordinate(sector)) + "</h4>"
+            + "<p class=\"neighbor-sector-context\">" + window.VNG.escapeHtml(networkName) + "</p>"
+            + "<p>" + window.VNG.escapeHtml(tr("scutTransitDestinationSummary", "Active SCUT relay, transit beacon confirmed.")) + "</p>"
+            + "<a class=\"button-link neighbor-sector-jump\" href=\"" + window.VNG.escapeHtml(movementUrl(sector)) + "\">" + window.VNG.escapeHtml(tr("prepareJump", "Prepare jump")) + "</a>"
+            + "</article>";
+    }
+
+    function renderScutTransitDestinations(destinations) {
+        const list = document.getElementById("scut-transit-destinations");
+        const empty = document.getElementById("scut-transit-empty");
+        const corridors = Array.isArray(destinations) ? destinations : [];
+        if (empty) {
+            empty.hidden = corridors.length > 0;
+            empty.textContent = tr("scutTransitCorridorsEmpty", "Safe long-distance transits start from a sector with an active SCUT relay equipped with a transit beacon and target another equipped relay in the same network. No such route is available from this sector.");
+        }
+        if (!list) {
+            return;
+        }
+
+        list.innerHTML = corridors.map(scutTransitDestinationTile).join("");
+    }
+
+    async function loadScutTransitDestinations() {
+        if (state.probeAlreadyMoving) {
+            return [];
+        }
+
+        try {
+            const sectorData = await window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"});
+            const sector = sectorData && sectorData.sector ? sectorData.sector : {};
+            const objects = Array.isArray(sector.objects) ? sector.objects : [];
+            const originNetworkIds = Array.from(new Set(
+                objects
+                    .filter(isTransitRelay)
+                    .map(relayNetworkId)
+                    .filter((id) => id !== null)
+            ));
+            if (originNetworkIds.length === 0) {
+                return [];
+            }
+
+            const networks = await Promise.all(originNetworkIds.map(async (networkId) => {
+                try {
+                    const data = await window.VNG.apiJson(window.VNG.probeApiPath("/scut-network/" + encodeURIComponent(networkId)), {"method": "GET"});
+                    return data && data.network ? data.network : null;
+                } catch (error) {
+                    return null;
+                }
+            }));
+            const currentSector = relativeCoordinates(state.currentProbeSectorRelative);
+            const destinations = new Map();
+
+            networks.filter(Boolean).forEach((network) => {
+                const relays = Array.isArray(network.relays) ? network.relays : [];
+                relays
+                    .filter(isTransitRelay)
+                    .filter((relay) => !sameRelativeCoordinates(relayRelativeSector(relay), currentSector))
+                    .forEach((relay) => {
+                        const sector = relayRelativeSector(relay);
+                        if (sector === null) {
+                            return;
+                        }
+
+                        const key = String(relay.id || "") + ":" + String(network.id || "") + ":" + window.VNG.coordinate(sector);
+                        destinations.set(key, {"relay": relay, "network": network});
+                    });
+            });
+
+            return Array.from(destinations.values());
+        } catch (error) {
+            return [];
+        }
+    }
+
     function destructionWarningConfig() {
         const form = document.getElementById("move-form");
         const warningDistance = Number.parseInt(form?.dataset.destructionWarningDistance || "3", 10);
@@ -264,8 +366,10 @@
         try {
             window.VNG.setProbeUnreachablePanel?.("actions-panel", false);
             const [probeData, mannyData] = await Promise.all([loadProbe(), loadMannies()]);
+            const scutTransitDestinations = await loadScutTransitDestinations();
             renderJumpChecklist();
             applyMoveButtonState();
+            renderScutTransitDestinations(scutTransitDestinations);
             scheduleRefresh({"probe": probeData.probe, "mannies": mannyData.mannies});
         } catch (error) {
             if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "action-status", "panelId": "actions-panel"})) {
@@ -274,6 +378,7 @@
             }
             renderJumpChecklist();
             applyMoveButtonState();
+            renderScutTransitDestinations([]);
             scheduleRefresh(null);
         } finally {
             loadInProgress = false;
@@ -371,6 +476,7 @@
             i18n = await window.VNG.loadI18n();
             bindPage();
             applyMoveButtonState();
+            renderScutTransitDestinations([]);
             refreshMovementState();
         });
     });

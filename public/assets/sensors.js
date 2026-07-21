@@ -152,8 +152,19 @@
             "Detached storage container drifting in open space.": tr("observationSummaryDetachedContainerDrifting", "Detached storage container drifting in open space."),
             "Detached storage container hidden on an asteroid.": tr("observationSummaryDetachedContainerHidden", "Detached storage container hidden on an asteroid."),
             "Deuterium refuel station detected in orbit.": tr("observationSummaryDeuteriumRefuelStation", "Deuterium refuel station detected in orbit."),
+            "Active long-range SCUT communication relay.": tr("observationSummaryScutRelayActive", "Active long-range SCUT communication relay."),
+            "Inactive long-range SCUT communication relay.": tr("observationSummaryScutRelayInactive", "Inactive long-range SCUT communication relay."),
             "Unknown astronomical object.": tr("observationSummaryUnknown", "Unknown astronomical object."),
         }[value] || value;
+    }
+
+    function objectSummaryLabel(object) {
+        const summary = observationSummaryLabel(object && object.summary || "");
+        if (object && object.type === "scut_relay" && object.isTransitBeacon === true) {
+            return [summary, tr("observationSummaryScutRelayTransitBeacon", "Transit beacon installed.")].filter(Boolean).join(" ");
+        }
+
+        return summary;
     }
 
     function setText(id, value) {
@@ -828,7 +839,7 @@
 
             return "<article class=\"" + classes + "\">"
                 + "<div class=\"sector-object-heading\"><span>" + window.VNG.escapeHtml(objectTypeLabel(object.type || "unknown")) + "</span><b>" + window.VNG.escapeHtml(dangerLevelLabel(danger)) + "</b></div>"
-                + "<p>" + window.VNG.escapeHtml(observationSummaryLabel(object.summary || "")) + "</p>"
+                + "<p>" + window.VNG.escapeHtml(objectSummaryLabel(object)) + "</p>"
                 + objectDetailHtml(object)
                 + solarSystemDetails(object, index)
                 + countdownHtml(object)
@@ -1075,7 +1086,7 @@
 
             return "<article class=\"visited-sector-object\">"
                 + "<div class=\"sector-object-heading\"><span>" + window.VNG.escapeHtml(objectTypeLabel(object.type || "unknown")) + "</span><b>" + window.VNG.escapeHtml(dangerLevelLabel(danger)) + "</b></div>"
-                + "<p>" + window.VNG.escapeHtml(observationSummaryLabel(object.summary || "")) + "</p>"
+                + "<p>" + window.VNG.escapeHtml(objectSummaryLabel(object)) + "</p>"
                 + objectDetailHtml(object)
                 + "</article>";
         }).join("");
