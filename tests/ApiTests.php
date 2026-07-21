@@ -2777,6 +2777,38 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     }
     $test->assertEquals($mannyCountBeforeCraft + 1, count($mannies->findByProbeId($craftProbeEntity->id)), 'completed Manny craft creates exactly one Manny after duplicate stale refreshes');
 
+    $probeImprovements->markDone($craftProbeEntity->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION);
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, [
+        'metals' => 0.8,
+        'ice' => 0.36,
+        'carbon_compounds' => 0.44,
+    ]);
+    $compressedTankMannyComponentSeeds = [
+        [ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, 6],
+        [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006, 12],
+        [ProbeItem::TYPE_BATTERY_PACK, ProbeItem::BATTERY_PACK_NAME, 0.008, 4],
+        [ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001, 2],
+        [ProbeItem::TYPE_STEEL_PLATE, ProbeItem::STEEL_PLATE_NAME, 0.01, 18],
+        [ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01, 12],
+    ];
+    foreach ($compressedTankMannyComponentSeeds as [$type, $name, $space, $count]) {
+        for ($index = 0; $index < $count; $index++) {
+            $storage->addItem($craftProbeEntity, $type, $name, $space, ['seededFor' => 'compressed-tank-manny-craft']);
+        }
+    }
+    $compressedTankMannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'manny',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $compressedTankMannyCraft->status, 'Manny craft with a compressed half-full tank counts deuterium costs in fixed ECE units');
+    $test->assertEquals(0.52, $compressedTankMannyCraft->body['manny']['task']['resourceCosts']['deuterium'] ?? null, 'compressed-tank Manny craft reserves four raw integrated-circuit deuterium costs');
+    $test->assertEquals(48.0, $probes->findByPlayerId($craftPlayer->id)?->deuteriumStock, 'compressed-tank Manny craft consumes fifty-two fuel points, not fifty-two percent of max capacity');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
     $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, ['metals' => 0.2, 'ice' => 0.09, 'carbon_compounds' => 0.11]);
     $directAtomicMannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([

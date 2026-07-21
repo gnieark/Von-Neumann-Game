@@ -13,6 +13,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - WebUI : la page `/sensors` précise désormais quand un relais SCUT détecté est équipé d’une balise de transit.
 - WebUI : la page `/mannies` expose maintenant l’action de secteur `Baliser un relais SCUT`, avec choix d’un relais actif non équipé et validation conditionnée à la présence d’un `scut_transit_beacon` en inventaire.
 - WebUI : la page `/scut` indique désormais, dans la liste des relais, si chaque relais possède une balise de transit SCUT.
+- Gameplay : les coûts de craft en deutérium restent désormais exprimés en ECE fixes même sur les sondes avec réservoir compressé; un réservoir à 100/200% fournit donc 1.0 ECE au craft, et non 0.5 ECE.
 - Debug : `scripts/add-inventory-item.php` cible désormais une sonde avec `<probe-id>` ou `--probe-id=<id>`; `--player-id=<id>` reste disponible comme raccourci legacy vers la sonde par défaut.
 - API v95 : ajout de la recette Manny `scut_transit_beacon`, un module SCUT léger destiné à être installé plus tard sur les relais actifs; il consomme 1 `integrated_circuit`, 1 `battery_pack`, 1 `micro_conductor`, 2 `steel_plate` et 0.05 ECE de deutérium, pour une durée directe de 1 heure.
 - Stats : les métriques publiques `Missions réussies` et `Missions échouées` sont désormais calculées depuis `probe_missions` au lieu de rester à zéro, en respectant l’exclusion des joueurs sans sonde comptabilisée dans les stats publiques.
