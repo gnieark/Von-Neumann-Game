@@ -23,6 +23,7 @@ final class TaskHandlerRegistry
         ReturningTaskHandler $returning,
         SalvageTaskHandler $salvage,
         ScutRelayTurnOnTaskHandler $scutRelayTurnOn,
+        ScutTransitBeaconInstallationTaskHandler $scutTransitBeaconInstallation,
         StorageMoveTaskHandler $storageMove,
         WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallation,
     ): array
@@ -41,6 +42,7 @@ final class TaskHandlerRegistry
             new WaitingForSpaceTaskHandler(),
             $storageMove,
             $scutRelayTurnOn,
+            $scutTransitBeaconInstallation,
             $probeImprovement,
             $probeAssembly,
             $deuteriumTransfer,

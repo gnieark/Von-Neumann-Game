@@ -288,6 +288,25 @@ final class ProbeManniesApiController
             ]);
         }
 
+        if ($action === 'install-scut-transit-beacon') {
+            $blocked = $this->probeMovementOrderError($probe);
+            if ($blocked instanceof ApiResponse) {
+                return $blocked;
+            }
+            $relayId = $data['relayId'] ?? $data['scutRelayId'] ?? null;
+            if (!is_int($relayId)) {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain relayId as an integer.');
+            }
+
+            $manny = $this->mannies->startScutTransitBeaconInstallation($probe, $uid, $relayId);
+            $probe = $this->freshProbe($probe);
+
+            return new ApiResponse(202, [
+                'manny' => $this->presenter->manny($player, $probe, $manny),
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+            ]);
+        }
+
         if ($action === 'install-bookmark') {
             $blocked = $this->probeMovementOrderError($probe);
             if ($blocked instanceof ApiResponse) {

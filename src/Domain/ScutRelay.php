@@ -21,6 +21,7 @@ final class ScutRelay
         public readonly SectorCoordinates $sector,
         public string $status,
         public ?int $networkId,
+        public bool $isTransitBeacon,
         public array $coveredSectors,
         public readonly string $createdAt,
         public ?string $activatedAt,

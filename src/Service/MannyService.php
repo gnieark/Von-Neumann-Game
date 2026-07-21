@@ -38,6 +38,7 @@ use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Service\Manny\ReturningTaskHandler;
 use VonNeumannGame\Service\Manny\SalvageTaskHandler;
 use VonNeumannGame\Service\Manny\ScutRelayTurnOnTaskHandler;
+use VonNeumannGame\Service\Manny\ScutTransitBeaconInstallationTaskHandler;
 use VonNeumannGame\Service\Manny\StorageMoveTaskHandler;
 use VonNeumannGame\Service\Manny\TaskHandlerRegistry;
 use VonNeumannGame\Service\Manny\WaypointBookmarkInstallationTaskHandler;
@@ -98,6 +99,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly ReturningTaskHandler $returningTaskHandler;
     private readonly SalvageTaskHandler $salvageTaskHandler;
     private readonly ScutRelayTurnOnTaskHandler $scutRelayTurnOnTaskHandler;
+    private readonly ScutTransitBeaconInstallationTaskHandler $scutTransitBeaconInstallationTaskHandler;
     private readonly StorageMoveTaskHandler $storageMoveTaskHandler;
     private readonly WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallationTaskHandler;
 
@@ -576,6 +578,48 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
+        $this->scutTransitBeaconInstallationTaskHandler = new ScutTransitBeaconInstallationTaskHandler(
+            function (): void {
+                if ($this->scut === null) {
+                    throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
+                }
+            },
+            function (NeumannProbe $probe): void {
+                $this->ensureProbeAcceptsMannyOrders($probe);
+            },
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            function (Manny $manny, NeumannProbe $probe): void {
+                $this->ensureMannyInRange($manny, $probe);
+            },
+            function (Manny $manny): void {
+                $this->ensureMannyIdle($manny);
+            },
+            function (NeumannProbe $probe, Manny $manny): void {
+                $this->refreshOtherMannyStates($probe, $manny);
+            },
+            fn(int $relayId): ?ScutRelay => $this->scut?->relayById($relayId),
+            fn(NeumannProbe $probe, string $type): ?ProbeItem => $this->firstItemOfType($probe, $type),
+            fn(ProbeItem $item): array => $this->crafting->consumedItemPayload($item),
+            function (ProbeItem $item): void {
+                $this->items->delete($item);
+            },
+            fn(): int => $this->scutRelayTurnOnSeconds(),
+            function (Manny $manny): void {
+                $this->mannies->save($manny);
+            },
+            function (int $relayId): ScutRelay {
+                if ($this->scut === null) {
+                    throw new MannyActionException(500, 'internal_error', 'SCUT relay service is unavailable.');
+                }
+
+                return $this->scut->installTransitBeacon($relayId);
+            },
+            function (Manny $manny, array $payload): void {
+                $this->clearTask($manny, $payload);
+            },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
         $this->storageMoveTaskHandler = new StorageMoveTaskHandler(
             function (NeumannProbe $probe): void {
                 $this->ensureProbeAcceptsMannyOrders($probe);
@@ -671,6 +715,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->returningTaskHandler,
                 $this->salvageTaskHandler,
                 $this->scutRelayTurnOnTaskHandler,
+                $this->scutTransitBeaconInstallationTaskHandler,
                 $this->storageMoveTaskHandler,
                 $this->waypointBookmarkInstallationTaskHandler,
             ),
@@ -1152,6 +1197,19 @@ final class MannyService implements MannyTaskRuntime
         return $this->scutRelayTurnOnTaskHandler->start($probe, $uid, $relayId, $networkName);
     }
 
+    public function startScutTransitBeaconInstallation(NeumannProbe $probe, string $uid, int $relayId): Manny
+    {
+        return $this->withProbeLock(
+            $probe,
+            fn(NeumannProbe $lockedProbe): Manny => $this->startScutTransitBeaconInstallationLocked($lockedProbe, $uid, $relayId),
+        );
+    }
+
+    private function startScutTransitBeaconInstallationLocked(NeumannProbe $probe, string $uid, int $relayId): Manny
+    {
+        return $this->scutTransitBeaconInstallationTaskHandler->start($probe, $uid, $relayId);
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
@@ -1213,7 +1271,7 @@ final class MannyService implements MannyTaskRuntime
 
             return $this->requiredManny($probe, $uid);
         }
-        if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
+        if ($manny->currentTask === Manny::TASK_TURNING_ON_SCUT_RELAY || $manny->currentTask === Manny::TASK_INSTALLING_SCUT_TRANSIT_BEACON) {
             $consumedItem = is_array($manny->taskPayload['consumedItem'] ?? null) ? $manny->taskPayload['consumedItem'] : null;
             if ($consumedItem !== null) {
                 $this->crafting->restoreConsumedItem($probe, $consumedItem);
@@ -1298,7 +1356,7 @@ final class MannyService implements MannyTaskRuntime
             $this->crafting->refundCraftingCommitment($probe, $manny);
         } elseif ($lastTask === Manny::TASK_IMPROVING_PROBE) {
             $this->crafting->refundProbeImprovementCommitment($probe, $manny);
-        } elseif ($lastTask === Manny::TASK_TURNING_ON_SCUT_RELAY) {
+        } elseif ($lastTask === Manny::TASK_TURNING_ON_SCUT_RELAY || $lastTask === Manny::TASK_INSTALLING_SCUT_TRANSIT_BEACON) {
             $consumedItem = is_array($manny->taskPayload['consumedItem'] ?? null) ? $manny->taskPayload['consumedItem'] : null;
             if ($consumedItem !== null) {
                 $this->crafting->restoreConsumedItem($probe, $consumedItem);
@@ -2575,6 +2633,7 @@ final class MannyService implements MannyTaskRuntime
             ProbeItem::TYPE_DEUTERIUM_ENGINE,
             ProbeItem::TYPE_SOLAR_PANEL,
             ProbeItem::TYPE_SCUT_RELAY,
+            ProbeItem::TYPE_SCUT_TRANSIT_BEACON,
             ProbeItem::TYPE_THERMAL_PROTECTION_SHELL,
             ProbeItem::TYPE_PARACHUTE_PACK,
             ProbeItem::TYPE_DESCENT_GUIDANCE_MODULE,
@@ -2601,6 +2660,7 @@ final class MannyService implements MannyTaskRuntime
             ProbeItem::TYPE_DEUTERIUM_ENGINE => ProbeItem::DEUTERIUM_ENGINE_NAME,
             ProbeItem::TYPE_SOLAR_PANEL => ProbeItem::SOLAR_PANEL_NAME,
             ProbeItem::TYPE_SCUT_RELAY => ProbeItem::SCUT_RELAY_NAME,
+            ProbeItem::TYPE_SCUT_TRANSIT_BEACON => ProbeItem::SCUT_TRANSIT_BEACON_NAME,
             ProbeItem::TYPE_THERMAL_PROTECTION_SHELL => ProbeItem::THERMAL_PROTECTION_SHELL_NAME,
             ProbeItem::TYPE_PARACHUTE_PACK => ProbeItem::PARACHUTE_PACK_NAME,
             ProbeItem::TYPE_DESCENT_GUIDANCE_MODULE => ProbeItem::DESCENT_GUIDANCE_MODULE_NAME,

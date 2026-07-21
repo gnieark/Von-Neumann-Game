@@ -49,7 +49,11 @@ function addInventoryItemRun(array $argv): int
 
     $objectName = $options['object'] ?? throw new InvalidArgumentException('Missing object name.');
     $quantity = $options['quantity'] ?? throw new InvalidArgumentException('Missing quantity.');
-    $playerId = $options['playerId'] ?? throw new InvalidArgumentException('Missing player id.');
+    $probeId = $options['probeId'] ?? null;
+    $playerId = $options['playerId'] ?? null;
+    if ($probeId === null && $playerId === null) {
+        throw new InvalidArgumentException('Missing probe id.');
+    }
     // Allow mineable resources (metals, ice, carbon_compounds, deuterium)
     $isResource = false;
     try {
@@ -81,10 +85,17 @@ function addInventoryItemRun(array $argv): int
     $containers = new StorageContainerRepository($pdo, $gameplayConfig);
     $storage = new ProbeStorageService($containers, $items, $mannies, $probes, $gameplayConfig);
 
-    $player = $players->findById($playerId)
-        ?? throw new RuntimeException("Player #{$playerId} not found.");
-    $probe = $probes->findByPlayerId($player->id)
-        ?? throw new RuntimeException("Player #{$player->id} has no probe.");
+    if ($probeId !== null) {
+        $probe = $probes->findById($probeId)
+            ?? throw new RuntimeException("Probe #{$probeId} not found.");
+        $player = $players->findById($probe->playerId)
+            ?? throw new RuntimeException("Probe #{$probe->id} owner player #{$probe->playerId} not found.");
+    } else {
+        $player = $players->findById($playerId)
+            ?? throw new RuntimeException("Player #{$playerId} not found.");
+        $probe = $probes->findByPlayerId($player->id)
+            ?? throw new RuntimeException("Player #{$player->id} has no default probe.");
+    }
 
     $createdItemUids = [];
     $createdMannyUids = [];
@@ -172,13 +183,14 @@ function addInventoryItemRun(array $argv): int
 
 /**
  * @param array<int, string> $argv
- * @return array{object:?string, quantity:?int, playerId:?int, databaseConfig:?string, dryRun:bool, list:bool, help:bool}
+ * @return array{object:?string, quantity:?int, probeId:?int, playerId:?int, databaseConfig:?string, dryRun:bool, list:bool, help:bool}
  */
 function addInventoryItemParseArguments(array $argv): array
 {
     $options = [
         'object' => null,
         'quantity' => null,
+        'probeId' => null,
         'playerId' => null,
         'databaseConfig' => null,
         'dryRun' => false,
@@ -213,6 +225,10 @@ function addInventoryItemParseArguments(array $argv): array
             $options['quantity'] = addInventoryItemPositiveInt(substr($argument, strlen('--quantity=')), 'quantity');
             continue;
         }
+        if (str_starts_with($argument, '--probe-id=')) {
+            $options['probeId'] = addInventoryItemPositiveInt(substr($argument, strlen('--probe-id=')), 'probe-id');
+            continue;
+        }
         if (str_starts_with($argument, '--player-id=')) {
             $options['playerId'] = addInventoryItemPositiveInt(substr($argument, strlen('--player-id=')), 'player-id');
             continue;
@@ -231,10 +247,13 @@ function addInventoryItemParseArguments(array $argv): array
         $options['quantity'] ??= addInventoryItemPositiveInt((string) array_shift($positionals), 'quantity');
     }
     if ($positionals !== []) {
-        $options['playerId'] ??= addInventoryItemPositiveInt((string) array_shift($positionals), 'player-id');
+        $options['probeId'] ??= addInventoryItemPositiveInt((string) array_shift($positionals), 'probe-id');
     }
     if ($positionals !== []) {
         throw new InvalidArgumentException('Too many positional arguments.');
+    }
+    if ($options['probeId'] !== null && $options['playerId'] !== null) {
+        throw new InvalidArgumentException('Use either --probe-id or --player-id, not both.');
     }
 
     return $options;
@@ -244,17 +263,18 @@ function addInventoryItemUsage(): string
 {
     return <<<TEXT
 Usage:
-  php scripts/add-inventory-item.php <object> <quantity> <player-id>
-  php scripts/add-inventory-item.php --object=<object> --quantity=<n> --player-id=<id>
+  php scripts/add-inventory-item.php <object> <quantity> <probe-id>
+  php scripts/add-inventory-item.php --object=<object> --quantity=<n> --probe-id=<id>
 
 Examples:
   php scripts/add-inventory-item.php steel_bar 3 42
-  php scripts/add-inventory-item.php "Atmospheric drop kit" 1 42
+  php scripts/add-inventory-item.php "Atmospheric drop kit" 1 --probe-id=42
   php scripts/add-inventory-item.php manny 1 42
 
 Options:
   --database-config=<path>  Use another database config.
   --dry-run                 Validate the operation and roll it back.
+  --player-id=<id>          Legacy shortcut: target this player's default probe.
   --list                    List supported object names and ids.
   -h, --help                Show this help.
 

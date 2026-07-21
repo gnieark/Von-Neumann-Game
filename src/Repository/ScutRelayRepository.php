@@ -134,6 +134,7 @@ final class ScutRelayRepository
             'UPDATE scut_relays SET
                 status = :status,
                 network_id = :network_id,
+                is_transit_beacon = :is_transit_beacon,
                 activated_at = :activated_at,
                 updated_at = :updated_at
              WHERE id = :id'
@@ -142,6 +143,7 @@ final class ScutRelayRepository
             'id' => $relay->id,
             'status' => $relay->status,
             'network_id' => $relay->networkId,
+            'is_transit_beacon' => $relay->isTransitBeacon ? 1 : 0,
             'activated_at' => $relay->activatedAt,
             'updated_at' => $relay->updatedAt,
         ]);
@@ -185,6 +187,7 @@ final class ScutRelayRepository
             new SectorCoordinates((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z']),
             (string) $row['status'],
             $row['network_id'] !== null ? (int) $row['network_id'] : null,
+            (bool) ((int) ($row['is_transit_beacon'] ?? 0)),
             $this->coverageForRelay((int) $row['id']),
             (string) $row['created_at'],
             $row['activated_at'] !== null ? (string) $row['activated_at'] : null,

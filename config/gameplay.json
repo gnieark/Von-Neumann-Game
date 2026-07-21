@@ -303,6 +303,16 @@
       "containerSpace": 0.12,
       "durationSeconds": 172800
     },
+    "scut_transit_beacon": {
+      "description": "A synchronized SCUT transit module that can later be mounted on an active relay to help secure travel toward another equipped relay.",
+      "integratedCircuitCount": 1,
+      "batteryPackCount": 1,
+      "microConductorCount": 1,
+      "steelPlateCount": 2,
+      "deuteriumCost": 0.05,
+      "containerSpace": 0.025,
+      "durationSeconds": 3600
+    },
     "thermal_protection_shell": {
       "description": "A disposable ablative shell that protects a storage container during atmospheric entry.",
       "ceramicInsulatorCount": 8,

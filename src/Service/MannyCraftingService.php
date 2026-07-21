@@ -646,6 +646,7 @@ final class MannyCraftingService
             ProbeItem::TYPE_DEUTERIUM_ENGINE => ProbeItem::DEUTERIUM_ENGINE_NAME,
             ProbeItem::TYPE_SOLAR_PANEL => ProbeItem::SOLAR_PANEL_NAME,
             ProbeItem::TYPE_SCUT_RELAY => ProbeItem::SCUT_RELAY_NAME,
+            ProbeItem::TYPE_SCUT_TRANSIT_BEACON => ProbeItem::SCUT_TRANSIT_BEACON_NAME,
             ProbeItem::TYPE_THERMAL_PROTECTION_SHELL => ProbeItem::THERMAL_PROTECTION_SHELL_NAME,
             ProbeItem::TYPE_PARACHUTE_PACK => ProbeItem::PARACHUTE_PACK_NAME,
             ProbeItem::TYPE_DESCENT_GUIDANCE_MODULE => ProbeItem::DESCENT_GUIDANCE_MODULE_NAME,

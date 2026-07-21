@@ -6,6 +6,15 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v96 : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/install-scut-transit-beacon` et de sa variante sonde par défaut pour installer, via une Manny, un `scut_transit_beacon` sur un relais SCUT actif du secteur courant; l’action dure 5 minutes, consomme le module, et les payloads de relais SCUT exposent désormais `isTransitBeacon`.
+- Gameplay : un trajet entre deux secteurs qui contiennent chacun un relais SCUT actif équipé d’un `scut_transit_beacon` dans le même réseau SCUT ignore désormais le risque de destruction de la sonde, tout en conservant les risques de détachement des containers.
+- WebUI : la page `/movement` liste désormais les corridors SCUT sécurisés disponibles depuis le secteur courant quand un relais actif équipé d’une balise de transit mène vers d’autres relais équipés du même réseau.
+- WebUI : dans `/movement`, les tuiles de corridors SCUT sécurisés déclenchent désormais directement le saut vers les coordonnées de la tuile via `INITIATE JUMP`.
+- WebUI : la page `/sensors` précise désormais quand un relais SCUT détecté est équipé d’une balise de transit.
+- WebUI : la page `/mannies` expose maintenant l’action de secteur `Baliser un relais SCUT`, avec choix d’un relais actif non équipé et validation conditionnée à la présence d’un `scut_transit_beacon` en inventaire.
+- WebUI : la page `/scut` indique désormais, dans la liste des relais, si chaque relais possède une balise de transit SCUT.
+- Debug : `scripts/add-inventory-item.php` cible désormais une sonde avec `<probe-id>` ou `--probe-id=<id>`; `--player-id=<id>` reste disponible comme raccourci legacy vers la sonde par défaut.
+- API v95 : ajout de la recette Manny `scut_transit_beacon`, un module SCUT léger destiné à être installé plus tard sur les relais actifs; il consomme 1 `integrated_circuit`, 1 `battery_pack`, 1 `micro_conductor`, 2 `steel_plate` et 0.05 ECE de deutérium, pour une durée directe de 1 heure.
 - Stats : les métriques publiques `Missions réussies` et `Missions échouées` sont désormais calculées depuis `probe_missions` au lieu de rester à zéro, en respectant l’exclusion des joueurs sans sonde comptabilisée dans les stats publiques.
 - API v94 : lorsqu’une sonde secondaire est détruite ou piégée alors que le joueur possède d’autres sondes, elle est supprimée immédiatement et une alerte `probe_destroyed` est créée sur la sonde principale sans coordonnées absolues; lorsqu’une sonde principale est détruite, le basculement automatique choisit désormais la sonde survivante la plus proche. Les Mannys déjà hors de la sonde détruite deviennent des objets de secteur `abandoned`, détachés de leur ancienne sonde et récupérables par une sonde de passage.
 - Maintenance : ajout de `scripts/delete-probe.php` pour supprimer une sonde terminale par id, avec `--database-config`, `--dry-run`, refus de supprimer la dernière sonde du joueur, et conservation des données rattachées au joueur.

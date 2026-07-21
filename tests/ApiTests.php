@@ -402,6 +402,8 @@ $test->assert(is_string($mainScript) && str_contains($mainScript, 'probe && prob
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'probe && probe.owned'), 'sensors JS ignores owned probes for sector probe presence objects');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function selectedProbeSectorDistance'), 'sensors JS resolves the sector context distance from the selected probe');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'Number(entry.probeId) === selectedProbeId'), 'sensors JS reads the selected probe distance from sector distances');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function objectSummaryLabel'), 'sensors JS centralizes sector object summary rendering');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'object.type === "scut_relay" && object.isTransitBeacon === true'), 'sensors JS mentions installed transit beacons on SCUT relay objects');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'inaccessible'"), 'French translations include the unreachable probe selector suffix');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'unreachable'"), 'English translations include the unreachable probe selector suffix');
@@ -411,11 +413,28 @@ $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="sec
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/sector")'), 'SCUT page reads selected probe current sector coverage');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/scut-network/"'), 'SCUT page reads selected probe network details');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.isTransitBeacon === true'), 'SCUT page renders relay transit beacon status');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitBeaconStatus' => 'Balise transit'"), 'French translations include SCUT relay transit beacon status label');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitBeaconStatus' => 'Transit beacon'"), 'English translations include SCUT relay transit beacon status label');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'observationSummaryScutRelayTransitBeacon' => 'Balise de transit installée.'"), 'French translations include SCUT relay transit beacon sensor text');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'observationSummaryScutRelayTransitBeacon' => 'Transit beacon installed.'"), 'English translations include SCUT relay transit beacon sensor text');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigationScutCoverage'), 'main JS can set SCUT nav LED state');
 $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
+$test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'id="scut-transit-panel"'), 'movement view exposes the secured SCUT transit corridor panel');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'function loadScutTransitDestinations'), 'movement JS loads secured SCUT transit destinations');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'probeApiPath("/scut-network/"'), 'movement JS reads SCUT network details for secured transit corridors');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'relay.status === "on" && relay.isTransitBeacon === true'), 'movement JS requires active beacon-equipped relays for secured transit corridors');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'neighbor-sector-tile scut-transit-tile'), 'movement JS renders SCUT transit destinations as neighbor-style tiles');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'data-scut-transit-jump'), 'movement JS renders secured SCUT transit actions as direct jump buttons');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'submitMovementTarget(scutTransitJumpTarget(button))'), 'movement JS starts secured SCUT transit jumps from tile coordinates');
+$test->assert(is_string($appCss) && str_contains($appCss, '.scut-transit-panel'), 'movement CSS styles the secured SCUT transit corridor panel');
+$test->assert(is_string($appCss) && str_contains($appCss, '.neighbor-sector-jump'), 'movement CSS styles secured SCUT transit direct jump buttons');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitCorridorsTitle' => 'Corridors SCUT sécurisés'"), 'French translations include the secured SCUT corridor title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitCorridorsTitle' => 'Secured SCUT corridors'"), 'English translations include the secured SCUT corridor title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitInitiateJump' => 'INITIATE JUMP'"), 'English translations include the direct secured SCUT jump button label');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.fuel.maxDeuterium'), 'probe JS reads the max deuterium fuel cap');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeImprovementsOnce'), 'probe JS loads probe improvements once');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPath("/probe-improvements-available")'), 'probe JS reads installed probe improvements for the selected probe');
@@ -513,6 +532,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'integra
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'inactiveScutRelayTargets()'), 'mannies JS detects inactive SCUT relay activation targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'networkName'), 'mannies JS renders the optional SCUT network name field');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'turning_on_scut_relay'), 'mannies JS displays SCUT relay activation tasks');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'installing_scut_transit_beacon'), 'mannies JS displays SCUT transit beacon installation tasks');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-transfer-probe-form'), 'mannies JS renders the Manny probe transfer form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/transfer-to-probe'), 'mannies JS posts Manny probe transfer orders');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'transferMannyToProbeActionTitle'"), 'translations include the Manny probe transfer action title');
@@ -591,6 +611,16 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "detached_container" && object.mode === "hidden_on_asteroid"'), 'mannies JS excludes hidden detached containers from generic salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installingScutTransitBeacon' => 'Installation de balise transit SCUT'"), 'French translations include the SCUT transit beacon installation task label');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installingScutTransitBeacon' => 'Installing SCUT transit beacon'"), 'English translations include the SCUT transit beacon installation task label');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-install-scut-transit-beacon-form'), 'mannies JS renders the SCUT transit beacon installation form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/install-scut-transit-beacon'), 'mannies JS posts SCUT transit beacon installation orders');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.status === "on" && object.isTransitBeacon !== true'), 'mannies JS lists active SCUT relays without transit beacon as installation targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scutTransitBeaconItems().length === 0'), 'mannies JS blocks SCUT transit beacon installation without stock');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installScutTransitBeaconActionTitle' => 'Baliser un relais SCUT'"), 'French translations include the SCUT transit beacon install action title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installScutTransitBeaconActionTitle' => 'Beacon a SCUT relay'"), 'English translations include the SCUT transit beacon install action title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missingScutTransitBeacon' => 'Une balise de transit SCUT doit être en stock.'"), 'French translations include the missing SCUT transit beacon hint');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missingScutTransitBeacon' => 'A SCUT transit beacon is required in stock.'"), 'English translations include the missing SCUT transit beacon hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installedProbeImprovements' => 'Améliorations installées'"), 'French translations include the installed probe improvements metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installedProbeImprovements' => 'Installed upgrades'"), 'English translations include the installed probe improvements metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noProbeImprovementAvailable' => 'Aucune amélioration n\\'est disponible'"), 'French translations include the empty probe-improvement message');
@@ -604,7 +634,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260716-manny-craft-storage-error"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-movement-scut-transit-direct-jump"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1077,6 +1107,7 @@ $scutRelaySchemaColumns = array_map(
     $pdo->query('PRAGMA table_info(scut_relays)')->fetchAll(PDO::FETCH_ASSOC),
 );
 $test->assert(in_array('created_by_probe_id', $scutRelaySchemaColumns, true), 'SCUT relays store their creator probe id');
+$test->assert(in_array('is_transit_beacon', $scutRelaySchemaColumns, true), 'SCUT relays store transit beacon installation state');
 $test->assert(!in_array('covered_sectors_json', $scutRelaySchemaColumns, true), 'SCUT relays do not store covered sectors in JSON');
 $scutRelayForeignKeys = $pdo->query('PRAGMA foreign_key_list(scut_relays)')->fetchAll(PDO::FETCH_ASSOC);
 $scutRelayCreatorForeignKeys = array_values(array_filter(
@@ -1144,7 +1175,7 @@ $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSect
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, worldSeed: 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
@@ -1403,7 +1434,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(94, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(96, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1438,7 +1469,7 @@ $multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $mult
 $multiScanStorage = new ProbeStorageService($multiScanStorageContainers, $multiScanItems, $multiScanMannies, $multiScanProbes, improvements: $multiScanProbeImprovements);
 $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMessages, [], 'multi-scan-world', $multiScanSectorService, $multiScanProbes, $multiScanPlayers);
 $multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanSectorService, $multiScanWarnings);
-$multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, worldSeed: 'multi-scan-world');
+$multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, scut: $multiScanScut, worldSeed: 'multi-scan-world');
 $multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
 $multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents);
 $multiScanKernel = new ApiKernel($multiScanAuth, $multiScanPlayers, $multiScanProbes, new SectorObservationService($multiScanSectorService, $multiScanVisited, mannies: $multiScanMannies), $multiScanMovementService, $multiScanVisited, $multiScanMannyService, $multiScanItems, $multiScanStorage, $multiScanMessages, $multiScanLogbook, $multiScanWarnings, $multiScanForum, $multiScanMissionService, $multiScanReinstantiation, $multiScanScut, improvements: $multiScanProbeImprovements);
@@ -1691,22 +1722,47 @@ if ($createdProbe !== null) {
     $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
     if ($cliInventoryProbe !== null) {
-        $pdo->prepare('UPDATE neumann_probes SET exclude_from_stats = 1 WHERE id = :id')->execute(['id' => $cliInventoryProbe->id]);
+        $cliInventoryAuxProbe = $probes->createForPlayer($cliInventoryPlayer->id, 'CLI Inventory aux probe', $cliInventoryProbe->currentSector);
+        $pdo->prepare('UPDATE neumann_probes SET exclude_from_stats = 1 WHERE id IN (:default_probe_id, :aux_probe_id)')->execute([
+            'default_probe_id' => $cliInventoryProbe->id,
+            'aux_probe_id' => $cliInventoryAuxProbe->id,
+        ]);
         $addInventoryItemCommand = escapeshellarg(PHP_BINARY)
             . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
             . ' --database-config=' . escapeshellarg($userinfosDbConfig)
             . ' ' . escapeshellarg(ProbeItem::TYPE_STEEL_BAR)
             . ' 2'
-            . ' ' . $cliInventoryPlayer->id;
+            . ' ' . $cliInventoryProbe->id;
         exec($addInventoryItemCommand . ' 2>&1', $addInventoryItemOutput, $addInventoryItemStatus);
         $addInventoryItemText = implode("\n", $addInventoryItemOutput);
         $test->assertEquals(0, $addInventoryItemStatus, 'add-inventory-item CLI exits successfully for craftable items');
         $test->assert(str_contains($addInventoryItemText, 'Added 2 x Steel bar'), 'add-inventory-item CLI reports added craftable items');
+        $test->assert(str_contains($addInventoryItemText, 'probe #' . $cliInventoryProbe->id), 'add-inventory-item CLI reports the targeted probe');
         $cliSteelBars = array_values(array_filter(
             $items->findByProbeId($cliInventoryProbe->id),
             static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_STEEL_BAR,
         ));
         $test->assertEquals(2, count($cliSteelBars), 'add-inventory-item CLI creates one item row per requested quantity');
+
+        $addInventoryAuxProbeCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --object=' . escapeshellarg(ProbeItem::TYPE_MICRO_CONDUCTOR)
+            . ' --quantity=1'
+            . ' --probe-id=' . $cliInventoryAuxProbe->id;
+        exec($addInventoryAuxProbeCommand . ' 2>&1', $addInventoryAuxProbeOutput, $addInventoryAuxProbeStatus);
+        $test->assertEquals(0, $addInventoryAuxProbeStatus, 'add-inventory-item CLI exits successfully for explicit probe targets');
+        $test->assert(str_contains(implode("\n", $addInventoryAuxProbeOutput), 'probe #' . $cliInventoryAuxProbe->id), 'add-inventory-item CLI reports the explicit probe target');
+        $cliAuxConductors = array_values(array_filter(
+            $items->findByProbeId($cliInventoryAuxProbe->id),
+            static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_MICRO_CONDUCTOR,
+        ));
+        $cliDefaultConductors = array_values(array_filter(
+            $items->findByProbeId($cliInventoryProbe->id),
+            static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_MICRO_CONDUCTOR,
+        ));
+        $test->assertEquals(1, count($cliAuxConductors), 'add-inventory-item CLI creates items on the explicit probe');
+        $test->assertEquals(0, count($cliDefaultConductors), 'add-inventory-item CLI does not add explicit probe items to the default probe');
 
         $legacyItemUid = 'legacy-french-steel-plate';
         $legacyItemCreatedAt = gmdate('c');
@@ -1748,7 +1804,7 @@ if ($createdProbe !== null) {
             . ' --dry-run'
             . ' ' . escapeshellarg(ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT)
             . ' 1'
-            . ' ' . $cliInventoryPlayer->id;
+            . ' ' . $cliInventoryProbe->id;
         exec($dryRunInventoryItemCommand . ' 2>&1', $dryRunInventoryItemOutput, $dryRunInventoryItemStatus);
         $test->assertEquals(0, $dryRunInventoryItemStatus, 'add-inventory-item CLI dry-run exits successfully');
         $test->assertEquals($beforeDryRunCount, count($items->findByProbeId($cliInventoryProbe->id)), 'add-inventory-item CLI dry-run leaves inventory unchanged');
@@ -1758,7 +1814,7 @@ if ($createdProbe !== null) {
             . ' --database-config=' . escapeshellarg($userinfosDbConfig)
             . ' ' . escapeshellarg(ProbeItem::TYPE_ADDITIONAL_CONTAINER)
             . ' 1'
-            . ' ' . $cliInventoryPlayer->id;
+            . ' ' . $cliInventoryProbe->id;
         exec($addContainerCommand . ' 2>&1', $addContainerOutput, $addContainerStatus);
         $test->assertEquals(0, $addContainerStatus, 'add-inventory-item CLI exits successfully for additional containers');
         $cliContainers = array_values(array_filter(
@@ -1776,7 +1832,7 @@ if ($createdProbe !== null) {
             . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
             . ' --database-config=' . escapeshellarg($userinfosDbConfig)
             . ' manny 1'
-            . ' ' . $cliInventoryPlayer->id;
+            . ' ' . $cliInventoryProbe->id;
         exec($addMannyCommand . ' 2>&1', $addMannyOutput, $addMannyStatus);
         $test->assertEquals(0, $addMannyStatus, 'add-inventory-item CLI exits successfully for Mannys');
         $cliMannies = $mannies->findByProbeId($cliInventoryProbe->id);
@@ -2218,10 +2274,49 @@ $test->assertEquals('on', $scutRelayObjects[0]['status'] ?? null, 'SCUT relay se
 $test->assertEquals(null, $scutRelayObjects[0]['salvageable'] ?? null, 'active SCUT relays are not exposed as salvageable sector objects');
 $test->assertEquals(ScutRelay::RADIUS_SECTORS, $scutRelayObjects[0]['coverageRadiusSectors'] ?? null, 'SCUT relay sector object exposes its coverage radius');
 $test->assertEquals($scutNetworkId, $scutRelayObjects[0]['network']['id'] ?? null, 'SCUT relay sector object exposes its network reference');
+$test->assertEquals(false, $scutRelayObjects[0]['isTransitBeacon'] ?? null, 'SCUT relay sector object exposes missing transit beacon state');
 $test->assert(is_string($scutRelayObjects[0]['activatedAt'] ?? null), 'SCUT relay sector object exposes its activation timestamp');
 $test->assertEquals($scutProbe->id, $scutRelayObjects[0]['createdByProbeId'] ?? null, 'SCUT relay sector object exposes its historical creator id');
 $test->assertEquals($scutProbe->name, $scutRelayObjects[0]['createdByProbeName'] ?? null, 'SCUT relay sector object resolves a living creator probe name');
 $test->assertEquals($scutNetworkId, $scutSector->body['sector']['scutNetworks'][0]['id'] ?? null, 'Current sector exposes covering SCUT networks');
+$missingScutTransitBeacon = $kernel->handle('POST', '/api/probe/' . $scutProbe->id . '/mannies/' . rawurlencode($scutMannyId) . '/install-scut-transit-beacon', $scutHeaders, json_encode([
+    'relayId' => $scutRelay->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(422, $missingScutTransitBeacon->status, 'Manny cannot install a SCUT transit beacon without the module in inventory');
+$test->assertEquals('missing_scut_transit_beacon', $missingScutTransitBeacon->body['error']['code'] ?? null, 'missing SCUT transit beacon returns an explicit error');
+$storage->addItem($scutProbe, ProbeItem::TYPE_SCUT_TRANSIT_BEACON, ProbeItem::SCUT_TRANSIT_BEACON_NAME, CraftingRecipeCatalog::SCUT_TRANSIT_BEACON_CONTAINER_SPACE);
+$scutTransitBeaconInstall = $kernel->handle('POST', '/api/probe/' . $scutProbe->id . '/mannies/' . rawurlencode($scutMannyId) . '/install-scut-transit-beacon', $scutHeaders, json_encode([
+    'relayId' => $scutRelay->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(202, $scutTransitBeaconInstall->status, 'Manny can start installing a SCUT transit beacon on an active relay');
+$test->assertEquals('installing_scut_transit_beacon', $scutTransitBeaconInstall->body['manny']['currentTask'] ?? null, 'SCUT transit beacon task is exposed on Manny');
+$test->assertEquals(300, $scutTransitBeaconInstall->body['manny']['task']['durationSeconds'] ?? null, 'SCUT transit beacon installation uses the relay activation duration');
+$scutTransitBeaconStillStored = array_values(array_filter(
+    $items->findByProbeId($scutProbe->id),
+    static fn(ProbeItem $item): bool => $item->type === ProbeItem::TYPE_SCUT_TRANSIT_BEACON,
+));
+$test->assertEquals(0, count($scutTransitBeaconStillStored), 'SCUT transit beacon installation consumes one beacon item');
+$scutManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT transit beacon Manny task missing.');
+$scutManny->taskEndsAt = gmdate('c', time() - 5);
+$mannies->save($scutManny);
+$scutTransitBeaconRefresh = $kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
+$test->assertEquals(200, $scutTransitBeaconRefresh->status, 'SCUT Manny refresh completes due transit beacon installation tasks');
+$scutRelay = $scutRelays->findById($scutRelay->id) ?? throw new RuntimeException('SCUT relay missing after transit beacon installation.');
+$test->assertEquals(true, $scutRelay->isTransitBeacon, 'SCUT relay stores transit beacon installation state after task completion');
+$scutTransitBeaconSector = $kernel->handle('GET', '/api/probe/' . $scutProbe->id . '/sector', $scutHeaders);
+$scutTransitBeaconRelayObjects = array_values(array_filter(
+    $scutTransitBeaconSector->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['type'] ?? null) === 'scut_relay' && ($object['id'] ?? null) === (string) $scutRelay->id,
+));
+$test->assertEquals(true, $scutTransitBeaconRelayObjects[0]['isTransitBeacon'] ?? null, 'probe-scoped current-sector scan exposes installed transit beacons');
+$scutTransitBeaconNetwork = $kernel->handle('GET', '/api/probe/' . $scutProbe->id . '/scut-network/' . $scutNetworkId, $scutHeaders);
+$test->assertEquals(200, $scutTransitBeaconNetwork->status, 'probe-scoped SCUT network endpoint succeeds after transit beacon installation');
+$test->assertEquals(true, $scutTransitBeaconNetwork->body['network']['relays'][0]['isTransitBeacon'] ?? null, 'SCUT network endpoint exposes relay transit beacon state');
+$secondScutTransitBeaconInstall = $kernel->handle('POST', '/api/probe/' . $scutProbe->id . '/mannies/' . rawurlencode($scutMannyId) . '/install-scut-transit-beacon', $scutHeaders, json_encode([
+    'relayId' => $scutRelay->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(409, $secondScutTransitBeaconInstall->status, 'Manny cannot install a second transit beacon on the same SCUT relay');
+$test->assertEquals('scut_transit_beacon_already_installed', $secondScutTransitBeaconInstall->body['error']['code'] ?? null, 'duplicate SCUT transit beacon installation returns an explicit error');
 $orphanScutRelay = $scut->createOffRelay($scutProbe->currentSector, 987654321);
 $orphanScutSector = $kernel->handle('GET', '/api/probe/sector', $scutHeaders);
 $orphanScutRelayObjects = array_values(array_filter(
@@ -2444,6 +2539,21 @@ $test->assertEquals(4, $scutRelayIngredients['solar_panel']['quantity'] ?? null,
 $test->assertEquals(5, $scutRelayIngredients['integrated_circuit']['quantity'] ?? null, 'SCUT relay requires five integrated circuits');
 $test->assertEquals(172800, $recipesById['scut_relay']['durationSeconds'] ?? null, 'prepared SCUT relay assembly takes forty-eight real hours');
 $test->assertEquals(0.12, $recipesById['scut_relay']['output']['containerSpace'] ?? null, 'SCUT relay occupies 0.12 containers');
+$test->assert(isset($recipesById['scut_transit_beacon']), 'crafting recipes expose SCUT transit beacons');
+$test->assertEquals(['manny'], $recipesById['scut_transit_beacon']['craftableBy'] ?? null, 'SCUT transit beacon is assembled by Manny');
+$scutTransitBeaconIngredients = [];
+foreach ($recipesById['scut_transit_beacon']['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $scutTransitBeaconIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(1, $scutTransitBeaconIngredients['integrated_circuit']['quantity'] ?? null, 'SCUT transit beacon requires one integrated circuit');
+$test->assertEquals(1, $scutTransitBeaconIngredients['battery_pack']['quantity'] ?? null, 'SCUT transit beacon requires one battery pack');
+$test->assertEquals(1, $scutTransitBeaconIngredients['micro_conductor']['quantity'] ?? null, 'SCUT transit beacon requires one micro conductor');
+$test->assertEquals(2, $scutTransitBeaconIngredients['steel_plate']['quantity'] ?? null, 'SCUT transit beacon requires two steel plates');
+$test->assertEquals(0.05, $scutTransitBeaconIngredients['deuterium']['quantity'] ?? null, 'SCUT transit beacon consumes calibration deuterium');
+$test->assertEquals(3600, $recipesById['scut_transit_beacon']['durationSeconds'] ?? null, 'prepared SCUT transit beacon assembly takes one real hour');
+$test->assertEquals(0.025, $recipesById['scut_transit_beacon']['output']['containerSpace'] ?? null, 'SCUT transit beacon occupies 0.025 containers');
 $test->assert(isset($recipesById['thermal_protection_shell']), 'crafting recipes expose thermal protection shells');
 $test->assertEquals('ceramic_insulator', $recipesById['thermal_protection_shell']['ingredients'][0]['type'] ?? null, 'thermal protection shells require ceramic insulators');
 $test->assert(isset($recipesById['parachute_pack']), 'crafting recipes expose parachute packs');
@@ -2604,6 +2714,35 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ));
     $test->assertEquals(1, count($scutRelayItems), 'completed SCUT relay craft adds one relay item');
     $test->assertEquals(0.12, $scutRelayItems[0]['containerSpace'] ?? null, 'crafted SCUT relay item occupies 0.12 containers');
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, [
+        'metals' => 0.31,
+        'ice' => 0.11,
+        'carbon_compounds' => 0.17,
+    ]);
+    $rawScutTransitBeaconCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'scut_transit_beacon',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $rawScutTransitBeaconCraft->status, 'Manny can start a SCUT transit beacon craft from raw resources');
+    $test->assertEquals(11400, $rawScutTransitBeaconCraft->body['manny']['task']['durationSeconds'] ?? null, 'raw SCUT transit beacon craft stays near three real hours');
+    $test->assertEquals(0.31, $rawScutTransitBeaconCraft->body['manny']['task']['resourceCosts']['metals'] ?? null, 'raw SCUT transit beacon craft commits its raw metal costs');
+    $test->assertEquals(0.11, $rawScutTransitBeaconCraft->body['manny']['task']['resourceCosts']['ice'] ?? null, 'raw SCUT transit beacon craft commits its raw ice costs');
+    $test->assertEquals(0.17, $rawScutTransitBeaconCraft->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'raw SCUT transit beacon craft commits its raw organic-compound costs');
+    $test->assertEquals(0.21, $rawScutTransitBeaconCraft->body['manny']['task']['resourceCosts']['deuterium'] ?? null, 'raw SCUT transit beacon craft commits its calibration deuterium costs');
+    $test->assertEquals(79.0, $probes->findByPlayerId($craftPlayer->id)?->deuteriumStock, 'raw SCUT transit beacon craft consumes twenty-one percent of the deuterium tank');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $craftMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
+    $scutTransitBeaconProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
+    $scutTransitBeaconItems = array_values(array_filter(
+        $scutTransitBeaconProbe->body['probe']['inventory']['items'] ?? [],
+        static fn(array $item): bool => ($item['type'] ?? null) === ProbeItem::TYPE_SCUT_TRANSIT_BEACON,
+    ));
+    $test->assertEquals(1, count($scutTransitBeaconItems), 'completed SCUT transit beacon craft adds one beacon item');
+    $test->assertEquals(0.025, $scutTransitBeaconItems[0]['containerSpace'] ?? null, 'crafted SCUT transit beacon item occupies 0.025 containers');
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
     $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
 
@@ -5969,6 +6108,81 @@ if ($riskProbe !== null) {
         $kernel->handle('GET', '/api/probe', $riskHeaders);
     }
 
+    $protectedRiskPlayer = $auth->registerPlayerWithPassword('scut-transit-protected-risk', 'secret', 'SCUT Transit Protected Risk', 'SCUT transit protected probe');
+    $protectedRiskSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'scut-transit-protected-risk', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+    $protectedRiskHeaders = ['Authorization' => 'Bearer ' . (string) ($protectedRiskSession->body['token'] ?? '')];
+    $protectedRiskProbe = $probes->findByPlayerId($protectedRiskPlayer->id);
+    if ($protectedRiskProbe !== null) {
+        $protectedRiskTarget = new SectorCoordinates(
+            $protectedRiskProbe->currentSector->getX() + 8,
+            $protectedRiskProbe->currentSector->getY(),
+            $protectedRiskProbe->currentSector->getZ(),
+        );
+        $protectedOriginRelay = $scut->turnOnRelay(
+            $scut->createOffRelay($protectedRiskProbe->currentSector, $protectedRiskProbe->id)->id,
+            'Protected transit',
+        );
+        $protectedOriginRelay = $scut->installTransitBeacon($protectedOriginRelay->id);
+        $protectedTargetRelay = $scut->turnOnRelay(
+            $scut->createOffRelay($protectedRiskTarget, $protectedRiskProbe->id)->id,
+            'Protected transit',
+        );
+        $protectedTargetRelay = $scut->installTransitBeacon($protectedTargetRelay->id);
+        $test->assertEquals($protectedOriginRelay->networkId, $protectedTargetRelay->networkId, 'SCUT transit protection test relays share the same network');
+        $test->assert($protectedOriginRelay->isTransitBeacon && $protectedTargetRelay->isTransitBeacon, 'SCUT transit protection test relays are equipped with transit beacons');
+        $test->assert($scut->hasTransitBeaconCorridor($protectedRiskProbe->currentSector, $protectedRiskTarget), 'SCUT transit protection helper detects an equipped same-network corridor');
+        for ($index = 0; $index < 14; $index++) {
+            $storage->addItem($protectedRiskProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+        }
+
+        $protectedRiskTargetRelative = $protectedRiskTarget->subtract($protectedRiskPlayer->homeSector);
+        $protectedRiskMove = $kernel->handle('POST', '/api/probe/move', $protectedRiskHeaders, json_encode(['target' => $protectedRiskTargetRelative], JSON_THROW_ON_ERROR));
+        $test->assertEquals(202, $protectedRiskMove->status, 'long SCUT transit-beacon movement can start');
+        $protectedRiskWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $protectedRiskHeaders);
+        $test->assertEquals(100.0, $protectedRiskWarnings->body['damageWarnings'][0]['risk']['percent'] ?? null, 'SCUT transit protection keeps fragile-container break warnings active');
+
+        $protectedMovement = $movements->findActiveByProbeId($protectedRiskProbe->id);
+        if ($protectedMovement !== null) {
+            $test->assert($protectedMovement->origin->equals($protectedRiskProbe->currentSector), 'protected movement starts from the equipped origin sector');
+            $test->assert($protectedMovement->target->equals($protectedRiskTarget), 'protected movement targets the equipped destination sector');
+            $base = time();
+            $chosenStartedAt = gmdate('c', $base - 240 * 60);
+            for ($i = 0; $i < 2000; $i++) {
+                $candidate = gmdate('c', $base - (240 * 60) - $i);
+                $payload = implode('|', [
+                    'api-test-world',
+                    $protectedMovement->probeId,
+                    $protectedMovement->id,
+                    $protectedMovement->origin->toKey(),
+                    $protectedMovement->target->toKey(),
+                    $candidate,
+                ]);
+                $roll = hexdec(substr(hash('sha256', $payload), 0, 15)) / hexdec(str_repeat('f', 15));
+                if ($roll < 0.40) {
+                    $chosenStartedAt = $candidate;
+                    break;
+                }
+            }
+
+            $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
+                'id' => $protectedMovement->id,
+                'started' => $chosenStartedAt,
+                'prep' => gmdate('c', $base - 230 * 60),
+                'accel' => gmdate('c', $base - 110 * 60),
+                'cruise' => gmdate('c', $base + 70 * 60),
+                'decel' => gmdate('c', $base + 190 * 60),
+                'arrival' => gmdate('c', $base + 190 * 60),
+            ]);
+
+            $protectedCruiseProbe = $kernel->handle('GET', '/api/probe', $protectedRiskHeaders);
+            $protectedCruiseMovement = $movements->findActiveByProbeId($protectedRiskProbe->id);
+            $test->assertEquals('cruising', $protectedCruiseProbe->body['probe']['status'] ?? null, 'SCUT transit-beacon corridor prevents deterministic movement destruction');
+            $test->assertEquals('cruising', $protectedCruiseMovement?->status, 'protected movement remains active after destruction check');
+            $test->assert($protectedCruiseMovement?->destructionCheckedAt !== null, 'protected movement still records the destruction check');
+            $test->assertEquals(null, $protectedCruiseMovement?->destroyedAt, 'protected movement does not record destruction');
+        }
+    }
+
     $longRiskMove = $kernel->handle('POST', '/api/probe/move', $riskHeaders, json_encode(['target' => ['x' => 8, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $longRiskMove->status, 'distance > 2 movement can start for deterministic destruction test');
     $longMovement = $movements->findActiveByProbeId($riskProbe->id);
@@ -6335,6 +6549,7 @@ foreach ([
     'GET /api/probes',
     'POST /api/probe/mind-snapshot/reassign',
     'POST /api/probe/atomic-printer/craft',
+    'POST /api/probe/1/mannies/mny_missing/install-scut-transit-beacon',
     'GET /api/probe/messages',
     'GET /api/probe/messages/sent',
     'GET /api/probe/1/logbook-pages',

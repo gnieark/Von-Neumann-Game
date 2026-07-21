@@ -99,6 +99,13 @@ final class CraftingRecipeCatalog
     public const SCUT_RELAY_LINEAR_ACTUATORS = 2;
     public const SCUT_RELAY_CONTAINER_SPACE = 0.12;
     public const SCUT_RELAY_CRAFTING_SECONDS = 172800;
+    public const SCUT_TRANSIT_BEACON_INTEGRATED_CIRCUITS = 1;
+    public const SCUT_TRANSIT_BEACON_BATTERY_PACKS = 1;
+    public const SCUT_TRANSIT_BEACON_MICRO_CONDUCTORS = 1;
+    public const SCUT_TRANSIT_BEACON_STEEL_PLATES = 2;
+    public const SCUT_TRANSIT_BEACON_DEUTERIUM_COST = 0.05;
+    public const SCUT_TRANSIT_BEACON_CONTAINER_SPACE = 0.025;
+    public const SCUT_TRANSIT_BEACON_CRAFTING_SECONDS = 3600;
     public const THERMAL_PROTECTION_SHELL_CERAMIC_INSULATORS = 8;
     public const THERMAL_PROTECTION_SHELL_STEEL_PLATES = 4;
     public const THERMAL_PROTECTION_SHELL_ORGANIC_COST = 0.06;
@@ -151,6 +158,7 @@ final class CraftingRecipeCatalog
         'deuterium_engine' => 'A compact propulsion module that channels stored deuterium through printed control parts.',
         'solar_panel' => 'A foldable photovoltaic panel with printed conductors, crystal substrate, and a reinforced mounting plate.',
         'scut_relay' => 'A long-range SCUT communication relay module with its own solar power array, buffer batteries, control circuits, and deployable structure.',
+        'scut_transit_beacon' => 'A synchronized SCUT transit module that can later be mounted on an active relay to help secure travel toward another equipped relay.',
         'thermal_protection_shell' => 'A disposable ablative shell that protects a storage container during atmospheric entry.',
         'parachute_pack' => 'A folded braking canopy pack with compact deployment hardware for cargo descents.',
         'descent_guidance_module' => 'A small avionics and actuator package for limited steering during a cargo drop.',
@@ -180,6 +188,7 @@ final class CraftingRecipeCatalog
             self::deuteriumEngine($config),
             self::solarPanel($config),
             self::scutRelay($config),
+            self::scutTransitBeacon($config),
             self::thermalProtectionShell($config),
             self::parachutePack($config),
             self::descentGuidanceModule($config),
@@ -627,6 +636,32 @@ final class CraftingRecipeCatalog
                 ProbeItem::TYPE_SCUT_RELAY,
                 ProbeItem::SCUT_RELAY_NAME,
                 Config::float($config, 'scut_relay.containerSpace', self::SCUT_RELAY_CONTAINER_SPACE),
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function scutTransitBeacon(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_SCUT_TRANSIT_BEACON,
+            'name' => ProbeItem::SCUT_TRANSIT_BEACON_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_SCUT_TRANSIT_BEACON),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_INTEGRATED_CIRCUIT, Config::int($config, 'scut_transit_beacon.integratedCircuitCount', self::SCUT_TRANSIT_BEACON_INTEGRATED_CIRCUITS)),
+                self::itemIngredient(ProbeItem::TYPE_BATTERY_PACK, Config::int($config, 'scut_transit_beacon.batteryPackCount', self::SCUT_TRANSIT_BEACON_BATTERY_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_MICRO_CONDUCTOR, Config::int($config, 'scut_transit_beacon.microConductorCount', self::SCUT_TRANSIT_BEACON_MICRO_CONDUCTORS)),
+                self::itemIngredient(ProbeItem::TYPE_STEEL_PLATE, Config::int($config, 'scut_transit_beacon.steelPlateCount', self::SCUT_TRANSIT_BEACON_STEEL_PLATES)),
+                self::resourceIngredient(ResourceComposition::DEUTERIUM, Config::float($config, 'scut_transit_beacon.deuteriumCost', self::SCUT_TRANSIT_BEACON_DEUTERIUM_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'scut_transit_beacon.durationSeconds', self::SCUT_TRANSIT_BEACON_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_SCUT_TRANSIT_BEACON,
+                ProbeItem::SCUT_TRANSIT_BEACON_NAME,
+                Config::float($config, 'scut_transit_beacon.containerSpace', self::SCUT_TRANSIT_BEACON_CONTAINER_SPACE),
             ),
         ];
     }

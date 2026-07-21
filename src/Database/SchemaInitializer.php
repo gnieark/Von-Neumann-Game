@@ -340,6 +340,7 @@ final class SchemaInitializer
                 sector_z INTEGER NOT NULL,
                 status $text NOT NULL,
                 network_id INTEGER NULL,
+                is_transit_beacon INTEGER NOT NULL DEFAULT 0,
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
@@ -671,6 +672,7 @@ final class SchemaInitializer
                 sector_z INTEGER NOT NULL,
                 status $text NOT NULL,
                 network_id INTEGER NULL,
+                is_transit_beacon INTEGER NOT NULL DEFAULT 0,
                 created_at $text NOT NULL,
                 activated_at $nullableText,
                 updated_at $text NOT NULL,
@@ -689,6 +691,11 @@ final class SchemaInitializer
                 FOREIGN KEY(scut_relay_id) REFERENCES scut_relays(id) ON DELETE CASCADE
             )"
         );
+        if ($this->driver === 'sqlite') {
+            $this->ensureSqliteColumn($pdo, 'scut_relays', 'is_transit_beacon', 'INTEGER NOT NULL DEFAULT 0');
+        } else {
+            $this->ensureMysqlColumn($pdo, 'scut_relays', 'is_transit_beacon', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER network_id');
+        }
         $this->removeScutRelayCreatorForeignKey($pdo);
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_sector ON scut_relays(sector_x, sector_y, sector_z)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scut_relays_status_sector ON scut_relays(status, sector_x, sector_y, sector_z)');
@@ -743,6 +750,7 @@ final class SchemaInitializer
                     sector_z INTEGER NOT NULL,
                     status TEXT NOT NULL,
                     network_id INTEGER NULL,
+                    is_transit_beacon INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     activated_at TEXT NULL,
                     updated_at TEXT NOT NULL,
@@ -752,8 +760,8 @@ final class SchemaInitializer
 
             $insert = $pdo->prepare(
                 'INSERT INTO scut_relays
-                 (id, created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, created_at, activated_at, updated_at)
-                 VALUES (:id, :created_by_probe_id, :sector_x, :sector_y, :sector_z, :status, :network_id, :created_at, :activated_at, :updated_at)'
+                 (id, created_by_probe_id, sector_x, sector_y, sector_z, status, network_id, is_transit_beacon, created_at, activated_at, updated_at)
+                 VALUES (:id, :created_by_probe_id, :sector_x, :sector_y, :sector_z, :status, :network_id, :is_transit_beacon, :created_at, :activated_at, :updated_at)'
             );
             foreach ($rows as $row) {
                 $insert->execute([
@@ -764,6 +772,7 @@ final class SchemaInitializer
                     'sector_z' => (int) $row['sector_z'],
                     'status' => (string) $row['status'],
                     'network_id' => $row['network_id'] !== null ? (int) $row['network_id'] : null,
+                    'is_transit_beacon' => (int) ($row['is_transit_beacon'] ?? 0),
                     'created_at' => (string) $row['created_at'],
                     'activated_at' => $row['activated_at'] !== null ? (string) $row['activated_at'] : null,
                     'updated_at' => (string) $row['updated_at'],

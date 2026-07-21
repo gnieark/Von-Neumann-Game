@@ -83,6 +83,23 @@ final class ScutNetworkService
         return $this->relays->findById($relay->id) ?? $relay;
     }
 
+    public function installTransitBeacon(int $relayId): ScutRelay
+    {
+        $relay = $this->relays->findById($relayId)
+            ?? throw new MannyActionException(404, 'scut_relay_not_found', 'SCUT relay not found.');
+        if (!$relay->isOn()) {
+            throw new MannyActionException(422, 'scut_relay_not_active', 'SCUT relay must be active before installing a transit beacon.');
+        }
+        if ($relay->isTransitBeacon) {
+            throw new MannyActionException(409, 'scut_transit_beacon_already_installed', 'SCUT relay already has a transit beacon.');
+        }
+
+        $relay->isTransitBeacon = true;
+        $this->relays->save($relay);
+
+        return $this->relays->findById($relay->id) ?? $relay;
+    }
+
     /**
      * @return array<ScutNetwork>
      */
@@ -122,6 +139,26 @@ final class ScutNetworkService
         );
         foreach ($this->networksCoveringSector($b) as $network) {
             if (isset($aNetworks[$network->id])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function hasTransitBeaconCorridor(SectorCoordinates $a, SectorCoordinates $b): bool
+    {
+        if ($a->equals($b)) {
+            return true;
+        }
+
+        $originNetworkIds = $this->transitBeaconNetworkIdsInSector($a);
+        if ($originNetworkIds === []) {
+            return false;
+        }
+
+        foreach (array_keys($this->transitBeaconNetworkIdsInSector($b)) as $networkId) {
+            if (isset($originNetworkIds[$networkId])) {
                 return true;
             }
         }
@@ -182,6 +219,21 @@ final class ScutNetworkService
             static fn(SectorCoordinates $covered): array => $covered->toArray(),
             $this->grid->getSectorsWithinDistance($sector, ScutRelay::RADIUS_SECTORS),
         );
+    }
+
+    /**
+     * @return array<int, true>
+     */
+    private function transitBeaconNetworkIdsInSector(SectorCoordinates $sector): array
+    {
+        $networkIds = [];
+        foreach ($this->relays->findBySector($sector) as $relay) {
+            if ($relay->isOn() && $relay->isTransitBeacon && $relay->networkId !== null) {
+                $networkIds[$relay->networkId] = true;
+            }
+        }
+
+        return $networkIds;
     }
 
     /**

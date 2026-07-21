@@ -1696,6 +1696,24 @@ button.account-menu-item {
     border-color: var(--cold);
 }
 
+.neighbor-sector-jump {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 8px 10px;
+    border-color: rgba(184, 111, 75, .65);
+    background: linear-gradient(180deg, #8b5137, #3b241c);
+    color: var(--text);
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.neighbor-sector-jump:hover,
+.neighbor-sector-jump:focus-visible {
+    border-color: var(--cold);
+}
+
 .sector-context {
     margin: -6px 0 0;
     padding: 12px 14px 0;
@@ -2270,6 +2288,33 @@ button.account-menu-item {
     display: flex;
     justify-content: space-between;
     gap: 12px;
+}
+
+.scut-transit-panel {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 16px;
+}
+
+.scut-transit-panel h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.scut-transit-destinations:empty {
+    display: none;
+}
+
+.scut-transit-empty {
+    margin: 0;
+    color: rgba(172, 217, 161, .72);
+    font-family: "Lucida Console", "Courier New", monospace;
+    font-size: .9rem;
+    line-height: 1.45;
+}
+
+.scut-transit-empty[hidden] {
+    display: none;
 }
 
 .checklist-value {
