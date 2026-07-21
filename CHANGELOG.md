@@ -6,6 +6,13 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Performance : l’authentification par session ou clef API ne réécrit plus `last_used_at` à chaque requête; la trace d’usage est désormais rafraîchie au plus toutes les 5 minutes par token.
+
+## 2026-07-21
+
+### Changed
+
+
 - API v96 : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/install-scut-transit-beacon` et de sa variante sonde par défaut pour installer, via une Manny, un `scut_transit_beacon` sur un relais SCUT actif du secteur courant; l’action dure 5 minutes, consomme le module, et les payloads de relais SCUT exposent désormais `isTransitBeacon`.
 - Gameplay : un trajet entre deux secteurs qui contiennent chacun un relais SCUT actif équipé d’un `scut_transit_beacon` dans le même réseau SCUT ignore désormais le risque de destruction de la sonde, tout en conservant les risques de détachement des containers.
 - WebUI : la page `/movement` liste désormais les corridors SCUT sécurisés disponibles depuis le secteur courant quand un relais actif équipé d’une balise de transit mène vers d’autres relais équipés du même réseau.

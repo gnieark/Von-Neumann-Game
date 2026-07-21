@@ -23,6 +23,7 @@ use VonNeumannGame\Sector\SectorService;
 final class AuthService
 {
     private const PSEUDONYM_PATTERN = '/\A[\p{L}\p{N}][\p{L}\p{N} ._-]{1,38}[\p{L}\p{N}]\z/u';
+    private const AUTH_TOUCH_INTERVAL_SECONDS = 300;
     private readonly SectorGrid $grid;
 
     public function __construct(
@@ -144,7 +145,9 @@ final class AuthService
 
         $session = $this->sessions->findValidSessionByToken($token);
         if ($session !== null) {
-            $this->sessions->touchSession($session);
+            if ($this->shouldRefreshLastUsedAt($session->lastUsedAt)) {
+                $this->sessions->touchSession($session);
+            }
 
             return $this->players->findById($session->playerId);
         }
@@ -152,13 +155,32 @@ final class AuthService
         if ($this->apiKeys !== null) {
             $apiKey = $this->apiKeys->findValidByToken($token);
             if ($apiKey !== null) {
-                $this->apiKeys->touch($apiKey);
+                if ($this->shouldRefreshLastUsedAt($apiKey->lastUsedAt)) {
+                    $this->apiKeys->touch($apiKey);
+                }
 
                 return $this->players->findById($apiKey->playerId);
             }
         }
 
         return null;
+    }
+
+    private function shouldRefreshLastUsedAt(?string $lastUsedAt): bool
+    {
+        if ($lastUsedAt === null || trim($lastUsedAt) === '') {
+            return true;
+        }
+
+        try {
+            $lastUsed = new \DateTimeImmutable($lastUsedAt);
+        } catch (\Exception) {
+            return true;
+        }
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+
+        return $lastUsed->getTimestamp() <= $now->getTimestamp() - self::AUTH_TOUCH_INTERVAL_SECONDS;
     }
 
     /**
