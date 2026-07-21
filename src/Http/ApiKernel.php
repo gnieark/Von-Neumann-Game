@@ -2146,9 +2146,10 @@ final class ApiKernel
     private function movementArray(Player $player, ProbeMovement $movement, bool $includeLive = true): array
     {
         $frame = new PlayerReferenceFrame($player->homeSector);
+        $livePhase = $includeLive ? $this->movements->phaseFor($movement) : $movement->status;
 
         return [
-            'status' => $movement->status,
+            'status' => $livePhase,
             'origin' => $frame->globalToRelative($movement->origin),
             'target' => $frame->globalToRelative($movement->target),
             'distance' => $movement->distance,
@@ -2156,9 +2157,9 @@ final class ApiKernel
             'startedAt' => $movement->startedAt,
             'arrivalAt' => $movement->arrivalAt,
         ] + ($includeLive ? [
-            'phase' => $this->movements->phaseFor($movement),
+            'phase' => $livePhase,
             'secondsRemaining' => $this->movements->secondsRemaining($movement),
-            'sensorMode' => $this->movements->sensorModeFor($movement, ProbeStatus::from($movement->status === 'destroyed' ? 'dead' : ($movement->status === 'arrived' ? 'idle' : $movement->status))),
+            'sensorMode' => $this->movements->sensorModeFor($movement, ProbeStatus::from($livePhase === 'destroyed' ? 'dead' : ($livePhase === 'arrived' ? 'idle' : $livePhase))),
             'estimatedVelocityC' => $this->movements->estimatedVelocityC($movement),
         ] : []);
     }

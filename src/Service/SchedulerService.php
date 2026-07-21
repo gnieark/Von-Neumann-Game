@@ -83,7 +83,7 @@ final class SchedulerService
             return true;
         }
 
-        $this->movementService->refreshProbeMovementState($probe);
+        $this->movementService->refreshProbeMovementState($probe, persistIntermediatePhase: true);
 
         return true;
     }

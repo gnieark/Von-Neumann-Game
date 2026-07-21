@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-21
+
+### Changed
+
+- Performance : les lectures API de sonde calculent désormais les phases de mouvement en cours sans verrou ni réécriture systématique; seules les arrivées, les checks de destruction et les événements scheduler persistent les transitions.
+- Performance : l’authentification par session ou clef API ne réécrit plus `last_used_at` à chaque requête; la trace d’usage est désormais rafraîchie au plus toutes les 5 minutes par token.
+
 ## 2026-07-16
 
 ### Changed
