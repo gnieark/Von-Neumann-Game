@@ -6053,8 +6053,16 @@ if ($moveProbe !== null) {
             'arrival' => gmdate('c', $base + 60 * 60),
         ]);
         $acceleratingProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
+        $test->assertEquals('accelerating', $acceleratingProbe->body['probe']['movement']['status'] ?? null, 'GET /api/probe exposes computed active movement status');
         $test->assertEquals('accelerating', $acceleratingProbe->body['probe']['movement']['phase'] ?? null, 'GET /api/probe reports acceleration phase from dates');
         $test->assertEquals('degraded', $acceleratingProbe->body['probe']['movement']['sensorMode'] ?? null, 'acceleration sensor mode is degraded');
+        $test->assertEquals('preparing', $movements->findActiveByProbeId($moveProbe->id)?->status, 'GET /api/probe does not persist a computed acceleration phase');
+        $test->assertEquals('preparing', $probes->findByPlayerId($player->id)?->status->value, 'GET /api/probe does not persist computed probe acceleration state');
+        $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $movement->id, gmdate('c'), ['probeId' => $movement->probeId, 'phase' => 'accelerating']);
+        $acceleratingSchedulerStats = $scheduler->processDueEvents();
+        $test->assertEquals(1, $acceleratingSchedulerStats['processed'], 'scheduler processes due movement phase persistence events');
+        $test->assertEquals('accelerating', $movements->findActiveByProbeId($moveProbe->id)?->status, 'scheduler persists movement phase transitions');
+        $test->assertEquals('accelerating', $probes->findByPlayerId($player->id)?->status->value, 'scheduler persists probe phase transitions');
 
         $pdo->prepare("UPDATE probe_movements SET status = 'accelerating', started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
             'id' => $movement->id,
@@ -6086,6 +6094,7 @@ if ($moveProbe !== null) {
         $deceleratingProbe = $kernel->handle('GET', '/api/probe', $moveHeaders);
         $test->assertEquals('decelerating', $deceleratingProbe->body['probe']['movement']['phase'] ?? null, 'GET /api/probe reports deceleration phase from dates');
         $test->assertEquals('degraded', $deceleratingProbe->body['probe']['movement']['sensorMode'] ?? null, 'deceleration sensor mode is degraded');
+        $test->assertEquals('cruising', $movements->findActiveByProbeId($moveProbe->id)?->status, 'GET /api/probe does not persist a computed deceleration phase');
 
         $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
             'id' => $movement->id,

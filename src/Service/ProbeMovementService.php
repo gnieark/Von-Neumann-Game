@@ -119,14 +119,28 @@ final class ProbeMovementService
         return $movement;
     }
 
-    public function refreshProbeMovementState(NeumannProbe $probe): NeumannProbe
+    public function refreshProbeMovementState(NeumannProbe $probe, bool $persistIntermediatePhase = false): NeumannProbe
     {
+        $movement = $this->movements->findActiveByProbeId($probe->id);
+        if ($movement === null) {
+            return $probe;
+        }
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $phase = $this->phaseAt($movement, $now);
+        if (!$this->movementNeedsPersistentRefresh($movement, $phase, $now, $persistIntermediatePhase)) {
+            return $this->withComputedMovementState($probe, $movement, $phase, $now);
+        }
+
         return $this->probes->withProbeLock($probe->id, function () use ($probe): NeumannProbe {
-            return $this->refreshProbeMovementStateLocked($this->probes->findById($probe->id) ?? $probe);
+            return $this->refreshProbeMovementStateLocked(
+                $this->probes->findById($probe->id) ?? $probe,
+                persistIntermediatePhase: true,
+            );
         });
     }
 
-    private function refreshProbeMovementStateLocked(NeumannProbe $probe): NeumannProbe
+    private function refreshProbeMovementStateLocked(NeumannProbe $probe, bool $persistIntermediatePhase = false): NeumannProbe
     {
         $movement = $this->movements->findActiveByProbeId($probe->id);
         if ($movement === null) {
@@ -160,22 +174,39 @@ final class ProbeMovementService
         }
 
         $phase = $this->phaseAt($movement, $now);
+        $destructionCheckedAtBefore = $movement->destructionCheckedAt;
         $replacementProbe = $this->checkDestructionAtCruiseStart($probe, $movement, $phase, $now);
         if ($movement->status === 'destroyed') {
             return $replacementProbe ?? $this->probes->findById($probe->id) ?? $probe;
         }
+        $destructionCheckRecorded = $destructionCheckedAtBefore === null && $movement->destructionCheckedAt !== null;
 
-        $movement->status = $phase;
-        $this->movements->save($movement);
+        $probe = $this->withComputedMovementState($probe, $movement, $phase, $now);
+        if ($persistIntermediatePhase || $destructionCheckRecorded) {
+            $movement->status = $phase;
+            $this->movements->save($movement);
+            $this->probes->save($probe);
+        }
 
+        return ($persistIntermediatePhase || $destructionCheckRecorded) ? ($this->probes->findById($probe->id) ?? $probe) : $probe;
+    }
+
+    private function movementNeedsPersistentRefresh(ProbeMovement $movement, string $phase, \DateTimeImmutable $now, bool $persistIntermediatePhase): bool
+    {
+        return $this->isAtOrAfter($now, $movement->arrivalAt)
+            || ($phase === 'cruising' && $movement->destructionCheckedAt === null)
+            || ($persistIntermediatePhase && $movement->status !== $phase);
+    }
+
+    private function withComputedMovementState(NeumannProbe $probe, ProbeMovement $movement, string $phase, \DateTimeImmutable $now): NeumannProbe
+    {
         $probe->status = ProbeStatus::from($phase);
         $probe->velocityC = $this->estimatedVelocityC($movement, $now);
         $accelerationCPerDay = $this->float('accelerationCPerDay', 0.36);
         $probe->accelerationCPerDay = $phase === 'accelerating' ? $accelerationCPerDay : ($phase === 'decelerating' ? -$accelerationCPerDay : 0.0);
         $probe->direction = $this->directionBetween($movement->origin, $movement->target);
-        $this->probes->save($probe);
 
-        return $this->probes->findById($probe->id) ?? $probe;
+        return $probe;
     }
 
     public function activeMovementForProbe(NeumannProbe $probe): ?ProbeMovement
