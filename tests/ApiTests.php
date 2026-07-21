@@ -428,9 +428,13 @@ $test->assert(is_string($movementScript) && str_contains($movementScript, 'funct
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'probeApiPath("/scut-network/"'), 'movement JS reads SCUT network details for secured transit corridors');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'relay.status === "on" && relay.isTransitBeacon === true'), 'movement JS requires active beacon-equipped relays for secured transit corridors');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'neighbor-sector-tile scut-transit-tile'), 'movement JS renders SCUT transit destinations as neighbor-style tiles');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'data-scut-transit-jump'), 'movement JS renders secured SCUT transit actions as direct jump buttons');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'submitMovementTarget(scutTransitJumpTarget(button))'), 'movement JS starts secured SCUT transit jumps from tile coordinates');
 $test->assert(is_string($appCss) && str_contains($appCss, '.scut-transit-panel'), 'movement CSS styles the secured SCUT transit corridor panel');
+$test->assert(is_string($appCss) && str_contains($appCss, '.neighbor-sector-jump'), 'movement CSS styles secured SCUT transit direct jump buttons');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitCorridorsTitle' => 'Corridors SCUT sécurisés'"), 'French translations include the secured SCUT corridor title');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitCorridorsTitle' => 'Secured SCUT corridors'"), 'English translations include the secured SCUT corridor title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitInitiateJump' => 'INITIATE JUMP'"), 'English translations include the direct secured SCUT jump button label');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.fuel.maxDeuterium'), 'probe JS reads the max deuterium fuel cap');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeImprovementsOnce'), 'probe JS loads probe improvements once');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPath("/probe-improvements-available")'), 'probe JS reads installed probe improvements for the selected probe');
@@ -630,7 +634,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-movement-scut-transit-corridors"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-movement-scut-transit-direct-jump"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
