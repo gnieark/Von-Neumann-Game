@@ -10,6 +10,12 @@ final class Asteroid extends UniverseObject
 {
     private const RESOURCE_CONTAINERS_PER_EARTH_MASS = 1000000.0;
     private const LEGACY_OTHER = 'other';
+    private const NAME_PARTS = [
+        ResourceComposition::ICE => 'Ice',
+        ResourceComposition::DEUTERIUM => 'Deut',
+        ResourceComposition::METALS => 'Metal',
+        ResourceComposition::CARBON_COMPOUNDS => 'Carb',
+    ];
 
     private readonly array $resourceAmounts;
 
@@ -40,6 +46,22 @@ final class Asteroid extends UniverseObject
         return $this->resourceAmounts;
     }
 
+    public function withGeneratedName(string $seedMaterial): self
+    {
+        return new self(
+            $this->getId(),
+            self::generatedName($this->resourceAmounts, $seedMaterial),
+            $this->composition,
+            $this->estimatedResources,
+            $this->sizeCategory,
+            $this->getMass(),
+            $this->getRadius(),
+            $this->getDescription(),
+            $this->resourceAmounts,
+            $this->getWaypointBookmarks(),
+        );
+    }
+
     public function withResourceAmounts(array $resourceAmounts): self
     {
         return new self(
@@ -64,6 +86,41 @@ final class Asteroid extends UniverseObject
             'sizeCategory' => $this->sizeCategory,
             'resourceAmounts' => $this->resourceAmounts,
         ];
+    }
+
+    /**
+     * @param array<string, float|int> $resourceAmounts
+     */
+    public static function generatedName(array $resourceAmounts, string $seedMaterial): string
+    {
+        $amounts = [];
+        foreach (ResourceComposition::TYPES as $index => $type) {
+            $amount = round(max(0.0, (float) ($resourceAmounts[$type] ?? 0.0)), 4);
+            if ($amount <= 0.0) {
+                continue;
+            }
+            $amounts[] = [
+                'type' => $type,
+                'amount' => $amount,
+                'index' => $index,
+            ];
+        }
+
+        usort($amounts, static function (array $left, array $right): int {
+            $amountComparison = $right['amount'] <=> $left['amount'];
+            return $amountComparison !== 0 ? $amountComparison : $left['index'] <=> $right['index'];
+        });
+
+        $parts = array_map(
+            static fn(array $entry): string => self::NAME_PARTS[$entry['type']] ?? ucfirst((string) $entry['type']),
+            $amounts,
+        );
+        if ($parts === []) {
+            $parts[] = 'Inert';
+        }
+
+        $hash = substr(hash('sha256', 'asteroid-name:' . $seedMaterial), 0, 4);
+        return implode(' ', [...$parts, $hash]);
     }
 
     public static function fromArray(array $data): self

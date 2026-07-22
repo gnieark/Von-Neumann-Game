@@ -371,6 +371,7 @@ $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
+$asteroidNamesScript = file_get_contents($root . '/scripts/name-generated-asteroids.php');
 $sectorPointCloudScript = file_get_contents($root . '/scripts/generate-threejs-point-cloud-sectors.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
@@ -484,6 +485,8 @@ $test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attac
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
+$test->assert(str_contains($openApi, 'Generated asteroids have a short content-based name such as Ice Deut 15ce'), 'OpenAPI documents content/hash asteroid names');
+$test->assert(is_string($asteroidNamesScript) && str_contains($asteroidNamesScript, 'Asteroid::generatedName'), 'asteroid naming CLI uses the canonical asteroid name generator');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'data-forum-jump-last'), 'forum JS exposes a jump-to-last-post button for long threads');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'forumJumpLastPost' => 'atteindre le dernier post'"), 'French translations include the forum last-post jump label');
@@ -501,6 +504,7 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'label + " " + name'), 'inventories JS displays Manny names after the Manny item label');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'iconButtonPlaceholder("inventory-line-move-placeholder")'), 'inventories JS keeps a non-interactive move placeholder for additional containers');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'target.name || target.id'), 'mannies JS displays mineable target names when the API exposes them');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'container.label !== "Sonde"'), 'mannies JS honors custom probe-core container labels');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'body.targetContainerId = targetContainerId'), 'mannies JS sends targetContainerId for external mining storage');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detection.targetObjectId'), 'mannies JS uses explicit hidden-container asteroid targets when provided');
@@ -1436,7 +1440,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(96, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(97, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1710,6 +1714,71 @@ if ($createdProbe !== null) {
     $test->assertEquals(0, $sectorJsonPathStatus, 'sector-json CLI path-only exits successfully');
     $test->assertEquals($cliSectorRepository->getPath($cliSectorCoordinates), $sectorJsonPathOutput[0] ?? null, 'sector-json CLI path-only prints the resolved sector path');
 
+    $asteroidNamesCoordinates = new SectorCoordinates(8, 0, 0);
+    $directAsteroid = new Asteroid(
+        'legacy-ice-asteroid',
+        null,
+        'ice',
+        ['water_ice', 'deuterium_trace'],
+        'small',
+        0.01,
+        0.1,
+        resourceAmounts: [
+            ResourceComposition::DEUTERIUM => 1.0,
+            ResourceComposition::METALS => 0.0,
+            ResourceComposition::ICE => 2.0,
+            ResourceComposition::CARBON_COMPOUNDS => 0.0,
+        ],
+    );
+    $nestedAsteroid = new Asteroid(
+        'legacy-carbon-asteroid',
+        'Old custom name',
+        'carbonaceous',
+        ['carbon', 'organics', 'ice_trace'],
+        'small',
+        0.01,
+        0.1,
+        resourceAmounts: [
+            ResourceComposition::DEUTERIUM => 0.0,
+            ResourceComposition::METALS => 0.0,
+            ResourceComposition::ICE => 1.0,
+            ResourceComposition::CARBON_COMPOUNDS => 2.0,
+        ],
+    );
+    $cliSectorRepository->save(new SectorContent($asteroidNamesCoordinates, [
+        $directAsteroid,
+        new SolarSystem(
+            'legacy-system',
+            'System legacy',
+            new Star('legacy-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+            null,
+            [new OrbitingBody($nestedAsteroid, new OrbitDescriptor(2.0, 0.01, 0.0))],
+            1.0,
+            2.0,
+        ),
+    ], source: 'cli-test'));
+    $asteroidNamesCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/name-generated-asteroids.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --world-seed=migration-seed';
+    exec($asteroidNamesCommand . ' --dry-run 2>&1', $asteroidNamesDryRunOutput, $asteroidNamesDryRunStatus);
+    $test->assertEquals(0, $asteroidNamesDryRunStatus, 'name-generated-asteroids CLI dry-run exits successfully');
+    $test->assert(str_contains(implode("\n", $asteroidNamesDryRunOutput), '2 asteroid(s) would be named'), 'name-generated-asteroids CLI dry-run reports direct and nested asteroids');
+    $test->assertEquals(null, $cliSectorRepository->load($asteroidNamesCoordinates)->findObjectById('legacy-ice-asteroid')?->getName(), 'name-generated-asteroids dry-run leaves sector JSON unchanged');
+    exec($asteroidNamesCommand . ' 2>&1', $asteroidNamesOutput, $asteroidNamesStatus);
+    $test->assertEquals(0, $asteroidNamesStatus, 'name-generated-asteroids CLI exits successfully');
+    $namedAsteroidSector = $cliSectorRepository->load($asteroidNamesCoordinates);
+    $test->assertEquals(
+        Asteroid::generatedName($directAsteroid->getResourceAmounts(), 'migration-seed:sector-content:8:0:0:legacy-ice-asteroid'),
+        $namedAsteroidSector->findObjectById('legacy-ice-asteroid')?->getName(),
+        'name-generated-asteroids names top-level asteroids by descending content quantity',
+    );
+    $test->assertEquals(
+        Asteroid::generatedName($nestedAsteroid->getResourceAmounts(), 'migration-seed:sector-content:8:0:0:legacy-carbon-asteroid'),
+        $namedAsteroidSector->findObjectById('legacy-carbon-asteroid')?->getName(),
+        'name-generated-asteroids names nested solar-system asteroids and replaces legacy names',
+    );
+
     $addConstructCoordinates = new SectorCoordinates(6, 0, 0);
     $addConstructCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
@@ -1894,7 +1963,7 @@ if ($createdProbe !== null) {
     ));
     $test->assert(count($deuteriumAsteroids) >= 1, 'deuterium asteroid CLI persists a mineable asteroid in the current sector');
     $deuteriumAsteroidData = $deuteriumAsteroids[0]->toArray();
-    $test->assertEquals('Astéroïde contenant du Deutérium', $deuteriumAsteroidData['name'] ?? null, 'deuterium asteroid CLI gives the asteroid a public non-debug name');
+    $test->assert(is_string($deuteriumAsteroidData['name'] ?? null) && preg_match('/\ADeut [a-f0-9]{4}\z/', (string) $deuteriumAsteroidData['name']) === 1, 'deuterium asteroid CLI gives the asteroid a public content/hash name');
     $test->assert(!str_contains(strtolower(json_encode($deuteriumAsteroidData, JSON_THROW_ON_ERROR)), 'debug'), 'deuterium asteroid CLI does not expose debug wording on the asteroid');
     $deuteriumAlerts = $kernel->handle('GET', '/api/probe/alerts', $missionHeaders);
     $deuteriumAlert = null;
@@ -2162,21 +2231,23 @@ if ($orphanProbe !== null) {
 $englishObserver = $auth->registerPlayerWithPassword('english-observer', 'secret', 'English Observer', 'English probe');
 $englishProbe = $probes->findByPlayerId($englishObserver->id);
 if ($englishProbe !== null) {
+    $englishAsteroid = (new Asteroid(
+        'english-asteroid',
+        null,
+        'iron',
+        ['iron'],
+        'small',
+        0.01,
+        0.1,
+    ))->withGeneratedName('api-sector:english-asteroid');
     $sectorRepository->save(new SectorContent($englishProbe->currentSector, [
-        new Asteroid(
-            'english-asteroid',
-            null,
-            'iron',
-            ['iron'],
-            'small',
-            0.01,
-            0.1,
-        ),
+        $englishAsteroid,
     ]));
     $englishObservation = (new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies))
         ->observe($englishObserver, $englishProbe, $englishProbe->currentSector)
         ->toArray();
     $test->assertEquals('Wandering asteroid body.', $englishObservation['objects'][0]['summary'] ?? null, 'sector observation summaries stay in API English');
+    $test->assertEquals($englishAsteroid->getName(), $englishObservation['objects'][0]['name'] ?? null, 'sector observation exposes persisted asteroid names');
 }
 
 $goodSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'remi', 'password' => 'secret'], JSON_THROW_ON_ERROR));

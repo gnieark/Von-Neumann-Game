@@ -58,7 +58,13 @@ try {
     }
 
     $objectId = deuteriumAsteroidObjectId($probe);
-    $label = 'Astéroïde contenant du Deutérium';
+    $resourceAmounts = [
+        ResourceComposition::DEUTERIUM => $options['amount'],
+        ResourceComposition::METALS => 0.0,
+        ResourceComposition::ICE => 0.0,
+        ResourceComposition::CARBON_COMPOUNDS => 0.0,
+    ];
+    $label = Asteroid::generatedName($resourceAmounts, $worldSeed . ':script:deuterium-asteroid:' . $objectId);
     $message = 'A new object has been detected in this sector: an asteroid containing deuterium. It was not detected when you entered the sector.';
     $asteroid = new Asteroid(
         $objectId,
@@ -69,12 +75,7 @@ try {
         0.00001,
         0.0001,
         'Astéroïde riche en deutérium détecté après l’arrivée dans le secteur.',
-        [
-            ResourceComposition::DEUTERIUM => $options['amount'],
-            ResourceComposition::METALS => 0.0,
-            ResourceComposition::ICE => 0.0,
-            ResourceComposition::CARBON_COMPOUNDS => 0.0,
-        ],
+        $resourceAmounts,
     );
 
     if ($options['dryRun']) {

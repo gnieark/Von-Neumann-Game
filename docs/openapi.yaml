@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 96
+                apiVersion: 97
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2155,7 +2155,7 @@ paths:
                       minableTargets:
                         - id: asteroid-abc123-0
                           type: asteroid
-                          name: null
+                          name: Metal 3b91
                           mass: 0.000001
                           massUnit: earth_mass
                           resources: [iron, nickel]
@@ -2172,7 +2172,7 @@ paths:
                             carbon_compounds: 0
                     - id: mine-rock
                       type: asteroid
-                      name: null
+                      name: Metal 8f1a
                       estimated: false
                       summary: Wandering asteroid body.
                       mass: 0.000001
@@ -3559,7 +3559,7 @@ paths:
                           dangerLevel: low
                         - id: mine-rock
                           type: asteroid
-                          name: null
+                          name: Metal 8f1a
                           estimated: false
                           summary: Wandering asteroid body.
                           mass: 0.000001
@@ -6121,7 +6121,7 @@ components:
         name:
           type: string
           nullable: true
-          description: Public object label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
+          description: Public object label. Generated asteroids have a short content-based name such as Ice Deut 15ce. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         estimated:
           type: boolean
         summary:
@@ -6286,7 +6286,7 @@ components:
         name:
           type: string
           nullable: true
-          description: Public target label. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
+          description: Public target label. Generated asteroids have a short content-based name such as Ice Deut 15ce. For inhabited planets, generated or debug names that would reveal absolute coordinates are replaced by a player-relative label.
         mass:
           type: number
         massUnit:

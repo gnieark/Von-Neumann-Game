@@ -124,6 +124,29 @@ function findGeneratedSector(SectorContentGenerator $generator, string $worldSee
     return null;
 }
 
+/**
+ * @return array<Asteroid>
+ */
+function sectorAsteroids(SectorContent $sector): array
+{
+    $asteroids = [];
+    foreach ($sector->getObjects() as $object) {
+        if ($object instanceof Asteroid) {
+            $asteroids[] = $object;
+            continue;
+        }
+        if ($object instanceof SolarSystem) {
+            foreach ($object->getOrbitalBodies() as $body) {
+                if ($body->getObject() instanceof Asteroid) {
+                    $asteroids[] = $body->getObject();
+                }
+            }
+        }
+    }
+
+    return $asteroids;
+}
+
 function solarSystemAsteroidStats(SectorContentGenerator $generator, string $worldSeed, int $limit = 5000): array
 {
     $stats = [
@@ -443,6 +466,34 @@ if ($blackHoleSector !== null) {
         }
     }
     $test->assert(!$containsSolarSystem, 'a sector containing a black hole does not contain a classic solar system');
+}
+
+$test->assertEquals(
+    'Ice Deut Metal Carb ' . substr(hash('sha256', 'asteroid-name:name-test-seed'), 0, 4),
+    Asteroid::generatedName([
+        'deuterium' => 3.0,
+        'metals' => 2.0,
+        'ice' => 5.0,
+        'carbon_compounds' => 1.0,
+    ], 'name-test-seed'),
+    'asteroid generated names list resources by descending quantity before the hash',
+);
+
+$asteroidNameSector = findGeneratedSector(
+    $contentGenerator,
+    'asteroid_name_search_seed',
+    static fn(SectorContent $sector): bool => sectorAsteroids($sector) !== []
+);
+$test->assert($asteroidNameSector !== null, 'deterministic search finds a generated asteroid for naming');
+if ($asteroidNameSector !== null) {
+    $namedAsteroids = sectorAsteroids($asteroidNameSector);
+    $test->assert($namedAsteroids !== [], 'generated asteroid sector exposes asteroid objects');
+    foreach ($namedAsteroids as $asteroid) {
+        $test->assert(
+            is_string($asteroid->getName()) && preg_match('/\A(?:Ice|Deut|Metal|Carb|Inert)(?: (?:Ice|Deut|Metal|Carb))* [a-f0-9]{4}\z/', $asteroid->getName()) === 1,
+            'generated asteroids receive a short public content/hash name',
+        );
+    }
 }
 
 $solarSystemSector = findGeneratedSector(

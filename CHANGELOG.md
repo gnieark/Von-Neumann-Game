@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-22
+
+### Changed
+
+- API v97 : les astéroïdes nouvellement générés reçoivent désormais un nom public déterministe basé sur leurs réserves par ordre de quantité et un court hash, par exemple `Ice Deut 15ce`; ce nom ressort dans `/api/probe/sector`, `/api/sector` et les cibles minables imbriquées des systèmes solaires.
+- Interface : dans `/mannies`, l’action `Mine the sector` affiche le nom public de l’astéroïde dans le sélecteur d’objet à miner dès que le secteur expose ce nom.
+- Maintenance : ajout de `scripts/name-generated-asteroids.php` pour renommer les astéroïdes déjà persistés dans les JSON de secteurs, avec `--universe-path`, `--world-seed`, `--keep-existing` et `--dry-run`.
+
 ## 2026-07-21
 
 ### Changed

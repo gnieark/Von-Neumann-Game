@@ -22,17 +22,18 @@ final class SectorContentGenerator
     {
         $seed = hash('sha256', $worldSeed . ':sector-content:' . $coordinates->toKey() . ':' . $this->neighborSignature($knownNeighbors));
         $random = new DeterministicRandom($seed);
+        $nameSeed = $worldSeed . ':sector-content:' . $coordinates->toKey();
         $category = $random->pickWeighted($this->categoryWeights($knownNeighbors));
         $timestamp = $this->timestampFromSeed($seed);
         $sector = new SectorContent($coordinates, [], $timestamp, $timestamp, $this->int('generationVersion', self::GENERATION_VERSION), 'generated');
 
         match ($category) {
-            'stellar_simple' => $sector->addObject($this->createSolarSystem($random, $coordinates, false)),
-            'stellar_binary' => $sector->addObject($this->createSolarSystem($random, $coordinates, true)),
-            'asteroids' => $this->addWanderingAsteroids($sector, $random, $coordinates),
+            'stellar_simple' => $sector->addObject($this->createSolarSystem($random, $coordinates, false, $nameSeed)),
+            'stellar_binary' => $sector->addObject($this->createSolarSystem($random, $coordinates, true, $nameSeed)),
+            'asteroids' => $this->addWanderingAsteroids($sector, $random, $coordinates, $nameSeed),
             'dust_cloud' => $sector->addObject($this->createDustCloud($random, $coordinates, 0)),
             'dead_star' => $sector->addObject($this->createStar($random, $coordinates, 0, true)),
-            'black_hole' => $this->addBlackHoleRegion($sector, $random, $coordinates),
+            'black_hole' => $this->addBlackHoleRegion($sector, $random, $coordinates, $nameSeed),
             default => null,
         };
 
@@ -111,7 +112,7 @@ final class SectorContentGenerator
         return $weights;
     }
 
-    private function createSolarSystem(DeterministicRandom $random, SectorCoordinates $coordinates, bool $binary): SolarSystem
+    private function createSolarSystem(DeterministicRandom $random, SectorCoordinates $coordinates, bool $binary, string $nameSeed): SolarSystem
     {
         $primary = $this->createStar($random, $coordinates, 0, false);
         $secondary = $binary ? $this->createStar($random, $coordinates, 1, false) : null;
@@ -146,7 +147,7 @@ final class SectorContentGenerator
                 $this->float('solarSystem.asteroidBeltAxisMax', 12.0),
             ));
             $orbitalBodies[] = new OrbitingBody(
-                $this->createAsteroid($random, $coordinates, $orbitIndex),
+                $this->createAsteroid($random, $coordinates, $orbitIndex, $nameSeed),
                 $this->createOrbit($random, $axis, $primary->getMass()),
             );
             $orbitIndex++;
@@ -272,7 +273,7 @@ final class SectorContentGenerator
         );
     }
 
-    private function createAsteroid(DeterministicRandom $random, SectorCoordinates $coordinates, int $index): Asteroid
+    private function createAsteroid(DeterministicRandom $random, SectorCoordinates $coordinates, int $index, string $nameSeed): Asteroid
     {
         $composition = $random->pickWeighted($this->weights('asteroids.compositionWeights', ['iron' => 25, 'silicate' => 35, 'carbonaceous' => 22, 'ice' => 12, 'rare_metals' => 6]));
         $resourcesByComposition = Config::getArray($this->config, 'asteroids.resourcesByComposition', []);
@@ -288,8 +289,9 @@ final class SectorContentGenerator
         [$massMin, $massMax] = $this->floatRange('asteroids.massRange', 0.000001, 0.02);
         [$radiusMin, $radiusMax] = $this->floatRange('asteroids.radiusRange', 0.001, 0.2);
 
-        return new Asteroid(
-            $this->objectId($coordinates, 'asteroid', $index),
+        $objectId = $this->objectId($coordinates, 'asteroid', $index);
+        $asteroid = new Asteroid(
+            $objectId,
             null,
             $composition,
             $resources,
@@ -299,6 +301,8 @@ final class SectorContentGenerator
             'Uncharted asteroid body.',
             resourceContainersPerEarthMass: $this->float('resourceContainersPerEarthMass', 1000000.0),
         );
+
+        return $asteroid->withGeneratedName($nameSeed . ':' . $objectId);
     }
 
     private function createDustCloud(DeterministicRandom $random, SectorCoordinates $coordinates, int $index): DustCloud
@@ -322,18 +326,18 @@ final class SectorContentGenerator
         );
     }
 
-    private function addWanderingAsteroids(SectorContent $sector, DeterministicRandom $random, SectorCoordinates $coordinates): void
+    private function addWanderingAsteroids(SectorContent $sector, DeterministicRandom $random, SectorCoordinates $coordinates, string $nameSeed): void
     {
         $count = $random->nextInt(
             $this->int('asteroids.wanderingCountMin', 1),
             $this->int('asteroids.wanderingCountMax', 5),
         );
         for ($i = 0; $i < $count; $i++) {
-            $sector->addObject($this->createAsteroid($random, $coordinates, $i));
+            $sector->addObject($this->createAsteroid($random, $coordinates, $i, $nameSeed));
         }
     }
 
-    private function addBlackHoleRegion(SectorContent $sector, DeterministicRandom $random, SectorCoordinates $coordinates): void
+    private function addBlackHoleRegion(SectorContent $sector, DeterministicRandom $random, SectorCoordinates $coordinates, string $nameSeed): void
     {
         [$massMin, $massMax] = $this->floatRange('blackHoles.massRange', 3.0, 30.0);
         [$dangerMin, $dangerMax] = $this->floatRange('blackHoles.dangerRadiusRange', 0.8, 7.5);
@@ -350,7 +354,7 @@ final class SectorContentGenerator
         ));
 
         if ($random->nextFloat() < $this->float('blackHoles.wanderingAsteroidsChance', 0.55)) {
-            $this->addWanderingAsteroids($sector, $random, $coordinates);
+            $this->addWanderingAsteroids($sector, $random, $coordinates, $nameSeed);
         }
         if ($random->nextFloat() < $this->float('blackHoles.dustCloudChance', 0.45)) {
             $sector->addObject($this->createDustCloud($random, $coordinates, 0));

@@ -321,8 +321,9 @@ final class AuthService
         $radius = Config::float($this->gameplayConfig, 'player.starterAsteroid.radius', 0.012);
         $description = (string) Config::value($this->gameplayConfig, 'player.starterAsteroid.description', 'Metallic asteroid seeded in a newly reactivated probe sector.');
 
-        return new Asteroid(
-            $prefix . '-' . substr(hash('sha256', $coordinates->toKey()), 0, 16),
+        $objectId = $prefix . '-' . substr(hash('sha256', $coordinates->toKey()), 0, 16);
+        $asteroid = new Asteroid(
+            $objectId,
             null,
             $composition,
             $resources,
@@ -332,5 +333,7 @@ final class AuthService
             $description,
             resourceContainersPerEarthMass: Config::float($this->universeConfig, 'resourceContainersPerEarthMass', 1000000.0),
         );
+
+        return $asteroid->withGeneratedName('starter:' . $coordinates->toKey() . ':' . $objectId);
     }
 }
