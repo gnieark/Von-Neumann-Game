@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v98 : `GET /api/probe/mannies` et `GET /api/probe/{probeId}/mannies` exposent `nextUsefulRefreshDelayMs`, le délai recommandé avant le prochain polling utile: prochaine fin de tâche Manny, ou `30000` ms lorsqu’aucune tâche n’a de fin planifiée.
+- Interface : `/mannies` utilise `nextUsefulRefreshDelayMs` pour espacer automatiquement ses rafraîchissements quand aucune fin de tâche n’est attendue.
 - API v97 : les astéroïdes nouvellement générés reçoivent désormais un nom public déterministe basé sur leurs réserves par ordre de quantité et un court hash, par exemple `Ice Deut 15ce`; ce nom ressort dans `/api/probe/sector`, `/api/sector` et les cibles minables imbriquées des systèmes solaires.
 - Interface : dans `/mannies`, l’action `Mine the sector` affiche le nom public de l’astéroïde dans le sélecteur d’objet à miner dès que le secteur expose ce nom.
 - Maintenance : ajout de `scripts/name-generated-asteroids.php` pour renommer les astéroïdes déjà persistés dans les JSON de secteurs, avec `--universe-path`, `--world-seed`, `--keep-existing` et `--dry-run`.

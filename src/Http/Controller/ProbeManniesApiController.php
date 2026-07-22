@@ -16,6 +16,8 @@ use VonNeumannGame\Service\ProbeStorageService;
 
 final class ProbeManniesApiController
 {
+    private const IDLE_REFRESH_DELAY_MS = 30000;
+
     public function __construct(
         private readonly NeumannProbeRepository $probes,
         private readonly ProbeMovementService $movements,
@@ -32,7 +34,33 @@ final class ProbeManniesApiController
 
         return new ApiResponse(200, [
             'mannies' => $this->presenter->mannies($player, $probe, $mannies),
+            'nextUsefulRefreshDelayMs' => $this->nextUsefulRefreshDelayMs($mannies),
         ]);
+    }
+
+    /**
+     * @param array<\VonNeumannGame\Domain\Manny> $mannies
+     */
+    private function nextUsefulRefreshDelayMs(array $mannies): int
+    {
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $nextEndAt = null;
+        foreach ($mannies as $manny) {
+            if ($manny->currentTask === null || $manny->taskEndsAt === null) {
+                continue;
+            }
+
+            $endsAt = new \DateTimeImmutable($manny->taskEndsAt);
+            if ($nextEndAt === null || $endsAt < $nextEndAt) {
+                $nextEndAt = $endsAt;
+            }
+        }
+
+        if ($nextEndAt === null) {
+            return self::IDLE_REFRESH_DELAY_MS;
+        }
+
+        return max(0, ($nextEndAt->getTimestamp() - $now->getTimestamp()) * 1000);
     }
 
     public function rename(Player $player, string $uid, ?string $body, ?NeumannProbe $probe = null): ApiResponse

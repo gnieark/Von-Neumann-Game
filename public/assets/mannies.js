@@ -3605,9 +3605,10 @@
         if (refreshTimer !== null) {
             window.clearTimeout(refreshTimer);
         }
+        const suggestedDelay = Number(data && data.nextUsefulRefreshDelayMs);
         refreshTimer = window.setTimeout(loadManniesPage, window.VNG.nextRefreshDelay(
             data,
-            DEFAULT_REFRESH_MS,
+            Number.isFinite(suggestedDelay) && suggestedDelay >= 0 ? suggestedDelay : DEFAULT_REFRESH_MS,
             MIN_REFRESH_MS,
             REFRESH_CUSHION_MS
         ));
@@ -3663,7 +3664,7 @@
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentSectorProbes = Array.isArray(sector.probes) ? sector.probes : [];
             const rawMannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
-            refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector};
+            refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector, "nextUsefulRefreshDelayMs": mannyData && mannyData.nextUsefulRefreshDelayMs};
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
             state.currentMannySalvageTargets = salvageTargetsFromObjects(state.currentSectorObjects);

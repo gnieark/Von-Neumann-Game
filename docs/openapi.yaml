@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 97
+                apiVersion: 98
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2492,12 +2492,20 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [mannies]
+                required: [mannies, nextUsefulRefreshDelayMs]
                 properties:
                   mannies:
                     type: array
                     items:
                       $ref: '#/components/schemas/Manny'
+                  nextUsefulRefreshDelayMs:
+                    type: integer
+                    minimum: 0
+                    description: >
+                      Recommended delay, in milliseconds, before polling this
+                      endpoint again. It is the delay until the next active
+                      Manny task end, or 30000 when no Manny task has a planned
+                      end time.
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe/mannies/{mannyId}:

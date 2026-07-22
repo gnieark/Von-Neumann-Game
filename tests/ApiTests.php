@@ -486,6 +486,7 @@ $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the leg
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
 $test->assert(str_contains($openApi, 'Generated asteroids have a short content-based name such as Ice Deut 15ce'), 'OpenAPI documents content/hash asteroid names');
+$test->assert(str_contains($openApi, 'nextUsefulRefreshDelayMs'), 'OpenAPI documents Manny list useful refresh delay hints');
 $test->assert(is_string($asteroidNamesScript) && str_contains($asteroidNamesScript, 'Asteroid::generatedName'), 'asteroid naming CLI uses the canonical asteroid name generator');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'data-forum-jump-last'), 'forum JS exposes a jump-to-last-post button for long threads');
@@ -526,7 +527,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remaini
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/ 60000'), 'mannies JS rounds remaining task time to minutes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'DEFAULT_REFRESH_MS = 15000'), 'mannies JS uses the shared adaptive refresh default');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'window.VNG.nextRefreshDelay'), 'mannies JS schedules refreshes from API timing hints');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector}'), 'mannies JS feeds probe, Manny, and sector timing data into adaptive refreshes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'nextUsefulRefreshDelayMs'), 'mannies JS reads the API recommended useful refresh delay');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector, "nextUsefulRefreshDelayMs"'), 'mannies JS feeds probe, Manny, sector, and API refresh-delay data into adaptive refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scheduleMannyRefresh'), 'mannies JS schedules repeated Manny refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'PROBE_INVENTORY_ACTIONS'), 'mannies JS tracks actions whose forms depend on probe inventory');
@@ -640,7 +642,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260721-manny-adaptive-refresh"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260722-manny-useful-refresh-delay"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1316,6 +1318,7 @@ $sameScutProbeStorageMove = $kernel->handle('POST', '/api/probe/' . $sameSectorP
 $test->assertEquals(400, $sameScutProbeStorageMove->status, 'POST /api/probe/{probeId}/storage-moves routes to same-SCUT owned probe validation');
 $sameScutProbeMannies = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/mannies', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeMannies->status, 'GET /api/probe/{probeId}/mannies lists same-SCUT owned probe Mannys');
+$test->assertEquals(30000, $sameScutProbeMannies->body['nextUsefulRefreshDelayMs'] ?? null, 'GET /api/probe/{probeId}/mannies exposes the recommended useful refresh delay');
 $sameScutProbeRenameManny = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/mannies/' . rawurlencode($sameSectorProbeManny->uid), $multiProbeHeaders, json_encode([
     'name' => 'remote-manny',
 ], JSON_THROW_ON_ERROR));
@@ -1440,7 +1443,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(97, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(98, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2014,6 +2017,7 @@ if ($createdProbe !== null) {
     $storageRepairHeaders = ['Authorization' => 'Bearer ' . $storageRepairSession['token']];
     $initialMannyStorageRepair = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
     $test->assertEquals(200, $initialMannyStorageRepair->status, 'GET /api/probe/mannies initializes storage for a newly created probe');
+    $test->assertEquals(30000, $initialMannyStorageRepair->body['nextUsefulRefreshDelayMs'] ?? null, 'GET /api/probe/mannies recommends a 30s refresh delay when no Manny task is planned');
     $coreContainer = $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core');
     $test->assert($coreContainer !== null, 'Manny list repair creates the probe core storage container');
     if ($coreContainer !== null) {
@@ -4881,6 +4885,11 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $repairManny->status, 'POST /api/probe/mannies/{id}/repair starts a real-time repair task');
     $test->assertEquals('repair', $repairManny->body['manny']['currentTask'] ?? null, 'repair task is exposed on Manny');
     $test->assert(is_string($repairManny->body['manny']['taskEstimatedEndTime'] ?? null), 'active repair exposes a task estimated end time');
+    $activeRepairMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $repairRefreshDelay = $activeRepairMannies->body['nextUsefulRefreshDelayMs'] ?? null;
+    $repairEndsAt = new DateTimeImmutable((string) ($repairManny->body['manny']['taskEstimatedEndTime'] ?? 'now'));
+    $expectedRepairDelay = max(0, ($repairEndsAt->getTimestamp() - (new DateTimeImmutable('now', new DateTimeZone('UTC')))->getTimestamp()) * 1000);
+    $test->assert(is_int($repairRefreshDelay) && abs($repairRefreshDelay - $expectedRepairDelay) <= 1000, 'GET /api/probe/mannies recommends refreshing at the next active Manny task end');
     $test->assertEquals(0.03, $probes->findByPlayerId($player->id)?->metalsStock, 'repair consumes 0.01 containers of metals per integrity percent');
     $test->assertEquals(2, $repairManny->body['manny']['task']['integrityPercent'] ?? null, 'repair task stores planned integrity restoration');
     $repairRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
