@@ -487,6 +487,8 @@ $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny r
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
 $test->assert(str_contains($openApi, 'Generated asteroids have a short content-based name such as Ice Deut 15ce'), 'OpenAPI documents content/hash asteroid names');
 $test->assert(str_contains($openApi, 'nextUsefulRefreshDelayMs'), 'OpenAPI documents Manny list useful refresh delay hints');
+$test->assert(str_contains($openApi, 'enum: [covered, uncovered, unknown]'), 'OpenAPI documents SCUT coverage knowledge states');
+$test->assert(str_contains($openApi, 'scutCoverageStatus: unknown'), 'OpenAPI includes an unknown SCUT coverage example');
 $test->assert(is_string($asteroidNamesScript) && str_contains($asteroidNamesScript, 'Asteroid::generatedName'), 'asteroid naming CLI uses the canonical asteroid name generator');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'data-forum-jump-last'), 'forum JS exposes a jump-to-last-post button for long threads');
@@ -589,6 +591,9 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorD
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="sector-scut-coverage"'), 'sensors view exposes SCUT coverage in the main scan');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorScutCoverageHtml(sector)'), 'sensors JS exposes SCUT coverage in sector tiles');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutNetworks.length > 0'), 'sensors JS derives SCUT coverage from the sector endpoint');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutCoverageStatus === "unknown"'), 'sensors JS renders unknown SCUT coverage');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'Couverture SCUT : inconnue'"), 'French translations include unknown SCUT coverage');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'SCUT coverage: unknown'"), 'English translations include unknown SCUT coverage');
 $test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'scheduleRefresh'), 'sensors JS does not poll and overwrite coordinate input');
 $test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'setTimeout(loadDisplayedSector'), 'sensors JS only reloads sector data after explicit actions');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuterium_refuel_station'), 'sensors JS recognizes deuterium refuel station objects');
@@ -655,7 +660,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-sensors-lazy-refresh"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-sensors-scut-coverage-status"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1456,7 +1461,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(98, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(99, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1531,6 +1536,39 @@ if ($multiScanDefaultProbe !== null) {
     $test->assertEquals(false, $multiScanDistanceByProbe[$multiScanTooEarlyProbe->id]['usedForScan'] ?? null, 'GET /api/sector distance list does not mark insufficient-data probes as scan source');
     $test->assertEquals(2, $multiScanDistanceByProbe[$multiScanBetterProbe->id]['distance'] ?? null, 'GET /api/sector distance list includes the selected scanner distance');
     $test->assertEquals(true, $multiScanDistanceByProbe[$multiScanBetterProbe->id]['usedForScan'] ?? null, 'GET /api/sector distance list marks the probe used for the scan');
+
+    $undiscoveredScutSector = $multiScanDefaultProbe->currentSector->add(14, 0, 0);
+    $undiscoveredScutRelay = $multiScanRelays->create($multiScanDefaultProbe->id, $undiscoveredScutSector);
+    $undiscoveredScutRelay = $multiScanScut->turnOnRelay($undiscoveredScutRelay->id, 'Undiscovered network');
+    $undiscoveredRelative = $undiscoveredScutSector->subtract($multiScanPlayer->homeSector);
+    $undiscoveredResponse = $multiScanKernel->handle(
+        'GET',
+        '/api/sector?x=' . $undiscoveredRelative['x'] . '&y=' . $undiscoveredRelative['y'] . '&z=' . $undiscoveredRelative['z'],
+        $multiScanHeaders,
+    );
+    $test->assertEquals(200, $undiscoveredResponse->status, 'GET /api/sector can scan a sector covered by an undiscovered SCUT network');
+    $test->assertEquals('unknown', $undiscoveredResponse->body['sector']['scutCoverageStatus'] ?? null, 'GET /api/sector hides coverage by a network with no player visit');
+    $test->assert(!array_key_exists('scutNetworks', $undiscoveredResponse->body['sector'] ?? []), 'GET /api/sector omits undiscovered SCUT network references');
+
+    $multiScanVisited->markVisited($multiScanPlayer, $undiscoveredScutSector->add(1, 1, 0));
+    $discoveredResponse = $multiScanKernel->handle(
+        'GET',
+        '/api/sector?x=' . $undiscoveredRelative['x'] . '&y=' . $undiscoveredRelative['y'] . '&z=' . $undiscoveredRelative['z'],
+        $multiScanHeaders,
+    );
+    $test->assertEquals('covered', $discoveredResponse->body['sector']['scutCoverageStatus'] ?? null, 'GET /api/sector reveals a network after any covered sector was visited');
+    $test->assertEquals($undiscoveredScutRelay->networkId, $discoveredResponse->body['sector']['scutNetworks'][0]['id'] ?? null, 'GET /api/sector exposes the discovered covering network reference');
+
+    $visitedUncoveredSector = $multiScanDefaultProbe->currentSector->add(30, 0, 0);
+    $multiScanVisited->markVisited($multiScanPlayer, $visitedUncoveredSector);
+    $visitedUncoveredRelative = $visitedUncoveredSector->subtract($multiScanPlayer->homeSector);
+    $visitedUncoveredResponse = $multiScanKernel->handle(
+        'GET',
+        '/api/sector?x=' . $visitedUncoveredRelative['x'] . '&y=' . $visitedUncoveredRelative['y'] . '&z=' . $visitedUncoveredRelative['z'],
+        $multiScanHeaders,
+    );
+    $test->assertEquals('uncovered', $visitedUncoveredResponse->body['sector']['scutCoverageStatus'] ?? null, 'GET /api/sector confirms absent SCUT coverage for a visited sector');
+    $test->assertEquals([], $visitedUncoveredResponse->body['sector']['scutNetworks'] ?? null, 'GET /api/sector exposes an empty network list for known absent coverage');
 }
 
 $privacyHome = new SectorCoordinates(1000, 1000, 0);
@@ -2384,6 +2422,7 @@ $test->assert(is_string($scutRelayObjects[0]['activatedAt'] ?? null), 'SCUT rela
 $test->assertEquals($scutProbe->id, $scutRelayObjects[0]['createdByProbeId'] ?? null, 'SCUT relay sector object exposes its historical creator id');
 $test->assertEquals($scutProbe->name, $scutRelayObjects[0]['createdByProbeName'] ?? null, 'SCUT relay sector object resolves a living creator probe name');
 $test->assertEquals($scutNetworkId, $scutSector->body['sector']['scutNetworks'][0]['id'] ?? null, 'Current sector exposes covering SCUT networks');
+$test->assertEquals('covered', $scutSector->body['sector']['scutCoverageStatus'] ?? null, 'Current sector marks SCUT coverage as known');
 $missingScutTransitBeacon = $kernel->handle('POST', '/api/probe/' . $scutProbe->id . '/mannies/' . rawurlencode($scutMannyId) . '/install-scut-transit-beacon', $scutHeaders, json_encode([
     'relayId' => $scutRelay->id,
 ], JSON_THROW_ON_ERROR));

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '96'
+  version: '99'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 98
+                apiVersion: 99
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -3557,6 +3557,8 @@ paths:
                           usedForScan: true
                       knowledgeLevel: detailed
                       confidence: 1
+                      scutCoverageStatus: uncovered
+                      scutNetworks: []
                       objects:
                         - type: solar_system
                           name: System abc123
@@ -3626,6 +3628,7 @@ paths:
                           usedForScan: true
                       knowledgeLevel: neighbor_scan
                       confidence: 0.82
+                      scutCoverageStatus: unknown
                       estimatedObjects:
                         star: true
                         planetCountMin: 3
@@ -6056,9 +6059,19 @@ components:
             $ref: '#/components/schemas/SectorProbePresence'
         scutNetworks:
           type: array
-          description: SCUT relay networks covering this sector, when known.
+          description: >
+            SCUT relay networks known by the player to cover this sector.
+            Omitted while `scutCoverageStatus` is `unknown`.
           items:
             $ref: '#/components/schemas/ScutNetworkReference'
+        scutCoverageStatus:
+          type: string
+          enum: [covered, uncovered, unknown]
+          description: >
+            Whether SCUT coverage is known. A non-visited sector reports
+            `covered` only for networks having at least one covered sector in
+            the player's visited-sector history; otherwise it reports `unknown`.
+            A visited sector can report `uncovered`.
         estimatedObjects:
           type: object
           additionalProperties: true

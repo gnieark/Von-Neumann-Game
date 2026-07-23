@@ -163,6 +163,10 @@
     }
 
     function sectorScutCoverageText(sector) {
+        if (sector && sector.scutCoverageStatus === "unknown") {
+            return tr("sectorScutUnknown", "SCUT coverage: unknown");
+        }
+
         const covered = Array.isArray(sector && sector.scutNetworks) && sector.scutNetworks.length > 0;
 
         return covered
@@ -171,9 +175,10 @@
     }
 
     function sectorScutCoverageHtml(sector) {
+        const unknown = sector && sector.scutCoverageStatus === "unknown";
         const covered = Array.isArray(sector && sector.scutNetworks) && sector.scutNetworks.length > 0;
 
-        return "<p class=\"sector-scut-coverage " + (covered ? "is-covered" : "is-not-covered") + "\">"
+        return "<p class=\"sector-scut-coverage " + (unknown ? "is-unknown" : (covered ? "is-covered" : "is-not-covered")) + "\">"
             + window.VNG.escapeHtml(sectorScutCoverageText(sector))
             + "</p>";
     }
@@ -841,7 +846,8 @@
         if (scutCoverage) {
             scutCoverage.textContent = sector ? sectorScutCoverageText(sector) : "";
             scutCoverage.classList.toggle("is-covered", Boolean(sector) && Array.isArray(sector.scutNetworks) && sector.scutNetworks.length > 0);
-            scutCoverage.classList.toggle("is-not-covered", Boolean(sector) && (!Array.isArray(sector.scutNetworks) || sector.scutNetworks.length === 0));
+            scutCoverage.classList.toggle("is-not-covered", Boolean(sector) && sector.scutCoverageStatus !== "unknown" && (!Array.isArray(sector.scutNetworks) || sector.scutNetworks.length === 0));
+            scutCoverage.classList.toggle("is-unknown", Boolean(sector) && sector.scutCoverageStatus === "unknown");
         }
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         const displayObjects = objects.concat(sectorBookmarkObjects(sector), sectorProbeObjects(sector));

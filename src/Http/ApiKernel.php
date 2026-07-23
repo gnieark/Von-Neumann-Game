@@ -51,7 +51,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 98;
+    public const API_VERSION = 99;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1617,13 +1617,30 @@ final class ApiKernel
         }
 
         $networks = $this->scut->networksCoveringSector($sector);
+        $sectorWasVisited = $this->visitedSectors->hasVisited($player, $sector);
+        if (!$sectorWasVisited && $networks !== []) {
+            $knownNetworkIds = array_fill_keys($this->visitedSectors->knownScutNetworkIds(
+                $player,
+                array_map(static fn(ScutNetwork $network): int => $network->id, $networks),
+            ), true);
+            $networks = array_values(array_filter(
+                $networks,
+                static fn(ScutNetwork $network): bool => isset($knownNetworkIds[$network->id]),
+            ));
+        }
+
         if ($networks !== []) {
+            $observation['scutCoverageStatus'] = 'covered';
             $observation['scutNetworks'] = array_map(
                 fn(ScutNetwork $network): array => $this->scutNetworkReferenceArray($network),
                 $networks,
             );
-        } elseif (($observation['knowledgeLevel'] ?? null) === 'detailed') {
+        } elseif ($sectorWasVisited) {
+            $observation['scutCoverageStatus'] = 'uncovered';
             $observation['scutNetworks'] = [];
+        } else {
+            $observation['scutCoverageStatus'] = 'unknown';
+            unset($observation['scutNetworks']);
         }
 
         return $observation;

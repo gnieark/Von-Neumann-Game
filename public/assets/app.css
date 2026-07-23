@@ -1655,6 +1655,10 @@ button.account-menu-item {
     color: #ff9b73;
 }
 
+.sector-scut-coverage.is-unknown {
+    color: rgba(172, 217, 161, .68);
+}
+
 .neighbor-sector-tile .sector-waypoint-bookmark-highlight {
     color: #f6d66a;
     font-weight: 700;

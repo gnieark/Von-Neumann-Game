@@ -62,6 +62,34 @@ final class VisitedSectorRepository
         return (int) $stmt->fetchColumn();
     }
 
+    /**
+     * @param array<int> $networkIds
+     * @return array<int>
+     */
+    public function knownScutNetworkIds(Player $player, array $networkIds): array
+    {
+        $networkIds = array_values(array_unique(array_map('intval', $networkIds)));
+        if ($networkIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($networkIds), '?'));
+        $stmt = $this->pdo->prepare(
+            'SELECT DISTINCT coverage.scut_network_id
+             FROM visited_sectors visited
+             INNER JOIN scut_covered_sectors coverage
+                ON coverage.sector_x = visited.sector_x
+               AND coverage.sector_y = visited.sector_y
+               AND coverage.sector_z = visited.sector_z
+             WHERE visited.player_id = ?
+               AND coverage.scut_network_id IN (' . $placeholders . ')
+             ORDER BY coverage.scut_network_id ASC'
+        );
+        $stmt->execute([$player->id, ...$networkIds]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     public function getVisitedSector(Player $player, SectorCoordinates $coordinates): ?VisitedSector
     {
         return $this->getVisitedSectorByPlayerId($player->id, $coordinates);

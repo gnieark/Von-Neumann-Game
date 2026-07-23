@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v99 : les observations de secteur exposent `scutCoverageStatus` (`covered`, `uncovered` ou `unknown`) et ne révèlent sur un secteur non visité que les réseaux SCUT dont le joueur a déjà visité au moins un secteur couvert.
 - Interface : `/sensors` et `/sensors/{probeId}` indiquent désormais si le secteur du scan principal, chaque secteur voisin scanné et chaque secteur visité sont couverts ou non par un réseau SCUT.
 - Interface : `/sensors` ne rafraîchit plus automatiquement le scan affiché ; les coordonnées en cours de saisie restent intactes jusqu’à un scan ou un rafraîchissement explicitement demandé.
 
