@@ -635,6 +635,10 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noProbeImprovementAvailable' => 'No improvement is available.'"), 'English translations include the empty probe-improvement message');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'Aucun container détaché n’est disponible dans le secteur de cette Manny.'"), 'French translations include remote Manny mining storage hints');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'noRemoteMiningStorageTarget' => 'No detached container is available in this Manny sector.'"), 'English translations include remote Manny mining storage hints');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'ingredientAutoPreparedLine' => 'Prépare aussi : {components}'"), 'French translations include automatic craft component breakdowns');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'ingredientAutoPreparedLine' => 'Also prepares: {components}'"), 'English translations include automatic craft component breakdowns');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'craftedComponentSummary(status.components)'), 'mannies JS renders automatic craft component breakdowns');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'addCraftComponentRequirement(componentItems'), 'mannies JS tracks automatic subcomponent requirements');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'mannyFilterStatusIdle' => 'Mains libres'"), 'French translations include Manny filter labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'mannyFilterStatusIdle' => 'Free hands'"), 'English translations include Manny filter labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
@@ -642,7 +646,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260722-manny-useful-refresh-delay"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-manny-craft-component-breakdown"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

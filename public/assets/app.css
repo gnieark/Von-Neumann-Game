@@ -3001,6 +3001,15 @@ button.account-menu-item {
     text-align: right;
 }
 
+.manny-craft-ingredients small {
+    flex-basis: 100%;
+    color: var(--muted);
+    font-size: .78rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+
 .manny-craft-ingredients li.missing b {
     color: #ffd0d0;
 }

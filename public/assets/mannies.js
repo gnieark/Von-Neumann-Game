@@ -1213,7 +1213,24 @@
             && (recipe.craftableBy.includes("manny") || recipe.craftableBy.includes("atomic_3d_printer"));
     }
 
-    function resolveCraftRecipe(recipe, itemCounts, resourceCosts, path) {
+    function addCraftComponentRequirement(componentItems, type, required, available, craftedFromResources) {
+        if (!componentItems || !type || required <= 0) {
+            return;
+        }
+
+        const current = componentItems[type] || {
+            type,
+            "required": 0,
+            "available": 0,
+            "craftedFromResources": 0,
+        };
+        current.required += required;
+        current.available += available;
+        current.craftedFromResources += craftedFromResources;
+        componentItems[type] = current;
+    }
+
+    function resolveCraftRecipe(recipe, itemCounts, resourceCosts, path, componentItems) {
         const recipeId = String(recipe && recipe.id || craftingRecipeOutputType(recipe));
         if (!recipe || !recipeId || path.includes(recipeId)) {
             return {"canResolve": false, "durationSeconds": 0};
@@ -1233,21 +1250,26 @@
             const consumed = Math.min(required, available);
             itemCounts[type] = available - consumed;
             const missing = required - consumed;
+            let craftedFromResources = 0;
             if (missing <= 0) {
+                addCraftComponentRequirement(componentItems, type, required, consumed, craftedFromResources);
                 return;
             }
 
             const componentRecipe = craftingRecipeByOutputType(type);
             if (!recipeCanBeAutoCrafted(componentRecipe)) {
+                addCraftComponentRequirement(componentItems, type, required, consumed, craftedFromResources);
                 canResolve = false;
                 return;
             }
 
             for (let index = 0; index < missing; index += 1) {
-                const componentPlan = resolveCraftRecipe(componentRecipe, itemCounts, resourceCosts, path.concat([recipeId]));
+                const componentPlan = resolveCraftRecipe(componentRecipe, itemCounts, resourceCosts, path.concat([recipeId]), componentItems);
                 canResolve = canResolve && componentPlan.canResolve;
                 durationSeconds += componentPlan.durationSeconds;
+                craftedFromResources += componentPlan.canResolve ? 1 : 0;
             }
+            addCraftComponentRequirement(componentItems, type, required, consumed, craftedFromResources);
         });
 
         return {canResolve, durationSeconds};
@@ -1282,13 +1304,14 @@
             itemCounts[type] = available - consumed;
             const missing = required - consumed;
             let craftedFromResources = 0;
+            const componentItems = {};
             if (missing > 0) {
                 const componentRecipe = craftingRecipeByOutputType(type);
                 if (!recipeCanBeAutoCrafted(componentRecipe)) {
                     canCraft = false;
                 } else {
                     for (let index = 0; index < missing; index += 1) {
-                        const componentPlan = resolveCraftRecipe(componentRecipe, itemCounts, resourceCosts, [String(recipe.id || "")]);
+                        const componentPlan = resolveCraftRecipe(componentRecipe, itemCounts, resourceCosts, [String(recipe.id || "")], componentItems);
                         canCraft = canCraft && componentPlan.canResolve;
                         durationSeconds += componentPlan.durationSeconds;
                         craftedFromResources += componentPlan.canResolve ? 1 : 0;
@@ -1302,6 +1325,7 @@
                 available,
                 missing,
                 craftedFromResources,
+                "components": Object.values(componentItems).filter((component) => component.required > 0),
                 "canResolve": missing === 0 || craftedFromResources === missing,
             });
         });
@@ -1329,6 +1353,29 @@
         return craftAvailability(recipe).canCraft;
     }
 
+    function craftedComponentSummary(components) {
+        const entries = (Array.isArray(components) ? components : [])
+            .filter((component) => Number(component && component.required) > 0)
+            .map((component) => {
+                const quantity = Math.max(0, Number(component.required) || 0);
+                const crafted = Math.max(0, Number(component.craftedFromResources) || 0);
+                const label = inventoryItemTypeLabel(component.type, component.type);
+                const quantityLabel = window.VNG.numberValue(quantity) + " " + label;
+
+                return crafted > 0
+                    ? quantityLabel + " (" + window.VNG.formatText(tr("ingredientAutoPreparedCrafted", "{crafted} crafted"), {"crafted": crafted}) + ")"
+                    : quantityLabel;
+            });
+
+        if (entries.length === 0) {
+            return "";
+        }
+
+        return window.VNG.formatText(tr("ingredientAutoPreparedLine", "Also prepares: {components}"), {
+            "components": entries.join(", "),
+        });
+    }
+
     function renderCraftIngredients(recipe) {
         const availability = craftAvailability(recipe);
         if (availability.itemStatuses.length === 0 && availability.resourceStatuses.length === 0) {
@@ -1349,10 +1396,12 @@
                         "required": status.required,
                         "available": status.available,
                     });
+                const componentSummary = craftedComponentSummary(status.components);
 
                 return "<li class=\"" + (status.canResolve ? "available" : "missing") + "\">"
                     + "<span>" + escaped(inventoryItemTypeLabel(status.type, status.type)) + "</span>"
                     + "<b>" + escaped(detail) + "</b>"
+                    + (componentSummary ? "<small>" + escaped(componentSummary) + "</small>" : "")
                     + "</li>";
             }).join("")
             + availability.resourceStatuses.map((status) => {
