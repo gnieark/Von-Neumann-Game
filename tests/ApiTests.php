@@ -589,6 +589,8 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorD
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="sector-scut-coverage"'), 'sensors view exposes SCUT coverage in the main scan');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorScutCoverageHtml(sector)'), 'sensors JS exposes SCUT coverage in sector tiles');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutNetworks.length > 0'), 'sensors JS derives SCUT coverage from the sector endpoint');
+$test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'scheduleRefresh'), 'sensors JS does not poll and overwrite coordinate input');
+$test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'setTimeout(loadDisplayedSector'), 'sensors JS only reloads sector data after explicit actions');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuterium_refuel_station'), 'sensors JS recognizes deuterium refuel station objects');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');
@@ -653,7 +655,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-manny-deuterium-mining-points"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-sensors-lazy-refresh"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

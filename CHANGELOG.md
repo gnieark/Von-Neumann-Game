@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - Interface : `/sensors` et `/sensors/{probeId}` indiquent désormais si le secteur du scan principal, chaque secteur voisin scanné et chaque secteur visité sont couverts ou non par un réseau SCUT.
+- Interface : `/sensors` ne rafraîchit plus automatiquement le scan affiché ; les coordonnées en cours de saisie restent intactes jusqu’à un scan ou un rafraîchissement explicitement demandé.
 
 - API v98 : `GET /api/probe/mannies` et `GET /api/probe/{probeId}/mannies` exposent `nextUsefulRefreshDelayMs`, le délai recommandé avant le prochain polling utile: prochaine fin de tâche Manny, ou `30000` ms lorsqu’aucune tâche n’a de fin planifiée.
 - Interface : `/mannies` utilise `nextUsefulRefreshDelayMs` pour espacer automatiquement ses rafraîchissements quand aucune fin de tâche n’est attendue.

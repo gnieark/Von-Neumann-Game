@@ -1,10 +1,5 @@
 (function () {
-    const DEFAULT_REFRESH_MS = 15000;
-    const MIN_REFRESH_MS = 750;
-    const REFRESH_CUSHION_MS = 500;
-
     let i18n = {};
-    let refreshTimer = null;
     let countdownTimer = null;
     let loadInProgress = false;
     let currentProbeSectorRelative = null;
@@ -944,42 +939,11 @@
         }
     }
 
-    function scanRefreshHints(data) {
-        const scan = data && data.sector && data.sector.scan;
-        const current = Number(scan && scan.currentSectorResidenceSeconds);
-        const required = Number(scan && scan.requiredResidenceSeconds);
-        if (!Number.isFinite(current) || !Number.isFinite(required) || required <= current) {
-            return data;
-        }
-
-        return {
-            ...data,
-            "scanRemainingSeconds": Math.max(0, required - current),
-        };
-    }
-
-    function clearRefreshTimer() {
-        if (refreshTimer !== null) {
-            window.clearTimeout(refreshTimer);
-            refreshTimer = null;
-        }
-    }
-
     function clearCountdownTimer() {
         if (countdownTimer !== null) {
             window.clearTimeout(countdownTimer);
             countdownTimer = null;
         }
-    }
-
-    function scheduleRefresh(data) {
-        clearRefreshTimer();
-        refreshTimer = window.setTimeout(loadDisplayedSector, window.VNG.nextRefreshDelay(
-            scanRefreshHints(data),
-            DEFAULT_REFRESH_MS,
-            MIN_REFRESH_MS,
-            REFRESH_CUSHION_MS
-        ));
     }
 
     function updateLiveCountdowns() {
@@ -1348,7 +1312,6 @@
         }
 
         loadInProgress = true;
-        clearRefreshTimer();
         clearCountdownTimer();
 
         try {
@@ -1361,7 +1324,6 @@
             renderSectorObjects(data.sector);
             syncPrepareJumpButton(data.sector);
             applySectorScanButtonState();
-            scheduleRefresh(data);
             return data;
         } catch (error) {
             renderSectorObjects(null);
@@ -1371,7 +1333,6 @@
                 setText("sector-context", scanErrorMessage(error));
             }
             applySectorScanButtonState();
-            scheduleRefresh(null);
             return null;
         } finally {
             loadInProgress = false;
