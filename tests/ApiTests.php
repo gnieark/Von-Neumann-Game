@@ -639,6 +639,10 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'ingredientAutoPreparedLine' => 'Also prepares: {components}'"), 'English translations include automatic craft component breakdowns');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'craftedComponentSummary(status.components)'), 'mannies JS renders automatic craft component breakdowns');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'addCraftComponentRequirement(componentItems'), 'mannies JS tracks automatic subcomponent requirements');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'targetDeuteriumPointsWithMax' => 'Points de deutérium (max. {max})'"), 'French translations include deuterium mining point labels');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'targetDeuteriumPointsWithMax' => 'Deuterium points (max. {max})'"), 'English translations include deuterium mining point labels');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningAmountMode(selectedResources)'), 'mannies JS switches deuterium-only mining amounts to tank points');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningAmountForRequest(formData.get("targetAmount"), amountMode)'), 'mannies JS converts deuterium mining points before submitting');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'mannyFilterStatusIdle' => 'Mains libres'"), 'French translations include Manny filter labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'mannyFilterStatusIdle' => 'Free hands'"), 'English translations include Manny filter labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
@@ -646,7 +650,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-manny-craft-component-breakdown"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-manny-deuterium-mining-points"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -5474,6 +5478,38 @@ if ($createdProbe !== null) {
     $test->assertEquals(20.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'parallel Manny mining deliveries preserve both deuterium additions');
     $parallelDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-deuterium-rock');
     $test->assertEquals(0.0, $parallelDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'parallel Manny mining depletes both deuterium deliveries');
+
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 25 WHERE id = :id')->execute(['id' => $createdProbe->id]);
+    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+        new Asteroid('trip-deuterium-rock', null, 'deuterium', ['deuterium'], 'small', 0.000001, 0.001, null, ['deuterium' => 0.2]),
+    ]));
+    $tripDeuteriumMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
+        'objectId' => 'trip-deuterium-rock',
+        'resource' => 'deuterium',
+        'targetAmount' => 0.1,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $tripDeuteriumMine->status, 'Manny starts a two-trip deuterium mining task');
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started WHERE id = :id')->execute([
+        'id' => $mineMannyDbId,
+        'started' => gmdate('c', time() - 3400),
+    ]);
+    $tripDeuteriumProgress = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $tripDeuteriumManny = array_values(array_filter(
+        $tripDeuteriumProgress->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $secondMannyId,
+    ))[0] ?? null;
+    $test->assertEquals(30.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'intermediate Manny deuterium delivery adds one 0.05 ECE trip as five tank points');
+    $test->assertEquals(0.05, $tripDeuteriumManny['task']['depositedAmount'] ?? null, 'intermediate deuterium mining records the first delivered trip');
+    $test->assertEquals(0.0, $tripDeuteriumManny['cargo']['deuterium'] ?? null, 'Manny starts the next deuterium trip without stale cargo');
+    $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $mineMannyDbId,
+        'started' => gmdate('c', time() - 7000),
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $test->assertEquals(35.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed two-trip deuterium mining adds the final five tank points only once');
+    $tripDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('trip-deuterium-rock');
+    $test->assertEquals(0.1, $tripDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'two-trip deuterium mining depletes exactly 0.10 ECE from the asteroid');
 
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Asteroid('thin-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.005]),

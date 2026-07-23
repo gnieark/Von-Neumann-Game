@@ -2097,10 +2097,55 @@
         return Math.max(0, Math.floor(capped * 100) / 100);
     }
 
-    function miningAmountLabel(maxAmount) {
+    function miningAmountMode(selectedResources) {
+        return selectedResources.length === 1 && selectedResources[0] === "deuterium" ? "deuterium_points" : "ece";
+    }
+
+    function miningAmountInputMax(maxAmount, mode) {
+        return mode === "deuterium_points"
+            ? Math.max(0, Math.floor(maxAmount * 100))
+            : maxAmount;
+    }
+
+    function miningAmountLabel(maxAmount, mode) {
+        if (mode === "deuterium_points") {
+            return window.VNG.formatText(tr("targetDeuteriumPointsWithMax", "Deuterium points (max. {max})"), {
+                "max": window.VNG.numberValue(miningAmountInputMax(maxAmount, mode)),
+            });
+        }
+
         return window.VNG.formatText(tr("targetAmountWithMax", "Amount (max. {max})"), {
             "max": window.VNG.numberValue(maxAmount),
         });
+    }
+
+    function normalizeMiningAmountInputValue(value, oldMode, newMode) {
+        const amount = Number(value);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return amount;
+        }
+        if (oldMode === newMode) {
+            return amount;
+        }
+        if (oldMode === "ece" && newMode === "deuterium_points") {
+            return Math.round(amount * 100);
+        }
+        if (oldMode === "deuterium_points" && newMode === "ece") {
+            return Math.round(amount) / 100;
+        }
+
+        return amount;
+    }
+
+    function miningAmountForRequest(inputValue, mode) {
+        const amount = Number(inputValue);
+        if (!Number.isFinite(amount)) {
+            return 0;
+        }
+
+        return mode === "deuterium_points"
+            ? Math.round(Math.max(0, amount) * 100) / 10000
+            : amount;
     }
 
     function mineResourceOptions(target, selectedResources) {
@@ -2179,7 +2224,9 @@
         const status = context && context.status ? context.status : "loaded";
         const mineTarget = targets[0] || null;
         const initialResources = resourceTypesForTarget(mineTarget);
+        const initialAmountMode = miningAmountMode(initialResources);
         const mineAmountMax = mineTargetMaxAmount(mineTarget, initialResources);
+        const mineInputMax = miningAmountInputMax(mineAmountMax, initialAmountMode);
         const mineStorageTargets = miningStorageTargetsForTarget(mineTarget, storageTargets);
         const externalStorageDisabled = requireExternalStorage && initialResources.includes("deuterium");
         const disabled = !mineTarget || mineAmountMax < 0.01 || (requireExternalStorage && (mineStorageTargets.length === 0 || externalStorageDisabled));
@@ -2195,7 +2242,7 @@
             + mineResourceOptions(mineTarget, [])
             + "</select></label>"
             + "<label class=\"manny-mine-storage-label\"" + (!requireExternalStorage && mineStorageTargets.length === 0 ? " hidden" : "") + ">" + escaped(tr("mineStoreOn", "Store in")) + "<select class=\"manny-mine-storage-target\" name=\"targetContainerId\"" + (requireExternalStorage ? " required" : "") + (mineStorageTargets.length === 0 || externalStorageDisabled ? " disabled" : "") + ">" + miningStorageTargetOptionsForTarget(mineTarget, "", storageTargets, !requireExternalStorage) + "</select></label>"
-            + "<label class=\"manny-mine-amount-label\"><span class=\"manny-mine-amount-text\">" + escaped(miningAmountLabel(mineAmountMax)) + "</span><input name=\"targetAmount\" type=\"number\" min=\"0.01\" max=\"" + escaped(String(mineAmountMax)) + "\" step=\"0.01\" value=\"" + escaped(mineAmountMax >= 0.01 ? "0.01" : "0") + "\"></label>"
+            + "<label class=\"manny-mine-amount-label\"><span class=\"manny-mine-amount-text\">" + escaped(miningAmountLabel(mineAmountMax, initialAmountMode)) + "</span><input name=\"targetAmount\" type=\"number\" min=\"" + (initialAmountMode === "deuterium_points" ? "1" : "0.01") + "\" max=\"" + escaped(String(mineInputMax)) + "\" step=\"" + (initialAmountMode === "deuterium_points" ? "1" : "0.01") + "\" value=\"" + escaped(mineAmountMax >= 0.01 ? String(initialAmountMode === "deuterium_points" ? 1 : 0.01) : "0") + "\" data-amount-mode=\"" + escaped(initialAmountMode) + "\"></label>"
             + "<button class=\"manny-mine-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("mine", "Mine")) + "</button>"
             + "<p class=\"manny-mine-hint\">" + escaped(hint) + "</p>"
             + "</form>";
@@ -3224,6 +3271,8 @@
             .filter((option) => !option.disabled)
             .map((option) => option.value);
         const maxAmount = mineTargetMaxAmount(target, selectedResources);
+        const amountMode = miningAmountMode(selectedResources);
+        const inputMax = miningAmountInputMax(maxAmount, amountMode);
         const selectedStorage = storageSelect ? storageSelect.value : "";
         const storageTargets = miningStorageTargetsForTarget(target, storageContainers);
         const externalStorageDisabled = selectedResources.includes("deuterium");
@@ -3238,15 +3287,21 @@
             storageLabel.hidden = !requireExternalStorage && storageTargets.length === 0;
         }
         if (amountText) {
-            amountText.textContent = miningAmountLabel(maxAmount);
+            amountText.textContent = miningAmountLabel(maxAmount, amountMode);
         }
         if (amountInput) {
-            amountInput.max = String(maxAmount);
-            const currentAmount = Number(amountInput.value);
+            const oldMode = amountInput.dataset.amountMode || "ece";
+            const currentAmount = normalizeMiningAmountInputValue(amountInput.value, oldMode, amountMode);
+            amountInput.dataset.amountMode = amountMode;
+            amountInput.min = amountMode === "deuterium_points" ? "1" : "0.01";
+            amountInput.max = String(inputMax);
+            amountInput.step = amountMode === "deuterium_points" ? "1" : "0.01";
             if (!Number.isFinite(currentAmount) || currentAmount <= 0) {
-                amountInput.value = maxAmount >= 0.01 ? "0.01" : "0";
-            } else if (currentAmount > maxAmount) {
-                amountInput.value = String(maxAmount);
+                amountInput.value = maxAmount >= 0.01 ? String(amountMode === "deuterium_points" ? 1 : 0.01) : "0";
+            } else if (currentAmount > inputMax) {
+                amountInput.value = String(inputMax);
+            } else {
+                amountInput.value = String(amountMode === "deuterium_points" ? Math.round(currentAmount) : currentAmount);
             }
         }
         if (mineButton) {
@@ -3764,10 +3819,12 @@
                 setStatus(tr("noMiningResourceSelected", "Select at least one available resource."));
                 return null;
             }
+            const amountInput = form.querySelector("input[name=\"targetAmount\"]");
+            const amountMode = amountInput ? (amountInput.dataset.amountMode || "ece") : "ece";
             const body = {
                 "objectId": formData.get("objectId"),
                 resources,
-                "targetAmount": Number.parseFloat(formData.get("targetAmount")),
+                "targetAmount": miningAmountForRequest(formData.get("targetAmount"), amountMode),
             };
             const targetContainerId = String(formData.get("targetContainerId") || "");
             if (form.dataset.requireExternalStorage === "1" && targetContainerId === "") {

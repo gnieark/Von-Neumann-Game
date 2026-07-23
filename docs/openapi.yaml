@@ -5598,7 +5598,7 @@ components:
           type: number
           minimum: 0
           exclusiveMinimum: true
-          description: Amount to mine in equivalent earth containers. Manny cargo capacity is 0.05 per trip.
+          description: Amount to mine in equivalent earth containers. Manny cargo capacity is 0.05 per trip. For deuterium-only mining, 0.01 ECE becomes 1 point in the probe tank.
         targetContainerId:
           type: string
           description: >
@@ -5748,7 +5748,7 @@ components:
           type: number
           minimum: 0
           exclusiveMinimum: true
-          description: Requested total amount in equivalent earth containers.
+          description: Requested total amount in equivalent earth containers. For deuterium-only mining, 0.01 ECE becomes 1 point in the probe tank.
         depositedAmount:
           type: number
           minimum: 0

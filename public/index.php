@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260723-manny-craft-component-breakdown';
+const ASSET_VERSION = '20260723-manny-deuterium-mining-points';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
