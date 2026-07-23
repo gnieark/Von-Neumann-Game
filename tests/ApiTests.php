@@ -586,6 +586,9 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'const w
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'waypointBookmarkPlacedBy'), 'sensors JS formats waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-waypoint-bookmark-highlight'), 'sensors CSS styles waypoint bookmark tile highlights');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorDeuteriumStationHighlightHtml'), 'sensors JS highlights deuterium refuel stations in visited-sector tiles');
+$test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="sector-scut-coverage"'), 'sensors view exposes SCUT coverage in the main scan');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorScutCoverageHtml(sector)'), 'sensors JS exposes SCUT coverage in sector tiles');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutNetworks.length > 0'), 'sensors JS derives SCUT coverage from the sector endpoint');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuterium_refuel_station'), 'sensors JS recognizes deuterium refuel station objects');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');

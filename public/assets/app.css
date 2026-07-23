@@ -1641,6 +1641,20 @@ button.account-menu-item {
     color: rgba(172, 217, 161, .68) !important;
 }
 
+.sector-scut-coverage {
+    color: #ff9b73;
+    font-weight: 700;
+}
+
+.sector-scut-coverage.is-covered {
+    color: #82e9ff;
+    text-shadow: 0 0 5px rgba(130, 233, 255, .28);
+}
+
+.sector-scut-coverage.is-not-covered {
+    color: #ff9b73;
+}
+
 .neighbor-sector-tile .sector-waypoint-bookmark-highlight {
     color: #f6d66a;
     font-weight: 700;
@@ -2061,6 +2075,11 @@ button.account-menu-item {
     margin: 8px 0 0;
     color: #dce9eb;
     line-height: 1.55;
+}
+
+#sector-scut-coverage {
+    margin: 8px 0 0;
+    font-family: "Lucida Console", "Courier New", monospace;
 }
 
 .forum-categories {

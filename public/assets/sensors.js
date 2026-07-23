@@ -167,6 +167,22 @@
         return summary;
     }
 
+    function sectorScutCoverageText(sector) {
+        const covered = Array.isArray(sector && sector.scutNetworks) && sector.scutNetworks.length > 0;
+
+        return covered
+            ? tr("sectorScutCovered", "SCUT coverage: yes")
+            : tr("sectorScutNotCovered", "SCUT coverage: no");
+    }
+
+    function sectorScutCoverageHtml(sector) {
+        const covered = Array.isArray(sector && sector.scutNetworks) && sector.scutNetworks.length > 0;
+
+        return "<p class=\"sector-scut-coverage " + (covered ? "is-covered" : "is-not-covered") + "\">"
+            + window.VNG.escapeHtml(sectorScutCoverageText(sector))
+            + "</p>";
+    }
+
     function setText(id, value) {
         const node = document.getElementById(id);
         if (node) {
@@ -826,6 +842,12 @@
 
         const openPanels = window.VNG.openDisclosureIds(node, ".sector-system-toggle[aria-expanded=\"true\"][aria-controls]");
         setText("sector-context", sectorContext(sector));
+        const scutCoverage = document.getElementById("sector-scut-coverage");
+        if (scutCoverage) {
+            scutCoverage.textContent = sector ? sectorScutCoverageText(sector) : "";
+            scutCoverage.classList.toggle("is-covered", Boolean(sector) && Array.isArray(sector.scutNetworks) && sector.scutNetworks.length > 0);
+            scutCoverage.classList.toggle("is-not-covered", Boolean(sector) && (!Array.isArray(sector.scutNetworks) || sector.scutNetworks.length === 0));
+        }
         const objects = Array.isArray(sector && sector.objects) ? sector.objects : [];
         const displayObjects = objects.concat(sectorBookmarkObjects(sector), sectorProbeObjects(sector));
         const summarySector = sector && (Array.isArray(sector.objects) || displayObjects.length > 0)
@@ -1040,10 +1062,12 @@
             : sectorSummary(sector);
         const context = error ? "" : sectorContext(sector);
         const waypointHighlight = error ? "" : sectorWaypointBookmarkHighlightHtml(sector);
+        const scutCoverage = error ? "" : sectorScutCoverageHtml(sector);
 
         return "<article class=\"neighbor-sector-tile\">"
             + "<h4>" + window.VNG.escapeHtml(coordinates) + "</h4>"
             + (context ? "<p class=\"neighbor-sector-context\">" + window.VNG.escapeHtml(context) + "</p>" : "")
+            + scutCoverage
             + "<p>" + window.VNG.escapeHtml(summary) + "</p>"
             + waypointHighlight
             + "<a class=\"button-link neighbor-sector-jump\" href=\"" + window.VNG.escapeHtml(movementUrl(target)) + "\">" + window.VNG.escapeHtml(tr("prepareJump", "Prepare jump")) + "</a>"
@@ -1117,6 +1141,7 @@
                     {"count": visitCount}
                 )) + "</p>"
                 : "")
+            + (error ? "" : sectorScutCoverageHtml(sector))
             + "<p>" + window.VNG.escapeHtml(summary) + "</p>"
             + (error ? "" : sectorWaypointBookmarkHighlightHtml(sector))
             + (error ? "" : sectorDeuteriumStationHighlightHtml(sector))
