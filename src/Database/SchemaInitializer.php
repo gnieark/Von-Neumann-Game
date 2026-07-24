@@ -365,17 +365,20 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS visited_sectors (
                 id $id,
                 player_id INTEGER NOT NULL,
+                probe_id INTEGER NOT NULL,
                 sector_x INTEGER NOT NULL,
                 sector_y INTEGER NOT NULL,
                 sector_z INTEGER NOT NULL,
                 first_visited_at $text NOT NULL,
                 last_visited_at $text NOT NULL,
                 visit_count INTEGER NOT NULL DEFAULT 1,
-                UNIQUE(player_id, sector_x, sector_y, sector_z),
-                FOREIGN KEY(player_id) REFERENCES players(id)
+                UNIQUE(probe_id, sector_x, sector_y, sector_z),
+                FOREIGN KEY(player_id) REFERENCES players(id),
+                FOREIGN KEY(probe_id) REFERENCES neumann_probes(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_visited_sectors_player_id ON visited_sectors(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_visited_sectors_player_coords ON visited_sectors(player_id, sector_x, sector_y, sector_z)",
+            "CREATE INDEX IF NOT EXISTS idx_visited_sectors_probe_id ON visited_sectors(probe_id)",
             "CREATE TABLE IF NOT EXISTS sessions (
                 id $id,
                 player_id INTEGER NOT NULL,

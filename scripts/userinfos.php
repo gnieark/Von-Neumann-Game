@@ -241,9 +241,9 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ow
     $visitedCurrent = userinfosSingleRow(
         $pdo,
         'SELECT * FROM visited_sectors
-         WHERE player_id = :player_id AND sector_x = :x AND sector_y = :y AND sector_z = :z',
+         WHERE probe_id = :probe_id AND sector_x = :x AND sector_y = :y AND sector_z = :z',
         [
-            'player_id' => $player->id,
+            'probe_id' => $probe->id,
             'x' => $probe->currentSector->getX(),
             'y' => $probe->currentSector->getY(),
             'z' => $probe->currentSector->getZ(),
@@ -300,10 +300,10 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ow
     $visited = userinfosRows(
         $pdo,
         'SELECT * FROM visited_sectors
-         WHERE player_id = :player_id
+         WHERE probe_id = :probe_id
          ORDER BY last_visited_at DESC, id DESC
          LIMIT :limit',
-        ['player_id' => $player->id, 'limit' => $limit],
+        ['probe_id' => $probe->id, 'limit' => $limit],
         ['limit'],
     );
     $movements = userinfosRows(
@@ -357,8 +357,8 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ow
     $inventory = userinfosInventoryReport($probe, $gameplayConfig, $containers, $resources, $items, $mannies);
     $visitedTotal = userinfosScalar(
         $pdo,
-        'SELECT COUNT(*) FROM visited_sectors WHERE player_id = :player_id',
-        ['player_id' => $player->id],
+        'SELECT COUNT(*) FROM visited_sectors WHERE probe_id = :probe_id',
+        ['probe_id' => $probe->id],
     );
     $movementTotal = userinfosScalar(
         $pdo,

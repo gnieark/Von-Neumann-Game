@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-24
+
+### Changed
+
+- API v100 : les secteurs visités sont désormais historisés par sonde. `GET /api/probe/{probeId}/visited-sectors` et sa variante pour la sonde par défaut ne renvoient que l’historique de cette sonde.
+- API v100 : ajout de `GET /api/visited-sectors`, qui renvoie l’ensemble dédupliqué des secteurs visités par toutes les sondes du joueur.
+- Maintenance : ajout de `scripts/migrate-visited-sectors-to-probes.php` pour reconstruire l’historique par sonde depuis les mouvements lors du déploiement.
+
 ## 2026-07-22
 
 ### Changed

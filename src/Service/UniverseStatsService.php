@@ -154,9 +154,12 @@ final class UniverseStatsService
         $stmt = $this->pdo->query(
             'SELECT players.id AS player_id, players.username, players.display_name,
                     COALESCE(NULLIF(players.display_name, \'\'), players.username, \'\') AS player_name,
-                    COUNT(visited_sectors.id) AS visited_count
+                    COUNT(visited_sectors.player_id) AS visited_count
              FROM players
-             LEFT JOIN visited_sectors ON visited_sectors.player_id = players.id
+             LEFT JOIN (
+                 SELECT DISTINCT player_id, sector_x, sector_y, sector_z
+                 FROM visited_sectors
+             ) visited_sectors ON visited_sectors.player_id = players.id
              WHERE EXISTS (
                  SELECT 1
                  FROM neumann_probes

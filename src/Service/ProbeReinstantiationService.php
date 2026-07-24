@@ -74,7 +74,7 @@ final class ProbeReinstantiationService
 
             $newProbe = $this->probes->createForPlayer($player->id, 'Probe of ' . $player->username, $newHome);
             $this->mannies->ensureDefaultsForProbe($newProbe);
-            $this->visitedSectors->markVisited($player, $newHome);
+            $this->visitedSectors->markVisited($player, $newProbe, $newHome);
 
             $updatedPlayer = $this->players->findById($player->id) ?? $player;
             $this->pdo->commit();
@@ -277,6 +277,7 @@ final class ProbeReinstantiationService
 
     private function deleteProbeData(int $probeId): void
     {
+        $this->execute('DELETE FROM visited_sectors WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM scheduled_events
              WHERE entity_type = :entity_type

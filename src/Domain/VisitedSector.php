@@ -11,6 +11,7 @@ final class VisitedSector
     public function __construct(
         public readonly int $id,
         public readonly int $playerId,
+        public readonly int $probeId,
         public readonly SectorCoordinates $coordinates,
         public readonly string $firstVisitedAt,
         public string $lastVisitedAt,

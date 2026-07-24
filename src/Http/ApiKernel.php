@@ -51,7 +51,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 99;
+    public const API_VERSION = 100;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -192,6 +192,7 @@ final class ApiKernel
             ApiRoute::path('/api/me/api-key', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->apiKeyResponse($player))),
             ApiRoute::path('/api/crafting-recipes', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $_player): ApiResponse => $this->craftingRecipesResponse())),
             ApiRoute::path('/api/probes', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeListResponse($player))),
+            ApiRoute::path('/api/visited-sectors', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->visitedSectorsResponse($player))),
             ApiRoute::path('/api/probe', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeResponse($player))),
             ApiRoute::path('/api/probe/mind-snapshot/reassign', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMindSnapshotReassignResponse($player))),
             ApiRoute::path('/api/probe/storage-containers', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeStorageContainersResponse($player))),
@@ -612,7 +613,28 @@ final class ApiKernel
 
     private function probeVisitedSectorsResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
-        $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
+
+        return $this->visitedSectorsApiResponse(
+            $player,
+            $this->visitedSectors->listVisitedByProbe($probe),
+        );
+    }
+
+    private function visitedSectorsResponse(Player $player): ApiResponse
+    {
+        foreach ($this->probes->findAllByPlayerId($player->id) as $probe) {
+            $this->movements->refreshProbeMovementState($probe);
+        }
+
+        return $this->visitedSectorsApiResponse($player, $this->visitedSectors->listVisited($player));
+    }
+
+    /**
+     * @param array<VisitedSector> $visitedSectors
+     */
+    private function visitedSectorsApiResponse(Player $player, array $visitedSectors): ApiResponse
+    {
         $frame = new PlayerReferenceFrame($player->homeSector);
 
         return new ApiResponse(200, [
@@ -623,7 +645,7 @@ final class ApiKernel
                     'lastVisitedAt' => $sector->lastVisitedAt,
                     'visitCount' => $sector->visitCount,
                 ],
-                $this->visitedSectors->listVisited($player),
+                $visitedSectors,
             ),
         ]);
     }

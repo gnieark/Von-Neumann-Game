@@ -856,7 +856,7 @@ for ($ranking = 1; $ranking <= 10; $ranking++) {
     $statsRankingPlayerRows[$ranking] = $rankingPlayer;
     $statsRankingProbeRows[$ranking] = $statsRankingProbes->createForPlayer($rankingPlayer->id, 'Stats Ranking Probe ' . $ranking, $rankingPlayer->homeSector);
     for ($visit = 0; $visit <= 10 - $ranking; $visit++) {
-        $statsRankingVisitedSectors->markVisited($rankingPlayer, new SectorCoordinates(200 + ($ranking * 2), $visit * 2, 0));
+        $statsRankingVisitedSectors->markVisited($rankingPlayer, $statsRankingProbeRows[$ranking], new SectorCoordinates(200 + ($ranking * 2), $visit * 2, 0));
     }
 }
 $statsRankingProbes->createForPlayer($statsRankingPlayerRows[1]->id, 'Stats Ranking Secondary Probe', new SectorCoordinates(202, 2, 0));
@@ -1040,6 +1040,29 @@ $test->assertEquals($mannyTaskMigrationManny->id, (int) ($mannyTaskMigrationRow[
 $test->assertEquals($mannyTaskMigrationRunAt, $mannyTaskMigrationRow['run_at'] ?? null, 'Manny task migration preserves task end time');
 $test->assertEquals('pending', $mannyTaskMigrationRow['status'] ?? null, 'Manny task migration creates pending events');
 $test->assertEquals(4.5, (float) ($mannyTaskMigrationPayload['integrityPercent'] ?? 0), 'Manny task migration moves the task payload into scheduled_events');
+$visitedMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration.sqlite';
+$visitedMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration-database.json';
+file_put_contents($visitedMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $visitedMigrationDbPath], JSON_THROW_ON_ERROR));
+$visitedMigrationPdo = (new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $visitedMigrationDbPath), $root))->create();
+$visitedMigrationPdo->exec('CREATE TABLE players (id INTEGER PRIMARY KEY)');
+$visitedMigrationPdo->exec('CREATE TABLE neumann_probes (id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL, sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL, entered_current_sector_at TEXT NOT NULL)');
+$visitedMigrationPdo->exec('CREATE TABLE probe_movements (id INTEGER PRIMARY KEY, probe_id INTEGER NOT NULL, origin_x INTEGER NOT NULL, origin_y INTEGER NOT NULL, origin_z INTEGER NOT NULL, target_x INTEGER NOT NULL, target_y INTEGER NOT NULL, target_z INTEGER NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, arrival_at TEXT NOT NULL)');
+$visitedMigrationPdo->exec('CREATE TABLE visited_sectors (id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL, sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL, first_visited_at TEXT NOT NULL, last_visited_at TEXT NOT NULL, visit_count INTEGER NOT NULL)');
+$visitedMigrationPdo->exec("INSERT INTO players (id) VALUES (1)");
+$visitedMigrationPdo->exec("INSERT INTO neumann_probes (id, player_id, sector_x, sector_y, sector_z, entered_current_sector_at) VALUES (10, 1, 4, 0, 0, '2026-01-03T00:00:00+00:00'), (11, 1, 8, 0, 0, '2026-01-04T00:00:00+00:00')");
+$visitedMigrationPdo->exec("INSERT INTO probe_movements (id, probe_id, origin_x, origin_y, origin_z, target_x, target_y, target_z, status, started_at, arrival_at) VALUES (1, 10, 0, 0, 0, 2, 0, 0, 'arrived', '2026-01-01T00:00:00+00:00', '2026-01-01T01:00:00+00:00'), (2, 10, 2, 0, 0, 4, 0, 0, 'arrived', '2026-01-02T00:00:00+00:00', '2026-01-02T01:00:00+00:00')");
+$visitedMigrationPdo = null;
+$visitedMigrationCommand = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/migrate-visited-sectors-to-probes.php') . ' --database-config=' . escapeshellarg($visitedMigrationConfig);
+exec($visitedMigrationCommand . ' 2>&1', $visitedMigrationOutput, $visitedMigrationStatus);
+$test->assertEquals(0, $visitedMigrationStatus, 'visited-sector migration CLI exits successfully');
+$visitedMigrationPdo = (new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $visitedMigrationDbPath), $root))->create();
+$visitedMigrationColumns = array_column($visitedMigrationPdo->query('PRAGMA table_info(visited_sectors)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assert(in_array('probe_id', $visitedMigrationColumns, true), 'visited-sector migration adds probe ownership');
+$visitedMigrationRows = $visitedMigrationPdo->query('SELECT probe_id, sector_x, visit_count FROM visited_sectors ORDER BY probe_id, sector_x')->fetchAll(PDO::FETCH_ASSOC);
+$test->assertEquals(4, count($visitedMigrationRows), 'visited-sector migration reconstructs movement history and stationary origins');
+$test->assertEquals(10, (int) ($visitedMigrationRows[0]['probe_id'] ?? 0), 'visited-sector migration keeps the first movement origin');
+$test->assertEquals(0, (int) ($visitedMigrationRows[0]['sector_x'] ?? -1), 'visited-sector migration keeps the first movement origin coordinates');
+$test->assertEquals(11, (int) ($visitedMigrationRows[3]['probe_id'] ?? 0), 'visited-sector migration initializes probes without movements');
 $itemSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_items)')->fetchAll(PDO::FETCH_ASSOC),
@@ -1174,6 +1197,11 @@ $test->assert(in_array('probe_id', $logbookSchemaColumns, true), 'probe logbook 
 $test->assert(in_array('title', $logbookSchemaColumns, true), 'probe logbook pages store their title');
 $test->assert(in_array('content', $logbookSchemaColumns, true), 'probe logbook pages store their content');
 $test->assert(in_array('sort_order', $logbookSchemaColumns, true), 'probe logbook pages store their sort order');
+$visitedSectorSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(visited_sectors)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('probe_id', $visitedSectorSchemaColumns, true), 'visited sectors store their probe id');
 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
@@ -1443,8 +1471,20 @@ $sameScutProbeDamageWarnings = $kernel->handle('GET', '/api/probe/' . $sameSecto
 $test->assertEquals(200, $sameScutProbeDamageWarnings->status, 'GET /api/probe/{probeId}/damage-warnings lists same-SCUT owned probe damage warnings');
 $sameScutProbeReadDamageWarning = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings/' . $sameScutProbeWarningId, $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeReadDamageWarning->status, 'PATCH /api/probe/{probeId}/damage-warnings/{damageWarningId} marks same-SCUT owned probe damage warnings read');
+$primaryOnlyVisitedSector = new SectorCoordinates(26, 0, 0);
+$sameScutOnlyVisitedSector = new SectorCoordinates(28, 0, 0);
+$visitedSectors->markVisited($multiProbePlayer, $primaryProbe, $primaryOnlyVisitedSector);
+$visitedSectors->markVisited($multiProbePlayer, $sameSectorProbe, $sameScutOnlyVisitedSector);
 $sameScutProbeVisitedSectors = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/visited-sectors', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeVisitedSectors->status, 'GET /api/probe/{probeId}/visited-sectors accepts same-SCUT owned probes');
+$sameScutVisitedCoordinates = array_column($sameScutProbeVisitedSectors->body['visitedSectors'] ?? [], 'relativeCoordinates');
+$test->assert(in_array(['x' => 8, 'y' => 0, 'z' => 0], $sameScutVisitedCoordinates, true), 'probe visited-sector history includes sectors visited by the requested probe');
+$test->assert(!in_array(['x' => 6, 'y' => 0, 'z' => 0], $sameScutVisitedCoordinates, true), 'probe visited-sector history excludes sectors visited by another probe');
+$playerVisitedSectors = $kernel->handle('GET', '/api/visited-sectors', $multiProbeHeaders);
+$test->assertEquals(200, $playerVisitedSectors->status, 'GET /api/visited-sectors lists player-wide visited sectors');
+$playerVisitedCoordinates = array_column($playerVisitedSectors->body['visitedSectors'] ?? [], 'relativeCoordinates');
+$test->assert(in_array(['x' => 6, 'y' => 0, 'z' => 0], $playerVisitedCoordinates, true), 'player visited-sector history includes the first probe history');
+$test->assert(in_array(['x' => 8, 'y' => 0, 'z' => 0], $playerVisitedCoordinates, true), 'player visited-sector history includes the second probe history');
 $sameScutProbeSector = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/sector', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeSector->status, 'GET /api/probe/{probeId}/sector observes same-SCUT owned probes');
 $sameScutProbeMove = $kernel->handle('POST', '/api/probe/' . $sameSectorProbe->id . '/move', $multiProbeHeaders, json_encode([], JSON_THROW_ON_ERROR));
@@ -1461,7 +1501,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(99, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(100, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1550,7 +1590,7 @@ if ($multiScanDefaultProbe !== null) {
     $test->assertEquals('unknown', $undiscoveredResponse->body['sector']['scutCoverageStatus'] ?? null, 'GET /api/sector hides coverage by a network with no player visit');
     $test->assert(!array_key_exists('scutNetworks', $undiscoveredResponse->body['sector'] ?? []), 'GET /api/sector omits undiscovered SCUT network references');
 
-    $multiScanVisited->markVisited($multiScanPlayer, $undiscoveredScutSector->add(1, 1, 0));
+    $multiScanVisited->markVisited($multiScanPlayer, $multiScanDefaultProbe, $undiscoveredScutSector->add(1, 1, 0));
     $discoveredResponse = $multiScanKernel->handle(
         'GET',
         '/api/sector?x=' . $undiscoveredRelative['x'] . '&y=' . $undiscoveredRelative['y'] . '&z=' . $undiscoveredRelative['z'],
@@ -1560,7 +1600,7 @@ if ($multiScanDefaultProbe !== null) {
     $test->assertEquals($undiscoveredScutRelay->networkId, $discoveredResponse->body['sector']['scutNetworks'][0]['id'] ?? null, 'GET /api/sector exposes the discovered covering network reference');
 
     $visitedUncoveredSector = $multiScanDefaultProbe->currentSector->add(30, 0, 0);
-    $multiScanVisited->markVisited($multiScanPlayer, $visitedUncoveredSector);
+    $multiScanVisited->markVisited($multiScanPlayer, $multiScanDefaultProbe, $visitedUncoveredSector);
     $visitedUncoveredRelative = $visitedUncoveredSector->subtract($multiScanPlayer->homeSector);
     $visitedUncoveredResponse = $multiScanKernel->handle(
         'GET',
@@ -4062,7 +4102,7 @@ if ($teleportLifeProbe !== null) {
         'z' => $teleportLifeTarget->getZ(),
         'now' => gmdate('c'),
     ]);
-    $visitedSectors->markVisited($teleportLifePlayer, $teleportLifeTarget);
+    $visitedSectors->markVisited($teleportLifePlayer, $teleportLifeProbe, $teleportLifeTarget);
 
     $teleportLifeSector = $kernel->handle('GET', '/api/probe/sector', $teleportLifeHeaders);
     $test->assertEquals(200, $teleportLifeSector->status, 'GET /api/probe/sector succeeds after debug teleport into intelligent-life sector');
@@ -5392,7 +5432,7 @@ if ($createdProbe !== null) {
     }
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
-    $visitedSectors->markVisited($player, $visitedPlanetSector);
+    $visitedSectors->markVisited($player, $createdProbe, $visitedPlanetSector);
     $sectorRepository->save(new SectorContent($visitedPlanetSector, [
         new Planet('visited-habitable-planet', null, 'ocean', 1.1, 1.2, true, 0.81, ['water_ice']),
     ]));
@@ -6127,7 +6167,7 @@ if ($currentProbe !== null) {
     $grid = new SectorGrid();
     $neighbors = $grid->getNeighbors($currentProbe->currentSector);
     $visitedNeighbor = $neighbors[0];
-    $visitedSectors->markVisited($player, $visitedNeighbor);
+    $visitedSectors->markVisited($player, $currentProbe, $visitedNeighbor);
     $sectorRepository->save(new SectorContent($visitedNeighbor, [
         new DormantConstruct('api-visited-dormant-construct'),
     ]));
@@ -6828,6 +6868,7 @@ foreach ([
     'GET /api/probe/messages/sent',
     'GET /api/probe/1/logbook-pages',
     'POST /api/probe/1/logbook-page',
+    'GET /api/visited-sectors',
     'GET /api/probe/visited-sectors',
     'GET /api/probe/sector',
     'GET /api/sector?x=0&y=0&z=0',

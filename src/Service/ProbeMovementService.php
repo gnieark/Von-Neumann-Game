@@ -162,7 +162,7 @@ final class ProbeMovementService
             $this->applyIntersectorIntegrityLoss($probe, $movement);
             $this->probes->save($probe);
             $alreadyVisited = $this->visitedSectors->getVisitedSectorByPlayerId($probe->playerId, $movement->target) !== null;
-            $this->visitedSectors->markVisitedByPlayerId($probe->playerId, $movement->target);
+            $this->visitedSectors->markVisitedByProbe($probe->playerId, $probe->id, $movement->target);
             $this->createIntelligentLifeAlerts($probe, $movement);
             $this->createDormantConstructAlerts($probe, $movement);
             if (!$alreadyVisited) {
