@@ -121,7 +121,7 @@
       "orbital_cleanup": {
         "weight": 0
       },
-      "exodus": {
+      "oracle": {
         "weight": 0
       },
       "genetic_ark": {

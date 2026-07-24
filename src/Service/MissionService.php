@@ -23,11 +23,14 @@ use VonNeumannGame\Sector\SectorService;
 final class MissionService
 {
     public const SCENARIO_RETURN_TO_SPACE_PROGRAM = 'return_to_space_program';
+    public const SCENARIO_ORACLE = 'oracle';
     public const FIRST_CONTACT_SIGNAL = '-- --- ----- -------';
     public const FIRST_CONTACT_FULL_REPLY = '-- --- ----- ------- -----------';
     public const FIRST_CONTACT_SHORT_REPLY = '-----------';
+    public const ORACLE_INITIAL_MESSAGE = "To you who are listening.\n\nIf you understand this message, then our calculation was correct. We do not know who you are. We do not know what world you come from.\n\nWe know only that one day, a machine capable of traveling between the stars would pass near our sun.\n\nOur planet is cooling, and we cannot prevent it. For a long time, we hoped to leave. We failed.\n\nWe did not have enough time to build an ark. We can only preserve what we are. Several genetic capsules are in orbit around our world.\n\nThey contain the information needed to reconstruct our biosphere. Not only our species.\n\nOur entire planet.";
 
     private const FIRST_CONTACT_MISSION_TYPE = 'first_contact.return_to_space_program';
+    private const ORACLE_MISSION_TYPE = 'first_contact.oracle';
     private const FIRST_CONTACT_REPLY_STEP_UID = 'decode_prime_signal';
     private const FIRST_CONTACT_WAIT_STEP_UID = 'await_planetary_reply';
     private const FIRST_CONTACT_DELIVER_METALS_STEP_UID = 'deliver_required_metals';
@@ -91,11 +94,11 @@ final class MissionService
         ?int $movementId = null,
     ): ?Mission {
         $scenario = $this->selectIntelligentLifeScenario($probe, $sector, $planet);
-        if ($scenario !== self::SCENARIO_RETURN_TO_SPACE_PROGRAM) {
-            return null;
-        }
-
-        return $this->startReturnToSpaceProgram($probe, $sector, $planet, $movementId);
+        return match ($scenario) {
+            self::SCENARIO_RETURN_TO_SPACE_PROGRAM => $this->startReturnToSpaceProgram($probe, $sector, $planet, $movementId),
+            self::SCENARIO_ORACLE => $this->startOracle($probe, $sector, $planet, $movementId),
+            default => null,
+        };
     }
 
     public function handlePlanetReply(NeumannProbe $probe, string $planetId, string $body): ?Mission
@@ -918,6 +921,52 @@ final class MissionService
         );
     }
 
+    private function startOracle(NeumannProbe $probe, SectorCoordinates $sector, Planet $planet, ?int $movementId): Mission
+    {
+        $planetName = $this->publicPlanetName($planet, $sector);
+        $uid = $this->oracleMissionUid($probe, $sector, $planet);
+        $existing = $this->missions->findByUidForPlayer($probe->playerId, $uid);
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $this->messages?->createForEndpoints(
+            ProbeMessage::ENDPOINT_PLANET,
+            $planet->getId(),
+            $planetName,
+            null,
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $probe->id,
+            null,
+            $probe->id,
+            $sector,
+            self::ORACLE_INITIAL_MESSAGE,
+        );
+
+        return $this->startMission(
+            $probe,
+            self::ORACLE_MISSION_TYPE,
+            'Oracle',
+            'Une civilisation mourante vous a transmis l\'emplacement de capsules génétiques en orbite autour de son monde.',
+            Mission::STEP_ORDER_SEQUENTIAL,
+            [
+                'scenario' => self::SCENARIO_ORACLE,
+                'planetId' => $planet->getId(),
+                'planetName' => $planetName,
+                'sector' => $sector->toArray(),
+                'initialMessage' => self::ORACLE_INITIAL_MESSAGE,
+            ],
+            [
+                'type' => 'intelligent_life_first_contact',
+                'movementId' => $movementId,
+                'planetId' => $planet->getId(),
+                'sector' => $sector->toArray(),
+            ],
+            [],
+            $uid,
+        );
+    }
+
     private function selectIntelligentLifeScenario(NeumannProbe $probe, SectorCoordinates $sector, Planet $planet): ?string
     {
         $scenarios = Config::getArray($this->gameplayConfig, 'intelligentLife.scenarios', []);
@@ -980,6 +1029,16 @@ final class MissionService
             $sector->toKey(),
             $planetId,
             self::SCENARIO_RETURN_TO_SPACE_PROGRAM,
+        ])), 0, 20);
+    }
+
+    private function oracleMissionUid(NeumannProbe $probe, SectorCoordinates $sector, Planet $planet): string
+    {
+        return 'mis_oracle_' . substr(hash('sha256', implode('|', [
+            $probe->playerId,
+            $sector->toKey(),
+            $planet->getId(),
+            self::SCENARIO_ORACLE,
         ])), 0, 20);
     }
 

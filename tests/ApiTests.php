@@ -4037,6 +4037,34 @@ if ($damageWarningProbe !== null) {
     }
 }
 
+$oraclePlayer = $auth->registerPlayerWithPassword('oracle-contact', 'secret', 'Oracle Contact', 'Oracle probe');
+$oracleProbe = $probes->findByPlayerId($oraclePlayer->id);
+if ($oracleProbe !== null) {
+    $oracleSector = $oracleProbe->currentSector->add(3, 1, 0);
+    $oraclePlanet = new Planet('oracle-planet', 'Oracle world', 'frozen', 1.0, 1.0, true, 0.75, ['water_ice'], intelligentLife: true);
+    $oracleMissionService = new MissionService(
+        $missions,
+        $messages,
+        ['intelligentLife' => ['scenarios' => ['oracle' => ['weight' => 100]]]],
+        'oracle-test-world',
+        $sectorService,
+        $probes,
+        $players,
+    );
+
+    $oracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet, 4242);
+    $test->assertEquals('first_contact.oracle', $oracleMission?->type, 'Oracle intelligent-life contact creates the Oracle mission');
+    $test->assertEquals('oracle', $oracleMission?->metadata['scenario'] ?? null, 'Oracle mission stores its scenario key');
+    $test->assertEquals([], $oracleMission?->steps ?? null, 'first Oracle implementation does not invent later mission steps');
+    $oracleMessages = $messages->receivedByProbe($oracleProbe->id);
+    $test->assertEquals(MissionService::ORACLE_INITIAL_MESSAGE, $oracleMessages[0]->body ?? null, 'Oracle planet directly sends the translated initial message');
+    $test->assertEquals(ProbeMessage::ENDPOINT_PLANET, $oracleMessages[0]->senderType ?? null, 'Oracle initial message comes from the planet');
+
+    $sameOracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet, 4242);
+    $test->assertEquals($oracleMission?->uid, $sameOracleMission?->uid, 'Oracle scenario initialization is idempotent');
+    $test->assertEquals(1, $messages->countReceivedByProbe($oracleProbe->id), 'Oracle initial message is sent only once');
+}
+
 $intelligentLifePlayer = $auth->registerPlayerWithPassword('life-alert', 'secret', 'Life Alert', 'Life probe');
 $intelligentLifeProbe = $probes->findByPlayerId($intelligentLifePlayer->id);
 $intelligentLifeSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'life-alert', 'password' => 'secret'], JSON_THROW_ON_ERROR));

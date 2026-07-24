@@ -1,5 +1,7 @@
 # Changelog
 
+- Scénario : ajout de la première étape de la mission `oracle` ; lors du premier contact, la planète envoie directement son message sur les capsules génétiques orbitales, sans énigme préalable.
+
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-07-22
