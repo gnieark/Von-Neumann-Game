@@ -7,17 +7,21 @@ namespace VonNeumannGame\Service;
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\MissionStep;
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
+use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorService;
 
 final class MissionService
@@ -28,6 +32,7 @@ final class MissionService
     public const FIRST_CONTACT_FULL_REPLY = '-- --- ----- ------- -----------';
     public const FIRST_CONTACT_SHORT_REPLY = '-----------';
     public const ORACLE_INITIAL_MESSAGE = "To you who are listening.\n\nIf you understand this message, then our calculation was correct. We do not know who you are. We do not know what world you come from.\n\nWe know only that one day, a machine capable of traveling between the stars would pass near our sun.\n\nOur planet is cooling, and we cannot prevent it. For a long time, we hoped to leave. We failed.\n\nWe did not have enough time to build an ark. We can only preserve what we are. Several genetic capsules are in orbit around our world.\n\nThey contain the information needed to reconstruct our biosphere. Not only our species.\n\nOur entire planet.";
+    public const ORACLE_ARCHIVES_ALERT = 'Two biological archives are drifting in this sector. The inhabitants of the planet would like you to recover them and deposit them on a habitable planet with a habitability score above 0.5.';
 
     private const FIRST_CONTACT_MISSION_TYPE = 'first_contact.return_to_space_program';
     private const ORACLE_MISSION_TYPE = 'first_contact.oracle';
@@ -54,6 +59,7 @@ final class MissionService
         private readonly ?SectorService $sectors = null,
         private readonly ?NeumannProbeRepository $probes = null,
         private readonly ?PlayerRepository $players = null,
+        private readonly ?ProbeDamageWarningRepository $alerts = null,
     ) {}
 
     /**
@@ -942,6 +948,7 @@ final class MissionService
             $sector,
             self::ORACLE_INITIAL_MESSAGE,
         );
+        $this->createOracleBiologicalArchives($probe, $sector, $movementId);
 
         return $this->startMission(
             $probe,
@@ -964,6 +971,38 @@ final class MissionService
             ],
             [],
             $uid,
+        );
+    }
+
+    private function createOracleBiologicalArchives(NeumannProbe $probe, SectorCoordinates $sector, ?int $movementId): void
+    {
+        if ($this->sectors === null) {
+            return;
+        }
+
+        $objectId = SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE);
+        $sectorContent = $this->sectors->getOrCreateSector($sector);
+        $existing = $sectorContent->findObjectById($objectId);
+        if (!$existing instanceof SectorDriftingItem) {
+            $sectorContent->addObject(new SectorDriftingItem(
+                $objectId,
+                ProbeItem::BIOLOGICAL_ARCHIVE_NAME,
+                ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
+                2,
+                Manny::CONTAINER_SPACE,
+                description: 'Genetic material intended to reconstruct an entire biosphere.',
+            ));
+            $this->sectors->saveSector($sectorContent);
+        }
+
+        $this->alerts?->createSectorObjectDetectedAlert(
+            $probe->id,
+            $movementId,
+            $sector,
+            $objectId,
+            'drifting_item',
+            'Biological archives',
+            self::ORACLE_ARCHIVES_ALERT,
         );
     }
 

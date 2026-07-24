@@ -4050,19 +4050,31 @@ if ($oracleProbe !== null) {
         $sectorService,
         $probes,
         $players,
+        $damageWarnings,
     );
 
-    $oracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet, 4242);
+    $sectorRepository->save(new SectorContent($oracleSector, [$oraclePlanet]));
+    $oracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet);
     $test->assertEquals('first_contact.oracle', $oracleMission?->type, 'Oracle intelligent-life contact creates the Oracle mission');
     $test->assertEquals('oracle', $oracleMission?->metadata['scenario'] ?? null, 'Oracle mission stores its scenario key');
     $test->assertEquals([], $oracleMission?->steps ?? null, 'first Oracle implementation does not invent later mission steps');
     $oracleMessages = $messages->receivedByProbe($oracleProbe->id);
     $test->assertEquals(MissionService::ORACLE_INITIAL_MESSAGE, $oracleMessages[0]->body ?? null, 'Oracle planet directly sends the translated initial message');
     $test->assertEquals(ProbeMessage::ENDPOINT_PLANET, $oracleMessages[0]->senderType ?? null, 'Oracle initial message comes from the planet');
+    $oracleArchives = $sectorRepository->load($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE));
+    $test->assert($oracleArchives instanceof SectorDriftingItem, 'Oracle contact places biological archives in open-space drift');
+    $test->assertEquals(2, $oracleArchives instanceof SectorDriftingItem ? $oracleArchives->getQuantity() : null, 'Oracle contact places two biological archives');
+    $test->assertEquals(0.05, $oracleArchives instanceof SectorDriftingItem ? $oracleArchives->getContainerSpace() : null, 'each biological archive occupies the same ECE volume as a Manny');
+    $test->assertEquals(ProbeItem::BIOLOGICAL_ARCHIVE_NAME, $oracleArchives?->getName(), 'biological archive uses its English canonical name');
+    $oracleAlerts = $damageWarnings->findByProbeId($oracleProbe->id);
+    $test->assertEquals(MissionService::ORACLE_ARCHIVES_ALERT, $oracleAlerts[0]->message ?? null, 'Oracle contact alerts the probe about the drifting biological archives');
+    $test->assertEquals('drifting_item', $oracleAlerts[0]->containerId ?? null, 'Oracle archive alert identifies a drifting item');
 
-    $sameOracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet, 4242);
+    $sameOracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet);
     $test->assertEquals($oracleMission?->uid, $sameOracleMission?->uid, 'Oracle scenario initialization is idempotent');
     $test->assertEquals(1, $messages->countReceivedByProbe($oracleProbe->id), 'Oracle initial message is sent only once');
+    $test->assertEquals(2, $sectorRepository->load($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE))?->getQuantity(), 'Oracle initialization does not duplicate biological archives');
+    $test->assertEquals(1, count($damageWarnings->findByProbeId($oracleProbe->id)), 'Oracle initialization does not duplicate its archive alert');
 }
 
 $intelligentLifePlayer = $auth->registerPlayerWithPassword('life-alert', 'secret', 'Life Alert', 'Life probe');
