@@ -1,5 +1,7 @@
 # Changelog
 
+- Interface : `/inventories` propose de nouveau les relais SCUT dans les éléments filtrables de “Manage storage rules by container”, même lorsqu’aucun relais n’est actuellement en stock.
+
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-07-24

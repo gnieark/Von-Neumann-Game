@@ -500,6 +500,7 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"<details class=\"storage-rules\"" + (keepOpen ? " open" : "")'), 'inventories refresh preserves an opened storage-rules accordion');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'const excludedStorageRuleTypes = new Set'), 'inventories JS declares storage-rule filter exclusions');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"atomic_3d_printer",') && str_contains($inventoriesScript, '"additional_container",'), 'inventories JS excludes atomic printers and additional containers from storage-rule filters');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay",'), 'inventories JS always exposes SCUT relays in storage-rule filters');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'probeApiPath("/storage-containers/" + encodeURIComponent(containerId))'), 'inventories JS renames containers through the selected-probe storage-container PATCH endpoint');
