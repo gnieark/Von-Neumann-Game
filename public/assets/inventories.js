@@ -390,6 +390,7 @@
         "linear_actuator",
         "deuterium_engine",
         "scut_relay",
+        "scut_transit_beacon",
     ];
     const excludedStorageRuleTypes = new Set([
         "atomic_3d_printer",
