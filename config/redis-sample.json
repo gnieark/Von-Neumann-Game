@@ -1,0 +1,13 @@
+{
+  "host": "127.0.0.1",
+  "port": 6379,
+  "database": 0,
+  "password": null,
+  "connectTimeoutSeconds": 1.0,
+  "keyPrefix": "vng:",
+  "rateLimit": {
+    "enabled": true,
+    "maxRequests": 60,
+    "windowSeconds": 60
+  }
+}

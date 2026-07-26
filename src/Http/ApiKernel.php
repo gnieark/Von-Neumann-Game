@@ -32,6 +32,7 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeLogbookRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\RateLimit\TokenRateLimiter;
 use VonNeumannGame\Service\MannyActionException;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MissionService;
@@ -51,7 +52,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 100;
+    public const API_VERSION = 101;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -76,6 +77,7 @@ final class ApiKernel
         private readonly ScutNetworkService $scut,
         private readonly array $gameplayConfig = [],
         private readonly ?ProbeImprovementRepository $improvements = null,
+        private readonly ?TokenRateLimiter $rateLimiter = null,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -316,12 +318,38 @@ final class ApiKernel
             return ApiResponse::error(405, 'method_not_allowed', 'Method not allowed');
         }
 
-        $player = $this->auth->getPlayerFromBearerToken($this->authorizationHeader($headers));
+        $authorization = $this->authorizationHeader($headers);
+        $player = $this->auth->getPlayerFromBearerToken($authorization);
         if ($player === null) {
             return ApiResponse::error(401, 'unauthorized', 'Missing or invalid bearer token');
         }
 
-        return $handler($player);
+        $token = $this->bearerToken($authorization);
+        if ($this->rateLimiter === null || $token === null) {
+            return $handler($player);
+        }
+
+        $decision = $this->rateLimiter->check($token);
+        if (!$decision->available) {
+            return $handler($player);
+        }
+
+        $headers = [
+            'Content-Type' => 'application/json',
+            'X-RateLimit-Limit' => (string) $decision->limit,
+            'X-RateLimit-Remaining' => (string) $decision->remaining,
+            'X-RateLimit-Reset' => (string) $decision->resetAt,
+        ];
+        if (!$decision->allowed) {
+            $headers['Retry-After'] = (string) $decision->retryAfterSeconds;
+            $error = ApiResponse::error(429, 'rate_limit_exceeded', 'Too many API requests for this bearer token.');
+
+            return new ApiResponse($error->status, $error->body, $headers);
+        }
+
+        $response = $handler($player);
+
+        return new ApiResponse($response->status, $response->body, array_merge($response->headers, $headers));
     }
 
     private function protectedProbeRoute(ApiRouteContext $ctx, callable $handler, int $probeId, array $allowedMethods): ApiResponse
@@ -2250,5 +2278,16 @@ final class ApiKernel
         }
 
         return null;
+    }
+
+    private function bearerToken(?string $authorizationHeader): ?string
+    {
+        if ($authorizationHeader === null || !preg_match('/^Bearer\s+(.+)$/i', $authorizationHeader, $matches)) {
+            return null;
+        }
+
+        $token = trim($matches[1]);
+
+        return $token === '' ? null : $token;
     }
 }

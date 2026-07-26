@@ -28,6 +28,10 @@ use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
 use VonNeumannGame\FrontRoute\MenuLinkItem;
 use VonNeumannGame\Http\ApiKernel;
+use VonNeumannGame\RateLimit\RateLimitDecision;
+use VonNeumannGame\RateLimit\RedisScriptExecutor;
+use VonNeumannGame\RateLimit\RedisTokenRateLimiter;
+use VonNeumannGame\RateLimit\TokenRateLimiter;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
@@ -127,6 +131,47 @@ final class TestRunner
     }
 }
 
+final class RecordingRedisScriptExecutor implements RedisScriptExecutor
+{
+    public string $script = '';
+    public array $arguments = [];
+    public int $keyCount = 0;
+
+    public function __construct(private readonly mixed $result, private readonly ?\Throwable $failure = null) {}
+
+    public function evaluate(string $script, array $arguments, int $keyCount): mixed
+    {
+        $this->script = $script;
+        $this->arguments = $arguments;
+        $this->keyCount = $keyCount;
+        if ($this->failure !== null) {
+            throw $this->failure;
+        }
+
+        return $this->result;
+    }
+}
+
+final class QueueTokenRateLimiter implements TokenRateLimiter
+{
+    /** @var list<RateLimitDecision> */
+    private array $decisions;
+    /** @var list<string> */
+    public array $tokens = [];
+
+    public function __construct(RateLimitDecision ...$decisions)
+    {
+        $this->decisions = $decisions;
+    }
+
+    public function check(string $token): RateLimitDecision
+    {
+        $this->tokens[] = $token;
+
+        return array_shift($this->decisions) ?? RateLimitDecision::unavailable();
+    }
+}
+
 function removeDirectory(string $directory): void
 {
     if (!is_dir($directory)) {
@@ -222,6 +267,26 @@ class TestUnavailablePasswordAuthRoute extends FrontRouteAuthByPwd
 }
 
 $test = new TestRunner();
+
+$redisConfig = (new JsonConfigLoader(dirname(__DIR__)))->load('redis');
+$test->assertEquals(60, $redisConfig['rateLimit']['maxRequests'] ?? null, 'Redis config defaults API rate limiting to 60 requests');
+$test->assertEquals(60, $redisConfig['rateLimit']['windowSeconds'] ?? null, 'Redis config defaults API rate limiting to a 60-second window');
+$rateLimitRedis = new RecordingRedisScriptExecutor([1, 60, 59, 0, 1_750_000_060]);
+$rateLimiter = new RedisTokenRateLimiter($rateLimitRedis, 60, 60, 'test:');
+$allowedRateLimit = $rateLimiter->check('top-secret-bearer-token');
+$test->assert($allowedRateLimit->allowed, 'Redis rate limiter accepts an available request');
+$test->assertEquals(59, $allowedRateLimit->remaining, 'Redis rate limiter exposes remaining requests');
+$test->assertEquals(1, $rateLimitRedis->keyCount, 'Redis rate limiter sends one key to its atomic script');
+$test->assertEquals('test:rate-limit:api:token:' . hash('sha256', 'top-secret-bearer-token'), $rateLimitRedis->arguments[0] ?? null, 'Redis rate limiter keys counters by a token hash');
+$test->assert(!str_contains((string) ($rateLimitRedis->arguments[0] ?? ''), 'top-secret-bearer-token'), 'Redis rate limiter never places the clear bearer token in its key');
+$test->assert(str_contains($rateLimitRedis->script, "redis.call('TIME')"), 'Redis rate limiter uses Redis server time');
+$test->assert(str_contains($rateLimitRedis->script, "redis.call('ZREMRANGEBYSCORE'"), 'Redis rate limiter removes expired sliding-window entries atomically');
+$test->assert(str_contains($rateLimitRedis->script, "redis.call('ZADD'"), 'Redis rate limiter records accepted requests atomically');
+$rejectedRateLimit = (new RedisTokenRateLimiter(new RecordingRedisScriptExecutor([0, 60, 0, 17, 1_750_000_060])))->check('limited-token');
+$test->assert(!$rejectedRateLimit->allowed, 'Redis rate limiter exposes rejected requests');
+$test->assertEquals(17, $rejectedRateLimit->retryAfterSeconds, 'Redis rate limiter exposes the retry delay');
+$unavailableRateLimit = (new RedisTokenRateLimiter(new RecordingRedisScriptExecutor(null, new RuntimeException('offline'))))->check('fail-open-token');
+$test->assert($unavailableRateLimit->allowed && !$unavailableRateLimit->available, 'Redis rate limiter fails open when Redis is unavailable');
 $root = dirname(__DIR__);
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_api_tests_' . bin2hex(random_bytes(4));
 $dbPath = $tmp . DIRECTORY_SEPARATOR . 'database.sqlite';
@@ -1510,7 +1575,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(100, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(101, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -2397,6 +2462,39 @@ $headers = ['Authorization' => 'Bearer ' . $token];
 $me = $kernel->handle('GET', '/api/me', $headers);
 $test->assertEquals(200, $me->status, 'valid token allows GET /api/me');
 $test->assertEquals('remi', $me->body['player']['username'] ?? null, 'GET /api/me returns the player');
+$queuedRateLimiter = new QueueTokenRateLimiter(
+    new RateLimitDecision(true, 60, 12, 0, 1_750_000_060),
+    new RateLimitDecision(false, 60, 0, 17, 1_750_000_060),
+);
+$rateLimitedKernel = new ApiKernel(
+    $auth,
+    $players,
+    $probes,
+    new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies),
+    $movementService,
+    $visitedSectors,
+    $mannyService,
+    $items,
+    $storage,
+    $messages,
+    $logbook,
+    $damageWarnings,
+    $forum,
+    $missionService,
+    $reinstantiation,
+    $scut,
+    improvements: $probeImprovements,
+    rateLimiter: $queuedRateLimiter,
+);
+$rateLimitedAllowed = $rateLimitedKernel->handle('GET', '/api/me', $headers);
+$test->assertEquals(200, $rateLimitedAllowed->status, 'rate limiter lets an allowed authenticated API request reach its handler');
+$test->assertEquals('60', $rateLimitedAllowed->headers['X-RateLimit-Limit'] ?? null, 'allowed API response exposes the configured rate limit');
+$test->assertEquals('12', $rateLimitedAllowed->headers['X-RateLimit-Remaining'] ?? null, 'allowed API response exposes the remaining rate limit');
+$rateLimitedRejected = $rateLimitedKernel->handle('GET', '/api/me', $headers);
+$test->assertEquals(429, $rateLimitedRejected->status, 'rate limiter rejects a bearer token over its sliding-window limit');
+$test->assertEquals('rate_limit_exceeded', $rateLimitedRejected->body['error']['code'] ?? null, 'rate limit rejection exposes a stable API error code');
+$test->assertEquals('17', $rateLimitedRejected->headers['Retry-After'] ?? null, 'rate limit rejection tells clients when to retry');
+$test->assertEquals([(string) $token, (string) $token], $queuedRateLimiter->tokens, 'rate limiter receives the normalized bearer token for every authenticated request');
 $sessionTouchHash = SessionRepository::hashToken((string) $token);
 $setSessionLastUsed = $pdo->prepare('UPDATE sessions SET last_used_at = :last_used_at WHERE token_hash = :hash');
 $getSessionLastUsed = $pdo->prepare('SELECT last_used_at FROM sessions WHERE token_hash = :hash');
