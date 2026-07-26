@@ -1,5 +1,10 @@
 # Changelog
 
+Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
+
+## 2026-07-26
+
+### Changed
 - Interface : `/mannies` rafraîchit immédiatement les alertes de la sonde sélectionnée lorsqu’une Manny termine un largage de conteneur sur une planète.
 - Scénario Oracle : si les archives biologiques sont larguées sur une destination invalide et que la mission échoue, la planète demandeuse perd définitivement son statut de planète habitée.
 - Scénario Oracle : une planète dont la mission a été validée peut être consultée par tout joueur présent dans son secteur, avec un unique délai de 24 heures partagé entre tous ses visiteurs.
@@ -9,7 +14,6 @@
 - Scénario Oracle : une mission terminée permet désormais d’envoyer à la planète le `username` d’un joueur pour recevoir la direction approximative normalisée de sa sonde par défaut et sa distance ; une recherche réussie applique un délai partagé de 24 heures, contrairement aux noms inconnus.
 - Interface : `/inventories` propose de nouveau les relais SCUT et les balises de transit SCUT dans les éléments filtrables de “Manage storage rules by container”, même lorsqu’aucun exemplaire n’est actuellement en stock.
 
-Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-07-24
 
