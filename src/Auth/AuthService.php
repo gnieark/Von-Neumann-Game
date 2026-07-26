@@ -55,7 +55,7 @@ final class AuthService
         $this->authMethods->addPasswordAuth($player->id, $passwordHash);
         $probe = $this->probes->createForPlayer($player->id, $probeName ?? 'Probe of ' . $username, $home);
         $this->mannies?->ensureDefaultsForProbe($probe);
-        $this->visitedSectors->markVisited($player, $home);
+        $this->visitedSectors->markVisited($player, $probe, $home);
 
         return $player;
     }
@@ -77,7 +77,7 @@ final class AuthService
         $this->authMethods->addExternalAuth($player->id, $provider, $providerUserId);
         $probe = $this->probes->createForPlayer($player->id, 'Sonde de ' . $pseudonym, $home);
         $this->mannies?->ensureDefaultsForProbe($probe);
-        $this->visitedSectors->markVisited($player, $home);
+        $this->visitedSectors->markVisited($player, $probe, $home);
 
         return $player;
     }

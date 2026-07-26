@@ -1,8 +1,17 @@
 # Changelog
 
 - Scénario : ajout de la première étape de la mission `oracle` ; lors du premier contact, la planète envoie directement son message, place deux `biological_archive` récupérables en dérive et alerte la sonde de leur destination souhaitée, sans énigme préalable.
+- Interface : `/inventories` propose de nouveau les relais SCUT et les balises de transit SCUT dans les éléments filtrables de “Manage storage rules by container”, même lorsqu’aucun exemplaire n’est actuellement en stock.
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
+
+## 2026-07-24
+
+### Changed
+
+- API v100 : les secteurs visités sont désormais historisés par sonde. `GET /api/probe/{probeId}/visited-sectors` et sa variante pour la sonde par défaut ne renvoient que l’historique de cette sonde.
+- API v100 : ajout de `GET /api/visited-sectors`, qui renvoie l’ensemble dédupliqué des secteurs visités par toutes les sondes du joueur.
+- Maintenance : ajout de `scripts/migrate-visited-sectors-to-probes.php` pour reconstruire l’historique par sonde depuis les mouvements lors du déploiement.
 
 ## 2026-07-22
 

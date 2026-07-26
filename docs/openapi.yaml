@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '99'
+  version: '100'
 servers:
   - url: /
     description: Current host
@@ -20,7 +20,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 99
+                apiVersion: 100
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1221,13 +1221,26 @@ paths:
       $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/patch'
   /api/probe/{probeId}/visited-sectors:
     get:
-      summary: List sectors already visited by the current probe
+      summary: List sectors already visited by the requested probe
       description: >
-        Returns the authenticated player's visited-sector history for the
-        current probe. Coordinates are relative to the player's home sector and
+        Returns only the requested probe's visited-sector history. Coordinates
+        are relative to the player's home sector and
         sorted by most recent visit first.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
+      responses:
+        '200':
+          $ref: '#/paths/~1api~1probe~1visited-sectors/get/responses/200'
+        '401':
+          $ref: '#/paths/~1api~1probe~1visited-sectors/get/responses/401'
+  /api/visited-sectors:
+    get:
+      summary: List all sectors visited by the authenticated player
+      description: >
+        Returns the union of sectors visited by all probes owned by the
+        authenticated player. A sector visited by several probes appears once;
+        its dates span all probes and its visit count is cumulative.
+        Coordinates are relative to the player's home sector.
       responses:
         '200':
           $ref: '#/paths/~1api~1probe~1visited-sectors/get/responses/200'
