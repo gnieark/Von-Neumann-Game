@@ -116,13 +116,13 @@
   "intelligentLife": {
     "scenarios": {
       "return_to_space_program": {
-        "weight": 100
+        "weight": 0
       },
       "orbital_cleanup": {
         "weight": 0
       },
       "oracle": {
-        "weight": 0,
+        "weight": 100,
         "minimumDestinationHabitabilityScore": 0.5,
         "queryCooldownSeconds": 86400
       },
