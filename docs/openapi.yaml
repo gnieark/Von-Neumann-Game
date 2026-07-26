@@ -1320,6 +1320,61 @@ paths:
           $ref: '#/paths/~1api~1probe~1mannies/get/responses/200'
         '401':
           $ref: '#/paths/~1api~1probe~1mannies/get/responses/401'
+  /api/probe/{probeId}/mannies/tasks:
+    post:
+      summary: Assign tasks to several Mannies atomically
+      description: >
+        Applies the tasks in request order using the same validation and
+        payload contract as each corresponding
+        `/api/probe/{probeId}/mannies/{mannyId}/{task}` endpoint. The whole
+        batch is atomic: if one task is rejected, none of its tasks are
+        retained. An error identifies the rejected zero-based `taskIndex`.
+        A Manny may occur only once in a batch.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyTaskBatchRequest'
+            example:
+              tasks:
+                - mannyId: mny_8d4a2c1f5a91b334
+                  task: repair
+                  payload:
+                    integrityPercent: 2
+                - mannyId: mny_07bf5aa714c84d11
+                  task: mine
+                  payload:
+                    objectId: asteroid-42
+                    resources: [metals]
+                    targetAmount: 0.02
+      responses:
+        '202':
+          description: All Manny tasks accepted, in request order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MannyTaskBatchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: At least one Manny or the probe is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: At least one task lacks resources or cannot be fulfilled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
@@ -5652,6 +5707,7 @@ components:
         resources:
           type: array
           minItems: 1
+          maxItems: 100
           uniqueItems: true
           items:
             $ref: '#/components/schemas/MineableResourceType'
@@ -5940,6 +5996,46 @@ components:
           $ref: '#/components/schemas/MannyCargo'
         canReceiveOrders:
           type: boolean
+    MannyTaskBatchRequest:
+      type: object
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [mannyId, task, payload]
+            properties:
+              mannyId:
+                type: string
+              task:
+                type: string
+                enum: [repair, mine, craft, salvage, install-bookmark, detach-storage-container, drop-storage-container, drop-manny-cargo, inspect-sector-object, recover-storage-container, refill-deuterium-tank, transfer-deuterium-to-probe, transfer-to-probe, turn-on-relay, install-scut-transit-beacon, improve-probe, assemble-probe, recall]
+              payload:
+                type: object
+                additionalProperties: true
+                description: Request body of the corresponding individual task endpoint.
+    MannyTaskBatchResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          description: Individual endpoint response bodies, in request order.
+          items:
+            type: object
+            required: [manny]
+            properties:
+              manny:
+                $ref: '#/components/schemas/Manny'
+              inventory:
+                $ref: '#/components/schemas/ProbeInventory'
+              improvements:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
     MannyLocation:
       type: object
       required: [type]

@@ -5,6 +5,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-07-26
 
 ### Changed
+- API v102 : ajout de `POST /api/probe/{probeId}/mannies/tasks` pour attribuer en une requête plusieurs tâches Manny, avec les mêmes payloads que les endpoints unitaires, des résultats ordonnés et une application atomique (tout le lot ou rien).
 - API v101 : les routes authentifiées sont limitées par token à 60 requêtes sur toute fenêtre glissante de 60 secondes via Redis et un script Lua atomique ; les réponses exposent les en-têtes de quota, les dépassements renvoient `429` avec `Retry-After`, et une indisponibilité Redis laisse temporairement passer les requêtes.
 - Interface : `/mannies` rafraîchit immédiatement les alertes de la sonde sélectionnée lorsqu’une Manny termine un largage de conteneur sur une planète.
 - Scénario Oracle : si les archives biologiques sont larguées sur une destination invalide et que la mission échoue, la planète demandeuse perd définitivement son statut de planète habitée.
