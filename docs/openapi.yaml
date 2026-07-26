@@ -992,7 +992,13 @@ paths:
         Probe recipients must be in the exact same sector as the sender probe,
         or both probes must be inside coverage of the same active SCUT relay
         network. Planet recipients must be inhabited planets in the current
-        sector. If the recipient type is omitted, `probe` is used.
+        sector. If the recipient type is omitted, `probe` is used. After
+        completing an Oracle mission, sending a player's exact username to the
+        Oracle planet produces a planet-originated reply containing the
+        approximate normalized direction vector and FCC distance to that
+        player's default probe. A successful lookup starts a player-wide
+        24-hour cooldown; unknown usernames do not consume it, while requests
+        during the cooldown receive a polite refusal.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       requestBody:

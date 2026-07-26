@@ -4182,6 +4182,44 @@ if ($oracleProbe !== null) {
     $test->assert(str_contains($oracleCompletionMessages[0]->body ?? '', 'Once every 24 hours'), 'Oracle reward announces the future daily probe-location service');
     $test->assert(!$oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'completed Oracle mission cannot emit its reward message twice');
     $test->assertEquals(1, $messages->countReceivedByProbe($oracleSecondProbe->id), 'Oracle completion message remains idempotent');
+
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), 'player-who-does-not-exist');
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_PLAYER_NOT_FOUND_REPLY, $oracleQueryMessages[0]->body ?? null, 'Oracle reports an unknown player username');
+    $oracleMissionAfterUnknownQuery = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assert(!isset($oracleMissionAfterUnknownQuery?->metadata['lastOracleQueryAt']), 'unknown Oracle targets do not consume the daily request');
+
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), $multiProbePlayer->username);
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $oracleSuccessfulReply = $oracleQueryMessages[0]->body ?? '';
+    $oracleTargetProbe = $probes->findByPlayerId($multiProbePlayer->id);
+    $oracleTargetVector = $oracleTargetProbe !== null ? $oracleTargetProbe->currentSector->subtract($oracleSecondProbe->currentSector) : ['x' => 0, 'y' => 0, 'z' => 0];
+    $oracleTargetMax = max(abs($oracleTargetVector['x']), abs($oracleTargetVector['y']), abs($oracleTargetVector['z']));
+    $oracleExpectedDirection = $oracleTargetMax === 0 ? ['x' => 0, 'y' => 0, 'z' => 0] : [
+        'x' => (int) round($oracleTargetVector['x'] * 50 / $oracleTargetMax),
+        'y' => (int) round($oracleTargetVector['y'] * 50 / $oracleTargetMax),
+        'z' => (int) round($oracleTargetVector['z'] * 50 / $oracleTargetMax),
+    ];
+    $oracleExpectedDistance = $oracleTargetProbe !== null ? (new SectorGrid())->getDistance($oracleSecondProbe->currentSector, $oracleTargetProbe->currentSector) : 0;
+    $test->assert(
+        str_contains($oracleSuccessfulReply, sprintf(
+            'Approximate direction vector: %d %d %d',
+            $oracleExpectedDirection['x'],
+            $oracleExpectedDirection['y'],
+            $oracleExpectedDirection['z'],
+        )),
+        'Oracle normalizes the player direction vector so its largest absolute component is 50',
+    );
+    $test->assert(str_contains($oracleSuccessfulReply, 'Distance: ' . $oracleExpectedDistance . ' sectors.'), 'Oracle reports the FCC sector distance to the player default probe');
+    $oracleMissionAfterSuccessfulQuery = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $lastOracleQueryAt = $oracleMissionAfterSuccessfulQuery?->metadata['lastOracleQueryAt'] ?? null;
+    $test->assert(is_string($lastOracleQueryAt), 'successful Oracle query stores its cooldown at player-mission level');
+
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), $multiProbePlayer->username);
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_COOLDOWN_REPLY, $oracleQueryMessages[0]->body ?? null, 'Oracle politely refuses a second successful lookup within 24 hours');
+    $oracleMissionAfterRefusal = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals($lastOracleQueryAt, $oracleMissionAfterRefusal?->metadata['lastOracleQueryAt'] ?? null, 'cooldown refusal does not extend the Oracle cooldown');
 }
 
 $failedOraclePlayer = $auth->registerPlayerWithPassword('oracle-failed', 'secret', 'Oracle Failed', 'Oracle failed probe');

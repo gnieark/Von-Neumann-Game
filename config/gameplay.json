@@ -123,7 +123,8 @@
       },
       "oracle": {
         "weight": 0,
-        "minimumDestinationHabitabilityScore": 0.5
+        "minimumDestinationHabitabilityScore": 0.5,
+        "queryCooldownSeconds": 86400
       },
       "genetic_ark": {
         "weight": 0

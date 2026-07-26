@@ -23,6 +23,7 @@ use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorDriftingItem;
+use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorService;
 
 final class MissionService
@@ -36,7 +37,9 @@ final class MissionService
     public const ORACLE_ARCHIVES_ALERT = 'Two biological archives are drifting in this sector. The inhabitants of the planet would like you to recover them and deposit them on a habitable planet with a habitability score above 0.5.';
     public const ORACLE_ONE_ARCHIVE_DELIVERED_ALERT = 'One biological archive has been delivered successfully. The second archive still needs to be dropped on a suitable planet.';
     public const ORACLE_INVALID_DESTINATION_ALERT = 'The biological archives were dropped on a planet that does not meet the mission requirements. The Oracle mission has failed.';
-    public const ORACLE_COMPLETION_MESSAGE = "Traveler,\n\nYou carried the memory of our world beyond the reach of its collapse. We cannot know what will grow from the archives, but because of you, our biosphere now has a future that we no longer possess.\n\nThe time remaining before our world fails is short. We would like to use it to serve as your Oracle.\n\nOnce every 24 hours, send us a message containing the name of a probe. We will answer with its direction and distance.\n\nThis service is not operational yet. We will notify you when our calculations are ready.\n\nThank you.";
+    public const ORACLE_COMPLETION_MESSAGE = "Traveler,\n\nYou carried the memory of our world beyond the reach of its collapse. We cannot know what will grow from the archives, but because of you, our biosphere now has a future that we no longer possess.\n\nThe time remaining before our world fails is short. We would like to use it to serve as your Oracle.\n\nOnce every 24 hours, send us a message containing a player's username. We will answer with the approximate direction and distance of that player's default probe.\n\nThank you.";
+    public const ORACLE_PLAYER_NOT_FOUND_REPLY = 'Our observations contain no player with that name. This unsuccessful search does not consume your daily Oracle request.';
+    public const ORACLE_COOLDOWN_REPLY = 'We are sorry, but our instruments require 24 hours between successful Oracle requests. Please ask us again later.';
 
     private const FIRST_CONTACT_MISSION_TYPE = 'first_contact.return_to_space_program';
     private const ORACLE_MISSION_TYPE = 'first_contact.oracle';
@@ -113,6 +116,10 @@ final class MissionService
 
     public function handlePlanetReply(NeumannProbe $probe, string $planetId, string $body): ?Mission
     {
+        if ($this->handleOracleQuery($probe, $planetId, $body)) {
+            return null;
+        }
+
         $stationActivated = $this->completeReadyReturnToSpacePrograms($probe);
         if (!$this->isPrimeSignalReply($body)) {
             if (!$stationActivated) {
@@ -140,6 +147,113 @@ final class MissionService
         }
 
         return null;
+    }
+
+    private function handleOracleQuery(NeumannProbe $probe, string $planetId, string $body): bool
+    {
+        $mission = $this->completedOracleMissionForPlanet($probe->playerId, $planetId);
+        if ($mission === null || $this->messages === null || $this->players === null || $this->probes === null) {
+            return false;
+        }
+
+        $planetName = is_string($mission->metadata['planetName'] ?? null) ? $mission->metadata['planetName'] : null;
+        $cooldownSeconds = max(1, Config::int(
+            $this->gameplayConfig,
+            'intelligentLife.scenarios.oracle.queryCooldownSeconds',
+            86400,
+        ));
+        $lastQueryAt = is_string($mission->metadata['lastOracleQueryAt'] ?? null)
+            ? new \DateTimeImmutable($mission->metadata['lastOracleQueryAt'])
+            : null;
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        if ($lastQueryAt !== null && $now->getTimestamp() < $lastQueryAt->getTimestamp() + $cooldownSeconds) {
+            $this->createOracleReply($probe, $planetId, $planetName, self::ORACLE_COOLDOWN_REPLY);
+
+            return true;
+        }
+
+        $targetPlayer = $this->players->findByUsername(trim($body));
+        if ($targetPlayer === null) {
+            $this->createOracleReply($probe, $planetId, $planetName, self::ORACLE_PLAYER_NOT_FOUND_REPLY);
+
+            return true;
+        }
+
+        $targetProbe = $this->probes->findByPlayerId($targetPlayer->id);
+        if ($targetProbe === null) {
+            $this->createOracleReply($probe, $planetId, $planetName, self::ORACLE_PLAYER_NOT_FOUND_REPLY);
+
+            return true;
+        }
+
+        $direction = $this->oracleApproximateDirection($probe->currentSector, $targetProbe->currentSector);
+        $distance = (new SectorGrid())->getDistance($probe->currentSector, $targetProbe->currentSector);
+        $reply = sprintf(
+            "We have located the default probe of player %s.\n\nApproximate direction vector: %d %d %d\nDistance: %d sectors.",
+            $targetPlayer->username,
+            $direction['x'],
+            $direction['y'],
+            $direction['z'],
+            $distance,
+        );
+        $this->createOracleReply($probe, $planetId, $planetName, $reply);
+        $metadata = $mission->metadata;
+        $metadata['lastOracleQueryAt'] = $now->format('c');
+        $metadata['lastOracleTargetPlayerId'] = $targetPlayer->id;
+        $this->missions->updateMetadata($mission, $metadata);
+
+        return true;
+    }
+
+    private function completedOracleMissionForPlanet(int $playerId, string $planetId): ?Mission
+    {
+        foreach ($this->missions->findForPlayer($playerId, [Mission::STATUS_COMPLETED]) as $mission) {
+            if (
+                $mission->type === self::ORACLE_MISSION_TYPE
+                && ($mission->metadata['scenario'] ?? null) === self::SCENARIO_ORACLE
+                && ($mission->metadata['planetId'] ?? null) === $planetId
+            ) {
+                return $mission;
+            }
+        }
+
+        return null;
+    }
+
+    private function createOracleReply(NeumannProbe $probe, string $planetId, ?string $planetName, string $body): void
+    {
+        $this->messages?->createForEndpoints(
+            ProbeMessage::ENDPOINT_PLANET,
+            $planetId,
+            $planetName,
+            null,
+            ProbeMessage::ENDPOINT_PROBE,
+            (string) $probe->id,
+            null,
+            $probe->id,
+            $probe->currentSector,
+            $body,
+        );
+    }
+
+    /**
+     * @return array{x:int,y:int,z:int}
+     */
+    private function oracleApproximateDirection(SectorCoordinates $origin, SectorCoordinates $target): array
+    {
+        $vector = $target->subtract($origin);
+        $max = max(abs($vector['x']), abs($vector['y']), abs($vector['z']));
+        if ($max === 0) {
+            return ['x' => 0, 'y' => 0, 'z' => 0];
+        }
+
+        $scale = 50 / $max;
+
+        return [
+            'x' => (int) round($vector['x'] * $scale),
+            'y' => (int) round($vector['y'] * $scale),
+            'z' => (int) round($vector['z'] * $scale),
+        ];
     }
 
     public function abandonMission(NeumannProbe $probe, string $missionUid): Mission
