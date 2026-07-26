@@ -17,6 +17,27 @@ use VonNeumannGame\Service\ProbeStorageService;
 final class ProbeManniesApiController
 {
     private const IDLE_REFRESH_DELAY_MS = 30000;
+    private const MAX_BATCH_TASKS = 100;
+    private const BATCH_ACTIONS = [
+        'repair',
+        'mine',
+        'craft',
+        'salvage',
+        'install-bookmark',
+        'detach-storage-container',
+        'drop-storage-container',
+        'drop-manny-cargo',
+        'inspect-sector-object',
+        'recover-storage-container',
+        'refill-deuterium-tank',
+        'transfer-deuterium-to-probe',
+        'transfer-to-probe',
+        'turn-on-relay',
+        'install-scut-transit-beacon',
+        'improve-probe',
+        'assemble-probe',
+        'recall',
+    ];
 
     public function __construct(
         private readonly NeumannProbeRepository $probes,
@@ -92,6 +113,84 @@ final class ProbeManniesApiController
             'manny' => $this->presenter->manny($player, $probe, $manny),
             'inventory' => $this->inventoryForProbe($probe)->toArray(),
         ]);
+    }
+
+    public function batchActions(Player $player, ?string $body, ?NeumannProbe $probe = null): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
+        $data = $this->decodeJsonBody($body);
+        $tasks = is_array($data) ? ($data['tasks'] ?? null) : null;
+        if (!is_array($tasks) || !array_is_list($tasks) || $tasks === []) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain a non-empty tasks list.');
+        }
+        if (count($tasks) > self::MAX_BATCH_TASKS) {
+            return ApiResponse::error(400, 'bad_request', 'A batch cannot contain more than 100 tasks.');
+        }
+
+        $normalizedTasks = [];
+        $seenMannyIds = [];
+        foreach ($tasks as $index => $task) {
+            if (!is_array($task)) {
+                return $this->batchTaskError($index, 'Each task must be an object.');
+            }
+
+            $mannyId = $task['mannyId'] ?? null;
+            $action = $task['task'] ?? null;
+            $payload = $task['payload'] ?? [];
+            if (!is_string($mannyId) || trim($mannyId) === '') {
+                return $this->batchTaskError($index, 'mannyId must be a non-empty string.');
+            }
+            if (!is_string($action) || !in_array($action, self::BATCH_ACTIONS, true)) {
+                return $this->batchTaskError($index, 'task is not a supported Manny action.');
+            }
+            if (!is_array($payload) || (array_is_list($payload) && $payload !== [])) {
+                return $this->batchTaskError($index, 'payload must be a JSON object.');
+            }
+            if (isset($seenMannyIds[$mannyId])) {
+                return $this->batchTaskError($index, 'A Manny can only occur once in a batch.');
+            }
+
+            $seenMannyIds[$mannyId] = true;
+            $normalizedTasks[] = [
+                'mannyId' => $mannyId,
+                'task' => $action,
+                'payload' => $payload,
+            ];
+        }
+
+        try {
+            $results = $this->probes->withProbeLock(
+                $probe->id,
+                function () use ($player, $probe, $normalizedTasks): array {
+                    $results = [];
+                    foreach ($normalizedTasks as $index => $task) {
+                        $response = $this->action(
+                            $player,
+                            $task['mannyId'],
+                            $task['task'],
+                            json_encode($task['payload'], JSON_THROW_ON_ERROR),
+                            $probe,
+                        );
+                        if ($response->status !== 202) {
+                            throw new BatchMannyActionRejected($index, $response);
+                        }
+                        $results[] = $response->body;
+                    }
+
+                    return $results;
+                },
+            );
+        } catch (BatchMannyActionRejected $rejected) {
+            $error = $rejected->response->body['error'] ?? [
+                'code' => 'bad_request',
+                'message' => 'Manny task rejected.',
+            ];
+            $error['details'] = array_merge($error['details'] ?? [], ['taskIndex' => $rejected->taskIndex]);
+
+            return new ApiResponse($rejected->response->status, ['error' => $error]);
+        }
+
+        return new ApiResponse(202, ['results' => $results]);
     }
 
     public function action(Player $player, string $uid, string $action, ?string $body, ?NeumannProbe $probe = null): ApiResponse
@@ -366,6 +465,11 @@ final class ProbeManniesApiController
         return null;
     }
 
+    private function batchTaskError(int $index, string $message): ApiResponse
+    {
+        return ApiResponse::error(400, 'bad_request', $message, ['taskIndex' => $index]);
+    }
+
     private function requiredProbe(Player $player): NeumannProbe
     {
         return $this->probes->findByPlayerId($player->id) ?? throw new \RuntimeException('Probe not found.');
@@ -394,5 +498,15 @@ final class ProbeManniesApiController
         }
 
         return is_array($decoded) ? $decoded : null;
+    }
+}
+
+final class BatchMannyActionRejected extends \RuntimeException
+{
+    public function __construct(
+        public readonly int $taskIndex,
+        public readonly ApiResponse $response,
+    ) {
+        parent::__construct('Manny batch action rejected.');
     }
 }

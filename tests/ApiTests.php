@@ -546,6 +546,7 @@ $test->assert(str_contains($openApi, 'summary: Update a Neumann probe'), 'OpenAP
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-sector-object'), 'OpenAPI documents the generic Manny sector-object inspection endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/transfer-to-probe'), 'OpenAPI documents the Manny probe transfer endpoint');
+$test->assert(str_contains($openApi, '/api/probe/{probeId}/mannies/tasks'), 'OpenAPI documents atomic Manny task batches');
 $test->assert(str_contains($openApi, 'transferring_to_probe'), 'OpenAPI documents the Manny probe transfer task type');
 $test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attach_to_probe]'), 'OpenAPI documents attach-to-probe storage detachment mode');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
@@ -1575,7 +1576,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(101, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(102, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5244,6 +5245,61 @@ $fourthMannyId = (string) ($mannyList->body['mannies'][3]['id'] ?? '');
 $test->assert(str_starts_with($firstMannyId, 'mny_'), 'Manny public API id is a stable generated uid');
 $test->assertEquals('manny-1', $mannyList->body['mannies'][0]['name'] ?? null, 'default Manny names are player-facing names');
 $test->assert(array_key_exists('taskEstimatedEndTime', $mannyList->body['mannies'][0] ?? []) && $mannyList->body['mannies'][0]['taskEstimatedEndTime'] === null, 'idle Manny exposes a null task estimated end time');
+
+$batchPlayer = $auth->registerPlayerWithPassword('manny-batch-user', 'secret', 'Manny Batch User');
+$batchHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($batchPlayer)['token']];
+$batchProbe = $probes->findByPlayerId($batchPlayer->id) ?? throw new RuntimeException('Expected Manny batch probe.');
+$batchProbe->currentSector = new SectorCoordinates(4550, 0, 0);
+$probes->save($batchProbe);
+$sectorRepository->save(new SectorContent($batchProbe->currentSector, [
+    new Asteroid('batch-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 1.0]),
+]));
+$batchMannyList = $kernel->handle('GET', '/api/probe/' . $batchProbe->id . '/mannies', $batchHeaders);
+$batchMannyIds = array_column($batchMannyList->body['mannies'] ?? [], 'id');
+$batchStart = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
+    'tasks' => [
+        [
+            'mannyId' => $batchMannyIds[0] ?? '',
+            'task' => 'mine',
+            'payload' => ['objectId' => 'batch-mine-rock', 'resource' => 'metals', 'targetAmount' => 0.01],
+        ],
+        [
+            'mannyId' => $batchMannyIds[1] ?? '',
+            'task' => 'mine',
+            'payload' => ['objectId' => 'batch-mine-rock', 'resources' => ['metals'], 'targetAmount' => 0.01],
+        ],
+    ],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(202, $batchStart->status, 'POST /api/probe/{probeId}/mannies/tasks accepts several Manny tasks');
+$test->assertEquals(2, count($batchStart->body['results'] ?? []), 'Manny task batch returns one ordered result per request');
+$test->assertEquals($batchMannyIds[0] ?? null, $batchStart->body['results'][0]['manny']['id'] ?? null, 'first Manny batch result identifies its Manny');
+$test->assertEquals($batchMannyIds[1] ?? null, $batchStart->body['results'][1]['manny']['id'] ?? null, 'second Manny batch result identifies its Manny');
+
+$batchRollback = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
+    'tasks' => [
+        [
+            'mannyId' => $batchMannyIds[2] ?? '',
+            'task' => 'mine',
+            'payload' => ['objectId' => 'batch-mine-rock', 'resource' => 'metals', 'targetAmount' => 0.01],
+        ],
+        [
+            'mannyId' => $batchMannyIds[3] ?? '',
+            'task' => 'mine',
+            'payload' => ['objectId' => 'batch-mine-rock'],
+        ],
+    ],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $batchRollback->status, 'Manny task batch reports an invalid task payload');
+$test->assertEquals(1, $batchRollback->body['error']['details']['taskIndex'] ?? null, 'Manny task batch identifies the rejected zero-based task index');
+$test->assertEquals(null, $mannies->findByUidForProbe($batchProbe->id, (string) ($batchMannyIds[2] ?? ''))?->currentTask, 'Manny task batch rolls back earlier accepted tasks when a later task fails');
+
+$duplicateBatchManny = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
+    'tasks' => [
+        ['mannyId' => $batchMannyIds[2] ?? '', 'task' => 'recall', 'payload' => []],
+        ['mannyId' => $batchMannyIds[2] ?? '', 'task' => 'recall', 'payload' => []],
+    ],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $duplicateBatchManny->status, 'Manny task batch rejects duplicate Manny ids');
 
 $foreignMannyOwner = $auth->registerPlayerWithPassword('foreign-manny-owner', 'secret', 'Foreign Manny Owner', 'Foreign Manny probe');
 $foreignMannyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($foreignMannyOwner)['token']];
