@@ -116,7 +116,7 @@
   "intelligentLife": {
     "scenarios": {
       "return_to_space_program": {
-        "weight": 0
+        "weight": 100
       },
       "orbital_cleanup": {
         "weight": 0
