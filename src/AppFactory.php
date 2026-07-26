@@ -32,6 +32,8 @@ use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\RateLimit\PhpRedisScriptExecutor;
+use VonNeumannGame\RateLimit\RedisTokenRateLimiter;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\MovementDurationCalculator;
@@ -106,8 +108,18 @@ final class AppFactory
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
+        $redisConfig = $this->redisConfig();
+        $rateLimitConfig = Config::getArray($redisConfig, 'rateLimit');
+        $rateLimiter = Config::bool($redisConfig, 'rateLimit.enabled', true)
+            ? new RedisTokenRateLimiter(
+                new PhpRedisScriptExecutor($redisConfig),
+                Config::int($rateLimitConfig, 'maxRequests', 60),
+                Config::int($rateLimitConfig, 'windowSeconds', 60),
+                (string) ($redisConfig['keyPrefix'] ?? 'vng:'),
+            )
+            : null;
 
-        return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements);
+        return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements, $rateLimiter);
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService
@@ -185,6 +197,11 @@ final class AppFactory
     public function universeConfig(): array
     {
         return $this->configLoader()->load('universe');
+    }
+
+    public function redisConfig(): array
+    {
+        return $this->configLoader()->load('redis');
     }
 
     private function absolutePath(string $path): string

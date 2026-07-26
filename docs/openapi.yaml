@@ -1,7 +1,13 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '100'
+  version: '101'
+  description: >
+    Authenticated endpoints are rate-limited per bearer token using a shared
+    sliding window. Successful responses expose X-RateLimit-Limit,
+    X-RateLimit-Remaining and X-RateLimit-Reset. A token over its limit
+    receives HTTP 429 with Retry-After. Authentication and API-version
+    endpoints are not rate-limited.
 servers:
   - url: /
     description: Current host
@@ -20,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 100
+                apiVersion: 101
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -81,6 +87,8 @@ paths:
                   forumModerator: false
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /api/me/api-key:
     post:
       summary: Create an API key for the authenticated player
@@ -3859,6 +3867,34 @@ components:
             error:
               code: unauthorized
               message: Missing or invalid bearer token
+    TooManyRequests:
+      description: Bearer token sliding-window rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds until this token may retry.
+          schema:
+            type: integer
+            minimum: 1
+        X-RateLimit-Limit:
+          description: Maximum accepted requests in the configured window.
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          description: Requests still available in the current sliding window.
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          description: Unix timestamp when the oldest counted request expires.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: rate_limit_exceeded
+              message: Too many API requests for this bearer token.
     Forbidden:
       description: Forbidden
       content:

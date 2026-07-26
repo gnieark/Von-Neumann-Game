@@ -5,6 +5,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-07-26
 
 ### Changed
+- API v101 : les routes authentifiées sont limitées par token à 60 requêtes sur toute fenêtre glissante de 60 secondes via Redis et un script Lua atomique ; les réponses exposent les en-têtes de quota, les dépassements renvoient `429` avec `Retry-After`, et une indisponibilité Redis laisse temporairement passer les requêtes.
 - Interface : `/mannies` rafraîchit immédiatement les alertes de la sonde sélectionnée lorsqu’une Manny termine un largage de conteneur sur une planète.
 - Scénario Oracle : si les archives biologiques sont larguées sur une destination invalide et que la mission échoue, la planète demandeuse perd définitivement son statut de planète habitée.
 - Scénario Oracle : une planète dont la mission a été validée peut être consultée par tout joueur présent dans son secteur, avec un unique délai de 24 heures partagé entre tous ses visiteurs.

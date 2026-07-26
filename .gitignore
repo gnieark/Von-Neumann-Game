@@ -1,5 +1,6 @@
 AGENTS.md
 /config/database.json
+/config/redis.json
 # Composer
 /vendor/
 
