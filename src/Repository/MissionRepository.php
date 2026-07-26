@@ -58,6 +58,33 @@ final class MissionRepository
     }
 
     /**
+     * @param array<string> $statuses
+     * @return array<Mission>
+     */
+    public function findByType(string $type, array $statuses): array
+    {
+        if ($statuses === []) {
+            return [];
+        }
+
+        $params = ['type' => $type];
+        $placeholders = [];
+        foreach (array_values($statuses) as $index => $status) {
+            $key = 'status_' . $index;
+            $params[$key] = $status;
+            $placeholders[] = ':' . $key;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM probe_missions
+             WHERE type = :type AND status IN (' . implode(', ', $placeholders) . ')
+             ORDER BY created_at ASC, id ASC'
+        );
+        $stmt->execute($params);
+
+        return array_map(fn(array $row): Mission => $this->hydrateMission($row, true), $stmt->fetchAll());
+    }
+
+    /**
      * @param array<string, mixed> $metadata
      * @param array<string, mixed>|null $createdByEvent
      * @param list<array{uid?:string,title:string,description?:?string,metadata?:array<string,mixed>}> $steps
@@ -161,6 +188,26 @@ final class MissionRepository
         ]);
 
         return $this->findByUidForPlayer($mission->playerId, $mission->uid) ?? throw new \RuntimeException('Mission failure update failed.');
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    public function updateMetadata(Mission $mission, array $metadata): Mission
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'UPDATE probe_missions
+             SET metadata_json = :metadata_json, updated_at = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id' => $mission->id,
+            'metadata_json' => $this->encodeJsonObject($metadata),
+            'updated_at' => $now,
+        ]);
+
+        return $this->findByUidForPlayer($mission->playerId, $mission->uid) ?? throw new \RuntimeException('Mission metadata update failed.');
     }
 
     /**

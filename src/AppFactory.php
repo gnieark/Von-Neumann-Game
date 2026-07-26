@@ -101,7 +101,7 @@ final class AppFactory
         $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig, mannies: $mannies);
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
-        $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players);
+        $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players, $damageWarnings);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
@@ -135,7 +135,7 @@ final class AppFactory
         $scutRelays = new ScutRelayRepository($pdo);
         $scutNetworks = new ScutNetworkRepository($pdo);
         $scut = new ScutNetworkService($scutRelays, $scutNetworks, $probes);
-        $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players);
+        $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players, $damageWarnings);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);

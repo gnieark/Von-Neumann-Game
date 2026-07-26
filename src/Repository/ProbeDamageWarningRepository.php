@@ -103,7 +103,7 @@ final class ProbeDamageWarningRepository
 
     public function createSectorObjectDetectedAlert(
         int $probeId,
-        int $movementId,
+        ?int $movementId,
         SectorCoordinates $sector,
         string $objectId,
         string $objectType,
@@ -341,20 +341,24 @@ final class ProbeDamageWarningRepository
         return $row ? $this->hydrate($row) : null;
     }
 
-    private function findByProbeMovementTypeAndObject(int $probeId, int $movementId, string $type, string $objectId): ?ProbeDamageWarning
+    private function findByProbeMovementTypeAndObject(int $probeId, ?int $movementId, string $type, string $objectId): ?ProbeDamageWarning
     {
+        $movementCondition = $movementId === null ? 'movement_id IS NULL' : 'movement_id = :movement_id';
         $stmt = $this->pdo->prepare(
             'SELECT * FROM probe_damage_warnings
-             WHERE probe_id = :probe_id AND movement_id = :movement_id AND type = :type AND object_id = :object_id
+             WHERE probe_id = :probe_id AND ' . $movementCondition . ' AND type = :type AND object_id = :object_id
              ORDER BY id ASC
              LIMIT 1'
         );
-        $stmt->execute([
+        $params = [
             'probe_id' => $probeId,
-            'movement_id' => $movementId,
             'type' => $type,
             'object_id' => $objectId,
-        ]);
+        ];
+        if ($movementId !== null) {
+            $params['movement_id'] = $movementId;
+        }
+        $stmt->execute($params);
         $row = $stmt->fetch();
 
         return $row ? $this->hydrate($row) : null;

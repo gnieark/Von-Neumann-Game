@@ -228,6 +228,23 @@
         return item;
     }
 
+    function hasCompletedStorageContainerDrop(previousMannies, currentMannies) {
+        const previousById = new Map((Array.isArray(previousMannies) ? previousMannies : []).map((manny) => [
+            String(manny && manny.id || ""),
+            manny,
+        ]));
+
+        return (Array.isArray(currentMannies) ? currentMannies : []).some((manny) => {
+            const previous = previousById.get(String(manny && manny.id || ""));
+
+            return previous
+                && previous.currentTask === "dropping_storage_container"
+                && manny.currentTask === null
+                && manny.task
+                && manny.task.lastTask === "dropping_storage_container";
+        });
+    }
+
     function normalizeResourceType(type) {
         return type === "organic_compounds" ? "carbon_compounds" : String(type || "");
     }
@@ -3768,6 +3785,7 @@
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentSectorProbes = Array.isArray(sector.probes) ? sector.probes : [];
             const rawMannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
+            const storageContainerDropCompleted = hasCompletedStorageContainerDrop(state.currentMannies, rawMannies);
             refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector, "nextUsefulRefreshDelayMs": mannyData && mannyData.nextUsefulRefreshDelayMs};
             state.currentProbeSectorRelative = relativeCoordinates(probe.sector && probe.sector.relative);
             state.currentMannyMineTargets = mineTargetsFromObjects(state.currentSectorObjects);
@@ -3775,6 +3793,9 @@
             await loadRemoteMannySectorScans(rawMannies);
             state.currentMannies = rawMannies.map(withMannyStateHash);
             renderVisibleMannies();
+            if (storageContainerDropCompleted) {
+                await window.VNG.syncNavigationWarnings();
+            }
         } catch (error) {
             state.currentMannies = [];
             renderMannyList([]);

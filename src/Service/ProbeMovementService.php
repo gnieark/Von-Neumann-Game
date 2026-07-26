@@ -163,6 +163,7 @@ final class ProbeMovementService
             $this->probes->save($probe);
             $alreadyVisited = $this->visitedSectors->getVisitedSectorByPlayerId($probe->playerId, $movement->target) !== null;
             $this->visitedSectors->markVisitedByProbe($probe->playerId, $probe->id, $movement->target);
+            $this->missions?->completeReadyOracleMissions($probe);
             $this->createIntelligentLifeAlerts($probe, $movement);
             $this->createDormantConstructAlerts($probe, $movement);
             if (!$alreadyVisited) {
@@ -225,6 +226,7 @@ final class ProbeMovementService
             return;
         }
 
+        $this->missions->completeReadyOracleMissions($probe);
         $sector = $this->sectors->getOrCreateSector($probe->currentSector);
         foreach ($this->intelligentLifePlanets($sector->getObjects()) as $planet) {
             $this->missions->startIntelligentLifeScenario($probe, $probe->currentSector, $planet, null);

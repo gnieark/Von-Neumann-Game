@@ -992,7 +992,14 @@ paths:
         Probe recipients must be in the exact same sector as the sender probe,
         or both probes must be inside coverage of the same active SCUT relay
         network. Planet recipients must be inhabited planets in the current
-        sector. If the recipient type is omitted, `probe` is used.
+        sector. If the recipient type is omitted, `probe` is used. After
+        completing an Oracle mission, sending a player's exact username to the
+        Oracle planet whose mission has been completed by any player produces
+        a planet-originated reply containing the
+        approximate normalized direction vector and FCC distance to that
+        player's default probe. A successful lookup starts a 24-hour cooldown
+        shared by every visitor to that Oracle planet; unknown usernames do not
+        consume it, while requests during the cooldown receive a polite refusal.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       requestBody:
@@ -2961,7 +2968,15 @@ paths:
         when the order is accepted, and the drop kit is consumed. On completion
         the detached container is stored in sector JSON as attached to the
         planet with the origin probe id, but planet-dropped containers are not
-        exposed by sector observation endpoints yet.
+        exposed by sector observation endpoints yet. If the container contains
+        biological_archive items for an active Oracle mission, their delivery
+        count is recorded on the owning player's mission, independently of the
+        probe used. The destination must differ from the requesting planet and
+        have a habitability score strictly above the configured Oracle threshold;
+        otherwise the mission fails. After both archives are delivered, returning
+        any probe owned by that player to the requesting sector completes the
+        mission and creates a planet-originated message announcing the future
+        once-per-24-hours Oracle service.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:

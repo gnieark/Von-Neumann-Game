@@ -64,6 +64,7 @@ use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\OrbitDescriptor;
 use VonNeumannGame\Sector\OrbitingBody;
 use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
@@ -538,6 +539,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'window.
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'nextUsefulRefreshDelayMs'), 'mannies JS reads the API recommended useful refresh delay');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector, "nextUsefulRefreshDelayMs"'), 'mannies JS feeds probe, Manny, sector, and API refresh-delay data into adaptive refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scheduleMannyRefresh'), 'mannies JS schedules repeated Manny refreshes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasCompletedStorageContainerDrop'), 'mannies JS detects completed planet storage-container drops');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await window.VNG.syncNavigationWarnings();'), 'mannies JS refreshes the selected-probe alerts after a planet storage-container drop completes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'PROBE_INVENTORY_ACTIONS'), 'mannies JS tracks actions whose forms depend on probe inventory');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshProbeInventory'), 'mannies JS refreshes probe inventory lazily before rendering inventory-dependent forms');
@@ -666,7 +669,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-sensors-scut-coverage-status"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260726-manny-drop-alert-refresh"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -4081,6 +4084,211 @@ if ($damageWarningProbe !== null) {
         $detachedByMovement = $sectorRepository->load($warningSector)->findObjectById($warningObjectId);
         $test->assertEquals('detached_container', $detachedByMovement?->getType()->value, 'storage break persists the lost container as a drifting sector object');
     }
+}
+
+$oraclePlayer = $auth->registerPlayerWithPassword('oracle-contact', 'secret', 'Oracle Contact', 'Oracle probe');
+$oracleProbe = $probes->findByPlayerId($oraclePlayer->id);
+if ($oracleProbe !== null) {
+    $oracleSector = $oracleProbe->currentSector->add(3, 1, 0);
+    $oraclePlanet = new Planet('oracle-planet', 'Oracle world', 'frozen', 1.0, 1.0, true, 0.75, ['water_ice'], intelligentLife: true);
+    $oracleMissionService = new MissionService(
+        $missions,
+        $messages,
+        ['intelligentLife' => ['scenarios' => ['oracle' => ['weight' => 100]]]],
+        'oracle-test-world',
+        $sectorService,
+        $probes,
+        $players,
+        $damageWarnings,
+    );
+
+    $sectorRepository->save(new SectorContent($oracleSector, [$oraclePlanet]));
+    $oracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet);
+    $test->assertEquals('first_contact.oracle', $oracleMission?->type, 'Oracle intelligent-life contact creates the Oracle mission');
+    $test->assertEquals('oracle', $oracleMission?->metadata['scenario'] ?? null, 'Oracle mission stores its scenario key');
+    $test->assertEquals([], $oracleMission?->steps ?? null, 'first Oracle implementation does not invent later mission steps');
+    $oracleMessages = $messages->receivedByProbe($oracleProbe->id);
+    $test->assertEquals(MissionService::ORACLE_INITIAL_MESSAGE, $oracleMessages[0]->body ?? null, 'Oracle planet directly sends the translated initial message');
+    $test->assertEquals(ProbeMessage::ENDPOINT_PLANET, $oracleMessages[0]->senderType ?? null, 'Oracle initial message comes from the planet');
+    $oracleArchives = $sectorRepository->load($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE));
+    $test->assert($oracleArchives instanceof SectorDriftingItem, 'Oracle contact places biological archives in open-space drift');
+    $test->assertEquals(2, $oracleArchives instanceof SectorDriftingItem ? $oracleArchives->getQuantity() : null, 'Oracle contact places two biological archives');
+    $test->assertEquals(0.05, $oracleArchives instanceof SectorDriftingItem ? $oracleArchives->getContainerSpace() : null, 'each biological archive occupies the same ECE volume as a Manny');
+    $test->assertEquals(ProbeItem::BIOLOGICAL_ARCHIVE_NAME, $oracleArchives?->getName(), 'biological archive uses its English canonical name');
+    $oracleAlerts = $damageWarnings->findByProbeId($oracleProbe->id);
+    $test->assertEquals(MissionService::ORACLE_ARCHIVES_ALERT, $oracleAlerts[0]->message ?? null, 'Oracle contact alerts the probe about the drifting biological archives');
+    $test->assertEquals('drifting_item', $oracleAlerts[0]->containerId ?? null, 'Oracle archive alert identifies a drifting item');
+
+    $sameOracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet);
+    $test->assertEquals($oracleMission?->uid, $sameOracleMission?->uid, 'Oracle scenario initialization is idempotent');
+    $test->assertEquals(1, $messages->countReceivedByProbe($oracleProbe->id), 'Oracle initial message is sent only once');
+    $test->assertEquals(2, $sectorRepository->load($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE))?->getQuantity(), 'Oracle initialization does not duplicate biological archives');
+    $test->assertEquals(1, count($damageWarnings->findByProbeId($oracleProbe->id)), 'Oracle initialization does not duplicate its archive alert');
+
+    $oracleDestinationSector = $oracleSector->add(2, 0, 0);
+    $oracleDestinationPlanet = new Planet('oracle-destination', 'Future biosphere', 'terrestrial', 1.0, 1.0, true, 0.8, ['water', 'carbon']);
+    $oracleDestinationContent = new SectorContent($oracleDestinationSector, [$oracleDestinationPlanet]);
+    $oracleSecondProbe = $probes->createForPlayer($oraclePlayer->id, 'Oracle cargo relay', $oracleDestinationSector);
+    $archiveItem = [
+        'uid' => 'oracle-archive-one',
+        'type' => ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
+        'name' => ProbeItem::BIOLOGICAL_ARCHIVE_NAME,
+        'containerSpace' => 0.05,
+        'metadata' => [],
+    ];
+    $firstOracleDrop = $oracleMissionService->handleOracleBiologicalArchiveDrop(
+        $oracleSecondProbe,
+        $oracleDestinationContent,
+        $oracleDestinationPlanet,
+        $oraclePlayer->id,
+        'oracle-drop-one',
+        [$archiveItem],
+    );
+    $test->assertEquals(1, $firstOracleDrop['delivered'] ?? null, 'Oracle counts a biological archive dropped by another probe owned by the mission player');
+    $oracleMissionAfterFirstDrop = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals(1, $oracleMissionAfterFirstDrop?->metadata['deliveredBiologicalArchives'] ?? null, 'Oracle archive delivery count is persisted on the player mission');
+    $oracleSecondProbeAlerts = $damageWarnings->findByProbeId($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_ONE_ARCHIVE_DELIVERED_ALERT, $oracleSecondProbeAlerts[0]->message ?? null, 'first Oracle archive delivery asks for the second archive');
+    $test->assert(!$oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'Oracle cannot complete before both archives are delivered');
+
+    $secondOracleDrop = $oracleMissionService->handleOracleBiologicalArchiveDrop(
+        $oracleSecondProbe,
+        $oracleDestinationContent,
+        $oracleDestinationPlanet,
+        $oraclePlayer->id,
+        'oracle-drop-two',
+        [array_merge($archiveItem, ['uid' => 'oracle-archive-two'])],
+    );
+    $test->assertEquals(2, $secondOracleDrop['delivered'] ?? null, 'Oracle counts both biological archives across separate container drops');
+    $oracleMissionAfterSecondDrop = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals(2, $oracleMissionAfterSecondDrop?->metadata['deliveredBiologicalArchives'] ?? null, 'Oracle persists completion-like delivery progress at player level');
+    $oracleSecondProbeAlerts = $damageWarnings->findByProbeId($oracleSecondProbe->id);
+    $expectedOracleReturnSector = (new PlayerReferenceFrame($oraclePlayer->homeSector))->globalToRelative($oracleSector);
+    $test->assert(
+        isset($oracleSecondProbeAlerts[0]) && str_contains(
+            $oracleSecondProbeAlerts[0]->message,
+            sprintf('relative sector (%d, %d, %d)', $expectedOracleReturnSector['x'], $expectedOracleReturnSector['y'], $expectedOracleReturnSector['z']),
+        ),
+        'second Oracle archive delivery alert gives only player-relative coordinates for the requesting planet',
+    );
+    $test->assertEquals(Mission::STATUS_ACTIVE, $oracleMissionAfterSecondDrop?->status, 'Oracle remains active while suggesting a return to the requesting planet');
+    $test->assert(!$oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'Oracle remains active while the player probe is outside the requesting sector');
+
+    $oracleSecondProbe->currentSector = $oracleSector;
+    $test->assert($oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'returning any player-owned probe to the requesting sector completes Oracle');
+    $completedOracleMission = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals(Mission::STATUS_COMPLETED, $completedOracleMission?->status, 'Oracle mission is marked completed after the return');
+    $oracleCompletionMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_COMPLETION_MESSAGE, $oracleCompletionMessages[0]->body ?? null, 'requesting planet sends the Oracle reward message to the returning probe');
+    $test->assertEquals(ProbeMessage::ENDPOINT_PLANET, $oracleCompletionMessages[0]->senderType ?? null, 'Oracle reward message is sent by the requesting planet');
+    $test->assert(str_contains($oracleCompletionMessages[0]->body ?? '', 'Once every 24 hours'), 'Oracle reward announces the future daily probe-location service');
+    $test->assert(!$oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'completed Oracle mission cannot emit its reward message twice');
+    $test->assertEquals(1, $messages->countReceivedByProbe($oracleSecondProbe->id), 'Oracle completion message remains idempotent');
+
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), 'player-who-does-not-exist');
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_PLAYER_NOT_FOUND_REPLY, $oracleQueryMessages[0]->body ?? null, 'Oracle reports an unknown player username');
+    $oracleMissionAfterUnknownQuery = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assert(!isset($oracleMissionAfterUnknownQuery?->metadata['lastOracleQueryAt']), 'unknown Oracle targets do not consume the daily request');
+
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), $multiProbePlayer->username);
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $oracleSuccessfulReply = $oracleQueryMessages[0]->body ?? '';
+    $oracleTargetProbe = $probes->findByPlayerId($multiProbePlayer->id);
+    $oracleTargetVector = $oracleTargetProbe !== null ? $oracleTargetProbe->currentSector->subtract($oracleSecondProbe->currentSector) : ['x' => 0, 'y' => 0, 'z' => 0];
+    $oracleTargetMax = max(abs($oracleTargetVector['x']), abs($oracleTargetVector['y']), abs($oracleTargetVector['z']));
+    $oracleExpectedDirection = $oracleTargetMax === 0 ? ['x' => 0, 'y' => 0, 'z' => 0] : [
+        'x' => (int) round($oracleTargetVector['x'] * 50 / $oracleTargetMax),
+        'y' => (int) round($oracleTargetVector['y'] * 50 / $oracleTargetMax),
+        'z' => (int) round($oracleTargetVector['z'] * 50 / $oracleTargetMax),
+    ];
+    $oracleExpectedDistance = $oracleTargetProbe !== null ? (new SectorGrid())->getDistance($oracleSecondProbe->currentSector, $oracleTargetProbe->currentSector) : 0;
+    $test->assert(
+        str_contains($oracleSuccessfulReply, sprintf(
+            'Approximate direction vector: %d %d %d',
+            $oracleExpectedDirection['x'],
+            $oracleExpectedDirection['y'],
+            $oracleExpectedDirection['z'],
+        )),
+        'Oracle normalizes the player direction vector so its largest absolute component is 50',
+    );
+    $test->assert(str_contains($oracleSuccessfulReply, 'Distance: ' . $oracleExpectedDistance . ' sectors.'), 'Oracle reports the FCC sector distance to the player default probe');
+    $oracleMissionAfterSuccessfulQuery = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $lastOracleQueryAt = $oracleMissionAfterSuccessfulQuery?->metadata['lastOracleQueryAt'] ?? null;
+    $test->assert(is_string($lastOracleQueryAt), 'successful Oracle query stores its cooldown at player-mission level');
+
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), $multiProbePlayer->username);
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_COOLDOWN_REPLY, $oracleQueryMessages[0]->body ?? null, 'Oracle politely refuses a second successful lookup within 24 hours');
+    $oracleMissionAfterRefusal = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals($lastOracleQueryAt, $oracleMissionAfterRefusal?->metadata['lastOracleQueryAt'] ?? null, 'cooldown refusal does not extend the Oracle cooldown');
+
+    $expiredOracleMetadata = $oracleMissionAfterRefusal?->metadata ?? [];
+    $expiredOracleMetadata['lastOracleQueryAt'] = gmdate('c', time() - 90000);
+    if ($oracleMissionAfterRefusal !== null) {
+        $missions->updateMetadata($oracleMissionAfterRefusal, $expiredOracleMetadata);
+    }
+    $visitorOriginalSector = $primaryProbe->currentSector;
+    $primaryProbe->currentSector = $oracleSector;
+    $oracleMissionService->handlePlanetReply($primaryProbe, $oraclePlanet->getId(), $oraclePlayer->username);
+    $visitorOracleMessages = $messages->receivedByProbe($primaryProbe->id);
+    $test->assert(
+        isset($visitorOracleMessages[0]) && str_contains($visitorOracleMessages[0]->body, 'Approximate direction vector:'),
+        'a visiting player can query a completed Oracle without owning its mission',
+    );
+    $oracleMissionAfterVisitorQuery = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $visitorQueryAt = $oracleMissionAfterVisitorQuery?->metadata['lastOracleQueryAt'] ?? null;
+    $test->assert(
+        is_string($visitorQueryAt) && $visitorQueryAt !== $expiredOracleMetadata['lastOracleQueryAt'],
+        'successful visitor query updates the canonical Oracle mission cooldown',
+    );
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), $multiProbePlayer->username);
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_COOLDOWN_REPLY, $oracleQueryMessages[0]->body ?? null, 'visitor Oracle query starts the same cooldown for the mission owner');
+    $primaryProbe->currentSector = $visitorOriginalSector;
+}
+
+$failedOraclePlayer = $auth->registerPlayerWithPassword('oracle-failed', 'secret', 'Oracle Failed', 'Oracle failed probe');
+$failedOracleProbe = $probes->findByPlayerId($failedOraclePlayer->id);
+if ($failedOracleProbe !== null) {
+    $failedOracleSector = $failedOracleProbe->currentSector->add(1, 1, 0);
+    $failedOraclePlanet = new Planet('oracle-failed-origin', 'Oracle origin', 'frozen', 1.0, 1.0, true, 0.1, ['water_ice'], intelligentLife: true);
+    $failedOracleMissionService = new MissionService(
+        $missions,
+        $messages,
+        ['intelligentLife' => ['scenarios' => ['oracle' => [
+            'weight' => 100,
+            'minimumDestinationHabitabilityScore' => 0.5,
+        ]]]],
+        'oracle-failure-world',
+        $sectorService,
+        $probes,
+        $players,
+        $damageWarnings,
+    );
+    $sectorRepository->save(new SectorContent($failedOracleSector, [$failedOraclePlanet]));
+    $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
+    $thresholdPlanet = new Planet('oracle-threshold-planet', 'Barely unsuitable', 'terrestrial', 1.0, 1.0, true, 0.5, ['water']);
+    $failedOracleMissionService->handleOracleBiologicalArchiveDrop(
+        $failedOracleProbe,
+        new SectorContent($failedOracleProbe->currentSector, [$thresholdPlanet]),
+        $thresholdPlanet,
+        $failedOraclePlayer->id,
+        'oracle-invalid-drop',
+        [[
+            'uid' => 'failed-oracle-archive',
+            'type' => ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
+        ]],
+    );
+    $failedOracleMission = $missions->findByUidForPlayer($failedOraclePlayer->id, (string) $failedOracleMission?->uid);
+    $test->assertEquals(Mission::STATUS_FAILED, $failedOracleMission?->status, 'Oracle fails when archives are dropped on a planet at the strict habitability threshold');
+    $failedOracleOriginAfterFailure = $sectorRepository->load($failedOracleSector)->findObjectById($failedOraclePlanet->getId());
+    $test->assert(
+        $failedOracleOriginAfterFailure instanceof Planet && !$failedOracleOriginAfterFailure->hasIntelligentLife(),
+        'failed Oracle mission turns its requesting inhabited planet into an uninhabited planet',
+    );
+    $failedOracleAlerts = $damageWarnings->findByProbeId($failedOracleProbe->id);
+    $test->assertEquals(MissionService::ORACLE_INVALID_DESTINATION_ALERT, $failedOracleAlerts[0]->message ?? null, 'invalid Oracle destination creates a mission-failure alert');
 }
 
 $intelligentLifePlayer = $auth->registerPlayerWithPassword('life-alert', 'secret', 'Life Alert', 'Life probe');
