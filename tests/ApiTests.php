@@ -4147,6 +4147,7 @@ if ($oracleProbe !== null) {
     $test->assertEquals(1, $oracleMissionAfterFirstDrop?->metadata['deliveredBiologicalArchives'] ?? null, 'Oracle archive delivery count is persisted on the player mission');
     $oracleSecondProbeAlerts = $damageWarnings->findByProbeId($oracleSecondProbe->id);
     $test->assertEquals(MissionService::ORACLE_ONE_ARCHIVE_DELIVERED_ALERT, $oracleSecondProbeAlerts[0]->message ?? null, 'first Oracle archive delivery asks for the second archive');
+    $test->assert(!$oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'Oracle cannot complete before both archives are delivered');
 
     $secondOracleDrop = $oracleMissionService->handleOracleBiologicalArchiveDrop(
         $oracleSecondProbe,
@@ -4169,6 +4170,18 @@ if ($oracleProbe !== null) {
         'second Oracle archive delivery alert gives only player-relative coordinates for the requesting planet',
     );
     $test->assertEquals(Mission::STATUS_ACTIVE, $oracleMissionAfterSecondDrop?->status, 'Oracle remains active while suggesting a return to the requesting planet');
+    $test->assert(!$oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'Oracle remains active while the player probe is outside the requesting sector');
+
+    $oracleSecondProbe->currentSector = $oracleSector;
+    $test->assert($oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'returning any player-owned probe to the requesting sector completes Oracle');
+    $completedOracleMission = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals(Mission::STATUS_COMPLETED, $completedOracleMission?->status, 'Oracle mission is marked completed after the return');
+    $oracleCompletionMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_COMPLETION_MESSAGE, $oracleCompletionMessages[0]->body ?? null, 'requesting planet sends the Oracle reward message to the returning probe');
+    $test->assertEquals(ProbeMessage::ENDPOINT_PLANET, $oracleCompletionMessages[0]->senderType ?? null, 'Oracle reward message is sent by the requesting planet');
+    $test->assert(str_contains($oracleCompletionMessages[0]->body ?? '', 'Once every 24 hours'), 'Oracle reward announces the future daily probe-location service');
+    $test->assert(!$oracleMissionService->completeReadyOracleMissions($oracleSecondProbe), 'completed Oracle mission cannot emit its reward message twice');
+    $test->assertEquals(1, $messages->countReceivedByProbe($oracleSecondProbe->id), 'Oracle completion message remains idempotent');
 }
 
 $failedOraclePlayer = $auth->registerPlayerWithPassword('oracle-failed', 'secret', 'Oracle Failed', 'Oracle failed probe');

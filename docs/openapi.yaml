@@ -2966,7 +2966,10 @@ paths:
         count is recorded on the owning player's mission, independently of the
         probe used. The destination must differ from the requesting planet and
         have a habitability score strictly above the configured Oracle threshold;
-        otherwise the mission fails.
+        otherwise the mission fails. After both archives are delivered, returning
+        any probe owned by that player to the requesting sector completes the
+        mission and creates a planet-originated message announcing the future
+        once-per-24-hours Oracle service.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:

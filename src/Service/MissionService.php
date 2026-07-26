@@ -36,6 +36,7 @@ final class MissionService
     public const ORACLE_ARCHIVES_ALERT = 'Two biological archives are drifting in this sector. The inhabitants of the planet would like you to recover them and deposit them on a habitable planet with a habitability score above 0.5.';
     public const ORACLE_ONE_ARCHIVE_DELIVERED_ALERT = 'One biological archive has been delivered successfully. The second archive still needs to be dropped on a suitable planet.';
     public const ORACLE_INVALID_DESTINATION_ALERT = 'The biological archives were dropped on a planet that does not meet the mission requirements. The Oracle mission has failed.';
+    public const ORACLE_COMPLETION_MESSAGE = "Traveler,\n\nYou carried the memory of our world beyond the reach of its collapse. We cannot know what will grow from the archives, but because of you, our biosphere now has a future that we no longer possess.\n\nThe time remaining before our world fails is short. We would like to use it to serve as your Oracle.\n\nOnce every 24 hours, send us a message containing the name of a probe. We will answer with its direction and distance.\n\nThis service is not operational yet. We will notify you when our calculations are ready.\n\nThank you.";
 
     private const FIRST_CONTACT_MISSION_TYPE = 'first_contact.return_to_space_program';
     private const ORACLE_MISSION_TYPE = 'first_contact.oracle';
@@ -221,6 +222,54 @@ final class MissionService
         }
 
         return $changed;
+    }
+
+    public function completeReadyOracleMissions(NeumannProbe $probe): bool
+    {
+        foreach ($this->missions->activeForPlayer($probe->playerId) as $mission) {
+            if (
+                $mission->type !== self::ORACLE_MISSION_TYPE
+                || ($mission->metadata['scenario'] ?? null) !== self::SCENARIO_ORACLE
+                || (int) ($mission->metadata['deliveredBiologicalArchives'] ?? 0) < 2
+            ) {
+                continue;
+            }
+
+            $sectorData = is_array($mission->metadata['sector'] ?? null) ? $mission->metadata['sector'] : [];
+            if (!isset($sectorData['x'], $sectorData['y'], $sectorData['z'])) {
+                continue;
+            }
+            $requestingSector = new SectorCoordinates(
+                (int) $sectorData['x'],
+                (int) $sectorData['y'],
+                (int) $sectorData['z'],
+            );
+            if (!$probe->currentSector->equals($requestingSector)) {
+                continue;
+            }
+
+            $planetId = (string) ($mission->metadata['planetId'] ?? '');
+            if ($planetId === '') {
+                continue;
+            }
+            $this->messages?->createForEndpoints(
+                ProbeMessage::ENDPOINT_PLANET,
+                $planetId,
+                is_string($mission->metadata['planetName'] ?? null) ? $mission->metadata['planetName'] : null,
+                null,
+                ProbeMessage::ENDPOINT_PROBE,
+                (string) $probe->id,
+                null,
+                $probe->id,
+                $requestingSector,
+                self::ORACLE_COMPLETION_MESSAGE,
+            );
+            $this->missions->markCompleted($mission);
+
+            return true;
+        }
+
+        return false;
     }
 
     private function progressReturnToSpaceProgramAfterPrimeReply(NeumannProbe $probe, Mission $mission): Mission
