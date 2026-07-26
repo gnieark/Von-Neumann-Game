@@ -122,7 +122,8 @@
         "weight": 0
       },
       "oracle": {
-        "weight": 0
+        "weight": 0,
+        "minimumDestinationHabitabilityScore": 0.5
       },
       "genetic_ark": {
         "weight": 0

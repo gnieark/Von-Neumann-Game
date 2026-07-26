@@ -2961,7 +2961,12 @@ paths:
         when the order is accepted, and the drop kit is consumed. On completion
         the detached container is stored in sector JSON as attached to the
         planet with the origin probe id, but planet-dropped containers are not
-        exposed by sector observation endpoints yet.
+        exposed by sector observation endpoints yet. If the container contains
+        biological_archive items for an active Oracle mission, their delivery
+        count is recorded on the owning player's mission, independently of the
+        probe used. The destination must differ from the requesting planet and
+        have a habitability score strictly above the configured Oracle threshold;
+        otherwise the mission fails.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:

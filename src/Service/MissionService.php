@@ -19,6 +19,7 @@ use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
 use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorDriftingItem;
@@ -33,6 +34,8 @@ final class MissionService
     public const FIRST_CONTACT_SHORT_REPLY = '-----------';
     public const ORACLE_INITIAL_MESSAGE = "To you who are listening.\n\nIf you understand this message, then our calculation was correct. We do not know who you are. We do not know what world you come from.\n\nWe know only that one day, a machine capable of traveling between the stars would pass near our sun.\n\nOur planet is cooling, and we cannot prevent it. For a long time, we hoped to leave. We failed.\n\nWe did not have enough time to build an ark. We can only preserve what we are. Several genetic capsules are in orbit around our world.\n\nThey contain the information needed to reconstruct our biosphere. Not only our species.\n\nOur entire planet.";
     public const ORACLE_ARCHIVES_ALERT = 'Two biological archives are drifting in this sector. The inhabitants of the planet would like you to recover them and deposit them on a habitable planet with a habitability score above 0.5.';
+    public const ORACLE_ONE_ARCHIVE_DELIVERED_ALERT = 'One biological archive has been delivered successfully. The second archive still needs to be dropped on a suitable planet.';
+    public const ORACLE_INVALID_DESTINATION_ALERT = 'The biological archives were dropped on a planet that does not meet the mission requirements. The Oracle mission has failed.';
 
     private const FIRST_CONTACT_MISSION_TYPE = 'first_contact.return_to_space_program';
     private const ORACLE_MISSION_TYPE = 'first_contact.oracle';
@@ -350,6 +353,112 @@ final class MissionService
         }
 
         return $counter;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array{delivered:int,status:string}|null
+     */
+    public function handleOracleBiologicalArchiveDrop(
+        NeumannProbe $probe,
+        SectorContent $sector,
+        Planet $planet,
+        int $playerId,
+        string $containerObjectId,
+        array $items,
+    ): ?array {
+        $archiveCount = count(array_filter(
+            $items,
+            static fn(array $item): bool => ($item['type'] ?? null) === ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
+        ));
+        if ($archiveCount === 0 || $playerId !== $probe->playerId) {
+            return null;
+        }
+
+        $mission = $this->activeOracleMissionForPlayer($playerId);
+        if ($mission === null) {
+            return null;
+        }
+
+        $minimumHabitability = Config::float(
+            $this->gameplayConfig,
+            'intelligentLife.scenarios.oracle.minimumDestinationHabitabilityScore',
+            0.5,
+        );
+        $isDifferentPlanet = $planet->getId() !== (string) ($mission->metadata['planetId'] ?? '');
+        $isHabitableEnough = $planet->getHabitabilityScore() > $minimumHabitability;
+        if (!$isDifferentPlanet || !$isHabitableEnough) {
+            $this->missions->markFailed($mission);
+            $this->alerts?->createMannyReportAlert(
+                $probe->id,
+                $sector->getCoordinates(),
+                $containerObjectId,
+                'Oracle',
+                self::ORACLE_INVALID_DESTINATION_ALERT,
+                'oracle_mission',
+            );
+
+            return ['delivered' => 0, 'status' => Mission::STATUS_FAILED];
+        }
+
+        $delivered = min(2, max(0, (int) ($mission->metadata['deliveredBiologicalArchives'] ?? 0)) + $archiveCount);
+        $metadata = $mission->metadata;
+        $metadata['deliveredBiologicalArchives'] = $delivered;
+        $metadata['destinationPlanetId'] = $planet->getId();
+        $metadata['destinationSector'] = $sector->getCoordinates()->toArray();
+        $mission = $this->missions->updateMetadata($mission, $metadata);
+
+        $message = self::ORACLE_ONE_ARCHIVE_DELIVERED_ALERT;
+        if ($delivered >= 2) {
+            $message = $this->oracleArchivesDeliveredAlert($mission);
+        }
+        $this->alerts?->createMannyReportAlert(
+            $probe->id,
+            $sector->getCoordinates(),
+            $containerObjectId,
+            'Oracle',
+            $message,
+            'oracle_mission',
+        );
+
+        return ['delivered' => $delivered, 'status' => $mission->status];
+    }
+
+    private function activeOracleMissionForPlayer(int $playerId): ?Mission
+    {
+        foreach ($this->missions->activeForPlayer($playerId) as $mission) {
+            if (
+                $mission->type === self::ORACLE_MISSION_TYPE
+                && ($mission->metadata['scenario'] ?? null) === self::SCENARIO_ORACLE
+            ) {
+                return $mission;
+            }
+        }
+
+        return null;
+    }
+
+    private function oracleArchivesDeliveredAlert(Mission $mission): string
+    {
+        $sectorData = is_array($mission->metadata['sector'] ?? null) ? $mission->metadata['sector'] : [];
+        $player = $this->players?->findById($mission->playerId);
+        if (
+            $player === null
+            || !isset($sectorData['x'], $sectorData['y'], $sectorData['z'])
+        ) {
+            return 'Both biological archives have been delivered. The mission appears complete, but it will take decades before communication with this planet becomes possible. Returning to the requesting planet would be advisable.';
+        }
+
+        $relative = (new PlayerReferenceFrame($player->homeSector))->globalToRelative(
+            new SectorCoordinates((int) $sectorData['x'], (int) $sectorData['y'], (int) $sectorData['z']),
+        );
+
+        return sprintf(
+            'Both biological archives have been delivered. The mission appears complete, but it will take decades before communication with this planet becomes possible. Returning to the requesting planet in relative sector (%d, %d, %d) would be advisable.',
+            $relative['x'],
+            $relative['y'],
+            $relative['z'],
+        );
     }
 
     private function createReturnToSpacePlanetReply(NeumannProbe $probe, Mission $mission): void

@@ -166,6 +166,26 @@ final class MissionRepository
     /**
      * @param array<string, mixed> $metadata
      */
+    public function updateMetadata(Mission $mission, array $metadata): Mission
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'UPDATE probe_missions
+             SET metadata_json = :metadata_json, updated_at = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id' => $mission->id,
+            'metadata_json' => $this->encodeJsonObject($metadata),
+            'updated_at' => $now,
+        ]);
+
+        return $this->findByUidForPlayer($mission->playerId, $mission->uid) ?? throw new \RuntimeException('Mission metadata update failed.');
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
     public function createStep(int $missionId, string $title, ?string $description, array $metadata, int $sortOrder, ?string $uid = null): MissionStep
     {
         $now = gmdate('c');

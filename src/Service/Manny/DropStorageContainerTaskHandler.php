@@ -32,7 +32,7 @@ final class DropStorageContainerTaskHandler implements TaskHandlerInterface
      * @param \Closure(Manny): void $saveManny
      * @param \Closure(mixed): SectorContent $getOrCreateSector
      * @param \Closure(SectorContent): void $saveSector
-     * @param \Closure(NeumannProbe, SectorContent, string, int, string, array<string, mixed>): void $handleReturnToSpaceProgramMaterialDrop
+     * @param \Closure(NeumannProbe, SectorContent, Planet, int, string, array<string, mixed>, array<int, array<string, mixed>>): void $handleMissionPlanetDrop
      * @param \Closure(Manny, array<string, mixed>): void $clearTask
      * @param \Closure(int): ?Manny $findMannyById
      */
@@ -53,7 +53,7 @@ final class DropStorageContainerTaskHandler implements TaskHandlerInterface
         private readonly \Closure $saveManny,
         private readonly \Closure $getOrCreateSector,
         private readonly \Closure $saveSector,
-        private readonly \Closure $handleReturnToSpaceProgramMaterialDrop,
+        private readonly \Closure $handleMissionPlanetDrop,
         private readonly \Closure $clearTask,
         private readonly \Closure $findMannyById,
     ) {
@@ -150,14 +150,18 @@ final class DropStorageContainerTaskHandler implements TaskHandlerInterface
         );
 
         $sector->addPlanetDroppedContainer($object);
-        ($this->handleReturnToSpaceProgramMaterialDrop)(
-            $probe,
-            $sector,
-            $targetObjectId,
-            (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
-            $object->getId(),
-            is_array($snapshot['resources'] ?? null) ? $snapshot['resources'] : [],
-        );
+        $target = $sector->findObjectById($targetObjectId);
+        if ($target instanceof Planet) {
+            ($this->handleMissionPlanetDrop)(
+                $probe,
+                $sector,
+                $target,
+                (int) ($snapshot['ownerPlayerId'] ?? $probe->playerId),
+                $object->getId(),
+                is_array($snapshot['resources'] ?? null) ? $snapshot['resources'] : [],
+                is_array($snapshot['items'] ?? null) ? $snapshot['items'] : [],
+            );
+        }
         ($this->saveSector)($sector);
 
         ($this->clearTask)($manny, [

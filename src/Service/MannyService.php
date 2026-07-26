@@ -272,8 +272,9 @@ final class MannyService implements MannyTaskRuntime
             function (SectorContent $sector): void {
                 $this->sectors->saveSector($sector);
             },
-            function (NeumannProbe $probe, SectorContent $sector, string $planetId, int $playerId, string $containerObjectId, array $resources): void {
-                $this->missions?->handleReturnToSpaceProgramMaterialDrop($probe, $sector, $planetId, $playerId, $containerObjectId, $resources);
+            function (NeumannProbe $probe, SectorContent $sector, Planet $planet, int $playerId, string $containerObjectId, array $resources, array $items): void {
+                $this->missions?->handleReturnToSpaceProgramMaterialDrop($probe, $sector, $planet->getId(), $playerId, $containerObjectId, $resources);
+                $this->missions?->handleOracleBiologicalArchiveDrop($probe, $sector, $planet, $playerId, $containerObjectId, $items);
             },
             function (Manny $manny, array $payload): void {
                 $this->clearTask($manny, $payload);

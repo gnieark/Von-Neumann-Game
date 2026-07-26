@@ -64,6 +64,7 @@ use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\OrbitDescriptor;
 use VonNeumannGame\Sector\OrbitingBody;
 use VonNeumannGame\Sector\Planet;
+use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorContentGenerator;
@@ -4121,6 +4122,90 @@ if ($oracleProbe !== null) {
     $test->assertEquals(1, $messages->countReceivedByProbe($oracleProbe->id), 'Oracle initial message is sent only once');
     $test->assertEquals(2, $sectorRepository->load($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE))?->getQuantity(), 'Oracle initialization does not duplicate biological archives');
     $test->assertEquals(1, count($damageWarnings->findByProbeId($oracleProbe->id)), 'Oracle initialization does not duplicate its archive alert');
+
+    $oracleDestinationSector = $oracleSector->add(2, 0, 0);
+    $oracleDestinationPlanet = new Planet('oracle-destination', 'Future biosphere', 'terrestrial', 1.0, 1.0, true, 0.8, ['water', 'carbon']);
+    $oracleDestinationContent = new SectorContent($oracleDestinationSector, [$oracleDestinationPlanet]);
+    $oracleSecondProbe = $probes->createForPlayer($oraclePlayer->id, 'Oracle cargo relay', $oracleDestinationSector);
+    $archiveItem = [
+        'uid' => 'oracle-archive-one',
+        'type' => ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
+        'name' => ProbeItem::BIOLOGICAL_ARCHIVE_NAME,
+        'containerSpace' => 0.05,
+        'metadata' => [],
+    ];
+    $firstOracleDrop = $oracleMissionService->handleOracleBiologicalArchiveDrop(
+        $oracleSecondProbe,
+        $oracleDestinationContent,
+        $oracleDestinationPlanet,
+        $oraclePlayer->id,
+        'oracle-drop-one',
+        [$archiveItem],
+    );
+    $test->assertEquals(1, $firstOracleDrop['delivered'] ?? null, 'Oracle counts a biological archive dropped by another probe owned by the mission player');
+    $oracleMissionAfterFirstDrop = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals(1, $oracleMissionAfterFirstDrop?->metadata['deliveredBiologicalArchives'] ?? null, 'Oracle archive delivery count is persisted on the player mission');
+    $oracleSecondProbeAlerts = $damageWarnings->findByProbeId($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_ONE_ARCHIVE_DELIVERED_ALERT, $oracleSecondProbeAlerts[0]->message ?? null, 'first Oracle archive delivery asks for the second archive');
+
+    $secondOracleDrop = $oracleMissionService->handleOracleBiologicalArchiveDrop(
+        $oracleSecondProbe,
+        $oracleDestinationContent,
+        $oracleDestinationPlanet,
+        $oraclePlayer->id,
+        'oracle-drop-two',
+        [array_merge($archiveItem, ['uid' => 'oracle-archive-two'])],
+    );
+    $test->assertEquals(2, $secondOracleDrop['delivered'] ?? null, 'Oracle counts both biological archives across separate container drops');
+    $oracleMissionAfterSecondDrop = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $test->assertEquals(2, $oracleMissionAfterSecondDrop?->metadata['deliveredBiologicalArchives'] ?? null, 'Oracle persists completion-like delivery progress at player level');
+    $oracleSecondProbeAlerts = $damageWarnings->findByProbeId($oracleSecondProbe->id);
+    $expectedOracleReturnSector = (new PlayerReferenceFrame($oraclePlayer->homeSector))->globalToRelative($oracleSector);
+    $test->assert(
+        isset($oracleSecondProbeAlerts[0]) && str_contains(
+            $oracleSecondProbeAlerts[0]->message,
+            sprintf('relative sector (%d, %d, %d)', $expectedOracleReturnSector['x'], $expectedOracleReturnSector['y'], $expectedOracleReturnSector['z']),
+        ),
+        'second Oracle archive delivery alert gives only player-relative coordinates for the requesting planet',
+    );
+    $test->assertEquals(Mission::STATUS_ACTIVE, $oracleMissionAfterSecondDrop?->status, 'Oracle remains active while suggesting a return to the requesting planet');
+}
+
+$failedOraclePlayer = $auth->registerPlayerWithPassword('oracle-failed', 'secret', 'Oracle Failed', 'Oracle failed probe');
+$failedOracleProbe = $probes->findByPlayerId($failedOraclePlayer->id);
+if ($failedOracleProbe !== null) {
+    $failedOracleSector = $failedOracleProbe->currentSector->add(1, 1, 0);
+    $failedOraclePlanet = new Planet('oracle-failed-origin', 'Oracle origin', 'frozen', 1.0, 1.0, true, 0.1, ['water_ice'], intelligentLife: true);
+    $failedOracleMissionService = new MissionService(
+        $missions,
+        $messages,
+        ['intelligentLife' => ['scenarios' => ['oracle' => [
+            'weight' => 100,
+            'minimumDestinationHabitabilityScore' => 0.5,
+        ]]]],
+        'oracle-failure-world',
+        $sectorService,
+        $probes,
+        $players,
+        $damageWarnings,
+    );
+    $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
+    $thresholdPlanet = new Planet('oracle-threshold-planet', 'Barely unsuitable', 'terrestrial', 1.0, 1.0, true, 0.5, ['water']);
+    $failedOracleMissionService->handleOracleBiologicalArchiveDrop(
+        $failedOracleProbe,
+        new SectorContent($failedOracleProbe->currentSector, [$thresholdPlanet]),
+        $thresholdPlanet,
+        $failedOraclePlayer->id,
+        'oracle-invalid-drop',
+        [[
+            'uid' => 'failed-oracle-archive',
+            'type' => ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
+        ]],
+    );
+    $failedOracleMission = $missions->findByUidForPlayer($failedOraclePlayer->id, (string) $failedOracleMission?->uid);
+    $test->assertEquals(Mission::STATUS_FAILED, $failedOracleMission?->status, 'Oracle fails when archives are dropped on a planet at the strict habitability threshold');
+    $failedOracleAlerts = $damageWarnings->findByProbeId($failedOracleProbe->id);
+    $test->assertEquals(MissionService::ORACLE_INVALID_DESTINATION_ALERT, $failedOracleAlerts[0]->message ?? null, 'invalid Oracle destination creates a mission-failure alert');
 }
 
 $intelligentLifePlayer = $auth->registerPlayerWithPassword('life-alert', 'secret', 'Life Alert', 'Life probe');
