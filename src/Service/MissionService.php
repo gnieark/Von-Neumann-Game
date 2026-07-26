@@ -151,7 +151,7 @@ final class MissionService
 
     private function handleOracleQuery(NeumannProbe $probe, string $planetId, string $body): bool
     {
-        $mission = $this->completedOracleMissionForPlanet($probe->playerId, $planetId);
+        $mission = $this->completedOracleMissionForPlanet($planetId);
         if ($mission === null || $this->messages === null || $this->players === null || $this->probes === null) {
             return false;
         }
@@ -205,9 +205,9 @@ final class MissionService
         return true;
     }
 
-    private function completedOracleMissionForPlanet(int $playerId, string $planetId): ?Mission
+    private function completedOracleMissionForPlanet(string $planetId): ?Mission
     {
-        foreach ($this->missions->findForPlayer($playerId, [Mission::STATUS_COMPLETED]) as $mission) {
+        foreach ($this->missions->findByType(self::ORACLE_MISSION_TYPE, [Mission::STATUS_COMPLETED]) as $mission) {
             if (
                 $mission->type === self::ORACLE_MISSION_TYPE
                 && ($mission->metadata['scenario'] ?? null) === self::SCENARIO_ORACLE
@@ -551,6 +551,7 @@ final class MissionService
         $isDifferentPlanet = $planet->getId() !== (string) ($mission->metadata['planetId'] ?? '');
         $isHabitableEnough = $planet->getHabitabilityScore() > $minimumHabitability;
         if (!$isDifferentPlanet || !$isHabitableEnough) {
+            $this->removeIntelligentLifeFromOraclePlanet($mission);
             $this->missions->markFailed($mission);
             $this->alerts?->createMannyReportAlert(
                 $probe->id,
@@ -585,6 +586,35 @@ final class MissionService
         );
 
         return ['delivered' => $delivered, 'status' => $mission->status];
+    }
+
+    private function removeIntelligentLifeFromOraclePlanet(Mission $mission): void
+    {
+        if ($this->sectors === null) {
+            return;
+        }
+
+        $sectorData = is_array($mission->metadata['sector'] ?? null) ? $mission->metadata['sector'] : [];
+        $planetId = (string) ($mission->metadata['planetId'] ?? '');
+        if ($planetId === '' || !isset($sectorData['x'], $sectorData['y'], $sectorData['z'])) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector(new SectorCoordinates(
+            (int) $sectorData['x'],
+            (int) $sectorData['y'],
+            (int) $sectorData['z'],
+        ));
+        $planet = $sector->findObjectById($planetId);
+        if (!$planet instanceof Planet || !$planet->hasIntelligentLife()) {
+            return;
+        }
+
+        $planetData = $planet->toArray();
+        $planetData['intelligentLife'] = false;
+        if ($sector->replaceObject(Planet::fromArray($planetData))) {
+            $this->sectors->saveSector($sector);
+        }
     }
 
     private function activeOracleMissionForPlayer(int $playerId): ?Mission

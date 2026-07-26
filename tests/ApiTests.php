@@ -539,6 +539,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'window.
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'nextUsefulRefreshDelayMs'), 'mannies JS reads the API recommended useful refresh delay');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector, "nextUsefulRefreshDelayMs"'), 'mannies JS feeds probe, Manny, sector, and API refresh-delay data into adaptive refreshes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'scheduleMannyRefresh'), 'mannies JS schedules repeated Manny refreshes');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasCompletedStorageContainerDrop'), 'mannies JS detects completed planet storage-container drops');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await window.VNG.syncNavigationWarnings();'), 'mannies JS refreshes the selected-probe alerts after a planet storage-container drop completes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'card.dataset.mannyHash !== mannyHash'), 'mannies JS rebuilds a Manny card only when its hash changes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'PROBE_INVENTORY_ACTIONS'), 'mannies JS tracks actions whose forms depend on probe inventory');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshProbeInventory'), 'mannies JS refreshes probe inventory lazily before rendering inventory-dependent forms');
@@ -667,7 +669,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260723-sensors-scut-coverage-status"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260726-manny-drop-alert-refresh"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -4220,6 +4222,30 @@ if ($oracleProbe !== null) {
     $test->assertEquals(MissionService::ORACLE_COOLDOWN_REPLY, $oracleQueryMessages[0]->body ?? null, 'Oracle politely refuses a second successful lookup within 24 hours');
     $oracleMissionAfterRefusal = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
     $test->assertEquals($lastOracleQueryAt, $oracleMissionAfterRefusal?->metadata['lastOracleQueryAt'] ?? null, 'cooldown refusal does not extend the Oracle cooldown');
+
+    $expiredOracleMetadata = $oracleMissionAfterRefusal?->metadata ?? [];
+    $expiredOracleMetadata['lastOracleQueryAt'] = gmdate('c', time() - 90000);
+    if ($oracleMissionAfterRefusal !== null) {
+        $missions->updateMetadata($oracleMissionAfterRefusal, $expiredOracleMetadata);
+    }
+    $visitorOriginalSector = $primaryProbe->currentSector;
+    $primaryProbe->currentSector = $oracleSector;
+    $oracleMissionService->handlePlanetReply($primaryProbe, $oraclePlanet->getId(), $oraclePlayer->username);
+    $visitorOracleMessages = $messages->receivedByProbe($primaryProbe->id);
+    $test->assert(
+        isset($visitorOracleMessages[0]) && str_contains($visitorOracleMessages[0]->body, 'Approximate direction vector:'),
+        'a visiting player can query a completed Oracle without owning its mission',
+    );
+    $oracleMissionAfterVisitorQuery = $missions->findByUidForPlayer($oraclePlayer->id, (string) $oracleMission?->uid);
+    $visitorQueryAt = $oracleMissionAfterVisitorQuery?->metadata['lastOracleQueryAt'] ?? null;
+    $test->assert(
+        is_string($visitorQueryAt) && $visitorQueryAt !== $expiredOracleMetadata['lastOracleQueryAt'],
+        'successful visitor query updates the canonical Oracle mission cooldown',
+    );
+    $oracleMissionService->handlePlanetReply($oracleSecondProbe, $oraclePlanet->getId(), $multiProbePlayer->username);
+    $oracleQueryMessages = $messages->receivedByProbe($oracleSecondProbe->id);
+    $test->assertEquals(MissionService::ORACLE_COOLDOWN_REPLY, $oracleQueryMessages[0]->body ?? null, 'visitor Oracle query starts the same cooldown for the mission owner');
+    $primaryProbe->currentSector = $visitorOriginalSector;
 }
 
 $failedOraclePlayer = $auth->registerPlayerWithPassword('oracle-failed', 'secret', 'Oracle Failed', 'Oracle failed probe');
@@ -4240,6 +4266,7 @@ if ($failedOracleProbe !== null) {
         $players,
         $damageWarnings,
     );
+    $sectorRepository->save(new SectorContent($failedOracleSector, [$failedOraclePlanet]));
     $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
     $thresholdPlanet = new Planet('oracle-threshold-planet', 'Barely unsuitable', 'terrestrial', 1.0, 1.0, true, 0.5, ['water']);
     $failedOracleMissionService->handleOracleBiologicalArchiveDrop(
@@ -4255,6 +4282,11 @@ if ($failedOracleProbe !== null) {
     );
     $failedOracleMission = $missions->findByUidForPlayer($failedOraclePlayer->id, (string) $failedOracleMission?->uid);
     $test->assertEquals(Mission::STATUS_FAILED, $failedOracleMission?->status, 'Oracle fails when archives are dropped on a planet at the strict habitability threshold');
+    $failedOracleOriginAfterFailure = $sectorRepository->load($failedOracleSector)->findObjectById($failedOraclePlanet->getId());
+    $test->assert(
+        $failedOracleOriginAfterFailure instanceof Planet && !$failedOracleOriginAfterFailure->hasIntelligentLife(),
+        'failed Oracle mission turns its requesting inhabited planet into an uninhabited planet',
+    );
     $failedOracleAlerts = $damageWarnings->findByProbeId($failedOracleProbe->id);
     $test->assertEquals(MissionService::ORACLE_INVALID_DESTINATION_ALERT, $failedOracleAlerts[0]->message ?? null, 'invalid Oracle destination creates a mission-failure alert');
 }

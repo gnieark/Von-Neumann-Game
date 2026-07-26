@@ -1,5 +1,8 @@
 # Changelog
 
+- Interface : `/mannies` rafraîchit immédiatement les alertes de la sonde sélectionnée lorsqu’une Manny termine un largage de conteneur sur une planète.
+- Scénario Oracle : si les archives biologiques sont larguées sur une destination invalide et que la mission échoue, la planète demandeuse perd définitivement son statut de planète habitée.
+- Scénario Oracle : une planète dont la mission a été validée peut être consultée par tout joueur présent dans son secteur, avec un unique délai de 24 heures partagé entre tous ses visiteurs.
 - Scénario : ajout de la première étape de la mission `oracle` ; lors du premier contact, la planète envoie directement son message, place deux `biological_archive` récupérables en dérive et alerte la sonde de leur destination souhaitée, sans énigme préalable.
 - Scénario Oracle : le largage planétaire d’un conteneur compte désormais les `biological_archive` au niveau du joueur, invite à livrer la seconde archive, suggère un retour vers la planète demandeuse après deux livraisons et fait échouer la mission si la planète cible n’est pas différente et strictement plus habitable que le seuil configurable.
 - Scénario Oracle : après livraison des deux archives, le retour de l’une des sondes du joueur dans le secteur demandeur termine la mission et déclenche un message planétaire annonçant la future consultation quotidienne de l’Oracle.

@@ -58,6 +58,33 @@ final class MissionRepository
     }
 
     /**
+     * @param array<string> $statuses
+     * @return array<Mission>
+     */
+    public function findByType(string $type, array $statuses): array
+    {
+        if ($statuses === []) {
+            return [];
+        }
+
+        $params = ['type' => $type];
+        $placeholders = [];
+        foreach (array_values($statuses) as $index => $status) {
+            $key = 'status_' . $index;
+            $params[$key] = $status;
+            $placeholders[] = ':' . $key;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM probe_missions
+             WHERE type = :type AND status IN (' . implode(', ', $placeholders) . ')
+             ORDER BY created_at ASC, id ASC'
+        );
+        $stmt->execute($params);
+
+        return array_map(fn(array $row): Mission => $this->hydrateMission($row, true), $stmt->fetchAll());
+    }
+
+    /**
      * @param array<string, mixed> $metadata
      * @param array<string, mixed>|null $createdByEvent
      * @param list<array{uid?:string,title:string,description?:?string,metadata?:array<string,mixed>}> $steps
