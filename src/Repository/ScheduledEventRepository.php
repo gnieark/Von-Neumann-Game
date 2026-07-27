@@ -56,6 +56,18 @@ final class ScheduledEventRepository
         return array_map(fn(array $row): ScheduledEvent => $this->hydrate($row), $stmt->fetchAll());
     }
 
+    public function findNextPendingRunAt(): ?string
+    {
+        $value = $this->pdo->query(
+            "SELECT run_at FROM scheduled_events
+             WHERE status = 'pending'
+             ORDER BY run_at ASC, id ASC
+             LIMIT 1"
+        )->fetchColumn();
+
+        return $value !== false ? (string) $value : null;
+    }
+
     public function claim(ScheduledEvent $event): ?ScheduledEvent
     {
         $now = gmdate('c');

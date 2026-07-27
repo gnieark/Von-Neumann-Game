@@ -178,8 +178,9 @@ mouvement consomme et dure selon les parametres `movement` de
 `config/gameplay.json`.
 
 L'etat courant est derive des timestamps a chaque lecture. Le scheduler CLI
-(`php scripts/scheduler.php`) traite aussi les evenements planifies utiles aux
-transitions et aux pieges de trous noirs. Pendant un mouvement, les capteurs sont
+ponctuel (`php scripts/scheduler.php`) ou son worker permanent
+(`php scripts/scheduler-worker.php`) traite aussi les evenements planifies utiles
+aux transitions et aux pieges de trous noirs. Pendant un mouvement, les capteurs sont
 `normal`, `degraded` ou `blind` selon la phase. La croisiere longue peut detruire
 la sonde, et l'arrivee applique des degats de poussiere intersectorielle.
 
@@ -291,12 +292,15 @@ puis les tests du moteur de secteurs dans `tests/SectorTests.php`.
 coordonnees FCC, le voisinage, la generation et la persistance fichier.
 
 
-Le scheduler est placé dans les tâches cron de l'user php/nginx (www-data dans mon cas) :
+En production, le scheduler peut fonctionner comme worker permanent supervisé
+par systemd :
 ```bash
-* * * * * /usr/bin/php /<neumannpath>/scripts/scheduler.php
+/usr/bin/php /<neumannpath>/scripts/scheduler-worker.php
 ```
 
-Il peut etre lance manuellement:
+Le worker accepte `--limit=25` et `--maximum-sleep=5`. Cette dernière valeur
+borne le délai de détection d'un événement ajouté pendant sa veille. Le
+scheduler ponctuel reste disponible pour une exécution manuelle ou via cron :
 
 ```bash
 php scripts/scheduler.php

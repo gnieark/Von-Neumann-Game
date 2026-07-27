@@ -12,6 +12,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Interface : l’assemblage Manny permet de choisir le modèle `generic` ou `deuterium_tanker`, adapte la recette et sa description au choix, puis transmet le modèle à l’API. La fiche d’une sonde affiche désormais séparément son type et son modèle.
 - API v103 : ajout du modèle de sonde `deuterium_tanker` à l’assemblage Manny. Il possède une capacité de 400 points de deutérium (800 avec compression), consomme en plus 10 `steel_plate`, 2 `linear_actuator` et 1 `integrated_circuit`, et subit le risque de rupture de container dès le deuxième container additionnel (le quatrième avec les fixations renforcées). Le champ `model` des sondes vaut `generic` par défaut.
 - Statistiques publiques : le podium des activateurs SCUT regroupe désormais les relais par joueur, toutes ses sondes confondues.
+- Maintenance : ajout d’un worker scheduler permanent, conçu pour être supervisé par systemd, qui traite les événements à leur échéance avec une veille bornée à cinq secondes.
 
 ## 2026-07-26
 
