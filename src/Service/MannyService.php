@@ -103,6 +103,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly ScutTransitBeaconInstallationTaskHandler $scutTransitBeaconInstallationTaskHandler;
     private readonly StorageMoveTaskHandler $storageMoveTaskHandler;
     private readonly WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallationTaskHandler;
+    private ?int $preparedBatchProbeId = null;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -735,8 +736,38 @@ final class MannyService implements MannyTaskRuntime
      */
     private function withProbeLock(NeumannProbe $probe, callable $callback): mixed
     {
+        if ($this->preparedBatchProbeId === $probe->id) {
+            return $callback($this->probes->findById($probe->id) ?? $probe);
+        }
+
         return $this->probes->withProbeLock($probe->id, function () use ($probe, $callback): mixed {
             return $callback($this->probes->findById($probe->id) ?? $probe);
+        });
+    }
+
+    /**
+     * Runs a Manny task batch under one probe lock after refreshing pre-existing
+     * tasks once. Tasks started by the batch are too recent to need refreshing.
+     *
+     * @template T
+     * @param callable(NeumannProbe): T $callback
+     * @return T
+     */
+    public function withPreparedBatch(NeumannProbe $probe, callable $callback): mixed
+    {
+        if ($this->preparedBatchProbeId !== null) {
+            throw new \LogicException('A Manny task batch is already being prepared.');
+        }
+
+        return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($callback): mixed {
+            $this->preparedBatchProbeId = $lockedProbe->id;
+            try {
+                $this->refreshAllMannyStates($lockedProbe);
+
+                return $callback($lockedProbe);
+            } finally {
+                $this->preparedBatchProbeId = null;
+            }
         });
     }
 
@@ -1839,6 +1870,10 @@ final class MannyService implements MannyTaskRuntime
 
     private function refreshOtherMannyStates(NeumannProbe $probe, Manny $currentManny): void
     {
+        if ($this->preparedBatchProbeId === $probe->id) {
+            return;
+        }
+
         foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
             if ($manny->id === $currentManny->id || $manny->currentTask === null) {
                 continue;

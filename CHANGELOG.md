@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 - Performance : les requêtes HTTP et le scheduler ouvrent désormais la base sans rejouer l’initialisation complète du schéma. Les migrations restent réservées aux appels explicites, et la migration MySQL des messages ne relance plus de `ALTER TABLE` lorsque les références de sondes sont déjà nullables.
+- Performance : l’affectation atomique d’un lot de tâches Manny rafraîchit désormais les tâches existantes une seule fois et réutilise le verrou de la sonde, au lieu de rescanner toutes les Mannies pour chaque ordre.
 
 ### Changed
 - Interface : l’assemblage Manny permet de choisir le modèle `generic` ou `deuterium_tanker`, adapte la recette et sa description au choix, puis transmet le modèle à l’API. La fiche d’une sonde affiche désormais séparément son type et son modèle.

@@ -160,9 +160,9 @@ final class ProbeManniesApiController
         }
 
         try {
-            $results = $this->probes->withProbeLock(
-                $probe->id,
-                function () use ($player, $probe, $normalizedTasks): array {
+            $results = $this->mannies->withPreparedBatch(
+                $probe,
+                function (NeumannProbe $lockedProbe) use ($player, $normalizedTasks): array {
                     $results = [];
                     foreach ($normalizedTasks as $index => $task) {
                         $response = $this->action(
@@ -170,7 +170,7 @@ final class ProbeManniesApiController
                             $task['mannyId'],
                             $task['task'],
                             json_encode($task['payload'], JSON_THROW_ON_ERROR),
-                            $probe,
+                            $lockedProbe,
                         );
                         if ($response->status !== 202) {
                             throw new BatchMannyActionRejected($index, $response);

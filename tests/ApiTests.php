@@ -270,7 +270,7 @@ class TestUnavailablePasswordAuthRoute extends FrontRouteAuthByPwd
 $test = new TestRunner();
 
 $redisConfig = (new JsonConfigLoader(dirname(__DIR__)))->load('redis');
-$test->assertEquals(60, $redisConfig['rateLimit']['maxRequests'] ?? null, 'Redis config defaults API rate limiting to 60 requests');
+$test->assertEquals(120, $redisConfig['rateLimit']['maxRequests'] ?? null, 'Redis config defaults API rate limiting to 120 requests');
 $test->assertEquals(60, $redisConfig['rateLimit']['windowSeconds'] ?? null, 'Redis config defaults API rate limiting to a 60-second window');
 $rateLimitRedis = new RecordingRedisScriptExecutor([1, 60, 59, 0, 1_750_000_060]);
 $rateLimiter = new RedisTokenRateLimiter($rateLimitRedis, 60, 60, 'test:');
@@ -5309,6 +5309,11 @@ $test->assertEquals(202, $batchStart->status, 'POST /api/probe/{probeId}/mannies
 $test->assertEquals(2, count($batchStart->body['results'] ?? []), 'Manny task batch returns one ordered result per request');
 $test->assertEquals($batchMannyIds[0] ?? null, $batchStart->body['results'][0]['manny']['id'] ?? null, 'first Manny batch result identifies its Manny');
 $test->assertEquals($batchMannyIds[1] ?? null, $batchStart->body['results'][1]['manny']['id'] ?? null, 'second Manny batch result identifies its Manny');
+$mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
+$probeManniesControllerSource = file_get_contents($root . '/src/Http/Controller/ProbeManniesApiController.php');
+$test->assert(is_string($probeManniesControllerSource) && str_contains($probeManniesControllerSource, '$this->mannies->withPreparedBatch('), 'Manny task batches delegate their transaction and preparation to the Manny service');
+$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->refreshAllMannyStates($lockedProbe);'), 'Manny task batches refresh pre-existing tasks once before assigning orders');
+$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'if ($this->preparedBatchProbeId === $probe->id)'), 'Manny task batch assignments skip repeated peer refreshes and nested probe locks');
 
 $batchRollback = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
     'tasks' => [
