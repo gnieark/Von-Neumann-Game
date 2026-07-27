@@ -10,6 +10,7 @@ use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeItem;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
@@ -23,6 +24,11 @@ final class MannyCraftingService
         ProbeItem::TYPE_ELECTRIC_MOTOR => 5,
         ProbeItem::TYPE_ATOMIC_PRINTER_PART => 2,
         ProbeItem::TYPE_SOLAR_PANEL => 4,
+    ];
+    private const DEUTERIUM_TANKER_ASSEMBLY_COMPONENTS = [
+        ProbeItem::TYPE_STEEL_PLATE => 10,
+        ProbeItem::TYPE_LINEAR_ACTUATOR => 2,
+        ProbeItem::TYPE_INTEGRATED_CIRCUIT => 1,
     ];
 
     public function __construct(
@@ -123,12 +129,12 @@ final class MannyCraftingService
     /**
      * @return array<string, mixed>
      */
-    public function probeAssemblyPlan(NeumannProbe $probe): array
+    public function probeAssemblyPlan(NeumannProbe $probe, string $model = ProbeModel::GENERIC): array
     {
         $itemsByType = $this->probeItemsByType($probe);
         $itemsToConsume = [];
         $consumedItems = [];
-        foreach (self::PROBE_ASSEMBLY_COMPONENTS as $type => $requiredCount) {
+        foreach ($this->probeAssemblyComponents($model) as $type => $requiredCount) {
             $availableItems = $itemsByType[$type] ?? [];
             if (count($availableItems) < $requiredCount) {
                 throw new MannyActionException(422, 'insufficient_probe_assembly_components', 'Insufficient probe inventory to assemble a new probe.');
@@ -153,10 +159,10 @@ final class MannyCraftingService
     /**
      * @return list<array{type:string,name:string,quantity:int,unit:string}>
      */
-    public function probeAssemblyComponentRequirements(): array
+    public function probeAssemblyComponentRequirements(string $model = ProbeModel::GENERIC): array
     {
         $requirements = [];
-        foreach (self::PROBE_ASSEMBLY_COMPONENTS as $type => $quantity) {
+        foreach ($this->probeAssemblyComponents($model) as $type => $quantity) {
             $requirements[] = [
                 'type' => $type,
                 'name' => $this->itemDisplayName($type),
@@ -166,6 +172,21 @@ final class MannyCraftingService
         }
 
         return $requirements;
+    }
+
+    /** @return array<string, int> */
+    private function probeAssemblyComponents(string $model): array
+    {
+        if ($model !== ProbeModel::DEUTERIUM_TANKER) {
+            return self::PROBE_ASSEMBLY_COMPONENTS;
+        }
+
+        $components = self::PROBE_ASSEMBLY_COMPONENTS;
+        foreach (self::DEUTERIUM_TANKER_ASSEMBLY_COMPONENTS as $type => $additionalCount) {
+            $components[$type] = ($components[$type] ?? 0) + $additionalCount;
+        }
+
+        return $components;
     }
 
     /**

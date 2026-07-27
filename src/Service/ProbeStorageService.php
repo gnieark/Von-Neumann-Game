@@ -9,6 +9,7 @@ use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeExternalTank;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeInventoryItem;
 use VonNeumannGame\Domain\ProbeItem;
@@ -1512,7 +1513,10 @@ final class ProbeStorageService
 
     private function maxDeuteriumPercent(?NeumannProbe $probe = null): float
     {
-        $max = max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        $max = ProbeModel::baseMaxDeuteriumPercent(
+            $probe?->model ?? ProbeModel::GENERIC,
+            max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0)),
+        );
         if (
             $probe !== null
             && $this->improvements !== null
@@ -1520,7 +1524,8 @@ final class ProbeStorageService
         ) {
             $definition = ProbeImprovementCatalog::find(ProbeImprovementCatalog::DEUTERIUM_COMPRESSION, $this->probeImprovementConfig());
             $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
-            $max = max($max, (float) ($effects['maxDeuteriumPercent'] ?? ProbeImprovementCatalog::DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT));
+            $compressionMaximum = (float) ($effects['maxDeuteriumPercent'] ?? ProbeImprovementCatalog::DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT);
+            $max = $probe->model === ProbeModel::DEUTERIUM_TANKER ? $max * 2.0 : max($max, $compressionMaximum);
         }
 
         return $max;

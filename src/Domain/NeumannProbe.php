@@ -29,6 +29,7 @@ final class NeumannProbe
         public readonly string $createdAt,
         public string $updatedAt,
         public bool $excludeFromStats,
+        public readonly string $model = ProbeModel::GENERIC,
     ) {}
 
     public function addIntegrityPercent(float $percentageToAdd, float $maxIntegrityPercent): void

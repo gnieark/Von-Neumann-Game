@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Http\Controller;
 
 use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Http\ApiResponse;
@@ -383,7 +384,12 @@ final class ProbeManniesApiController
                 }
             }
 
-            $manny = $this->mannies->startProbeAssembly($probe, $uid, $containerIds);
+            $model = $data['model'] ?? ProbeModel::GENERIC;
+            if (!is_string($model) || !ProbeModel::isValid($model)) {
+                return ApiResponse::error(400, 'invalid_probe_model', 'model must be one of: ' . implode(', ', ProbeModel::ALL) . '.');
+            }
+
+            $manny = $this->mannies->startProbeAssembly($probe, $uid, $containerIds, $model);
             $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, [

@@ -68,6 +68,7 @@ final class SchemaInitializer
                 id $id,
                 player_id INTEGER NOT NULL,
                 name $text NOT NULL,
+                model $text NOT NULL DEFAULT 'generic',
                 sector_x INTEGER NOT NULL,
                 sector_y INTEGER NOT NULL,
                 sector_z INTEGER NOT NULL,
@@ -500,6 +501,7 @@ final class SchemaInitializer
             $this->ensureSqliteProbeResourceStockColumns($pdo);
             $this->ensureProbePlayerOneToManySchema($pdo);
             $this->ensureSqliteColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'INTEGER NOT NULL DEFAULT 0');
+            $this->ensureSqliteColumn($pdo, 'neumann_probes', 'model', "TEXT NOT NULL DEFAULT 'generic'");
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureProbeMessageSchema($pdo);
@@ -538,6 +540,7 @@ final class SchemaInitializer
             $this->ensureMysqlProbeResourceStockColumns($pdo);
             $this->ensureProbePlayerOneToManySchema($pdo);
             $this->ensureMysqlColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER updated_at');
+            $this->ensureMysqlColumn($pdo, 'neumann_probes', 'model', "VARCHAR(255) NOT NULL DEFAULT 'generic' AFTER name");
             $this->ensureStorageSchema($pdo);
             $this->ensureDamageWarningSchema($pdo);
             $this->ensureMysqlProbeDamageWarningMovementNullable($pdo);

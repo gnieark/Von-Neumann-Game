@@ -6,6 +6,7 @@ namespace VonNeumannGame\Service\Manny;
 
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Service\MannyActionException;
 
@@ -18,16 +19,16 @@ final class ProbeAssemblyTaskHandler implements TaskHandlerInterface
      * @param \Closure(Manny, NeumannProbe): void $ensureMannyInRange
      * @param \Closure(Manny): void $ensureMannyIdle
      * @param \Closure(NeumannProbe, Manny): void $refreshOtherMannyStates
-     * @param \Closure(NeumannProbe): array<string, mixed> $probeAssemblyPlan
+     * @param \Closure(NeumannProbe, string): array<string, mixed> $probeAssemblyPlan
      * @param \Closure(NeumannProbe, list<string>): list<array<string, mixed>> $consumeEmptyAdditionalContainers
      * @param \Closure(NeumannProbe, array<string, mixed>): void $consumeProbeAssemblyPlan
      * @param \Closure(): int $probeAssemblySeconds
-     * @param \Closure(): list<array{type:string,name:string,quantity:int,unit:string}> $probeAssemblyComponentRequirements
+     * @param \Closure(string): list<array{type:string,name:string,quantity:int,unit:string}> $probeAssemblyComponentRequirements
      * @param \Closure(Manny): void $releaseMannyFromStorage
      * @param \Closure(Manny): void $removeMannyFromSector
      * @param \Closure(Manny): void $saveManny
      * @param \Closure(int): string $nextDroneProbeName
-     * @param \Closure(int, string, SectorCoordinates): NeumannProbe $createProbeForPlayer
+     * @param \Closure(int, string, SectorCoordinates, string): NeumannProbe $createProbeForPlayer
      * @param \Closure(NeumannProbe): void $ensureProbeStorage
      * @param \Closure(NeumannProbe, Manny): bool $placeMannyOnProbe
      * @param \Closure(Manny, array<string, mixed>): void $clearTask
@@ -65,7 +66,7 @@ final class ProbeAssemblyTaskHandler implements TaskHandlerInterface
     /**
      * @param list<string> $containerIds
      */
-    public function start(NeumannProbe $probe, string $uid, array $containerIds): Manny
+    public function start(NeumannProbe $probe, string $uid, array $containerIds, string $model): Manny
     {
         ($this->ensureProbeAcceptsMannyOrders)($probe);
         $manny = ($this->refreshMannyState)(($this->requiredManny)($probe, $uid), $probe);
@@ -76,7 +77,7 @@ final class ProbeAssemblyTaskHandler implements TaskHandlerInterface
             throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to assemble a new probe.');
         }
 
-        $plan = ($this->probeAssemblyPlan)($probe);
+        $plan = ($this->probeAssemblyPlan)($probe, $model);
         $consumedContainers = ($this->consumeEmptyAdditionalContainers)($probe, $containerIds);
         ($this->consumeProbeAssemblyPlan)($probe, $plan);
 
@@ -89,7 +90,8 @@ final class ProbeAssemblyTaskHandler implements TaskHandlerInterface
         $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
         $manny->taskPayload = [
             'durationSeconds' => $durationSeconds,
-            'components' => ($this->probeAssemblyComponentRequirements)(),
+            'model' => $model,
+            'components' => ($this->probeAssemblyComponentRequirements)($model),
             'consumedItems' => is_array($plan['consumedItems'] ?? null) ? $plan['consumedItems'] : [],
             'consumedContainers' => $consumedContainers,
             'result' => 'pending',
@@ -112,7 +114,8 @@ final class ProbeAssemblyTaskHandler implements TaskHandlerInterface
         }
 
         $droneName = ($this->nextDroneProbeName)($probe->playerId);
-        $newProbe = ($this->createProbeForPlayer)($probe->playerId, $droneName, $manny->sector ?? $probe->currentSector);
+        $model = (string) ($manny->taskPayload['model'] ?? ProbeModel::GENERIC);
+        $newProbe = ($this->createProbeForPlayer)($probe->playerId, $droneName, $manny->sector ?? $probe->currentSector, $model);
         ($this->ensureProbeStorage)($newProbe);
         ($this->removeMannyFromSector)($manny);
         $manny->probeId = $newProbe->id;
@@ -126,6 +129,7 @@ final class ProbeAssemblyTaskHandler implements TaskHandlerInterface
             'probe' => [
                 'id' => $newProbe->id,
                 'name' => $newProbe->name,
+                'model' => $newProbe->model,
             ],
         ]);
         ($this->saveManny)($manny);

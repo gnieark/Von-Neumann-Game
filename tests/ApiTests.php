@@ -19,6 +19,7 @@ use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
@@ -1576,7 +1577,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(102, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(103, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5730,6 +5731,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('assembling_probe', $assembleProbe->body['manny']['currentTask'] ?? null, 'probe assembly task is exposed on Manny');
     $test->assertEquals('sector', $assembleProbe->body['manny']['location']['type'] ?? null, 'probe assembly moves the Manny outside the probe');
     $test->assertEquals(10800, $assembleProbe->body['manny']['task']['durationSeconds'] ?? null, 'probe assembly lasts three hours');
+    $test->assertEquals(ProbeModel::GENERIC, $assembleProbe->body['manny']['task']['model'] ?? null, 'omitting the assembly model selects the generic probe model');
     $test->assertEquals(13, count($assembleProbe->body['manny']['task']['consumedItems'] ?? []), 'probe assembly consumes all required components');
     $test->assertEquals(2, count($assembleProbe->body['manny']['task']['consumedContainers'] ?? []), 'probe assembly consumes the two selected containers');
     $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdA) === null, 'accepted probe assembly removes the first ingredient container immediately');
@@ -5757,6 +5759,66 @@ if ($createdProbe !== null) {
     $test->assertEquals($assemblyDrone?->id, $assemblyMannyAfterCompletion?->probeId, 'completed probe assembly transfers the Manny to the new drone');
     $test->assertEquals(Manny::LOCATION_PROBE, $assemblyMannyAfterCompletion?->locationType, 'transferred assembly Manny is aboard the new drone');
     $test->assert($assemblyMannyAfterCompletion?->storageContainerId !== null, 'transferred assembly Manny is stored in the new drone cargo');
+    $test->assertEquals(ProbeModel::GENERIC, $assemblyDrone?->model, 'legacy assembly payload creates a generic probe');
+
+    $tankerPlayer = $auth->registerPlayerWithPassword('deuterium-tanker-user', 'secret', 'Deuterium Tanker User');
+    $tankerHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($tankerPlayer)['token']];
+    $tankerSourceProbe = $probes->findByPlayerId($tankerPlayer->id) ?? throw new RuntimeException('Expected tanker source probe.');
+    $tankerMannyList = $kernel->handle('GET', '/api/probe/mannies', $tankerHeaders);
+    $tankerMannyId = (string) ($tankerMannyList->body['mannies'][0]['id'] ?? '');
+    $tankerMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $tankerMannyRow->execute(['uid' => $tankerMannyId]);
+    $tankerMannyDbId = (int) $tankerMannyRow->fetchColumn();
+    $tankerContainerA = $storage->addItem($tankerSourceProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $tankerContainerB = $storage->addItem($tankerSourceProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
+    $tankerComponents = array_merge($assemblyComponents, [
+        [ProbeItem::TYPE_STEEL_PLATE, ProbeItem::STEEL_PLATE_NAME, 0.01, 10],
+        [ProbeItem::TYPE_LINEAR_ACTUATOR, ProbeItem::LINEAR_ACTUATOR_NAME, 0.01, 2],
+        [ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001, 1],
+    ]);
+    foreach ($tankerComponents as [$type, $name, $space, $count]) {
+        for ($index = 0; $index < $count; $index++) {
+            $storage->addItem($tankerSourceProbe, $type, $name, $space);
+        }
+    }
+    $assembleTanker = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($tankerMannyId) . '/assemble-probe', $tankerHeaders, json_encode([
+        'model' => ProbeModel::DEUTERIUM_TANKER,
+        'containerIds' => ['container-' . $tankerContainerA->uid, 'container-' . $tankerContainerB->uid],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $assembleTanker->status, 'probe assembly accepts the deuterium tanker model');
+    $test->assertEquals(ProbeModel::DEUTERIUM_TANKER, $assembleTanker->body['manny']['task']['model'] ?? null, 'tanker model is persisted in the assembly task');
+    $test->assertEquals(26, count($assembleTanker->body['manny']['task']['consumedItems'] ?? []), 'tanker assembly consumes the generic recipe plus thirteen specialized components');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $tankerMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $tankerHeaders);
+    $tankerProbe = array_values(array_filter(
+        $probes->findAllByPlayerId($tankerPlayer->id),
+        static fn(NeumannProbe $probe): bool => $probe->model === ProbeModel::DEUTERIUM_TANKER,
+    ))[0] ?? null;
+    $test->assert($tankerProbe instanceof NeumannProbe, 'completed tanker assembly persists the new probe model');
+    if ($tankerProbe instanceof NeumannProbe) {
+        $test->assertEquals(400.0, $mannyService->maxDeuteriumPercentForProbe($tankerProbe), 'deuterium tanker capacity is 400 points');
+        $test->assertEquals(0.0, $riskMethod->invoke($movementService, $tankerProbe, 1), 'tanker has no container-loss risk with one additional container');
+        $test->assertEquals(0.1, $riskMethod->invoke($movementService, $tankerProbe, 2), 'tanker container-loss risk starts at the second additional container');
+        $now = gmdate('c');
+        $pdo->prepare('INSERT INTO probe_improvement_installations (probe_id, improvement, created_at, updated_at) VALUES (:probe_id, :improvement, :created_at, :updated_at)')->execute([
+            'probe_id' => $tankerProbe->id,
+            'improvement' => ProbeImprovementCatalog::DEUTERIUM_COMPRESSION,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+        $test->assertEquals(800.0, $mannyService->maxDeuteriumPercentForProbe($tankerProbe), 'deuterium compression doubles tanker capacity to 800 points');
+        $pdo->prepare('INSERT INTO probe_improvement_installations (probe_id, improvement, created_at, updated_at) VALUES (:probe_id, :improvement, :created_at, :updated_at)')->execute([
+            'probe_id' => $tankerProbe->id,
+            'improvement' => ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+        $test->assertEquals(0.0, $riskMethod->invoke($movementService, $tankerProbe, 3), 'reinforced tanker has no container-loss risk through three additional containers');
+        $test->assertEquals(0.1, $riskMethod->invoke($movementService, $tankerProbe, 4), 'reinforced tanker container-loss risk starts at the fourth additional container');
+    }
 
     $assemblyRecallPlayer = $auth->registerPlayerWithPassword('probe-assembly-recall-user', 'secret', 'Probe Assembly Recall User');
     $assemblyRecallHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($assemblyRecallPlayer)['token']];
