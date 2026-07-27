@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 101
+                apiVersion: 103
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2812,9 +2812,11 @@ paths:
     post:
       summary: Assemble a new drone probe with a Manny
       description: >
-        Starts a three-hour exterior Manny task that consumes two selected
-        empty additional containers plus one deuterium engine, one SCUT relay,
-        five electric motors, two atomic printer parts, and four solar panels.
+        Starts a three-hour exterior Manny task. The generic model consumes two
+        selected empty additional containers plus one deuterium engine, one
+        SCUT relay, five electric motors, two atomic printer parts, and four
+        solar panels. The `deuterium_tanker` model additionally consumes ten
+        steel plates, two linear actuators, and one integrated circuit.
         When the task completes, a new owned drone probe is created in the
         assembly sector and the Manny is transferred from the old probe to the
         new one. If the original probe leaves the sector before completion, the
@@ -2830,6 +2832,7 @@ paths:
             schema:
               $ref: '#/components/schemas/MannyProbeAssemblyRequest'
             example:
+              model: deuterium_tanker
               containerIds:
                 - container-itm_aaaaaaaaaaaaaaaaaaaaaaaa
                 - container-itm_bbbbbbbbbbbbbbbbbbbbbbbb
@@ -3989,7 +3992,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_relay_not_active, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, invalid_probe_model, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_relay_not_active, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -4414,12 +4417,14 @@ components:
           type: number
     Probe:
       type: object
-      required: [id, name, status, fuel, sensorMode]
+      required: [id, name, model, status, fuel, sensorMode]
       properties:
         id:
           type: integer
         name:
           type: string
+        model:
+          $ref: '#/components/schemas/ProbeModel'
         status:
           type: string
           enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, dead, trapped_by_black_hole]
@@ -4437,7 +4442,7 @@ components:
               type: number
             maxDeuterium:
               type: number
-              description: Current effective deuterium tank maximum; 100 by default, higher after probe improvements.
+              description: Current effective deuterium tank maximum; 100 for a generic probe and 400 for a deuterium tanker, doubled by deuterium compression.
         sensorMode:
           type: string
           enum: [normal, degraded, blind]
@@ -4493,12 +4498,14 @@ components:
               $ref: '#/components/schemas/Vector'
     ProbeSummary:
       type: object
-      required: [id, name, status, isDefault, isReachable]
+      required: [id, name, model, status, isDefault, isReachable]
       properties:
         id:
           type: integer
         name:
           type: string
+        model:
+          $ref: '#/components/schemas/ProbeModel'
         status:
           type: string
           enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, dead, trapped_by_black_hole]
@@ -5760,6 +5767,9 @@ components:
       type: object
       required: [containerIds]
       properties:
+        model:
+          $ref: '#/components/schemas/ProbeModel'
+          description: Probe model to assemble. Defaults to `generic` when omitted.
         containerIds:
           type: array
           minItems: 2
@@ -5769,6 +5779,9 @@ components:
           items:
             type: string
             example: container-itm_aaaaaaaaaaaaaaaaaaaaaaaa
+    ProbeModel:
+      type: string
+      enum: [generic, deuterium_tanker]
     AtomicPrinterCraftRequest:
       type: object
       required: [recipe]

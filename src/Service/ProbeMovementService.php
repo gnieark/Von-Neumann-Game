@@ -9,6 +9,7 @@ use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
@@ -734,17 +735,17 @@ final class ProbeMovementService
 
     private function fragileContainerLossRisk(NeumannProbe $probe, int $additionalContainerCount): float
     {
-        $effectiveContainerCount = max(0, $additionalContainerCount - $this->fragileContainerRiskDiscount($probe));
+        $threshold = ProbeModel::containerBreakThreshold(
+            $probe->model,
+            $this->hasReinforcedContainerCouplings($probe),
+        );
 
-        return min(1.0, max(0.0, ($effectiveContainerCount - 4) * 0.10));
+        return min(1.0, max(0.0, ($additionalContainerCount - $threshold + 1) * 0.10));
     }
 
     private function fragileContainerRiskDiscount(NeumannProbe $probe): int
     {
-        if (
-            $this->improvements === null
-            || !$this->improvements->isDone($probe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS)
-        ) {
+        if (!$this->hasReinforcedContainerCouplings($probe)) {
             return 0;
         }
 
@@ -755,6 +756,12 @@ final class ProbeMovementService
         $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
 
         return max(0, (int) ($effects['fragileContainerRiskAdditionalContainerDiscount'] ?? ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS_CONTAINER_RISK_DISCOUNT));
+    }
+
+    private function hasReinforcedContainerCouplings(NeumannProbe $probe): bool
+    {
+        return $this->improvements !== null
+            && $this->improvements->isDone($probe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS);
     }
 
     private function publicMovementSectorLabel(SectorCoordinates $sector, ?Player $player, string $fallback): string

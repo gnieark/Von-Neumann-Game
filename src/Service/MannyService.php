@@ -13,6 +13,7 @@ use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Domain\ScheduledEvent;
@@ -381,13 +382,13 @@ final class MannyService implements MannyTaskRuntime
             function (NeumannProbe $probe, Manny $manny): void {
                 $this->refreshOtherMannyStates($probe, $manny);
             },
-            fn(NeumannProbe $probe): array => $this->crafting->probeAssemblyPlan($probe),
+            fn(NeumannProbe $probe, string $model): array => $this->crafting->probeAssemblyPlan($probe, $model),
             fn(NeumannProbe $probe, array $containerIds): array => $this->storage->consumeEmptyAdditionalContainers($probe, $containerIds),
             function (NeumannProbe $probe, array $plan): void {
                 $this->crafting->consumeProbeAssemblyPlan($probe, $plan);
             },
             fn(): int => self::PROBE_ASSEMBLY_SECONDS,
-            fn(): array => $this->crafting->probeAssemblyComponentRequirements(),
+            fn(string $model): array => $this->crafting->probeAssemblyComponentRequirements($model),
             function (Manny $manny): void {
                 $this->storage->releaseMannyFromStorage($manny);
             },
@@ -398,7 +399,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->mannies->save($manny);
             },
             fn(int $playerId): string => $this->nextDroneProbeName($playerId),
-            fn(int $playerId, string $name, SectorCoordinates $sector): NeumannProbe => $this->probes->createForPlayer($playerId, $name, $sector),
+            fn(int $playerId, string $name, SectorCoordinates $sector, string $model): NeumannProbe => $this->probes->createForPlayer($playerId, $name, $sector, $model),
             function (NeumannProbe $probe): void {
                 $this->storage->ensureProbeStorage($probe);
             },
@@ -941,20 +942,20 @@ final class MannyService implements MannyTaskRuntime
     /**
      * @param list<string> $containerIds
      */
-    public function startProbeAssembly(NeumannProbe $probe, string $uid, array $containerIds): Manny
+    public function startProbeAssembly(NeumannProbe $probe, string $uid, array $containerIds, string $model = ProbeModel::GENERIC): Manny
     {
         return $this->withProbeLock(
             $probe,
-            fn(NeumannProbe $lockedProbe): Manny => $this->startProbeAssemblyLocked($lockedProbe, $uid, $containerIds),
+            fn(NeumannProbe $lockedProbe): Manny => $this->startProbeAssemblyLocked($lockedProbe, $uid, $containerIds, $model),
         );
     }
 
     /**
      * @param list<string> $containerIds
      */
-    private function startProbeAssemblyLocked(NeumannProbe $probe, string $uid, array $containerIds): Manny
+    private function startProbeAssemblyLocked(NeumannProbe $probe, string $uid, array $containerIds, string $model): Manny
     {
-        return $this->probeAssemblyTaskHandler->start($probe, $uid, $containerIds);
+        return $this->probeAssemblyTaskHandler->start($probe, $uid, $containerIds, $model);
     }
 
     public function startSalvage(NeumannProbe $probe, string $uid, string $objectId): Manny
@@ -2760,7 +2761,10 @@ final class MannyService implements MannyTaskRuntime
 
     private function maxDeuteriumPercent(?NeumannProbe $probe = null): float
     {
-        $max = max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0));
+        $max = ProbeModel::baseMaxDeuteriumPercent(
+            $probe?->model ?? ProbeModel::GENERIC,
+            max(0.0001, Config::float($this->config, 'probe.maxDeuteriumPercent', 100.0)),
+        );
         if (
             $probe !== null
             && $this->improvements !== null
@@ -2768,7 +2772,8 @@ final class MannyService implements MannyTaskRuntime
         ) {
             $definition = ProbeImprovementCatalog::find(ProbeImprovementCatalog::DEUTERIUM_COMPRESSION, $this->probeImprovementConfig());
             $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
-            $max = max($max, (float) ($effects['maxDeuteriumPercent'] ?? ProbeImprovementCatalog::DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT));
+            $compressionMaximum = (float) ($effects['maxDeuteriumPercent'] ?? ProbeImprovementCatalog::DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT);
+            $max = $probe->model === ProbeModel::DEUTERIUM_TANKER ? $max * 2.0 : max($max, $compressionMaximum);
         }
 
         return $max;

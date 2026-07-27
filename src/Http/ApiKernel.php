@@ -15,6 +15,7 @@ use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeLogbookPage;
 use VonNeumannGame\Domain\ProbeMessage;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ScutNetwork;
@@ -52,7 +53,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 102;
+    public const API_VERSION = 103;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -514,6 +515,7 @@ final class ApiKernel
                 'probe' => [
                     'id' => $probe->id,
                     'name' => $probe->name,
+                    'model' => $probe->model,
                     'status' => 'trapped_by_black_hole',
                     'message' => 'The probe has crossed a black hole escape threshold. No signal or actuator response can be recovered.',
                     'alert' => $this->terminalProbeAlert($probe),
@@ -533,6 +535,7 @@ final class ApiKernel
                 'probe' => [
                     'id' => $probe->id,
                     'name' => $probe->name,
+                    'model' => $probe->model,
                     'status' => 'dead',
                     'message' => 'The probe is no longer operational. Its intelligence core is isolated from all sensors and actuators.',
                     'alert' => $this->terminalProbeAlert($probe),
@@ -587,6 +590,7 @@ final class ApiKernel
         return [
             'id' => $probe->id,
             'name' => $probe->name,
+            'model' => $probe->model,
             'status' => $probe->status->value,
             'isDefault' => $isDefault,
             'isReachable' => $isDefault || $this->scut->canSectorsCommunicate($defaultProbe->currentSector, $probe->currentSector),
@@ -1130,7 +1134,7 @@ final class ApiKernel
      */
     private function storageContainerBreakRule(?NeumannProbe $probe = null): array
     {
-        $startsAtAdditionalContainers = 5 + $this->fragileContainerRiskDiscount($probe);
+        $startsAtAdditionalContainers = $this->containerBreakThreshold($probe);
 
         return [
             'type' => ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK,
@@ -1158,6 +1162,18 @@ final class ApiKernel
         $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
 
         return max(0, (int) ($effects['fragileContainerRiskAdditionalContainerDiscount'] ?? ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS_CONTAINER_RISK_DISCOUNT));
+    }
+
+    private function containerBreakThreshold(?NeumannProbe $probe): int
+    {
+        if ($probe === null) {
+            return ProbeModel::containerBreakThreshold(ProbeModel::GENERIC, false);
+        }
+
+        return ProbeModel::containerBreakThreshold(
+            $probe->model,
+            $this->fragileContainerRiskDiscount($probe) > 0,
+        );
     }
 
     private function messageRecipientProbeId(mixed $value): ?int
@@ -1785,6 +1801,7 @@ final class ApiKernel
         return [
             'id' => $probe->id,
             'name' => $probe->name,
+            'model' => $probe->model,
             'status' => $probe->status->value,
             'fuel' => [
                 'deuterium' => $probe->deuteriumStock,
@@ -2136,7 +2153,7 @@ final class ApiKernel
         ];
 
         if ($warning->type === ProbeDamageWarning::TYPE_STORAGE_CONTAINER_BREAK) {
-            $startsAtAdditionalContainers = 5 + $this->fragileContainerRiskDiscount($this->probes->findById($warning->probeId));
+            $startsAtAdditionalContainers = $this->containerBreakThreshold($this->probes->findById($warning->probeId));
             $alert['container'] = [
                 'id' => $warning->containerId,
                 'label' => $warning->containerLabel,

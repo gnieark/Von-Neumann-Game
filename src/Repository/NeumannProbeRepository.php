@@ -8,6 +8,7 @@ use PDO;
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeDirection;
+use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Sector\SectorCoordinates;
 
@@ -18,18 +19,22 @@ final class NeumannProbeRepository
         private readonly array $config = [],
     ) {}
 
-    public function createForPlayer(int $playerId, string $name, ?SectorCoordinates $sector = null): NeumannProbe
+    public function createForPlayer(int $playerId, string $name, ?SectorCoordinates $sector = null, string $model = ProbeModel::GENERIC): NeumannProbe
     {
+        if (!ProbeModel::isValid($model)) {
+            throw new \InvalidArgumentException('Unknown probe model.');
+        }
         $sector ??= SectorCoordinates::origin();
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO neumann_probes
-             (player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
-             VALUES (:player_id, :name, :x, :y, :z, 0, 0, 0, 0, 0, :status, :integrity_percent, 0, :deuterium_stock, 0, 0, 0, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
+             (player_id, name, model, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
+             VALUES (:player_id, :name, :model, :x, :y, :z, 0, 0, 0, 0, 0, :status, :integrity_percent, 0, :deuterium_stock, 0, 0, 0, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
         );
         $stmt->execute([
             'player_id' => $playerId,
             'name' => $name,
+            'model' => $model,
             'x' => $sector->getX(),
             'y' => $sector->getY(),
             'z' => $sector->getZ(),
@@ -336,6 +341,7 @@ final class NeumannProbeRepository
             (string) $row['created_at'],
             (string) $row['updated_at'],
             (int) ($row['exclude_from_stats'] ?? 0) === 1,
+            (string) ($row['model'] ?? ProbeModel::GENERIC),
         );
     }
 
