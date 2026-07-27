@@ -110,7 +110,7 @@ class FrontRouteAuthByPwd extends FrontRoute{
         $factory = $this->factory();
 
         return $factory
-            ->authService($factory->pdo(initializeSchema: true))
+            ->authService($factory->pdo())
             ->getPlayerFromBearerToken($bearer);
     }
 
@@ -131,7 +131,7 @@ class FrontRouteAuthByPwd extends FrontRoute{
     {
         $factory = $this->factory();
 
-        return $factory->authService($factory->pdo(initializeSchema: true));
+        return $factory->authService($factory->pdo());
     }
 
     protected function setAuthenticationUnavailableStatus(): void

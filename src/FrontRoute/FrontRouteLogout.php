@@ -11,7 +11,7 @@ class FrontRouteLogout extends FrontRoute{
         $token = (string) ($_COOKIE[self::SESSION_COOKIE] ?? '');
         if ($token !== '') {
             $factory = new AppFactory(dirname(__DIR__, 2));
-            $auth = $factory->authService($factory->pdo(initializeSchema: true));
+            $auth = $factory->authService($factory->pdo());
             $auth->revokeSessionToken($token);
         }
 

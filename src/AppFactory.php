@@ -73,7 +73,7 @@ final class AppFactory
 
     public function apiKernel(?PDO $pdo = null): ApiKernel
     {
-        $pdo ??= $this->pdo(initializeSchema: true);
+        $pdo ??= $this->pdo();
         $appConfig = $this->appConfig();
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();
@@ -124,7 +124,7 @@ final class AppFactory
 
     public function schedulerService(?PDO $pdo = null): SchedulerService
     {
-        $pdo ??= $this->pdo(initializeSchema: true);
+        $pdo ??= $this->pdo();
         $appConfig = $this->appConfig();
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();

@@ -2,6 +2,11 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-27
+
+### Fixed
+- Performance : les requêtes HTTP et le scheduler ouvrent désormais la base sans rejouer l’initialisation complète du schéma. Les migrations restent réservées aux appels explicites, et la migration MySQL des messages ne relance plus de `ALTER TABLE` lorsque les références de sondes sont déjà nullables.
+
 ## 2026-07-26
 
 ### Changed
