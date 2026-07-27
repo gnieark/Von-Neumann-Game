@@ -967,7 +967,7 @@ for ($ranking = 1; $ranking <= 10; $ranking++) {
         $statsRankingVisitedSectors->markVisited($rankingPlayer, $statsRankingProbeRows[$ranking], new SectorCoordinates(200 + ($ranking * 2), $visit * 2, 0));
     }
 }
-$statsRankingProbes->createForPlayer($statsRankingPlayerRows[1]->id, 'Stats Ranking Secondary Probe', new SectorCoordinates(202, 2, 0));
+$statsRankingSecondaryProbe = $statsRankingProbes->createForPlayer($statsRankingPlayerRows[1]->id, 'Stats Ranking Secondary Probe', new SectorCoordinates(202, 2, 0));
 $statsCompletedMissionOne = $statsRankingMissions->create($statsRankingPlayerRows[1]->id, 'stats_completed', 'Stats completed mission');
 $statsCompletedMissionTwo = $statsRankingMissions->create($statsRankingPlayerRows[2]->id, 'stats_completed', 'Stats completed mission');
 $statsFailedMission = $statsRankingMissions->create($statsRankingPlayerRows[3]->id, 'stats_failed', 'Stats failed mission');
@@ -1018,6 +1018,7 @@ $statsScutNetworkTwoId = (int) $statsRankingPdo->lastInsertId();
 foreach ([
     [$statsRankingProbeRows[1]->id, $statsScutNetworkOneId, 'on', $statsScutNetworkOneCoverage],
     [$statsRankingProbeRows[1]->id, $statsScutNetworkTwoId, 'on', $statsScutNetworkTwoCoverage],
+    [$statsRankingSecondaryProbe->id, $statsScutNetworkOneId, 'on', []],
     [$statsRankingProbeRows[2]->id, $statsScutNetworkTwoId, 'off', []],
 ] as $relayIndex => [$creatorProbeId, $networkId, $status, $coverage]) {
     $statsScutRelayInsert->execute([
@@ -1056,8 +1057,9 @@ $test->assertEquals(4, $rankingStats['metrics']['scutCoveredSectors'] ?? null, '
 $test->assertEquals(2, $rankingStats['metrics']['successfulMissions'] ?? null, 'public stats count completed missions from included players');
 $test->assertEquals(1, $rankingStats['metrics']['failedMissions'] ?? null, 'public stats count failed missions from included players');
 $topScutRelayActivators = $rankingStats['metrics']['topScutRelayActivators'] ?? [];
-$test->assertEquals('Stats Ranking Probe 1', $topScutRelayActivators[0]['probeName'] ?? null, 'public stats SCUT activator podium ranks relay creators');
-$test->assertEquals(2, $topScutRelayActivators[0]['activatedRelays'] ?? null, 'public stats SCUT activator podium counts online relays only');
+$test->assertEquals('Stats Ranking 1', $topScutRelayActivators[0]['playerName'] ?? null, 'public stats SCUT activator podium ranks players');
+$test->assertEquals(3, $topScutRelayActivators[0]['activatedRelays'] ?? null, 'public stats SCUT activator podium combines online relays from all player probes');
+$test->assertEquals(1, count(array_filter($topScutRelayActivators, static fn(array $row): bool => ($row['playerName'] ?? null) === 'Stats Ranking 1')), 'public stats SCUT activator podium keeps one row per player');
 $topScutNetworksByCoverage = $rankingStats['metrics']['topScutNetworksByCoverage'] ?? [];
 $test->assertEquals('Stats SCUT Alpha', $topScutNetworksByCoverage[0]['networkName'] ?? null, 'public stats SCUT network coverage podium ranks networks by covered sectors');
 $test->assertEquals(3, $topScutNetworksByCoverage[0]['coveredSectors'] ?? null, 'public stats SCUT network coverage podium exposes covered-sector counts');

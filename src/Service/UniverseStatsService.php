@@ -316,7 +316,7 @@ final class UniverseStatsService
     /**
      * @return array{
      *     coveredSectors: int,
-     *     topActivators: array<int, array{rank: int, probeName: string, activatedRelays: int}>,
+     *     topActivators: array<int, array{rank: int, playerName: string, activatedRelays: int}>,
      *     topNetworks: array<int, array{rank: int, networkId: int, networkName: string, coveredSectors: int}>
      * }
      */
@@ -343,10 +343,13 @@ final class UniverseStatsService
         $relayStmt = $this->pdo->query(
             "SELECT scut_relays.id, scut_relays.created_by_probe_id,
                     neumann_probes.id AS probe_id,
-                    neumann_probes.name AS probe_name,
-                    neumann_probes.exclude_from_stats AS probe_excluded
+                    neumann_probes.player_id,
+                    neumann_probes.exclude_from_stats AS probe_excluded,
+                    players.username,
+                    players.display_name
              FROM scut_relays
              LEFT JOIN neumann_probes ON neumann_probes.id = scut_relays.created_by_probe_id
+             LEFT JOIN players ON players.id = neumann_probes.player_id
              WHERE scut_relays.status = '" . ScutRelay::STATUS_ON . "'
              ORDER BY scut_relays.id ASC"
         );
@@ -362,14 +365,18 @@ final class UniverseStatsService
                 continue;
             }
 
-            $probeName = trim((string) ($row['probe_name'] ?? ''));
-            if ($probeName === '') {
-                $probeName = 'death probe';
+            $playerId = $row['player_id'] !== null ? (int) $row['player_id'] : null;
+            if ($playerId === null) {
+                continue;
             }
-            $key = 'probe:' . $creatorId;
+
+            $displayName = trim((string) ($row['display_name'] ?? ''));
+            $username = trim((string) ($row['username'] ?? ''));
+            $playerName = $displayName !== '' ? $displayName : ($username !== '' ? $username : 'Unknown player');
+            $key = 'player:' . $playerId;
             if (!isset($activators[$key])) {
                 $activators[$key] = [
-                    'probeName' => $probeName,
+                    'playerName' => $playerName,
                     'activatedRelays' => 0,
                 ];
             }
@@ -378,7 +385,7 @@ final class UniverseStatsService
 
         uasort($activators, static fn(array $a, array $b): int => (
             ($b['activatedRelays'] <=> $a['activatedRelays'])
-            ?: strcasecmp($a['probeName'], $b['probeName'])
+            ?: strcasecmp($a['playerName'], $b['playerName'])
         ));
         usort($topNetworks, static fn(array $a, array $b): int => (
             ($b['coveredSectors'] <=> $a['coveredSectors'])
@@ -421,8 +428,8 @@ final class UniverseStatsService
     }
 
     /**
-     * @param array<string, array{probeName: string, activatedRelays: int}> $activators
-     * @return array<int, array{rank: int, probeName: string, activatedRelays: int}>
+     * @param array<string, array{playerName: string, activatedRelays: int}> $activators
+     * @return array<int, array{rank: int, playerName: string, activatedRelays: int}>
      */
     private function rankedScutActivators(array $activators): array
     {
@@ -431,7 +438,7 @@ final class UniverseStatsService
         foreach (array_slice($activators, 0, self::PUBLIC_RANKING_LIMIT) as $activator) {
             $topActivators[] = [
                 'rank' => $rank++,
-                'probeName' => $activator['probeName'],
+                'playerName' => $activator['playerName'],
                 'activatedRelays' => $activator['activatedRelays'],
             ];
         }

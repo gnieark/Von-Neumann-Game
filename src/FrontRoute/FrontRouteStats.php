@@ -284,7 +284,9 @@ class FrontRouteStats extends FrontRoute{
             $activatedRelays = max(0, (int) ($row['activatedRelays'] ?? 0));
             $podium[] = [
                 'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
-                'name' => trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownProbe'),
+                'name' => trim((string) ($row['playerName'] ?? '')) !== ''
+                    ? (string) $row['playerName']
+                    : (trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownPlayer')),
                 'activatedRelays' => $this->formatNumber($activatedRelays),
                 'activatedRelaysLabel' => $translator->get($activatedRelays > 1 ? 'statsScutActivatedRelaysPlural' : 'statsScutActivatedRelaysSingular'),
             ];
