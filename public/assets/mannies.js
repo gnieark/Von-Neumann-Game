@@ -16,6 +16,11 @@
         {"type": "atomic_printer_part", "quantity": 2},
         {"type": "solar_panel", "quantity": 4},
     ];
+    const DEUTERIUM_TANKER_ASSEMBLY_COMPONENTS = [
+        {"type": "steel_plate", "quantity": 10},
+        {"type": "linear_actuator", "quantity": 2},
+        {"type": "integrated_circuit", "quantity": 1},
+    ];
 
     const state = {
         currentCraftingRecipes: [],
@@ -1535,9 +1540,25 @@
         ));
     }
 
-    function probeAssemblyAvailability() {
+    function probeAssemblyModel(value) {
+        return value === "deuterium_tanker" ? value : "generic";
+    }
+
+    function probeAssemblyComponents(model) {
+        return model === "deuterium_tanker"
+            ? PROBE_ASSEMBLY_COMPONENTS.concat(DEUTERIUM_TANKER_ASSEMBLY_COMPONENTS)
+            : PROBE_ASSEMBLY_COMPONENTS;
+    }
+
+    function probeAssemblyModelDescription(model) {
+        return model === "deuterium_tanker"
+            ? tr("probeModelDeuteriumTankerDescription", "Optimized for deuterium transport, at the expense of storage capacity.")
+            : tr("probeModelGenericDescription", "Multi-purpose probe.");
+    }
+
+    function probeAssemblyAvailability(model = "generic") {
         const itemCounts = inventoryItemCounts();
-        const itemStatuses = PROBE_ASSEMBLY_COMPONENTS.map((component) => {
+        const itemStatuses = probeAssemblyComponents(probeAssemblyModel(model)).map((component) => {
             const available = Math.max(0, itemCounts[component.type] || 0);
             return {
                 "type": component.type,
@@ -1554,8 +1575,8 @@
         };
     }
 
-    function renderProbeAssemblyIngredients() {
-        const availability = probeAssemblyAvailability();
+    function renderProbeAssemblyIngredients(model = "generic") {
+        const availability = probeAssemblyAvailability(model);
         return "<span class=\"manny-craft-ingredients-title\">" + escaped(tr("craftIngredientsRequired", "Required ingredients")) + "</span>"
             + "<ul>"
             + availability.itemStatuses.map((status) => {
@@ -2400,13 +2421,19 @@
     }
 
     function renderAssembleProbeForm() {
-        const availability = probeAssemblyAvailability();
+        const model = "generic";
+        const availability = probeAssemblyAvailability(model);
         const containers = availability.emptyContainers;
         const disabled = !availability.hasComponents || containers.length < 2;
 
         return "<form class=\"manny-assemble-probe-form manny-form\">"
             + "<p class=\"manny-assemble-probe-description\">" + escaped(tr("assembleProbeDescription", "Assemblez dans l'espace une nouvelle sonde que vous pourrez piloter via SCUT, ou vous transférer dedans. Les composants suivants sont nécessaires.")) + "</p>"
-            + "<div class=\"manny-assemble-probe-ingredients\" aria-live=\"polite\">" + renderProbeAssemblyIngredients() + "</div>"
+            + "<label>" + escaped(tr("probeModel", "Model")) + "<select class=\"manny-assemble-probe-model\" name=\"model\">"
+            + "<option value=\"generic\" selected>generic</option>"
+            + "<option value=\"deuterium_tanker\">deuterium_tanker</option>"
+            + "</select></label>"
+            + "<p class=\"manny-assemble-probe-model-description\" aria-live=\"polite\">" + escaped(probeAssemblyModelDescription(model)) + "</p>"
+            + "<div class=\"manny-assemble-probe-ingredients\" aria-live=\"polite\">" + renderProbeAssemblyIngredients(model) + "</div>"
             + "<label>" + escaped(tr("emptyStorageContainerOne", "Empty container 1")) + "<select class=\"manny-assemble-probe-container\" name=\"containerIdA\" required>" + emptyStorageContainerOptions(containers[0] ? containers[0].id : "") + "</select></label>"
             + "<label>" + escaped(tr("emptyStorageContainerTwo", "Empty container 2")) + "<select class=\"manny-assemble-probe-container\" name=\"containerIdB\" required>" + emptyStorageContainerOptions(containers[1] ? containers[1].id : "") + "</select></label>"
             + "<button class=\"manny-assemble-probe-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("assembleProbe", "Assemble")) + "</button>"
@@ -2416,7 +2443,8 @@
 
     function updateAssembleProbeForms() {
         document.querySelectorAll(".manny-assemble-probe-form").forEach((form) => {
-            const availability = probeAssemblyAvailability();
+            const model = probeAssemblyModel(form.querySelector(".manny-assemble-probe-model")?.value);
+            const availability = probeAssemblyAvailability(model);
             const containers = availability.emptyContainers;
             const selects = Array.from(form.querySelectorAll(".manny-assemble-probe-container"));
             const selectedA = selects[0] ? selects[0].value : "";
@@ -2424,6 +2452,7 @@
             const firstDefault = containers.some((container) => container.id === selectedA) ? selectedA : (containers[0] ? containers[0].id : "");
             const secondDefault = containers.some((container) => container.id === selectedB) ? selectedB : (containers.find((container) => container.id !== firstDefault)?.id || "");
             const ingredientsNode = form.querySelector(".manny-assemble-probe-ingredients");
+            const modelDescriptionNode = form.querySelector(".manny-assemble-probe-model-description");
             const button = form.querySelector(".manny-assemble-probe-button");
             const hint = form.querySelector(".manny-assemble-probe-hint");
 
@@ -2433,7 +2462,10 @@
                 select.value = value;
             });
             if (ingredientsNode) {
-                ingredientsNode.innerHTML = renderProbeAssemblyIngredients();
+                ingredientsNode.innerHTML = renderProbeAssemblyIngredients(model);
+            }
+            if (modelDescriptionNode) {
+                modelDescriptionNode.textContent = probeAssemblyModelDescription(model);
             }
             if (button) {
                 const distinctContainers = Boolean(firstDefault && secondDefault && firstDefault !== secondDefault);
@@ -4038,11 +4070,12 @@
         }
         if (form.classList.contains("manny-assemble-probe-form")) {
             updateAssembleProbeForms();
+            const model = probeAssemblyModel(formData.get("model"));
             const containerIds = [
                 String(formData.get("containerIdA") || ""),
                 String(formData.get("containerIdB") || ""),
             ];
-            const availability = probeAssemblyAvailability();
+            const availability = probeAssemblyAvailability(model);
             if (!availability.hasComponents) {
                 setStatus(tr("missingProbeAssemblyComponents", "Insufficient components for this assembly."));
                 return null;
@@ -4054,7 +4087,7 @@
 
             return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/assemble-probe"), {
                 "method": "POST",
-                "body": JSON.stringify({containerIds}),
+                "body": JSON.stringify({model, containerIds}),
             });
         }
         if (form.classList.contains("manny-craft-form")) {
@@ -4196,7 +4229,7 @@
             if (event.target.classList.contains("manny-probe-improvement")) {
                 updateProbeImprovementForm(event.target.closest(".manny-improve-probe-form"));
             }
-            if (event.target.classList.contains("manny-assemble-probe-container")) {
+            if (event.target.classList.contains("manny-assemble-probe-container") || event.target.classList.contains("manny-assemble-probe-model")) {
                 updateAssembleProbeForms();
             }
             if (event.target.classList.contains("manny-transfer-deuterium-target") || event.target.classList.contains("manny-transfer-deuterium-amount")) {

@@ -395,6 +395,7 @@
         const previousInstanceOpen = container.querySelector(".probe-instance-accordion-trigger")?.getAttribute("aria-expanded") === "true";
         const previousDroneId = container.querySelector(".probe-instance-form select[name=\"probeId\"]")?.value || "";
         const state = currentProbeState(probe);
+        const model = probe.model || probeSummary(probe.id)?.model || "generic";
         const drones = reachableDrones(probe.id);
         const renameOpen = previousRenameOpen && state.isReachable;
         const instanceOpen = previousInstanceOpen && state.isDefault;
@@ -420,6 +421,7 @@
             + "<button type=\"submit\">" + window.VNG.escapeHtml(translate("rename", "Rename")) + "</button>"
             + "</form>"
             + "<p class=\"probe-type-line\"><span>" + window.VNG.escapeHtml(translate("probeType", "Type")) + "</span><b>" + window.VNG.escapeHtml(probeTypeLabel(state.isDefault)) + "</b></p>"
+            + "<p class=\"probe-type-line\"><span>" + window.VNG.escapeHtml(translate("probeModel", "Model")) + "</span><b>" + window.VNG.escapeHtml(model) + "</b></p>"
             + noticeHtml
             + (state.isDefault ? "<section class=\"probe-instance-accordion\">"
                 + "<button class=\"probe-instance-accordion-trigger manny-action-accordion-trigger\" type=\"button\" aria-expanded=\"" + (instanceOpen ? "true" : "false") + "\" aria-controls=\"" + window.VNG.escapeHtml(instancePanelId) + "\">"

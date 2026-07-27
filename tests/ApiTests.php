@@ -508,6 +508,7 @@ $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeIm
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probeApiPath("/probe-improvements-available")'), 'probe JS reads installed probe improvements for the selected probe');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'improvement.done === true'), 'probe JS lists completed probe improvements only');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'installed.slice(0, 2)'), 'probe JS summarizes installed probe improvements after two entries');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.model || probeSummary(probe.id)?.model || "generic"'), 'probe page displays the persisted probe model, including limited remote telemetry');
 $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="probe-logbook"'), 'Probe template exposes the probe logbook panel');
 $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, '<h3 class="probe-logbook-heading">Logbook</h3>'), 'Probe template exposes the Logbook panel heading');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'function logbookApiPath'), 'probe JS builds explicit probe-scoped logbook endpoints');
@@ -729,6 +730,14 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'targetDeuteriumPointsWithMax' => 'Deuterium points (max. {max})'"), 'English translations include deuterium mining point labels');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningAmountMode(selectedResources)'), 'mannies JS switches deuterium-only mining amounts to tank points');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningAmountForRequest(formData.get("targetAmount"), amountMode)'), 'mannies JS converts deuterium mining points before submitting');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'name=\\"model\\"'), 'Manny probe assembly form exposes a model selector');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'DEUTERIUM_TANKER_ASSEMBLY_COMPONENTS'), 'Manny probe assembly declares tanker-specific ingredients');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'renderProbeAssemblyIngredients(model)'), 'Manny probe assembly refreshes ingredients for the selected model');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'JSON.stringify({model, containerIds})'), 'Manny probe assembly submits the selected model to the API');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeModelGenericDescription' => 'Sonde polyvalente.'"), 'French translations describe the generic probe model');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeModelDeuteriumTankerDescription' => 'Optimisée pour le transport de deutérium, au détriment de la capacité de stockage.'"), 'French translations describe the deuterium tanker model');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeModelGenericDescription' => 'Multi-purpose probe.'"), 'English translations describe the generic probe model');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeModelDeuteriumTankerDescription' => 'Optimized for deuterium transport, at the expense of storage capacity.'"), 'English translations describe the deuterium tanker model');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'mannyFilterStatusIdle' => 'Mains libres'"), 'French translations include Manny filter labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'mannyFilterStatusIdle' => 'Free hands'"), 'English translations include Manny filter labels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutNetworkRecipientLabel' => '{probe} via le réseau SCUT {network}'"), 'French translations include SCUT network messaging recipient labels');
@@ -736,7 +745,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260726-manny-drop-alert-refresh"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260727-probe-model-ui"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
