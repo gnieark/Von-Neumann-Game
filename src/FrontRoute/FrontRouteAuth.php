@@ -103,7 +103,7 @@ class FrontRouteAuth extends FrontRoute{
                 'code' => (string) $_GET['code'],
             ]);
             $providerUserId = $oauth->subjectFromAccessToken($providerName, $token);
-            $auth = $factory->authService($factory->pdo(initializeSchema: true));
+            $auth = $factory->authService($factory->pdo());
             $player = $auth->authenticateWithExternal($providerName, $providerUserId);
             if ($player !== null) {
                 unset($_SESSION['pending_oauth']);
@@ -150,7 +150,7 @@ class FrontRouteAuth extends FrontRoute{
         }
 
         $factory = $this->factory();
-        $auth = $factory->authService($factory->pdo(initializeSchema: true));
+        $auth = $factory->authService($factory->pdo());
         try {
             $player = $auth->registerPlayerWithExternalAuth($pseudonym, $pending['provider'], $pending['providerUserId']);
             unset($_SESSION['pending_oauth']);

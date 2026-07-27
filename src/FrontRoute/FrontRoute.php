@@ -181,7 +181,7 @@ class FrontRoute{
     {
         $projectRoot = dirname(__DIR__, 2);
         $factory = new AppFactory($projectRoot);
-        $pdo = $factory->pdo(initializeSchema: true);
+        $pdo = $factory->pdo();
 
         return $factory->apiKernel($pdo)->handle('GET', '/api/probe/' . $probeId, ['Authorization' => $bearer]);
     }

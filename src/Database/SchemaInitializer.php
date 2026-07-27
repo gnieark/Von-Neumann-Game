@@ -829,8 +829,8 @@ final class SchemaInitializer
         $this->ensureMysqlColumn($pdo, 'probe_messages', 'recipient_type', "VARCHAR(255) NOT NULL DEFAULT 'probe' AFTER sender_probe_id");
         $this->ensureMysqlColumn($pdo, 'probe_messages', 'recipient_id', 'VARCHAR(255) NULL AFTER recipient_type');
         $this->ensureMysqlColumn($pdo, 'probe_messages', 'recipient_name', 'VARCHAR(255) NULL AFTER recipient_id');
-        $pdo->exec('ALTER TABLE probe_messages MODIFY sender_probe_id INTEGER NULL');
-        $pdo->exec('ALTER TABLE probe_messages MODIFY recipient_probe_id INTEGER NULL');
+        $this->ensureMysqlColumnNullable($pdo, 'probe_messages', 'sender_probe_id', 'INTEGER NULL');
+        $this->ensureMysqlColumnNullable($pdo, 'probe_messages', 'recipient_probe_id', 'INTEGER NULL');
         $this->backfillProbeMessageEndpoints($pdo);
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_recipient_endpoint ON probe_messages(recipient_type(32), recipient_id(191), status(32), created_at(32))');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_messages_sender_endpoint ON probe_messages(sender_type(32), sender_id(191), created_at(32))');
@@ -1212,6 +1212,17 @@ final class SchemaInitializer
         }
 
         $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+    }
+
+    private function ensureMysqlColumnNullable(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        $stmt = $pdo->query("SHOW COLUMNS FROM $table WHERE Field = '$column'");
+        $row = $stmt !== false ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        if (!is_array($row) || strtoupper((string) ($row['Null'] ?? 'YES')) === 'YES') {
+            return;
+        }
+
+        $pdo->exec('ALTER TABLE ' . $table . ' MODIFY ' . $column . ' ' . $definition);
     }
 
     private function mysqlIndexExists(PDO $pdo, string $table, string $index): bool

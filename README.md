@@ -270,6 +270,13 @@ actuelles couvrent:
 
 Les migrations sont legeres et codees dans l'initializer pour SQLite et MySQL.
 Elles couvrent seulement les colonnes ajoutees pendant les iterations recentes.
+Elles ne sont pas executees par les requetes HTTP ni par le scheduler. Apres un
+deploiement qui modifie le schema, les appliquer explicitement avant de remettre
+le trafic en service:
+
+```bash
+php scripts/init-db.php
+```
 
 ## Tests Et Verification
 

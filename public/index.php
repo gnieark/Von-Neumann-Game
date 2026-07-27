@@ -25,7 +25,7 @@ $routePath = (string) (parse_url($path, PHP_URL_PATH) ?: '/');
 
 // Handle API requests 
 if (str_starts_with($routePath, '/api/')) {
-    $apiPdo = $factory->pdo(initializeSchema: true);
+    $apiPdo = $factory->pdo();
     refreshRememberedSessionCookie($factory, $apiPdo);
     $kernel = $factory->apiKernel($apiPdo);
     $headers = function_exists('getallheaders') ? getallheaders() : [];
@@ -78,7 +78,7 @@ function refreshRememberedSessionCookie(AppFactory $factory, ?PDO $pdo = null): 
         return;
     }
 
-    $pdo ??= $factory->pdo(initializeSchema: true);
+    $pdo ??= $factory->pdo();
     $refresh = $factory
         ->authService($pdo)
         ->refreshRememberedSessionFromBearerToken('Bearer ' . $token);

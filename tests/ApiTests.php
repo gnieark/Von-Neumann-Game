@@ -742,6 +742,29 @@ $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigra
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database.json.old'), 'SQLite to MySQL migration script backs up the active database config');
 $schemaInitializer = file_get_contents($root . '/src/Database/SchemaInitializer.php');
+$appFactorySource = file_get_contents($root . '/src/AppFactory.php');
+$runtimeDatabaseSources = [
+    $frontIndex,
+    $appFactorySource,
+    file_get_contents($root . '/src/FrontRoute/FrontRoute.php'),
+    file_get_contents($root . '/src/FrontRoute/FrontRouteAuth.php'),
+    file_get_contents($root . '/src/FrontRoute/FrontRouteAuthByPwd.php'),
+    file_get_contents($root . '/src/FrontRoute/FrontRouteLogout.php'),
+];
+$test->assert(
+    array_reduce(
+        $runtimeDatabaseSources,
+        static fn(bool $clean, string|false $source): bool => $clean
+            && is_string($source)
+            && !str_contains($source, 'initializeSchema: true'),
+        true,
+    ),
+    'HTTP routes and runtime service factories do not initialize the database schema',
+);
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnNullable(\$pdo, 'probe_messages', 'sender_probe_id'"), 'MySQL message migration checks sender probe nullability before altering the table');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnNullable(\$pdo, 'probe_messages', 'recipient_probe_id'"), 'MySQL message migration checks recipient probe nullability before altering the table');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, "\$pdo->exec('ALTER TABLE probe_messages MODIFY sender_probe_id INTEGER NULL')"), 'MySQL message migration no longer unconditionally alters sender_probe_id');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, "\$pdo->exec('ALTER TABLE probe_messages MODIFY recipient_probe_id INTEGER NULL')"), 'MySQL message migration no longer unconditionally alters recipient_probe_id');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
