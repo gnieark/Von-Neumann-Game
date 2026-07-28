@@ -5418,6 +5418,7 @@ $test->assertEquals($batchMannyIds[1] ?? null, $batchStart->body['results'][1]['
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
 $probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
 $storageContainerRepositorySource = file_get_contents($root . '/src/Repository/StorageContainerRepository.php');
+$apiKernelSource = file_get_contents($root . '/src/Http/ApiKernel.php');
 $probeManniesControllerSource = file_get_contents($root . '/src/Http/Controller/ProbeManniesApiController.php');
 $test->assert(is_string($probeManniesControllerSource) && str_contains($probeManniesControllerSource, '$this->mannies->withPreparedBatch('), 'Manny task batches delegate their transaction and preparation to the Manny service');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->refreshAllMannyStates($lockedProbe);'), 'Manny task batches refresh pre-existing tasks once before assigning orders');
@@ -5432,6 +5433,19 @@ $test->assert(
     is_string($storageContainerRepositorySource)
         && str_contains($storageContainerRepositorySource, 'public static function uidForItem('),
     'storage container ids use one shared derivation for bulk existence checks and creation',
+);
+$test->assert(
+    is_string($probeStorageServiceSource)
+        && str_contains($probeStorageServiceSource, 'bool $storageAlreadyEnsured = false')
+        && str_contains($probeStorageServiceSource, 'if (!$storageAlreadyEnsured)'),
+    'inventory construction keeps storage repair by default and can explicitly reuse prior preparation',
+);
+$test->assert(
+    is_string($apiKernelSource)
+        && str_contains($apiKernelSource, 'storageAlreadyEnsured: true')
+        && is_string($probeManniesControllerSource)
+        && str_contains($probeManniesControllerSource, 'storageAlreadyEnsured: true'),
+    'API inventory helpers avoid a second storage repair after preparing Mannies',
 );
 
 $batchRollback = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
@@ -5498,6 +5512,49 @@ $secondHintRefresh = $kernel->handle('GET', '/api/probe/' . $hintProbe->id . '/m
 $test->assertEquals(200, $secondHintRefresh->status, 'a later Manny list hint absorbs the remaining overdue task');
 $test->assertEquals(61.0, $probes->findById($hintProbe->id)?->integrityPercent, 'successive Manny list hints continue processing overdue tasks');
 $test->assertEquals(Manny::TASK_REPAIR, $mannies->findById($hintFutureManny->id)?->currentTask, 'Manny list hints do not refresh tasks before their deadline');
+
+for ($index = 1; $index <= 11; $index++) {
+    $hintManny = $mannies->createForProbe($hintProbe->id, sprintf('probe-inventory-overdue-%02d', $index));
+    $hintManny->currentTask = Manny::TASK_REPAIR;
+    $hintManny->taskStartedAt = gmdate('c', time() - 120);
+    $hintManny->taskEndsAt = gmdate('c', time() - (20 - $index));
+    $hintManny->taskPayload = ['integrityPercent' => 1.0, 'metalsCost' => 0.01];
+    $mannies->save($hintManny);
+}
+$probeInventoryHint = $kernel->handle('GET', '/api/probe/' . $hintProbe->id, $hintHeaders);
+$test->assertEquals(200, $probeInventoryHint->status, 'GET /api/probe/{probeId} succeeds with more than ten overdue Manny tasks');
+$test->assertEquals(71.0, $probes->findById($hintProbe->id)?->integrityPercent, 'probe inventory reads refresh at most ten overdue Manny tasks');
+$remainingProbeInventoryHints = array_values(array_filter(
+    $mannies->findByProbeId($hintProbe->id),
+    static fn(Manny $manny): bool => str_starts_with($manny->name, 'probe-inventory-overdue-')
+        && $manny->currentTask !== null,
+));
+$test->assertEquals(['probe-inventory-overdue-11'], array_map(
+    static fn(Manny $manny): string => $manny->name,
+    $remainingProbeInventoryHints,
+), 'probe inventory reads refresh the ten oldest overdue Manny tasks');
+$kernel->handle('GET', '/api/probe/' . $hintProbe->id, $hintHeaders);
+
+for ($index = 1; $index <= 11; $index++) {
+    $hintManny = $mannies->createForProbe($hintProbe->id, sprintf('sector-inventory-overdue-%02d', $index));
+    $hintManny->currentTask = Manny::TASK_REPAIR;
+    $hintManny->taskStartedAt = gmdate('c', time() - 120);
+    $hintManny->taskEndsAt = gmdate('c', time() - (20 - $index));
+    $hintManny->taskPayload = ['integrityPercent' => 1.0, 'metalsCost' => 0.01];
+    $mannies->save($hintManny);
+}
+$sectorInventoryHint = $kernel->handle('GET', '/api/probe/sector', $hintHeaders);
+$test->assertEquals(200, $sectorInventoryHint->status, 'GET /api/probe/sector succeeds with more than ten overdue Manny tasks');
+$test->assertEquals(82.0, $probes->findById($hintProbe->id)?->integrityPercent, 'sector inventory reads refresh at most ten overdue Manny tasks');
+$remainingSectorInventoryHints = array_values(array_filter(
+    $mannies->findByProbeId($hintProbe->id),
+    static fn(Manny $manny): bool => str_starts_with($manny->name, 'sector-inventory-overdue-')
+        && $manny->currentTask !== null,
+));
+$test->assertEquals(['sector-inventory-overdue-11'], array_map(
+    static fn(Manny $manny): string => $manny->name,
+    $remainingSectorInventoryHints,
+), 'sector inventory reads refresh the ten oldest overdue Manny tasks');
 
 $foreignMannyOwner = $auth->registerPlayerWithPassword('foreign-manny-owner', 'secret', 'Foreign Manny Owner', 'Foreign Manny probe');
 $foreignMannyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($foreignMannyOwner)['token']];

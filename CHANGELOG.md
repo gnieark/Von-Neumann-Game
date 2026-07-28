@@ -5,6 +5,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-07-28
 
 ### Changed
+- Performance : les inventaires inclus dans `GET /api/probe`, `GET /api/probe/{probeId}` et `GET /api/probe/sector` utilisent désormais le hint Manny borné à dix tâches échues, comme la liste des Mannies, au lieu de rafraîchir toutes les tâches actives.
+- Performance : les réponses API qui préparent les Mannies avant de construire l’inventaire réutilisent désormais cette préparation et n’exécutent plus deux fois `ensureProbeStorage()` dans la même requête.
 - Performance : la réparation automatique du stockage charge désormais les identifiants des conteneurs en une fois et vérifie en mémoire les items `additional_container`, supprimant une requête SQL par conteneur à chaque lecture d’inventaire.
 - Performance : les lectures de la liste des Mannies ne rafraîchissent opportunément que les dix tâches échues les plus anciennes par requête. Le worker scheduler reste responsable du traitement principal, tandis que les polls suivants absorbent progressivement un éventuel retard sans multiplier les verrous de sonde.
 - Interface : l’avertissement du forum présente désormais le canal communautaire et recommande le serveur Discord de Neumann Probe dans ses versions française et anglaise.

@@ -717,7 +717,7 @@ final class ApiKernel
 
             return new ApiResponse(200, [
                 'sector' => $this->withObservedProbePresence($observation, $probe, $observableSector),
-                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+                'inventory' => $this->inventoryForProbe($probe, boundedMannyHint: true)->toArray(),
             ]);
         }
 
@@ -731,7 +731,7 @@ final class ApiKernel
 
         return new ApiResponse(200, [
             'sector' => $observation,
-            'inventory' => $this->inventoryForProbe($probe)->toArray(),
+            'inventory' => $this->inventoryForProbe($probe, boundedMannyHint: true)->toArray(),
         ]);
     }
 
@@ -1821,16 +1821,21 @@ final class ApiKernel
                 'internalClockRate' => $probe->internalClockRate,
                 'currentTask' => $probe->currentTask,
             ],
-            'inventory' => $this->inventoryForProbe($probe)->toArray(),
+            'inventory' => $this->inventoryForProbe($probe, boundedMannyHint: true)->toArray(),
         ];
     }
 
-    private function inventoryForProbe(NeumannProbe $probe): ProbeInventory
+    private function inventoryForProbe(NeumannProbe $probe, bool $boundedMannyHint = false): ProbeInventory
     {
+        $mannies = $boundedMannyHint
+            ? $this->mannies->manniesForProbeApiHint($probe)
+            : $this->mannies->manniesForProbe($probe);
+
         return $this->storage->inventoryForProbe(
             $probe,
-            $this->mannies->manniesForProbe($probe),
+            $mannies,
             $this->items->findByProbeId($probe->id),
+            storageAlreadyEnsured: true,
         );
     }
 

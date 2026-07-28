@@ -115,9 +115,16 @@ final class ProbeStorageService
      * @param array<Manny>|null $mannies
      * @param array<ProbeItem>|null $probeItems
      */
-    public function inventoryForProbe(NeumannProbe $probe, ?array $mannies = null, ?array $probeItems = null): ProbeInventory
+    public function inventoryForProbe(
+        NeumannProbe $probe,
+        ?array $mannies = null,
+        ?array $probeItems = null,
+        bool $storageAlreadyEnsured = false,
+    ): ProbeInventory
     {
-        $this->ensureProbeStorage($probe);
+        if (!$storageAlreadyEnsured) {
+            $this->ensureProbeStorage($probe);
+        }
         $mannies ??= $this->mannies->findByProbeId($probe->id);
         $probeItems ??= $this->items->findByProbeId($probe->id);
         $containers = $this->containers->findByProbeId($probe->id);

@@ -492,6 +492,7 @@ final class ProbeManniesApiController
             $probe,
             $this->mannies->manniesForProbe($probe),
             $this->items->findByProbeId($probe->id),
+            storageAlreadyEnsured: true,
         );
     }
 
