@@ -648,6 +648,12 @@ $auditContainer = new SectorDetachedContainer(
 );
 $auditRepository->save(new SectorContent($auditCoordinatesA, [], detachedContainers: [$auditContainer]));
 $auditRepository->save(new SectorContent($auditCoordinatesB, [], detachedContainers: [$auditContainer]));
+foreach ([$auditCoordinatesA, $auditCoordinatesB] as $auditCoordinates) {
+    $auditPath = $auditRepository->getPath($auditCoordinates);
+    $auditData = json_decode((string) file_get_contents($auditPath), true, 512, JSON_THROW_ON_ERROR);
+    $auditData['detachedContainers'] = [$auditContainer->toArray()];
+    file_put_contents($auditPath, json_encode($auditData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+}
 $auditReport = (new DetachedContainerJsonAuditService())->audit($auditBase);
 $test->assertEquals(2, $auditReport['filesScanned'], 'detached-container audit scans every sector JSON file');
 $test->assertEquals(2, $auditReport['containersScanned'], 'detached-container audit counts raw container entries');

@@ -183,6 +183,77 @@ final class SchemaInitializer
                 FOREIGN KEY(container_id) REFERENCES storage_containers(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_storage_container_resources_container_id ON storage_container_resources(container_id)",
+            "CREATE TABLE IF NOT EXISTS detached_storage_containers (
+                object_id $text PRIMARY KEY,
+                source_container_uid $text NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                mode $text NOT NULL,
+                status $text NOT NULL DEFAULT 'available',
+                reserved_by_manny_id INTEGER NULL,
+                owner_probe_id INTEGER NOT NULL,
+                owner_player_id INTEGER NOT NULL,
+                origin_probe_id INTEGER NULL,
+                target_object_id $nullableText,
+                name $nullableText,
+                description TEXT NULL,
+                container_kind $text NOT NULL,
+                container_label $text NOT NULL,
+                container_sort_order INTEGER NOT NULL,
+                capacity $decimal NOT NULL,
+                capacity_unit $text NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_detached_storage_containers_sector ON detached_storage_containers(sector_x, sector_y, sector_z)",
+            "CREATE INDEX IF NOT EXISTS idx_detached_storage_containers_status ON detached_storage_containers(status, reserved_by_manny_id)",
+            "CREATE INDEX IF NOT EXISTS idx_detached_storage_containers_source_uid ON detached_storage_containers(source_container_uid)",
+            "CREATE INDEX IF NOT EXISTS idx_detached_storage_containers_target ON detached_storage_containers(sector_x, sector_y, sector_z, target_object_id)",
+            "CREATE TABLE IF NOT EXISTS detached_storage_container_resources (
+                container_object_id $text NOT NULL,
+                resource_type $text NOT NULL,
+                amount $decimal NOT NULL,
+                PRIMARY KEY(container_object_id, resource_type),
+                FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE CASCADE
+            )",
+            "CREATE TABLE IF NOT EXISTS detached_storage_container_items (
+                id $id,
+                container_object_id $text NOT NULL,
+                uid $text NOT NULL,
+                type $text NOT NULL,
+                name $text NOT NULL,
+                container_space $decimal NOT NULL,
+                metadata_json TEXT NOT NULL,
+                is_backing_item $boolean,
+                UNIQUE(container_object_id, uid),
+                FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_detached_storage_container_items_container ON detached_storage_container_items(container_object_id)",
+            "CREATE TABLE IF NOT EXISTS detached_storage_container_rules (
+                container_object_id $text NOT NULL,
+                rule_kind $text NOT NULL,
+                resource_type $text NOT NULL,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(container_object_id, rule_kind, resource_type),
+                FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE CASCADE
+            )",
+            "CREATE TABLE IF NOT EXISTS detached_storage_container_discoveries (
+                container_object_id $text NOT NULL,
+                player_id INTEGER NOT NULL,
+                discovered_at $text NOT NULL,
+                PRIMARY KEY(container_object_id, player_id),
+                FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE CASCADE
+            )",
+            "CREATE TABLE IF NOT EXISTS detached_storage_container_bookmarks (
+                container_object_id $text NOT NULL,
+                player_id INTEGER NOT NULL,
+                name $text NOT NULL,
+                player_name $text NOT NULL,
+                created_at $text NOT NULL,
+                PRIMARY KEY(container_object_id, player_id, name),
+                FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE CASCADE
+            )",
             "CREATE TABLE IF NOT EXISTS probe_movements (
                 id $id,
                 probe_id INTEGER NOT NULL,

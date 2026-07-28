@@ -475,8 +475,8 @@ final class MannyService implements MannyTaskRuntime
             function (NeumannProbe $probe, Manny $manny, array $payload): void {
                 $this->cargo->deliverReservedSalvageItems($probe, $manny, $payload);
             },
-            function (NeumannProbe $probe, array $payload): void {
-                $this->cargo->deliverReservedDetachedContainer($probe, $payload);
+            function (NeumannProbe $probe, Manny $manny, array $payload): void {
+                $this->cargo->deliverReservedDetachedContainer($probe, $payload, $manny);
             },
             fn(Manny $manny): bool => $this->cargo->mannyCargoIsEmpty($manny),
             fn(Manny $manny): bool => $this->cargo->hasReservedDeliveryPayload($manny),
@@ -513,7 +513,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->ensureScutRelayNotAlreadyBeingSalvaged($probe, $target, $actorMannyId);
             },
             fn(NeumannProbe $probe, SectorDriftingItem $target): array => $this->cargo->reserveDriftingItemForSalvage($probe, $target),
-            fn(NeumannProbe $probe, SectorDetachedContainer $target): array => $this->cargo->reserveDetachedContainerForSalvage($probe, $target),
+            fn(NeumannProbe $probe, Manny $manny, SectorDetachedContainer $target): array => $this->cargo->reserveDetachedContainerForSalvage($probe, $manny, $target),
             fn(UniverseObject|ScutRelay $target): array => $this->cargo->salvageTargetArray($target),
             fn(): int => $this->salvageSeconds(),
             function (Manny $manny): void {
@@ -1066,7 +1066,7 @@ final class MannyService implements MannyTaskRuntime
             throw new MannyActionException(404, 'detached_container_not_found', 'Detached storage container not found.');
         }
 
-        $reservedDetachedContainer = $this->cargo->reserveDetachedContainerForSalvage($probe, $target);
+        $reservedDetachedContainer = $this->cargo->reserveDetachedContainerForSalvage($probe, $manny, $target);
         $this->recallMiningManniesTargetingDetachedContainer($probe, $manny->id, $objectId);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $salvageSeconds = $this->salvageSeconds();
@@ -1734,7 +1734,7 @@ final class MannyService implements MannyTaskRuntime
 
         $this->cargo->transferMannyCargoToProbe($manny, $probe);
         $this->cargo->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
-        $this->cargo->deliverReservedDetachedContainer($probe, $manny->taskPayload);
+        $this->cargo->deliverReservedDetachedContainer($probe, $manny->taskPayload, $manny);
         if ($this->cargo->mannyCargoIsEmpty($manny)) {
             $finalPayload = $this->cargo->hasReservedDeliveryPayload($manny) ? $manny->taskPayload : [];
             if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
@@ -1785,7 +1785,7 @@ final class MannyService implements MannyTaskRuntime
 
         $this->cargo->transferMannyCargoToProbe($manny, $probe);
         $this->cargo->deliverReservedSalvageItems($probe, $manny, $manny->taskPayload);
-        $this->cargo->deliverReservedDetachedContainer($probe, $manny->taskPayload);
+        $this->cargo->deliverReservedDetachedContainer($probe, $manny->taskPayload, $manny);
         if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
             $this->cargo->waitForStorageSpace($manny, array_merge($manny->taskPayload, ['reason' => 'transfer_to_probe']));
             $this->mannies->save($manny);

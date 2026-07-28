@@ -14,7 +14,7 @@ final class ReturningTaskHandler implements TaskHandlerInterface
      * @param \Closure(Manny, array<string, mixed>): void $waitForStorageSpace
      * @param \Closure(Manny, NeumannProbe): void $transferMannyCargoToProbe
      * @param \Closure(NeumannProbe, Manny, array<string, mixed>): void $deliverReservedSalvageItems
-     * @param \Closure(NeumannProbe, array<string, mixed>): void $deliverReservedDetachedContainer
+     * @param \Closure(NeumannProbe, Manny, array<string, mixed>): void $deliverReservedDetachedContainer
      * @param \Closure(Manny): bool $mannyCargoIsEmpty
      * @param \Closure(Manny): bool $hasReservedDeliveryPayload
      * @param \Closure(NeumannProbe, Manny): bool $placeMannyOnProbe
@@ -59,7 +59,7 @@ final class ReturningTaskHandler implements TaskHandlerInterface
 
         ($this->transferMannyCargoToProbe)($manny, $probe);
         ($this->deliverReservedSalvageItems)($probe, $manny, $manny->taskPayload);
-        ($this->deliverReservedDetachedContainer)($probe, $manny->taskPayload);
+        ($this->deliverReservedDetachedContainer)($probe, $manny, $manny->taskPayload);
         if (($this->mannyCargoIsEmpty)($manny)) {
             $finalPayload = ($this->hasReservedDeliveryPayload)($manny) ? $manny->taskPayload : [];
             if (!($this->placeMannyOnProbe)($probe, $manny)) {

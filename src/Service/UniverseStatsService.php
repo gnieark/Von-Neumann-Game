@@ -32,6 +32,7 @@ final class UniverseStatsService
         $probeRows = $this->probeRows();
         $visitedSectorKeys = $this->visitedSectorKeys();
         $sectorStats = $this->sectorStats($visitedSectorKeys);
+        $detachedContainerStats = $this->detachedContainerStats();
         $probeDistances = $this->probeDistances($probeRows);
         $waypointStats = $this->waypointStats();
         $intelligentLifeStats = $this->intelligentLifeDiscoveryStats();
@@ -52,8 +53,8 @@ final class UniverseStatsService
                 'asteroidsByResource' => $sectorStats['asteroidsByResource'],
                 'lostMannies' => $sectorStats['lostMannies'],
                 'forgottenMannies' => $sectorStats['forgottenMannies'],
-                'driftingContainers' => $sectorStats['driftingContainers'],
-                'hiddenContainers' => $sectorStats['hiddenContainers'],
+                'driftingContainers' => $detachedContainerStats['drifting'],
+                'hiddenContainers' => $detachedContainerStats['hidden'],
                 'furthestProbeDistance' => $probeDistances['furthest'],
                 'closestProbeDistance' => $probeDistances['closest'],
                 'waypointBookmarksInstalled' => $waypointStats['installed'],
@@ -601,8 +602,29 @@ final class UniverseStatsService
                 $stats['habitablePlanetsInVisitedSectors'] += $habitablePlanets;
             }
             $this->addObjectStats($data['objects'] ?? [], $stats);
-            $this->addDetachedContainerStats($data['detachedContainers'] ?? [], $stats);
-            $this->addHiddenDetachedContainerStats($data['hiddenDetachedContainers'] ?? [], $stats);
+        }
+
+        return $stats;
+    }
+
+    /**
+     * @return array{drifting:int,hidden:int}
+     */
+    private function detachedContainerStats(): array
+    {
+        $stmt = $this->pdo->query(
+            "SELECT mode, COUNT(*) AS container_count
+             FROM detached_storage_containers
+             WHERE mode IN ('drifting', 'hidden_on_asteroid')
+             GROUP BY mode"
+        );
+        $stats = ['drifting' => 0, 'hidden' => 0];
+        foreach ($stmt !== false ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [] as $row) {
+            if (($row['mode'] ?? null) === 'drifting') {
+                $stats['drifting'] = (int) $row['container_count'];
+            } elseif (($row['mode'] ?? null) === 'hidden_on_asteroid') {
+                $stats['hidden'] = (int) $row['container_count'];
+            }
         }
 
         return $stats;
@@ -658,8 +680,6 @@ final class UniverseStatsService
                 }
             } elseif ($type === 'solar_system') {
                 $this->addSolarSystemStats($object, $stats);
-            } elseif ($type === 'detached_container') {
-                $this->addDetachedContainerStats([$object], $stats);
             }
         }
     }

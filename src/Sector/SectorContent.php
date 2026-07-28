@@ -6,6 +6,9 @@ namespace VonNeumannGame\Sector;
 
 final class SectorContent
 {
+    /** @var array<string, SectorDetachedContainer|null> */
+    private array $detachedContainerChanges = [];
+
     /**
      * @param array<UniverseObject> $objects
      */
@@ -154,6 +157,7 @@ final class SectorContent
     {
         if ($object instanceof SectorDetachedContainer) {
             $this->addDetachedContainerToCanonicalCollection($object);
+            $this->detachedContainerChanges[$object->getId()] = $object;
             $this->touch();
             return;
         }
@@ -165,13 +169,45 @@ final class SectorContent
     public function addHiddenDetachedContainer(SectorDetachedContainer $container): void
     {
         $this->addDetachedContainerToCanonicalCollection($container);
+        $this->detachedContainerChanges[$container->getId()] = $container;
         $this->touch();
     }
 
     public function addPlanetDroppedContainer(SectorDetachedContainer $container): void
     {
         $this->addDetachedContainerToCanonicalCollection($container);
+        $this->detachedContainerChanges[$container->getId()] = $container;
         $this->touch();
+    }
+
+    /**
+     * Replaces detached-container state with rows loaded from the SQL source of
+     * truth without marking them as application mutations.
+     *
+     * @param list<SectorDetachedContainer> $containers
+     */
+    public function hydrateDetachedContainers(array $containers): void
+    {
+        $this->detachedContainers = [];
+        $this->hiddenDetachedContainers = [];
+        $this->planetDroppedContainers = [];
+        foreach ($containers as $container) {
+            $this->addDetachedContainerToCanonicalCollection($container);
+        }
+        $this->detachedContainerChanges = [];
+    }
+
+    /**
+     * @return array<string, SectorDetachedContainer|null>
+     */
+    public function getDetachedContainerChanges(): array
+    {
+        return $this->detachedContainerChanges;
+    }
+
+    public function markDetachedContainerChangesPersisted(): void
+    {
+        $this->detachedContainerChanges = [];
     }
 
     /**
@@ -311,6 +347,7 @@ final class SectorContent
             foreach ($this->detachedContainers as $index => $container) {
                 if ($container->getId() === $replacement->getId()) {
                     $this->detachedContainers[$index] = $replacement;
+                    $this->detachedContainerChanges[$replacement->getId()] = $replacement;
                     $this->touch();
 
                     return true;
@@ -348,6 +385,7 @@ final class SectorContent
         }
 
         $this->addDetachedContainerToCanonicalCollection($replacement);
+        $this->detachedContainerChanges[$replacement->getId()] = $replacement;
         $this->touch();
 
         return true;
@@ -357,6 +395,7 @@ final class SectorContent
     {
         $removed = $this->removeDetachedContainerFrom($this->detachedContainers, $id);
         if ($removed !== null) {
+            $this->detachedContainerChanges[$id] = null;
             $this->touch();
 
             return true;
@@ -389,6 +428,7 @@ final class SectorContent
     {
         $removed = $this->removeDetachedContainerFrom($this->hiddenDetachedContainers, $id);
         if ($removed !== null) {
+            $this->detachedContainerChanges[$id] = null;
             $this->touch();
 
             return $removed;
