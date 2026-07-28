@@ -26,7 +26,7 @@ final class SalvageTaskHandler implements TaskHandlerInterface
      * @param \Closure(UniverseObject|ScutRelay): bool $isSalvageableTarget
      * @param \Closure(NeumannProbe, ScutRelay, int): void $ensureScutRelayNotAlreadyBeingSalvaged
      * @param \Closure(NeumannProbe, SectorDriftingItem): array<string, mixed> $reserveDriftingItemForSalvage
-     * @param \Closure(NeumannProbe, SectorDetachedContainer): array<string, mixed> $reserveDetachedContainerForSalvage
+     * @param \Closure(NeumannProbe, Manny, SectorDetachedContainer): array<string, mixed> $reserveDetachedContainerForSalvage
      * @param \Closure(UniverseObject|ScutRelay): array<string, mixed> $salvageTargetArray
      * @param \Closure(): int $salvageSeconds
      * @param \Closure(Manny): void $releaseMannyFromStorage
@@ -94,7 +94,7 @@ final class SalvageTaskHandler implements TaskHandlerInterface
             ? ($this->reserveDriftingItemForSalvage)($probe, $target)
             : null;
         $reservedDetachedContainer = $target instanceof SectorDetachedContainer
-            ? ($this->reserveDetachedContainerForSalvage)($probe, $target)
+            ? ($this->reserveDetachedContainerForSalvage)($probe, $manny, $target)
             : null;
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));

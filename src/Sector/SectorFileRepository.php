@@ -49,6 +49,20 @@ final class SectorFileRepository
             throw SectorStorageException::invalidJson($path, 'root value must be an object');
         }
 
+        // Detached containers live exclusively in SQL. Legacy JSON collections
+        // are intentionally ignored until the explicit deployment migration runs.
+        unset(
+            $data['detachedContainers'],
+            $data['hiddenDetachedContainers'],
+            $data['planetDroppedContainers'],
+        );
+        if (is_array($data['objects'] ?? null)) {
+            $data['objects'] = array_values(array_filter(
+                $data['objects'],
+                static fn(mixed $object): bool => !is_array($object) || ($object['type'] ?? null) !== 'detached_container',
+            ));
+        }
+
         return SectorContent::fromArray($data, 'loaded');
     }
 
@@ -60,7 +74,13 @@ final class SectorFileRepository
             throw SectorStorageException::writeFailed($path);
         }
 
-        $json = json_encode($sector->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $data = $sector->toArray();
+        unset(
+            $data['detachedContainers'],
+            $data['hiddenDetachedContainers'],
+            $data['planetDroppedContainers'],
+        );
+        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $temporaryPath = $path . '.tmp.' . bin2hex(random_bytes(6));
 
         if (file_put_contents($temporaryPath, $json, LOCK_EX) === false) {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Sector;
 
+use VonNeumannGame\Repository\DetachedStorageContainerRepository;
+
 final class SectorService
 {
     private SectorGrid $grid;
@@ -14,6 +16,7 @@ final class SectorService
         private readonly SectorContentGenerator $generator,
         private readonly string $worldSeed,
         ?SectorGrid $grid = null,
+        private readonly ?DetachedStorageContainerRepository $detachedContainers = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
     }
@@ -21,7 +24,7 @@ final class SectorService
     public function getOrCreateSector(SectorCoordinates $coordinates): SectorContent
     {
         if ($this->repository->exists($coordinates)) {
-            return $this->repository->load($coordinates);
+            return $this->withSqlDetachedContainers($this->repository->load($coordinates));
         }
 
         return $this->createSector($coordinates, true);
@@ -34,7 +37,37 @@ final class SectorService
 
     public function saveSector(SectorContent $sector): void
     {
+        if ($this->detachedContainers !== null) {
+            foreach ($sector->getDetachedContainerChanges() as $objectId => $container) {
+                if ($container instanceof SectorDetachedContainer) {
+                    $this->detachedContainers->save($sector->getCoordinates(), $container);
+                } else {
+                    $this->detachedContainers->delete($objectId);
+                }
+            }
+        }
         $this->repository->save($sector);
+        $sector->markDetachedContainerChangesPersisted();
+    }
+
+    public function reserveDetachedContainer(string $objectId, int $mannyId): bool
+    {
+        return $this->detachedContainers?->reserve($objectId, $mannyId) ?? false;
+    }
+
+    public function releaseDetachedContainerReservation(string $objectId, int $mannyId): bool
+    {
+        return $this->detachedContainers?->releaseReservation($objectId, $mannyId) ?? false;
+    }
+
+    public function reservedDetachedContainer(string $objectId, int $mannyId): ?SectorDetachedContainer
+    {
+        return $this->detachedContainers?->findReservedByObjectId($objectId, $mannyId);
+    }
+
+    public function deleteDetachedContainer(string $objectId): bool
+    {
+        return $this->detachedContainers?->delete($objectId) ?? false;
     }
 
     /**
@@ -48,7 +81,7 @@ final class SectorService
     private function createSector(SectorCoordinates $coordinates, bool $createMissingNeighbors): SectorContent
     {
         if ($this->repository->exists($coordinates)) {
-            return $this->repository->load($coordinates);
+            return $this->withSqlDetachedContainers($this->repository->load($coordinates));
         }
 
         $knownNeighbors = $this->loadExistingNeighbors($coordinates);
@@ -63,6 +96,15 @@ final class SectorService
                 }
             }
         }
+
+        return $sector;
+    }
+
+    private function withSqlDetachedContainers(SectorContent $sector): SectorContent
+    {
+        $sector->hydrateDetachedContainers(
+            $this->detachedContainers?->findBySector($sector->getCoordinates()) ?? [],
+        );
 
         return $sector;
     }

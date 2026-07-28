@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 - Interface : l’avertissement du forum présente désormais le canal communautaire et recommande le serveur Discord de Neumann Probe dans ses versions française et anglaise.
 - Maintenance : ajout d’un audit en lecture seule des conteneurs détachés stockés dans les JSON de secteurs, avec détection des doublons, collisions d’identifiants et snapshots incomplets.
+- Stockage : les conteneurs détachés `drifting`, `hidden` et `dropped_on_planet` sont désormais conservés dans des tables SQL normalisées plutôt que dans les JSON de secteurs. Ils persistent après la destruction de leur sonde d’origine. Le script `scripts/migrate-detached-containers-to-database.php` assure la bascule ponctuelle et renomme de façon déterministe les identifiants dupliqués.
 
 ## 2026-07-27
 

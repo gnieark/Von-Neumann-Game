@@ -37,6 +37,7 @@ use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ApiKeyRepository;
+use VonNeumannGame\Repository\DetachedStorageContainerRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
@@ -52,6 +53,7 @@ use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MovementDurationCalculator;
+use VonNeumannGame\Service\DetachedContainerJsonMigrationService;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ProbeMovementService;
@@ -1340,8 +1342,9 @@ $movements = new ProbeMovementRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $apiKeys = new ApiKeyRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
+$detachedStorageContainers = new DetachedStorageContainerRepository($pdo);
 $sectorRepository = new SectorFileRepository($universePath);
-$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world');
+$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers);
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
@@ -1646,9 +1649,10 @@ $multiScanMovements = new ProbeMovementRepository($multiScanPdo);
 $multiScanSessions = new SessionRepository($multiScanPdo);
 $multiScanApiKeys = new ApiKeyRepository($multiScanPdo);
 $multiScanVisited = new VisitedSectorRepository($multiScanPdo);
+$multiScanDetachedStorageContainers = new DetachedStorageContainerRepository($multiScanPdo);
 $multiScanUniversePath = $tmp . DIRECTORY_SEPARATOR . 'multi-scan-universe';
 $multiScanSectorRepository = new SectorFileRepository($multiScanUniversePath);
-$multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world');
+$multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world', detachedContainers: $multiScanDetachedStorageContainers);
 $multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $multiScanProbes, $multiScanSessions, $multiScanVisited, 7, $multiScanMannies, $multiScanApiKeys, $multiScanSectorService);
 $multiScanStorage = new ProbeStorageService($multiScanStorageContainers, $multiScanItems, $multiScanMannies, $multiScanProbes, improvements: $multiScanProbeImprovements);
 $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMessages, [], 'multi-scan-world', $multiScanSectorService, $multiScanProbes, $multiScanPlayers);
@@ -1916,6 +1920,65 @@ if ($createdProbe !== null) {
     $sectorJsonText = implode("\n", $sectorJsonOutput);
     $test->assertEquals(0, $sectorJsonStatus, 'sector-json CLI exits successfully for an existing sector');
     $test->assertEquals(['x' => 4, 'y' => 0, 'z' => 0], json_decode($sectorJsonText, true, 512, JSON_THROW_ON_ERROR)['coordinates'] ?? null, 'sector-json CLI prints the sector JSON');
+
+    $detachedMigrationDb = $tmp . DIRECTORY_SEPARATOR . 'detached-migration.sqlite';
+    $detachedMigrationFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $detachedMigrationDb), $root);
+    $detachedMigrationPdo = $detachedMigrationFactory->create();
+    $detachedMigrationFactory->initializeSchema($detachedMigrationPdo);
+    $detachedMigrationUniverse = $tmp . DIRECTORY_SEPARATOR . 'detached-migration-universe';
+    $detachedMigrationRepository = new SectorFileRepository($detachedMigrationUniverse);
+    $detachedMigrationCoordinates = new SectorCoordinates(6, 0, 0);
+    $detachedMigrationRepository->save(new SectorContent($detachedMigrationCoordinates));
+    $detachedMigrationPath = $detachedMigrationRepository->getPath($detachedMigrationCoordinates);
+    $detachedMigrationData = json_decode((string) file_get_contents($detachedMigrationPath), true, 512, JSON_THROW_ON_ERROR);
+    $detachedMigrationContainer = new SectorDetachedContainer(
+        'detached-container-duplicate-migration',
+        'Migration cache',
+        SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
+        987654,
+        987654,
+        987654,
+        'migration-rock',
+        1.0,
+        'earth_container_equivalent',
+        '2026-01-01T00:00:00+00:00',
+        [
+            'sourceContainerId' => 'container-itm_migration',
+            'container' => [
+                'id' => 'container-itm_migration',
+                'kind' => 'container',
+                'label' => 'Migration cache',
+                'sortOrder' => 2,
+                'capacity' => 1.0,
+                'rules' => ['priority' => ['metals'], 'exclusion' => [], 'strictExclusion' => []],
+            ],
+            'containerItem' => [
+                'uid' => 'itm_migration',
+                'type' => ProbeItem::TYPE_ADDITIONAL_CONTAINER,
+                'name' => ProbeItem::ADDITIONAL_CONTAINER_NAME,
+                'containerSpace' => 0.0,
+                'metadata' => ['capacityBonus' => 1.0],
+            ],
+            'resources' => ['metals' => 0.4],
+            'items' => [],
+        ],
+        discoveredByPlayerIds: [987654],
+    );
+    $detachedMigrationData['hiddenDetachedContainers'] = [
+        $detachedMigrationContainer->toArray(),
+        $detachedMigrationContainer->toArray(),
+    ];
+    file_put_contents($detachedMigrationPath, json_encode($detachedMigrationData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    $detachedMigrationSqlRepository = new DetachedStorageContainerRepository($detachedMigrationPdo);
+    $detachedMigrationResult = (new DetachedContainerJsonMigrationService(
+        $detachedMigrationPdo,
+        $detachedMigrationSqlRepository,
+    ))->migrate($detachedMigrationUniverse);
+    $test->assertEquals(2, $detachedMigrationResult['containersMigrated'], 'detached-container migration imports raw JSON entries');
+    $test->assertEquals(1, $detachedMigrationResult['containerIdsChanged'], 'detached-container migration renames the second duplicate id');
+    $test->assertEquals(2, count($detachedMigrationSqlRepository->findBySector($detachedMigrationCoordinates)), 'detached-container migration preserves duplicate physical containers under distinct ids');
+    $detachedMigrationCleanJson = json_decode((string) file_get_contents($detachedMigrationPath), true, 512, JSON_THROW_ON_ERROR);
+    $test->assert(!array_key_exists('hiddenDetachedContainers', $detachedMigrationCleanJson), 'detached-container migration removes hidden containers from sector JSON');
     $sectorJsonPathCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/sector-json.php')
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
@@ -2385,6 +2448,39 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     if (!$deleteSector->replaceObject($forgottenMannyObject)) {
         $deleteSector->addObject($forgottenMannyObject);
     }
+    $deleteDetachedContainerId = 'detached-container-deleted-probe';
+    $deleteSector->addObject(new SectorDetachedContainer(
+        $deleteDetachedContainerId,
+        'Persistent wreck',
+        SectorDetachedContainer::MODE_DRIFTING,
+        $deleteProbe->id,
+        $deletePlayer->id,
+        $deleteProbe->id,
+        null,
+        1.0,
+        'earth_container_equivalent',
+        gmdate('c'),
+        [
+            'sourceContainerId' => 'container-itm_deleted_probe',
+            'container' => [
+                'id' => 'container-itm_deleted_probe',
+                'kind' => 'container',
+                'label' => 'Persistent wreck',
+                'sortOrder' => 1,
+                'capacity' => 1.0,
+                'rules' => ['priority' => [], 'exclusion' => [], 'strictExclusion' => []],
+            ],
+            'containerItem' => [
+                'uid' => 'itm_deleted_probe',
+                'type' => ProbeItem::TYPE_ADDITIONAL_CONTAINER,
+                'name' => ProbeItem::ADDITIONAL_CONTAINER_NAME,
+                'containerSpace' => 0.0,
+                'metadata' => ['capacityBonus' => 1.0],
+            ],
+            'resources' => ['metals' => 0.25],
+            'items' => [],
+        ],
+    ));
     $sectorService->saveSector($deleteSector);
 
     $deleteStats = (new AccountDeletionService($pdo, $probes, $mannies, $sectorService))->deletePlayer($deletePlayer);
@@ -2408,6 +2504,9 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $test->assert($detachedManny !== null, 'account deletion keeps outside Mannys recoverable');
     $test->assertEquals(null, $detachedManny?->probeId, 'account deletion detaches outside Mannys from the deleted probe');
     $test->assertEquals(null, $detachedManny?->currentTask, 'account deletion clears outside Manny tasks');
+    $persistentWreck = $detachedStorageContainers->findByObjectId($deleteDetachedContainerId);
+    $test->assert($persistentWreck instanceof SectorDetachedContainer, 'account deletion preserves detached containers owned by destroyed probes');
+    $test->assertEquals($deleteProbe->id, $persistentWreck?->getOwnerProbeId(), 'detached containers preserve the historical destroyed-probe id');
     $deletedPlayerSector = $sectorRepository->load($deleteProbe->currentSector);
     $abandonedMannyObject = $deletedPlayerSector->findObjectById(SectorManny::objectIdForUid($outsideManny->uid));
     $test->assertEquals(SectorManny::STATE_ABANDONED, $abandonedMannyObject?->toArray()['state'] ?? null, 'account deletion marks outside sector Mannys as abandoned');
@@ -3463,7 +3562,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'ended' => gmdate('c', time() - 1),
         ]);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
-        $driftingContainerSector = $sectorRepository->load($detachProbe->currentSector);
+        $driftingContainerSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $driftingDetachedContainer = $driftingContainerSector->findObjectById($detachedObjectId);
         $test->assertEquals('detached_container', $driftingDetachedContainer?->getType()->value, 'completed drifting detach persists a detached container sector object');
         $driftingObservation = $kernel->handle('GET', '/api/probe/sector', $detachHeaders);
@@ -3482,7 +3581,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         }
         $test->assertEquals(0.0, $storage->freeCargoCapacity($detachProbe), 'detached-container mining regression starts with a full probe cargo');
 
-        $driftingMineSector = $sectorRepository->load($detachProbe->currentSector);
+        $driftingMineSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $driftingMineSector->addObject(new Asteroid('drifting-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001));
         $sectorRepository->save($driftingMineSector);
         $mineDriftingContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
@@ -3512,7 +3611,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'ended' => gmdate('c', time() - 1),
         ]);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
-        $driftingMinedContainer = $sectorRepository->load($detachProbe->currentSector)->findObjectById($detachedObjectId);
+        $driftingMinedContainer = $sectorService->getOrCreateSector($detachProbe->currentSector)->findObjectById($detachedObjectId);
         $test->assertEquals(0.21, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a drifting detached container updates its stored resources');
         $test->assertEquals(0.0, $probes->findByPlayerId($detachPlayer->id)?->metalsStock, 'mining into a detached container does not add mined resources to the probe inventory');
 
@@ -3629,14 +3728,14 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals($hiddenDetachedObjectId, $completedHiddenDetachTask['artificialObjectDetected']['objectId'] ?? null, 'completed hidden detach keeps the hidden container detection in the Manny result');
         $test->assertEquals('cache-rock', $completedHiddenDetachTask['artificialObjectDetected']['targetObjectId'] ?? null, 'completed hidden detach keeps the asteroid target in the Manny result');
         $test->assertEquals(false, $completedHiddenDetachTask['detachedContainer']['salvageable'] ?? null, 'completed hidden detach result does not expose the hidden container as a generic salvage target');
-        $hiddenStoredSector = $sectorRepository->load($detachProbe->currentSector);
+        $hiddenStoredSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $test->assertEquals(1, count($hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')), 'completed hidden detach persists the container on the asteroid');
         $hiddenStoredContainer = $hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')[0] ?? null;
         $test->assert($hiddenStoredContainer !== null && in_array($detachPlayer->id, $hiddenStoredContainer->getDiscoveredByPlayerIds(), true), 'completed hidden detach marks the owner player as a discoverer');
         if ($hiddenStoredContainer !== null) {
             $hiddenStoredSector->addHiddenDetachedContainer($hiddenStoredContainer);
             $sectorRepository->save($hiddenStoredSector);
-            $hiddenStoredSector = $sectorRepository->load($detachProbe->currentSector);
+            $hiddenStoredSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
             $test->assertEquals(1, count($hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')), 're-adding the same hidden detached container id does not duplicate it');
         }
         $hiddenObservation = $kernel->handle('GET', '/api/probe/sector', $detachHeaders);
@@ -3681,7 +3780,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $test->assertEquals(202, $scoutInspectHidden->status, 'deprecated asteroid inspection endpoint remains accepted');
             $test->assertEquals('inspecting_sector_object', $scoutInspectHidden->body['manny']['currentTask'] ?? null, 'deprecated asteroid inspection endpoint starts the generic inspecting task');
             $test->assertEquals($hiddenDetachedObjectId, $scoutInspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection by another player detects the hidden container');
-            $scoutDiscoveredContainer = $sectorRepository->load($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+            $scoutDiscoveredContainer = $sectorService->getOrCreateSector($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
             $test->assert($scoutDiscoveredContainer !== null && in_array($scoutPlayer->id, $scoutDiscoveredContainer->getDiscoveredByPlayerIds(), true), 'asteroid inspection records the discovering player');
             $scoutObservationAfter = $kernel->handle('GET', '/api/probe/sector', $scoutHeaders);
             $scoutHiddenAfter = array_values(array_filter(
@@ -3736,7 +3835,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $test->assert($targetRestoredContainer !== null, 'completed attach-to-probe detach creates the storage container on the target probe');
             $test->assertEquals(0.12, $targetRestoredContainer !== null ? ($storageContainers->resourceAmounts($targetRestoredContainer->id)['ice'] ?? null) : null, 'completed attach-to-probe detach transfers stored resources to the target probe');
             $test->assertEquals($targetRestoredContainer?->id, $items->findByUidForProbe($attachTargetProbe->id, $attachedStoredPlate->uid)?->storageContainerId, 'completed attach-to-probe detach transfers stored items inside the target container');
-            $test->assertEquals(null, $sectorRepository->load($detachProbe->currentSector)->findObjectById(SectorDetachedContainer::objectIdForContainer($attachContainerId)), 'attach-to-probe detach does not leave a detached container sector object');
+            $test->assertEquals(null, $sectorService->getOrCreateSector($detachProbe->currentSector)->findObjectById(SectorDetachedContainer::objectIdForContainer($attachContainerId)), 'attach-to-probe detach does not leave a detached container sector object');
         }
 
         $mineHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
@@ -3813,7 +3912,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'ended' => gmdate('c', time() - 1),
         ]);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
-        $hiddenMinedSector = $sectorRepository->load($detachProbe->currentSector);
+        $hiddenMinedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
         $test->assertEquals(1, count($hiddenMinedSector->hiddenDetachedContainersForObject('cache-rock')), 'mining into a hidden target container keeps a single persisted container entry');
         $test->assertEquals(0.211, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a hidden same-asteroid container updates its stored resources');
@@ -3837,7 +3936,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $mannyService->refreshMannyState($staleHiddenMineA, $staleHiddenProbe);
             $mannyService->refreshMannyState($staleHiddenMineB, $staleHiddenProbe);
         }
-        $hiddenMinedSector = $sectorRepository->load($detachProbe->currentSector);
+        $hiddenMinedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
         $test->assertEquals(0.231, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'duplicate stale mining refreshes do not deliver hidden-container mining twice');
 
@@ -3927,7 +4026,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $remoteScutMineCompletedList->body['mannies'] ?? [],
             static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
         ))[0] ?? null;
-        $remoteScutMinedSector = $sectorRepository->load($detachProbe->currentSector);
+        $remoteScutMinedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $remoteScutMinedContainer = $remoteScutMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
         $test->assertEquals(0.232, $remoteScutMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'remote same-SCUT mining deposits resources into the detached sector container');
         $test->assertEquals(null, $remoteScutMineCompletedManny['currentTask'] ?? null, 'completed remote same-SCUT mining leaves the Manny inactive');
@@ -3989,7 +4088,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $restoredHiddenContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
         $test->assertEquals(0.232, $restoredHiddenContainer !== null ? ($storageContainers->resourceAmounts($restoredHiddenContainer->id)['metals'] ?? null) : null, 'recovering a hidden detached container restores its resources');
-        $test->assertEquals(0, count($sectorRepository->load($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from sector JSON');
+        $test->assertEquals(0, count($sectorService->getOrCreateSector($detachProbe->currentSector)->hiddenDetachedContainersForObject('cache-rock')), 'recovering a hidden detached container removes it from SQL-backed sector state');
 
         $multiHiddenPlayer = $auth->registerPlayerWithPassword('multi-hidden-container-recover', 'secret', 'Multi Hidden Recover', 'Multi hidden probe');
         $multiHiddenProbe = $probes->findByPlayerId($multiHiddenPlayer->id);
@@ -4039,7 +4138,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                     ]);
                 }
                 $kernel->handle('GET', '/api/probe/mannies', $multiHiddenHeaders);
-                $multiHiddenStoredSector = $sectorRepository->load($multiHiddenProbe->currentSector);
+                $multiHiddenStoredSector = $sectorService->getOrCreateSector($multiHiddenProbe->currentSector);
                 $test->assertEquals(2, count($multiHiddenStoredSector->hiddenDetachedContainersForObject('multi-cache-rock')), 'multiple hidden containers can coexist on the same asteroid');
 
                 $multiInterruptedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[0]) . '/mine', $multiHiddenHeaders, json_encode([
@@ -4065,7 +4164,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 ], JSON_THROW_ON_ERROR));
                 $test->assertEquals(202, $multiRecoverA->status, 'first hidden container recovery on a shared asteroid is accepted');
                 $test->assertEquals(202, $multiRecoverB->status, 'second hidden container recovery on a shared asteroid is accepted');
-                $test->assertEquals(0, count($sectorRepository->load($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'recovering multiple hidden containers reserves all of them out of sector JSON');
+                $test->assertEquals(0, count($sectorService->getOrCreateSector($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'recovering multiple hidden containers reserves all of them out of SQL-backed sector state');
                 $multiInterruptedManny = $mannies->findByUidForProbe($multiHiddenProbe->id, $multiHiddenMannyIds[0]);
                 $test->assertEquals(Manny::TASK_RETURNING, $multiInterruptedManny?->currentTask, 'recovering a target detached container recalls Mannys mining into it');
                 $test->assertEquals('target_container_recovered', $multiInterruptedManny?->taskPayload['reason'] ?? null, 'interrupted mining recall records the recovered target-container reason');
@@ -4086,7 +4185,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $test->assert($multiRestoredContainerB !== null, 'recovering multiple hidden containers restores the second source container once');
                 $test->assertEquals(0.111, $multiRestoredContainerA !== null ? ($storageContainers->resourceAmounts($multiRestoredContainerA->id)['metals'] ?? null) : null, 'first recovered hidden container keeps its own resources');
                 $test->assertEquals(0.222, $multiRestoredContainerB !== null ? ($storageContainers->resourceAmounts($multiRestoredContainerB->id)['metals'] ?? null) : null, 'second recovered hidden container keeps its own resources');
-                $test->assertEquals(0, count($sectorRepository->load($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'completed multiple hidden-container recovery leaves no stale sector copies');
+                $test->assertEquals(0, count($sectorService->getOrCreateSector($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'completed multiple hidden-container recovery leaves no stale sector copies');
             }
         }
 
@@ -4119,7 +4218,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'ended' => gmdate('c', time() - 1),
         ]);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
-        $planetDropSector = $sectorRepository->load($detachProbe->currentSector);
+        $planetDropSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $planetDroppedContainers = $planetDropSector->planetDroppedContainersForObject('drop-target-planet');
         $test->assertEquals(1, count($planetDroppedContainers), 'completed planet drop persists the container on the planet');
         $test->assertEquals($droppedObjectId, $planetDroppedContainers[0]->getId(), 'planet-dropped container keeps the task object id');
@@ -4222,7 +4321,7 @@ if ($damageWarningProbe !== null) {
     $test->assertEquals(0.0, $probes->findByPlayerId($damageWarningPlayer->id)?->metalsStock, 'storage break removes selected container resources from probe totals');
     if ($storedWarning !== null) {
         $warningSector = new SectorCoordinates($storedWarning->sectorX, $storedWarning->sectorY, $storedWarning->sectorZ);
-        $detachedByMovement = $sectorRepository->load($warningSector)->findObjectById($warningObjectId);
+        $detachedByMovement = $sectorService->getOrCreateSector($warningSector)->findObjectById($warningObjectId);
         $test->assertEquals('detached_container', $detachedByMovement?->getType()->value, 'storage break persists the lost container as a drifting sector object');
     }
 }

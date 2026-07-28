@@ -15,6 +15,7 @@ use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\Repository\ApiKeyRepository;
+use VonNeumannGame\Repository\DetachedStorageContainerRepository;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
@@ -98,7 +99,7 @@ final class AppFactory
         $apiKeys = new ApiKeyRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig, mannies: $mannies);
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
@@ -139,7 +140,7 @@ final class AppFactory
         $visitedSectors = new VisitedSectorRepository($pdo);
         $damageWarnings = new ProbeDamageWarningRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
         $improvements = new ProbeImprovementRepository($pdo);
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
@@ -162,7 +163,7 @@ final class AppFactory
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
 
         return new AuthService(
             new PlayerRepository($pdo),

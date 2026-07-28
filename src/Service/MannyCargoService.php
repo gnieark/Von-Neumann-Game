@@ -141,7 +141,7 @@ final class MannyCargoService
 
         $this->transferMannyCargoToProbe($manny, $probe);
         $this->deliverReservedSalvageItems($probe, $manny, $resultPayload);
-        $this->deliverReservedDetachedContainer($probe, $resultPayload);
+        $this->deliverReservedDetachedContainer($probe, $resultPayload, $manny);
         if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
             $this->waitForStorageSpace($manny, ['reason' => 'salvage_return'] + $resultPayload);
             return;
@@ -212,20 +212,13 @@ final class MannyCargoService
     /**
      * @return array<string, mixed>
      */
-    public function reserveDetachedContainerForSalvage(NeumannProbe $probe, SectorDetachedContainer $target): array
+    public function reserveDetachedContainerForSalvage(NeumannProbe $probe, Manny $manny, SectorDetachedContainer $target): array
     {
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        if ($target->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
-            $removed = $sector->removeHiddenDetachedContainerById($target->getId());
-        } else {
-            $removed = $sector->removeObjectById($target->getId()) ? $target : null;
-        }
-        if (!$removed instanceof SectorDetachedContainer) {
+        if (!$this->sectors->reserveDetachedContainer($target->getId(), $manny->id)) {
             throw new MannyActionException(422, 'detached_container_not_recoverable', 'This detached container is no longer recoverable.');
         }
-        $this->sectors->saveSector($sector);
 
-        return $this->detachedContainerReservedPayload($removed);
+        return $this->detachedContainerReservedPayload($target);
     }
 
     public function restoreReservedDetachedContainer(Manny $manny): void
@@ -235,16 +228,7 @@ final class MannyCargoService
             return;
         }
 
-        $container = SectorDetachedContainer::fromArray($reserved['object']);
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        if ($container->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
-            if ($sector->findHiddenDetachedContainerById($container->getId()) === null) {
-                $sector->addHiddenDetachedContainer($container);
-            }
-        } elseif (!$sector->replaceObject($container)) {
-            $sector->addObject($container);
-        }
-        $this->sectors->saveSector($sector);
+        $this->sectors->releaseDetachedContainerReservation($reserved['objectId'], $manny->id);
     }
 
     /**
@@ -429,16 +413,20 @@ final class MannyCargoService
     /**
      * @param array<string, mixed> $payload
      */
-    public function deliverReservedDetachedContainer(NeumannProbe $probe, array $payload): void
+    public function deliverReservedDetachedContainer(NeumannProbe $probe, array $payload, Manny $manny): void
     {
         $reserved = $this->reservedDetachedContainerPayloadFrom($payload);
         if ($reserved === null) {
             return;
         }
 
-        $object = is_array($reserved['object'] ?? null) ? $reserved['object'] : [];
-        $snapshot = is_array($object['payload'] ?? null) ? $object['payload'] : [];
+        $object = $this->sectors->reservedDetachedContainer($reserved['objectId'], $manny->id);
+        if (!$object instanceof SectorDetachedContainer) {
+            return;
+        }
+        $snapshot = $object->getPayload();
         $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+        $this->sectors->deleteDetachedContainer($object->getId());
     }
 
     public function reservedSalvageItemPayload(Manny $manny): ?array
@@ -619,18 +607,16 @@ final class MannyCargoService
     private function reservedDetachedContainerPayloadFrom(array $payload): ?array
     {
         $reserved = $payload['reservedDetachedContainer'] ?? null;
-        if (!is_array($reserved) || !is_array($reserved['object'] ?? null)) {
+        if (!is_array($reserved) || trim((string) ($reserved['objectId'] ?? '')) === '') {
             return null;
         }
-        $object = SectorDetachedContainer::fromArray($reserved['object']);
 
         return [
-            'objectId' => $object->getId(),
-            'mode' => $object->getMode(),
-            'capacity' => $object->getCapacity(),
-            'capacityUnit' => $object->getCapacityUnit(),
-            'targetObjectId' => $object->getTargetObjectId(),
-            'object' => $object->toArray(),
+            'objectId' => (string) $reserved['objectId'],
+            'mode' => (string) ($reserved['mode'] ?? SectorDetachedContainer::MODE_DRIFTING),
+            'capacity' => round(max(0.0, (float) ($reserved['capacity'] ?? 0.0)), 4),
+            'capacityUnit' => (string) ($reserved['capacityUnit'] ?? ProbeInventory::CAPACITY_UNIT),
+            'targetObjectId' => isset($reserved['targetObjectId']) ? (string) $reserved['targetObjectId'] : null,
         ];
     }
 
@@ -645,7 +631,6 @@ final class MannyCargoService
             'capacity' => $container->getCapacity(),
             'capacityUnit' => $container->getCapacityUnit(),
             'targetObjectId' => $container->getTargetObjectId(),
-            'object' => $container->toArray(),
         ];
     }
 
