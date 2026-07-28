@@ -52,10 +52,20 @@ final class ProbeStorageService
     public function ensureProbeStorage(NeumannProbe $probe): void
     {
         $existingContainers = $this->containers->findByProbeId($probe->id);
-        $core = $this->containers->ensureCoreContainer($probe);
+        $containerUids = array_fill_keys(
+            array_map(static fn(StorageContainer $container): string => $container->uid, $existingContainers),
+            true,
+        );
+        $core = $this->containerByUid($existingContainers, StorageContainer::CORE_UID)
+            ?? $this->containers->ensureCoreContainer($probe);
+        $containerUids[$core->uid] = true;
         foreach ($this->items->findByProbeId($probe->id) as $item) {
             if ($item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
-                $this->containers->ensureContainerForItem($probe->id, $item->uid);
+                $containerUid = StorageContainerRepository::uidForItem($item->uid);
+                if (!isset($containerUids[$containerUid])) {
+                    $container = $this->containers->ensureContainerForItem($probe->id, $item->uid);
+                    $containerUids[$container->uid] = true;
+                }
             }
         }
 
@@ -74,10 +84,22 @@ final class ProbeStorageService
 
     public function migrateLegacyProbe(NeumannProbe $probe): void
     {
-        $this->containers->ensureCoreContainer($probe);
+        $existingContainers = $this->containers->findByProbeId($probe->id);
+        $containerUids = array_fill_keys(
+            array_map(static fn(StorageContainer $container): string => $container->uid, $existingContainers),
+            true,
+        );
+        if (!isset($containerUids[StorageContainer::CORE_UID])) {
+            $core = $this->containers->ensureCoreContainer($probe);
+            $containerUids[$core->uid] = true;
+        }
         foreach ($this->items->findByProbeId($probe->id) as $item) {
             if ($item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
-                $this->containers->ensureContainerForItem($probe->id, $item->uid);
+                $containerUid = StorageContainerRepository::uidForItem($item->uid);
+                if (!isset($containerUids[$containerUid])) {
+                    $container = $this->containers->ensureContainerForItem($probe->id, $item->uid);
+                    $containerUids[$container->uid] = true;
+                }
             }
         }
         $this->containers->clearResourcesForProbe($probe->id);
@@ -1178,6 +1200,20 @@ final class ProbeStorageService
         }
 
         return $containers[0] ?? throw new \RuntimeException('Probe storage has no container.');
+    }
+
+    /**
+     * @param array<StorageContainer> $containers
+     */
+    private function containerByUid(array $containers, string $uid): ?StorageContainer
+    {
+        foreach ($containers as $container) {
+            if ($container->uid === $uid) {
+                return $container;
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -29,7 +29,8 @@ final class StorageContainerRepository
 
     public function ensureContainerForItem(int $probeId, string $itemUid): StorageContainer
     {
-        $existing = $this->findByUidForProbe($probeId, $this->containerUidForItem($itemUid));
+        $containerUid = self::uidForItem($itemUid);
+        $existing = $this->findByUidForProbe($probeId, $containerUid);
         if ($existing !== null) {
             return $existing;
         }
@@ -38,7 +39,7 @@ final class StorageContainerRepository
 
         return $this->create(
             $probeId,
-            $this->containerUidForItem($itemUid),
+            $containerUid,
             StorageContainer::KIND_CONTAINER,
             'Container ' . $number,
             $number,
@@ -306,7 +307,7 @@ final class StorageContainerRepository
         return max(1, (int) $stmt->fetchColumn());
     }
 
-    private function containerUidForItem(string $itemUid): string
+    public static function uidForItem(string $itemUid): string
     {
         return 'container-' . $itemUid;
     }

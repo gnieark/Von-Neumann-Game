@@ -5416,10 +5416,23 @@ $test->assertEquals(2, count($batchStart->body['results'] ?? []), 'Manny task ba
 $test->assertEquals($batchMannyIds[0] ?? null, $batchStart->body['results'][0]['manny']['id'] ?? null, 'first Manny batch result identifies its Manny');
 $test->assertEquals($batchMannyIds[1] ?? null, $batchStart->body['results'][1]['manny']['id'] ?? null, 'second Manny batch result identifies its Manny');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
+$probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
+$storageContainerRepositorySource = file_get_contents($root . '/src/Repository/StorageContainerRepository.php');
 $probeManniesControllerSource = file_get_contents($root . '/src/Http/Controller/ProbeManniesApiController.php');
 $test->assert(is_string($probeManniesControllerSource) && str_contains($probeManniesControllerSource, '$this->mannies->withPreparedBatch('), 'Manny task batches delegate their transaction and preparation to the Manny service');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->refreshAllMannyStates($lockedProbe);'), 'Manny task batches refresh pre-existing tasks once before assigning orders');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'if ($this->preparedBatchProbeId === $probe->id)'), 'Manny task batch assignments skip repeated peer refreshes and nested probe locks');
+$test->assert(
+    is_string($probeStorageServiceSource)
+        && str_contains($probeStorageServiceSource, '$containerUids = array_fill_keys(')
+        && str_contains($probeStorageServiceSource, 'if (!isset($containerUids[$containerUid]))'),
+    'probe storage repair checks existing additional-container ids in memory',
+);
+$test->assert(
+    is_string($storageContainerRepositorySource)
+        && str_contains($storageContainerRepositorySource, 'public static function uidForItem('),
+    'storage container ids use one shared derivation for bulk existence checks and creation',
+);
 
 $batchRollback = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
     'tasks' => [

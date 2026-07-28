@@ -5,6 +5,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-07-28
 
 ### Changed
+- Performance : la réparation automatique du stockage charge désormais les identifiants des conteneurs en une fois et vérifie en mémoire les items `additional_container`, supprimant une requête SQL par conteneur à chaque lecture d’inventaire.
 - Performance : les lectures de la liste des Mannies ne rafraîchissent opportunément que les dix tâches échues les plus anciennes par requête. Le worker scheduler reste responsable du traitement principal, tandis que les polls suivants absorbent progressivement un éventuel retard sans multiplier les verrous de sonde.
 - Interface : l’avertissement du forum présente désormais le canal communautaire et recommande le serveur Discord de Neumann Probe dans ses versions française et anglaise.
 - Maintenance : ajout d’un audit en lecture seule des conteneurs détachés stockés dans les JSON de secteurs, avec détection des doublons, collisions d’identifiants et snapshots incomplets.
