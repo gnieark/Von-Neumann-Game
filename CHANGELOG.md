@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 - Interface : l’avertissement du forum présente désormais le canal communautaire et recommande le serveur Discord de Neumann Probe dans ses versions française et anglaise.
+- Maintenance : ajout d’un audit en lecture seule des conteneurs détachés stockés dans les JSON de secteurs, avec détection des doublons, collisions d’identifiants et snapshots incomplets.
 
 ## 2026-07-27
 

@@ -22,6 +22,7 @@ use VonNeumannGame\Sector\Star;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DormantConstruct;
+use VonNeumannGame\Service\DetachedContainerJsonAuditService;
 
 /**
  * Simple test runner with assertions.
@@ -622,6 +623,45 @@ $removedHiddenContainer = $duplicateHiddenSector->removeHiddenDetachedContainerB
 $test->assert($removedHiddenContainer instanceof SectorDetachedContainer, 'removing a hidden detached container returns the removed object');
 $test->assertCount(0, $duplicateHiddenSector->hiddenDetachedContainersForObject('cache-rock'), 'removing a hidden detached container removes all duplicates for that id');
 
+$auditBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_detached_container_audit_' . bin2hex(random_bytes(4));
+$auditRepository = new SectorFileRepository($auditBase);
+$auditCoordinatesA = new SectorCoordinates(20, 0, 0);
+$auditCoordinatesB = new SectorCoordinates(22, 0, 0);
+$auditContainer = new SectorDetachedContainer(
+    'detached-container-audit',
+    'Audit container',
+    SectorDetachedContainer::MODE_DRIFTING,
+    1,
+    1,
+    1,
+    null,
+    1.0,
+    'earth_container_equivalent',
+    '2026-01-01T00:00:00+00:00',
+    [
+        'sourceContainerId' => 'container-itm_audit',
+        'container' => ['id' => 'container-itm_audit'],
+        'containerItem' => ['uid' => 'itm_audit', 'type' => 'additional_container'],
+        'resources' => [],
+        'items' => [],
+    ],
+);
+$auditRepository->save(new SectorContent($auditCoordinatesA, [], detachedContainers: [$auditContainer]));
+$auditRepository->save(new SectorContent($auditCoordinatesB, [], detachedContainers: [$auditContainer]));
+$auditReport = (new DetachedContainerJsonAuditService())->audit($auditBase);
+$test->assertEquals(2, $auditReport['filesScanned'], 'detached-container audit scans every sector JSON file');
+$test->assertEquals(2, $auditReport['containersScanned'], 'detached-container audit counts raw container entries');
+$test->assertEquals(1, $auditReport['summary']['duplicate_container_id'] ?? 0, 'detached-container audit detects duplicate ids across sector files');
+
+$incompletePath = $auditRepository->getPath($auditCoordinatesB);
+$incompleteData = json_decode((string) file_get_contents($incompletePath), true, 512, JSON_THROW_ON_ERROR);
+$incompleteData['detachedContainers'][0]['id'] = 'detached-container-incomplete';
+$incompleteData['detachedContainers'][0]['payload'] = ['sourceContainerId' => 'container-itm_audit'];
+file_put_contents($incompletePath, json_encode($incompleteData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+$incompleteReport = (new DetachedContainerJsonAuditService())->audit($auditBase);
+$test->assert(($incompleteReport['summary']['incomplete_payload'] ?? 0) >= 4, 'detached-container audit reports incomplete snapshot payload fields');
+$test->assertEquals(1, $incompleteReport['summary']['source_container_uid_collision'] ?? 0, 'detached-container audit detects one source container uid mapped to different detached ids');
+
 $serviceBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_sector_service_tests_' . bin2hex(random_bytes(4));
 $serviceRepository = new SectorFileRepository($serviceBase);
 $service = new SectorService($serviceRepository, $contentGenerator, 'service_seed', $grid);
@@ -638,6 +678,7 @@ $test->assert($createdOrigin->getCoordinates()->equals($loadedExisting->getCoord
 
 removeDirectory($tmpBase);
 removeDirectory($serviceBase);
+removeDirectory($auditBase);
 
 // Print summary
 $test->printSummary();
