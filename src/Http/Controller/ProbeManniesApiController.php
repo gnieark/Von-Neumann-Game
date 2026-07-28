@@ -52,7 +52,7 @@ final class ProbeManniesApiController
     public function list(Player $player, ?NeumannProbe $probe = null): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
-        $mannies = $this->mannies->manniesForProbe($probe);
+        $mannies = $this->mannies->manniesForProbeApiHint($probe);
 
         return new ApiResponse(200, [
             'mannies' => $this->presenter->mannies($player, $probe, $mannies),

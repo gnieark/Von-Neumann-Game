@@ -5447,6 +5447,45 @@ $duplicateBatchManny = $kernel->handle('POST', '/api/probe/' . $batchProbe->id .
 ], JSON_THROW_ON_ERROR));
 $test->assertEquals(400, $duplicateBatchManny->status, 'Manny task batch rejects duplicate Manny ids');
 
+$hintPlayer = $auth->registerPlayerWithPassword('manny-hint-limit-user', 'secret', 'Manny Hint Limit User');
+$hintHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($hintPlayer)['token']];
+$hintProbe = $probes->findByPlayerId($hintPlayer->id) ?? throw new RuntimeException('Expected Manny hint limit probe.');
+$hintProbe->integrityPercent = 50.0;
+$probes->save($hintProbe);
+for ($index = 1; $index <= 11; $index++) {
+    $hintManny = $mannies->createForProbe($hintProbe->id, sprintf('hint-overdue-%02d', $index));
+    $hintManny->currentTask = Manny::TASK_REPAIR;
+    $hintManny->taskStartedAt = gmdate('c', time() - 120);
+    $hintManny->taskEndsAt = gmdate('c', time() - (20 - $index));
+    $hintManny->taskPayload = ['integrityPercent' => 1.0, 'metalsCost' => 0.01];
+    $mannies->save($hintManny);
+}
+$hintFutureManny = $mannies->createForProbe($hintProbe->id, 'hint-future');
+$hintFutureManny->currentTask = Manny::TASK_REPAIR;
+$hintFutureManny->taskStartedAt = gmdate('c');
+$hintFutureManny->taskEndsAt = gmdate('c', time() + 3600);
+$hintFutureManny->taskPayload = ['integrityPercent' => 1.0, 'metalsCost' => 0.01];
+$mannies->save($hintFutureManny);
+
+$firstHintRefresh = $kernel->handle('GET', '/api/probe/' . $hintProbe->id . '/mannies', $hintHeaders);
+$test->assertEquals(200, $firstHintRefresh->status, 'Manny list hint succeeds with more than ten overdue tasks');
+$test->assertEquals(16, count($firstHintRefresh->body['mannies'] ?? []), 'Manny list hint still returns every Manny');
+$test->assertEquals(60.0, $probes->findById($hintProbe->id)?->integrityPercent, 'Manny list hint refreshes at most ten overdue tasks');
+$remainingAfterFirstHint = array_values(array_filter(
+    $mannies->findByProbeId($hintProbe->id),
+    static fn(Manny $manny): bool => $manny->currentTask !== null,
+));
+$test->assertEquals(
+    ['hint-future', 'hint-overdue-11'],
+    array_map(static fn(Manny $manny): string => $manny->name, $remainingAfterFirstHint),
+    'Manny list hint refreshes the ten oldest overdue tasks and leaves future tasks untouched',
+);
+
+$secondHintRefresh = $kernel->handle('GET', '/api/probe/' . $hintProbe->id . '/mannies', $hintHeaders);
+$test->assertEquals(200, $secondHintRefresh->status, 'a later Manny list hint absorbs the remaining overdue task');
+$test->assertEquals(61.0, $probes->findById($hintProbe->id)?->integrityPercent, 'successive Manny list hints continue processing overdue tasks');
+$test->assertEquals(Manny::TASK_REPAIR, $mannies->findById($hintFutureManny->id)?->currentTask, 'Manny list hints do not refresh tasks before their deadline');
+
 $foreignMannyOwner = $auth->registerPlayerWithPassword('foreign-manny-owner', 'secret', 'Foreign Manny Owner', 'Foreign Manny probe');
 $foreignMannyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($foreignMannyOwner)['token']];
 $foreignMannyList = $kernel->handle('GET', '/api/probe/mannies', $foreignMannyHeaders);
@@ -6152,6 +6191,11 @@ if ($createdProbe !== null) {
         'id' => $mineMannyDbId,
         'started' => gmdate('c', time() - 3400),
     ]);
+    $tripDeuteriumEntity = $mannies->findById($mineMannyDbId);
+    $tripDeuteriumProbe = $probes->findByPlayerId($player->id);
+    if ($tripDeuteriumEntity !== null && $tripDeuteriumProbe !== null) {
+        $mannyService->refreshMannyState($tripDeuteriumEntity, $tripDeuteriumProbe);
+    }
     $tripDeuteriumProgress = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $tripDeuteriumManny = array_values(array_filter(
         $tripDeuteriumProgress->body['mannies'] ?? [],
@@ -6220,8 +6264,8 @@ if ($createdProbe !== null) {
         $readonlyMiningRefresh->body['mannies'] ?? [],
         static fn(array $manny): bool => ($manny['id'] ?? null) === $thirdMannyId,
     ))[0] ?? null;
-    $test->assertEquals('outbound', $readonlyMixedManny['task']['phase'] ?? null, 'GET /api/probe/mannies computes active mining phase without persisting it');
-    $test->assertEquals(0.0, $readonlyMixedManny['cargo']['metals'] ?? null, 'GET /api/probe/mannies exposes computed outbound mining cargo');
+    $test->assertEquals(null, $readonlyMixedManny['task']['phase'] ?? null, 'GET /api/probe/mannies does not refresh a mining task before its deadline');
+    $test->assertEquals(0.0, $readonlyMixedManny['cargo']['metals'] ?? null, 'GET /api/probe/mannies keeps pre-deadline mining cargo unchanged');
     $miningReadPersistenceRow = $pdo->prepare(
         'SELECT m.updated_at AS manny_updated_at, se.updated_at AS event_updated_at, se.payload_json
          FROM mannies m
@@ -6237,6 +6281,11 @@ if ($createdProbe !== null) {
         'id' => $mixedMannyDbId,
         'started' => gmdate('c', time() - 1500),
     ]);
+    $haulingMixedEntity = $mannies->findById($mixedMannyDbId);
+    $haulingMixedProbe = $probes->findByPlayerId($player->id);
+    if ($haulingMixedEntity !== null && $haulingMixedProbe !== null) {
+        $mannyService->refreshMannyState($haulingMixedEntity, $haulingMixedProbe);
+    }
     $haulingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $haulingMixedManny = array_values(array_filter(
         $haulingMannies->body['mannies'] ?? [],
@@ -6276,6 +6325,11 @@ if ($createdProbe !== null) {
         'id' => $mineMannyDbId,
         'started' => gmdate('c', time() - 3500),
     ]);
+    $haulingSecondEntity = $mannies->findById($mineMannyDbId);
+    $haulingSecondProbe = $probes->findByPlayerId($player->id);
+    if ($haulingSecondEntity !== null && $haulingSecondProbe !== null) {
+        $mannyService->refreshMannyState($haulingSecondEntity, $haulingSecondProbe);
+    }
     $haulingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $haulingSecondManny = array_values(array_filter(
         $haulingMannies->body['mannies'] ?? [],

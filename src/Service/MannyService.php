@@ -81,6 +81,7 @@ final class MannyService implements MannyTaskRuntime
     public const TASK_VISIBILITY_LOCAL = 'local';
     public const TASK_VISIBILITY_SCUT_NETWORK = 'scut_network';
     public const TASK_VISIBILITY_TOO_FAR = 'too_far';
+    private const API_HINT_REFRESH_LIMIT = 10;
 
     private readonly WaypointBookmarkService $bookmarks;
     private readonly MannyCraftingService $crafting;
@@ -790,6 +791,34 @@ final class MannyService implements MannyTaskRuntime
             static fn(Manny $manny): Manny => $refreshedById[$manny->id] ?? $manny,
             $this->mannies->findByProbeId($probe->id),
         );
+    }
+
+    /**
+     * Refreshes a bounded number of due tasks for a Manny-list API hint.
+     *
+     * @return array<Manny>
+     */
+    public function manniesForProbeApiHint(NeumannProbe $probe): array
+    {
+        $this->storage->ensureProbeStorage($probe);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $dueMannies = array_values(array_filter(
+            $this->mannies->findByProbeId($probe->id),
+            static fn(Manny $manny): bool => $manny->currentTask !== null
+                && $manny->taskEndsAt !== null
+                && new \DateTimeImmutable($manny->taskEndsAt) <= $now,
+        ));
+        usort(
+            $dueMannies,
+            static fn(Manny $left, Manny $right): int => [$left->taskEndsAt, $left->id] <=> [$right->taskEndsAt, $right->id],
+        );
+
+        foreach (array_slice($dueMannies, 0, self::API_HINT_REFRESH_LIMIT) as $manny) {
+            $this->refreshMannyState($manny, $probe);
+        }
+        $this->recoverForgottenManniesInCurrentSector($probe);
+
+        return $this->mannies->findByProbeId($probe->id);
     }
 
     public function maxDeuteriumPercentForProbe(NeumannProbe $probe): float
