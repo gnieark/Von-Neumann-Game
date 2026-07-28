@@ -1,5 +1,7 @@
 # Changelog
 
+- Interface : lorsqu'un appel API reçoit une réponse 401, le client vérifie une seule fois la session via `/api/me` et recharge la page si elle a expiré afin de revenir à l'authentification, sans multiplier les contrôles lors des rafraîchissements simultanés.
+
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-07-28

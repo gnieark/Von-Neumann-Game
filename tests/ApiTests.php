@@ -422,6 +422,13 @@ $mainTemplate = file_get_contents($root . '/templates/main.html');
 $probeTemplate = file_get_contents($root . '/templates/Probe.html');
 $frontIndex = file_get_contents($root . '/public/index.php');
 $mainScript = file_get_contents($root . '/public/assets/main.js');
+$test->assert(
+    is_string($mainScript)
+        && str_contains($mainScript, 'if (response.status === 401)')
+        && str_contains($mainScript, 'sessionCheckPromise = fetch("/api/me"')
+        && str_contains($mainScript, 'window.location.reload()'),
+    'WebUI checks the current session once and reloads after an authentication failure'
+);
 $probeScript = file_get_contents($root . '/public/assets/probe.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
@@ -754,7 +761,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260727-probe-model-ui"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260728-session-expiry-ui"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

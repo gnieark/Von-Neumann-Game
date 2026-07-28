@@ -47,6 +47,37 @@ function sessionToken() {
     return safeDecode(cookieValue("vn_session"));
 }
 
+let sessionCheckPromise = null;
+let sessionReloadRequested = false;
+
+async function reloadIfSessionExpired() {
+    if (sessionReloadRequested) {
+        return;
+    }
+    if (sessionCheckPromise === null) {
+        const token = sessionToken();
+        sessionCheckPromise = fetch("/api/me", {
+            "method": "GET",
+            "headers": {
+                "Authorization": token ? "Bearer " + token : "",
+                "Accept": "application/json",
+            },
+        })
+            .then((response) => {
+                if (response.status === 401 && !sessionReloadRequested) {
+                    sessionReloadRequested = true;
+                    window.location.reload();
+                }
+            })
+            .catch(() => null)
+            .finally(() => {
+                sessionCheckPromise = null;
+            });
+    }
+
+    await sessionCheckPromise;
+}
+
 function bindOAuthRememberChoice() {
     const checkbox = document.getElementById("oauth-remember");
     const links = document.querySelectorAll("[data-oauth-url]");
@@ -88,6 +119,9 @@ async function apiJson(path, options) {
     });
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
+    if (response.status === 401) {
+        await reloadIfSessionExpired();
+    }
     if (!response.ok) {
         const message = data && data.error && data.error.message
             ? data.error.message

@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260727-probe-model-ui';
+const ASSET_VERSION = '20260728-session-expiry-ui';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
