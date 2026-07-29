@@ -174,8 +174,9 @@ connaissance:
 - `long_range_estimation` au-dela.
 
 `ProbeMovementService` lance et rafraichit les mouvements intersecteurs. Un
-mouvement consomme et dure selon les parametres `movement` de
-`config/gameplay.json`.
+mouvement réserve dès son départ son coût fixe complet, décélération comprise,
+et ne peut pas démarrer si le stock de deutérium est insuffisant. Son coût et sa
+durée suivent les paramètres `movement` de `config/gameplay.json`.
 
 L'etat courant est derive des timestamps a chaque lecture. Le scheduler CLI
 ponctuel (`php scripts/scheduler.php`) ou son worker permanent

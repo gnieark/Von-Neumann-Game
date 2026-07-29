@@ -4399,6 +4399,7 @@ components:
           type: integer
         fuelCostDeuterium:
           type: number
+          description: Fixed deuterium-point cost reserved at departure for the complete trip, including deceleration.
         startedAt:
           type: string
           format: date-time

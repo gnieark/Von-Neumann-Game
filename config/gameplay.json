@@ -93,7 +93,7 @@
     "accelerationMinutesPerDistance": 20,
     "cruiseMinutesPerDistance": 30,
     "decelerationMinutesPerDistance": 20,
-    "fuelCostRatioOfCurrentDeuterium": 0.02,
+    "fuelCostPoints": 0.02,
     "velocityBaseC": 0.42,
     "velocityPerDistanceC": 0.1,
     "velocityMaxC": 0.95,

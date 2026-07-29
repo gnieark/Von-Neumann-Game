@@ -90,11 +90,11 @@ final class ProbeMovementService
             throw new ProbeMovementException(400, 'same_destination', 'Destination is identical to the current sector.');
         }
 
-        if ($probe->deuteriumStock <= 0.0001) {
+        $fuelCost = round($this->float('fuelCostPoints', 0.02) * 100, 4);
+        if ($probe->deuteriumStock < $fuelCost) {
             throw new ProbeMovementException(422, 'insufficient_fuel', 'Insufficient deuterium for movement.');
         }
 
-        $fuelCost = round($probe->deuteriumStock * $this->float('fuelCostRatioOfCurrentDeuterium', 0.02), 4);
         $startedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $movement = $this->movements->create(
             $probe->id,

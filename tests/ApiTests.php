@@ -6936,9 +6936,10 @@ $sameMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode
 $test->assertEquals(400, $sameMove->status, 'POST /api/probe/move rejects current sector destination');
 
 if ($moveProbe !== null) {
-    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 0 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 1.99 WHERE id = :id')->execute(['id' => $moveProbe->id]);
     $noFuel = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
-    $test->assertEquals(422, $noFuel->status, 'POST /api/probe/move rejects insufficient deuterium');
+    $test->assertEquals(422, $noFuel->status, 'POST /api/probe/move rejects stock below the fixed two-point travel cost');
+    $test->assertEquals(1.99, $probes->findByPlayerId($player->id)?->deuteriumStock, 'rejected movement keeps the deuterium needed for deceleration');
 
     $originBeforeMove = $moveProbe->currentSector;
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $moveProbe->id]);
@@ -6965,7 +6966,7 @@ if ($moveProbe !== null) {
     $test->assertEquals(202, $startMove->status, 'POST /api/probe/move starts movement with 202');
     $test->assertEquals('preparing', $startMove->body['movement']['status'] ?? null, 'new movement starts in preparing status');
     $test->assertEquals(1, $startMove->body['movement']['distance'] ?? null, 'movement distance is computed on FCC layers');
-    $test->assertEquals(2.0, $startMove->body['movement']['fuelCostDeuterium'] ?? null, 'movement consumes 2 percent of current deuterium');
+    $test->assertEquals(2.0, $startMove->body['movement']['fuelCostDeuterium'] ?? null, 'movement consumes a fixed two deuterium points');
     $test->assert(!str_contains(json_encode($startMove->body, JSON_THROW_ON_ERROR), 'sector_x'), 'movement response does not expose absolute database coordinates');
 
     $afterStartProbe = $probes->findByPlayerId($player->id);
