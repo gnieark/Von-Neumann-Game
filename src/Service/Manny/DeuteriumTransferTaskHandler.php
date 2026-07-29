@@ -26,6 +26,8 @@ final class DeuteriumTransferTaskHandler implements TaskHandlerInterface
      * @param \Closure(Manny, array<string, mixed>): void $clearTask
      * @param \Closure(?NeumannProbe): float $maxDeuteriumPercent
      * @param \Closure(NeumannProbe): bool $probeAcceptsMannyOrders
+     * @param \Closure(int, float, float): array{accepted:float, stock:float} $addDeuteriumStock
+     * @param \Closure(int, float): float $adjustDeuteriumStock
      */
     public function __construct(
         private readonly \Closure $refreshMannyState,
@@ -40,6 +42,8 @@ final class DeuteriumTransferTaskHandler implements TaskHandlerInterface
         private readonly \Closure $clearTask,
         private readonly \Closure $maxDeuteriumPercent,
         private readonly \Closure $probeAcceptsMannyOrders,
+        private readonly \Closure $addDeuteriumStock,
+        private readonly \Closure $adjustDeuteriumStock,
     ) {
     }
 
@@ -131,8 +135,7 @@ final class DeuteriumTransferTaskHandler implements TaskHandlerInterface
             || !$targetProbe->currentSector->equals($probe->currentSector)
             || !($this->probeAcceptsMannyOrders)($targetProbe)
         ) {
-            $probe->deuteriumStock = round($probe->deuteriumStock + $reservedAmount, 4);
-            ($this->saveProbe)($probe);
+            $probe->deuteriumStock = ($this->adjustDeuteriumStock)($probe->id, $reservedAmount);
             $result['result'] = 'failed';
             $result['failureReason'] = $targetProbe === null ? 'target_probe_not_found' : 'target_probe_unavailable';
             $result['returnedAmount'] = $reservedAmount;
@@ -143,13 +146,17 @@ final class DeuteriumTransferTaskHandler implements TaskHandlerInterface
             return ($this->findMannyById)($manny->id) ?? $manny;
         }
 
-        $targetCapacity = round(max(0.0, ($this->maxDeuteriumPercent)($targetProbe) - $targetProbe->deuteriumStock), 4);
-        $transferredAmount = round(min($reservedAmount, $targetCapacity), 4);
+        $targetCredit = ($this->addDeuteriumStock)(
+            $targetProbe->id,
+            $reservedAmount,
+            ($this->maxDeuteriumPercent)($targetProbe),
+        );
+        $transferredAmount = round($targetCredit['accepted'], 4);
         $returnedAmount = round(max(0.0, $reservedAmount - $transferredAmount), 4);
-        $targetProbe->deuteriumStock = round($targetProbe->deuteriumStock + $transferredAmount, 4);
-        $probe->deuteriumStock = round($probe->deuteriumStock + $returnedAmount, 4);
-        ($this->saveProbe)($targetProbe);
-        ($this->saveProbe)($probe);
+        $targetProbe->deuteriumStock = round($targetCredit['stock'], 4);
+        if ($returnedAmount > 0.0) {
+            $probe->deuteriumStock = ($this->adjustDeuteriumStock)($probe->id, $returnedAmount);
+        }
 
         $result['result'] = 'success';
         $result['targetProbeName'] = $targetProbe->name;

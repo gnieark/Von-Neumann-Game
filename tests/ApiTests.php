@@ -5755,6 +5755,12 @@ if ($createdProbe !== null) {
     $test->assertEquals(45.0, $probes->findById($createdProbe->id)?->deuteriumStock, 'deuterium transfer returns surplus to the source probe');
     $test->assertEquals(100.0, $probes->findById($transferTargetProbe->id)?->deuteriumStock, 'deuterium transfer fills the target probe to its maximum');
 
+    $staleTransferTarget = $probes->findById($transferTargetProbe->id);
+    $probes->adjustDeuteriumStock($transferTargetProbe->id, -10.0);
+    $probes->addDeuteriumStock($transferTargetProbe->id, 3.0, 100.0);
+    $test->assertEquals(93.0, $probes->findById($transferTargetProbe->id)?->deuteriumStock, 'atomic deuterium adjustments compose without a lost update');
+    $test->assertEquals(100.0, $staleTransferTarget?->deuteriumStock, 'atomic deuterium adjustments do not rely on a stale probe snapshot');
+
     $probeTransferManny = $mannies->createForProbe($createdProbe->id, 'probe-transfer-manny');
     $mannyProbeTransfer = $kernel->handle('POST', '/api/probe/' . $createdProbe->id . '/mannies/' . rawurlencode($probeTransferManny->uid) . '/transfer-to-probe', $headers, json_encode([
         'targetProbeId' => $transferTargetProbe->id,

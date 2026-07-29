@@ -318,6 +318,55 @@ final class NeumannProbeRepository
         }
     }
 
+    public function adjustDeuteriumStock(int $probeId, float $stockPercent): float
+    {
+        $stockPercent = round($stockPercent, 4);
+        if (abs($stockPercent) <= 0.00001) {
+            return $this->findById($probeId)?->deuteriumStock ?? 0.0;
+        }
+
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $update = $this->pdo->prepare(
+                'UPDATE neumann_probes
+                 SET deuterium_stock = ROUND(
+                         CASE
+                             WHEN deuterium_stock + :stock_percent_floor < 0 THEN 0
+                             ELSE deuterium_stock + :stock_percent_value
+                         END,
+                         4
+                     ),
+                     updated_at = :updated_at
+                 WHERE id = :id'
+            );
+            $update->execute([
+                'id' => $probeId,
+                'stock_percent_floor' => $stockPercent,
+                'stock_percent_value' => $stockPercent,
+                'updated_at' => gmdate('c'),
+            ]);
+            $select = $this->pdo->prepare('SELECT deuterium_stock FROM neumann_probes WHERE id = :id');
+            $select->execute(['id' => $probeId]);
+            $stock = (float) $select->fetchColumn();
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $stock;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
     private function hydrate(array $row): NeumannProbe
     {
         return new NeumannProbe(

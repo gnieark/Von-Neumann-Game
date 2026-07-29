@@ -464,6 +464,8 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(?NeumannProbe $probe): float => $this->maxDeuteriumPercent($probe),
             fn(NeumannProbe $probe): bool => $this->probeAcceptsMannyOrders($probe),
+            fn(int $probeId, float $amount, float $maximum): array => $this->probes->addDeuteriumStock($probeId, $amount, $maximum),
+            fn(int $probeId, float $amount): float => $this->probes->adjustDeuteriumStock($probeId, $amount),
         );
         $this->returningTaskHandler = new ReturningTaskHandler(
             fn(NeumannProbe $probe, Manny $manny, array $payload): bool => $this->cargo->canAcceptMannyDocking($probe, $manny, $payload),
