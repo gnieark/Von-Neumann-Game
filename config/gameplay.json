@@ -122,7 +122,7 @@
         "weight": 0
       },
       "oracle": {
-        "weight": 50,
+        "weight": 20,
         "minimumDestinationHabitabilityScore": 0.5,
         "queryCooldownSeconds": 86400
       },
