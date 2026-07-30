@@ -6,6 +6,7 @@ namespace VonNeumannGame\Repository;
 
 use PDO;
 use VonNeumannGame\Config\Config;
+use VonNeumannGame\Domain\InventoryMannyProjection;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -83,6 +84,56 @@ final class MannyRepository
         $stmt->execute(['probe_id' => $probeId]);
 
         return array_map(fn(array $row): Manny => $this->hydrate($row), $stmt->fetchAll());
+    }
+
+    /**
+     * Inventory-only projection. It deliberately excludes task columns and
+     * therefore never loads scheduled-event payloads.
+     *
+     * @return array<InventoryMannyProjection>
+     */
+    public function findInventoryProjectionsByProbeId(int $probeId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT uid, storage_container_id, name, location_type,
+                    cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds
+             FROM mannies
+             WHERE probe_id = :probe_id
+             ORDER BY name ASC, id ASC'
+        );
+        $stmt->execute(['probe_id' => $probeId]);
+
+        return array_map(
+            static fn(array $row): InventoryMannyProjection => new InventoryMannyProjection(
+                (string) $row['uid'],
+                $row['storage_container_id'] !== null ? (int) $row['storage_container_id'] : null,
+                (string) $row['name'],
+                (string) $row['location_type'],
+                (float) ($row['cargo_deuterium'] ?? 0),
+                (float) ($row['cargo_metals'] ?? 0),
+                (float) ($row['cargo_ice'] ?? 0),
+                (float) ($row['cargo_organic_compounds'] ?? 0),
+            ),
+            $stmt->fetchAll(),
+        );
+    }
+
+    public function findAtomicPrinterAssistantByProbeId(int $probeId): ?Manny
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT *
+             FROM mannies
+             WHERE probe_id = :probe_id AND current_task = :current_task
+             ORDER BY id ASC
+             LIMIT 1'
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'current_task' => Manny::TASK_ASSISTING_ATOMIC_PRINTER,
+        ]);
+        $row = $stmt->fetch();
+
+        return $row ? $this->hydrate($row) : null;
     }
 
     public function findByUidForProbe(int $probeId, string $uid): ?Manny

@@ -559,6 +559,11 @@ $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-secto
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/transfer-to-probe'), 'OpenAPI documents the Manny probe transfer endpoint');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/mannies/tasks'), 'OpenAPI documents atomic Manny task batches');
+$test->assert(
+    str_contains($openApi, '/api/probe/{probeId}/mannies/{mannyId}:')
+        && str_contains($openApi, 'summary: Get one persisted Manny robot'),
+    'OpenAPI documents the single Manny detail endpoint',
+);
 $test->assert(str_contains($openApi, 'transferring_to_probe'), 'OpenAPI documents the Manny probe transfer task type');
 $test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attach_to_probe]'), 'OpenAPI documents attach-to-probe storage detachment mode');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
@@ -597,6 +602,11 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'container.label !== "Sonde"'), 'inventories JS honors custom probe-core container labels');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'label + " " + name'), 'inventories JS displays Manny names after the Manny item label');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'iconButtonPlaceholder("inventory-line-move-placeholder")'), 'inventories JS keeps a non-interactive move placeholder for additional containers');
+$test->assert(
+    is_string($inventoriesScript)
+        && str_contains($inventoriesScript, 'return item.location && item.location.type === "probe";'),
+    'inventories JS leaves onboard Manny jettison validation to the authoritative endpoint',
+);
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-mine-storage-target'), 'mannies JS exposes a mining storage destination selector');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'target.name || target.id'), 'mannies JS displays mineable target names when the API exposes them');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'container.label !== "Sonde"'), 'mannies JS honors custom probe-core container labels');
@@ -761,7 +771,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260728-session-expiry-ui"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260730-lightweight-manny-inventory"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1492,6 +1502,27 @@ $test->assertEquals(400, $sameScutProbeStorageMove->status, 'POST /api/probe/{pr
 $sameScutProbeMannies = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/mannies', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeMannies->status, 'GET /api/probe/{probeId}/mannies lists same-SCUT owned probe Mannys');
 $test->assertEquals(30000, $sameScutProbeMannies->body['nextUsefulRefreshDelayMs'] ?? null, 'GET /api/probe/{probeId}/mannies exposes the recommended useful refresh delay');
+$sameScutProbeMannyId = (string) ($sameScutProbeMannies->body['mannies'][0]['id'] ?? '');
+$sameScutProbeMannyDetail = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/mannies/' . rawurlencode($sameScutProbeMannyId), $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeMannyDetail->status, 'GET /api/probe/{probeId}/mannies/{mannyId} reads one same-SCUT owned probe Manny');
+$test->assertEquals($sameScutProbeMannyId, $sameScutProbeMannyDetail->body['manny']['id'] ?? null, 'single Manny endpoint returns the requested Manny');
+$test->assertEquals(30000, $sameScutProbeMannyDetail->body['nextUsefulRefreshDelayMs'] ?? null, 'single Manny endpoint exposes its recommended useful refresh delay');
+$sameScutProbeTelemetry = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders);
+$sameScutProbeInventoryMannies = array_values(array_filter(
+    $sameScutProbeTelemetry->body['probe']['inventory']['items'] ?? [],
+    static fn(array $item): bool => ($item['type'] ?? null) === 'manny',
+));
+$test->assert($sameScutProbeInventoryMannies !== [], 'probe telemetry keeps Mannys in its lightweight inventory');
+$test->assert(!array_key_exists('currentTask', $sameScutProbeInventoryMannies[0]), 'lightweight probe inventory omits Manny currentTask');
+$test->assert(!array_key_exists('taskProgressPercent', $sameScutProbeInventoryMannies[0]), 'lightweight probe inventory omits Manny task progress');
+$sameScutProbeSectorTelemetry = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/sector', $multiProbeHeaders);
+$sameScutSectorInventoryMannies = array_values(array_filter(
+    $sameScutProbeSectorTelemetry->body['inventory']['items'] ?? [],
+    static fn(array $item): bool => ($item['type'] ?? null) === 'manny',
+));
+$test->assert($sameScutSectorInventoryMannies !== [], 'sector telemetry keeps Mannys in its lightweight inventory');
+$test->assert(!array_key_exists('currentTask', $sameScutSectorInventoryMannies[0]), 'lightweight sector inventory omits Manny currentTask');
+$test->assert(!array_key_exists('taskProgressPercent', $sameScutSectorInventoryMannies[0]), 'lightweight sector inventory omits Manny task progress');
 $sameScutProbeRenameManny = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/mannies/' . rawurlencode($sameSectorProbeManny->uid), $multiProbeHeaders, json_encode([
     'name' => 'remote-manny',
 ], JSON_THROW_ON_ERROR));
@@ -1628,7 +1659,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(103, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(104, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5530,16 +5561,19 @@ for ($index = 1; $index <= 11; $index++) {
 }
 $probeInventoryHint = $kernel->handle('GET', '/api/probe/' . $hintProbe->id, $hintHeaders);
 $test->assertEquals(200, $probeInventoryHint->status, 'GET /api/probe/{probeId} succeeds with more than ten overdue Manny tasks');
-$test->assertEquals(71.0, $probes->findById($hintProbe->id)?->integrityPercent, 'probe inventory reads refresh at most ten overdue Manny tasks');
+$test->assertEquals(61.0, $probes->findById($hintProbe->id)?->integrityPercent, 'lightweight probe inventory does not refresh overdue Manny tasks');
 $remainingProbeInventoryHints = array_values(array_filter(
     $mannies->findByProbeId($hintProbe->id),
     static fn(Manny $manny): bool => str_starts_with($manny->name, 'probe-inventory-overdue-')
         && $manny->currentTask !== null,
 ));
-$test->assertEquals(['probe-inventory-overdue-11'], array_map(
+$test->assertEquals(array_map(
+    static fn(int $index): string => sprintf('probe-inventory-overdue-%02d', $index),
+    range(1, 11),
+), array_map(
     static fn(Manny $manny): string => $manny->name,
     $remainingProbeInventoryHints,
-), 'probe inventory reads refresh the ten oldest overdue Manny tasks');
+), 'lightweight probe inventory leaves every overdue Manny task untouched');
 $kernel->handle('GET', '/api/probe/' . $hintProbe->id, $hintHeaders);
 
 for ($index = 1; $index <= 11; $index++) {
@@ -5552,16 +5586,19 @@ for ($index = 1; $index <= 11; $index++) {
 }
 $sectorInventoryHint = $kernel->handle('GET', '/api/probe/sector', $hintHeaders);
 $test->assertEquals(200, $sectorInventoryHint->status, 'GET /api/probe/sector succeeds with more than ten overdue Manny tasks');
-$test->assertEquals(82.0, $probes->findById($hintProbe->id)?->integrityPercent, 'sector inventory reads refresh at most ten overdue Manny tasks');
+$test->assertEquals(61.0, $probes->findById($hintProbe->id)?->integrityPercent, 'lightweight sector inventory does not refresh overdue Manny tasks');
 $remainingSectorInventoryHints = array_values(array_filter(
     $mannies->findByProbeId($hintProbe->id),
     static fn(Manny $manny): bool => str_starts_with($manny->name, 'sector-inventory-overdue-')
         && $manny->currentTask !== null,
 ));
-$test->assertEquals(['sector-inventory-overdue-11'], array_map(
+$test->assertEquals(array_map(
+    static fn(int $index): string => sprintf('sector-inventory-overdue-%02d', $index),
+    range(1, 11),
+), array_map(
     static fn(Manny $manny): string => $manny->name,
     $remainingSectorInventoryHints,
-), 'sector inventory reads refresh the ten oldest overdue Manny tasks');
+), 'lightweight sector inventory leaves every overdue Manny task untouched');
 
 $foreignMannyOwner = $auth->registerPlayerWithPassword('foreign-manny-owner', 'secret', 'Foreign Manny Owner', 'Foreign Manny probe');
 $foreignMannyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($foreignMannyOwner)['token']];

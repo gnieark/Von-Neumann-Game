@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
+use VonNeumannGame\Domain\InventoryMannyProjection;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeExternalTank;
@@ -184,6 +185,84 @@ final class ProbeStorageService
             $this->totalCapacity($containers),
             $items,
             $externalTanks,
+            $this->resourceStocks($probe, $containers),
+            array_map(
+                static fn(StorageContainer $container): array => $container->toArray((float) ($used[$container->id] ?? 0.0)),
+                $containers,
+            ),
+        );
+    }
+
+    /**
+     * Builds the inventory representation used by general probe telemetry
+     * without loading or refreshing Manny tasks.
+     *
+     * @param array<InventoryMannyProjection>|null $mannies
+     * @param array<ProbeItem>|null $probeItems
+     */
+    public function lightweightInventoryForProbe(
+        NeumannProbe $probe,
+        ?array $mannies = null,
+        ?array $probeItems = null,
+    ): ProbeInventory
+    {
+        $this->ensureProbeStorage($probe);
+        $mannies ??= $this->mannies->findInventoryProjectionsByProbeId($probe->id);
+        $probeItems ??= $this->items->findByProbeId($probe->id);
+        $containers = $this->containers->findByProbeId($probe->id);
+        $used = $this->usedCapacityByContainer($probe, $containers, $mannies, $probeItems);
+        $containerById = $this->containersByDatabaseId($containers);
+        $printerAssistant = $this->mannies->findAtomicPrinterAssistantByProbeId($probe->id);
+
+        $items = [
+            new ProbeInventoryItem(
+                'probe-' . $probe->id . '-atomic-3d-printer',
+                'atomic_3d_printer',
+                'Atomic printer',
+                $this->atomicPrinterSpace(),
+                $printerAssistant !== null ? self::ATOMIC_PRINTER_TASK : null,
+                $printerAssistant?->taskProgressPercent() ?? 0.0,
+                null,
+                null,
+                $this->atomicPrinterMetadata($printerAssistant),
+                $this->containerSummary($containerById[$this->coreContainer($containers)->id] ?? null),
+            ),
+        ];
+
+        foreach ($mannies as $manny) {
+            $container = $manny->isOnProbe() && $manny->storageContainerId !== null
+                ? ($containerById[$manny->storageContainerId] ?? null)
+                : null;
+            $items[] = new ProbeInventoryItem(
+                $manny->uid,
+                'manny',
+                $manny->name,
+                $manny->isOnProbe() ? $this->mannyContainerSpace() : 0.0,
+                null,
+                0.0,
+                ['type' => $manny->locationType],
+                array_replace($manny->cargoArray(), ['capacity' => $this->mannyCargoCapacity()]),
+                ['movable' => $manny->isOnProbe()],
+                $this->containerSummary($container),
+                false,
+            );
+        }
+
+        foreach ($probeItems as $item) {
+            $items[] = $item->inventoryItem($this->containerSummary(
+                $item->storageContainerId !== null ? ($containerById[$item->storageContainerId] ?? null) : null,
+            ));
+        }
+
+        return new ProbeInventory(
+            $this->totalCapacity($containers),
+            $items,
+            [new ProbeExternalTank(
+                'probe-' . $probe->id . '-deuterium-tank',
+                'deuterium',
+                'External deuterium tank',
+                $probe->deuteriumStock,
+            )],
             $this->resourceStocks($probe, $containers),
             array_map(
                 static fn(StorageContainer $container): array => $container->toArray((float) ($used[$container->id] ?? 0.0)),
@@ -1073,11 +1152,20 @@ final class ProbeStorageService
      */
     private function assignUnplacedMannies(NeumannProbe $probe, StorageContainer $fallback, array $knownContainerIds): void
     {
-        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
-            if (!$manny->isOnProbe()) {
+        foreach ($this->mannies->findInventoryProjectionsByProbeId($probe->id) as $projection) {
+            if (!$projection->isOnProbe()) {
                 continue;
             }
-            if ($manny->storageContainerId !== null && isset($knownContainerIds[$manny->storageContainerId])) {
+            if ($projection->storageContainerId !== null && isset($knownContainerIds[$projection->storageContainerId])) {
+                continue;
+            }
+
+            // Full hydration is reserved for the exceptional repair path.
+            $manny = $this->mannies->findByUidForProbe($probe->id, $projection->uid);
+            if ($manny === null) {
+                continue;
+            }
+            if (!$manny->isOnProbe()) {
                 continue;
             }
             $container = $this->placeUnit($probe, 'manny', $this->mannyContainerSpace()) ?? $fallback;
@@ -1154,7 +1242,7 @@ final class ProbeStorageService
 
     /**
      * @param array<StorageContainer> $containers
-     * @param array<Manny> $mannies
+     * @param array<Manny|InventoryMannyProjection> $mannies
      * @param array<ProbeItem> $items
      * @return array<int, float>
      */

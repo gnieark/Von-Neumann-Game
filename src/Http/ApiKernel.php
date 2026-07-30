@@ -53,7 +53,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 103;
+    public const API_VERSION = 104;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -146,6 +146,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/probe/(\d+)/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->rename($player, $ctx->stringParam(1), $ctx->body, $probe), $ctx->intParam(0), ['PATCH'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->detail($player, $ctx->stringParam(1), $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/mannies/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->rename($player, $ctx->stringParam(0), $ctx->body))),
             ApiRoute::regex('#^/api/probe/missions/([^/]+)/abandon$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeMissionAbandonResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/messages/(\d+)/read$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMessageReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
@@ -717,7 +718,7 @@ final class ApiKernel
 
             return new ApiResponse(200, [
                 'sector' => $this->withObservedProbePresence($observation, $probe, $observableSector),
-                'inventory' => $this->inventoryForProbe($probe, boundedMannyHint: true)->toArray(),
+                'inventory' => $this->lightweightInventoryForProbe($probe)->toArray(),
             ]);
         }
 
@@ -731,7 +732,7 @@ final class ApiKernel
 
         return new ApiResponse(200, [
             'sector' => $observation,
-            'inventory' => $this->inventoryForProbe($probe, boundedMannyHint: true)->toArray(),
+            'inventory' => $this->lightweightInventoryForProbe($probe)->toArray(),
         ]);
     }
 
@@ -1821,21 +1822,31 @@ final class ApiKernel
                 'internalClockRate' => $probe->internalClockRate,
                 'currentTask' => $probe->currentTask,
             ],
-            'inventory' => $this->inventoryForProbe($probe, boundedMannyHint: true)->toArray(),
+            'inventory' => $this->lightweightInventoryForProbe($probe)->toArray(),
         ];
     }
 
-    private function inventoryForProbe(NeumannProbe $probe, bool $boundedMannyHint = false): ProbeInventory
+    private function inventoryForProbe(NeumannProbe $probe): ProbeInventory
     {
-        $mannies = $boundedMannyHint
-            ? $this->mannies->manniesForProbeApiHint($probe)
-            : $this->mannies->manniesForProbe($probe);
+        $mannies = $this->mannies->manniesForProbe($probe);
 
         return $this->storage->inventoryForProbe(
             $probe,
             $mannies,
             $this->items->findByProbeId($probe->id),
             storageAlreadyEnsured: true,
+        );
+    }
+
+    private function lightweightInventoryForProbe(NeumannProbe $probe): ProbeInventory
+    {
+        // Sector return recovery is a gameplay rule, not a task refresh. Keep
+        // it while avoiding the full Manny task-list preparation.
+        $this->mannies->recoverForgottenManniesForProbe($probe);
+
+        return $this->storage->lightweightInventoryForProbe(
+            $probe,
+            probeItems: $this->items->findByProbeId($probe->id),
         );
     }
 

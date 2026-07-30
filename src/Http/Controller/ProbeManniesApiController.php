@@ -60,6 +60,17 @@ final class ProbeManniesApiController
         ]);
     }
 
+    public function detail(Player $player, string $uid, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $manny = $this->mannies->mannyForProbeApi($probe, $uid);
+
+        return new ApiResponse(200, [
+            'manny' => $this->presenter->manny($player, $probe, $manny),
+            'nextUsefulRefreshDelayMs' => $this->nextUsefulRefreshDelayMs([$manny]),
+        ]);
+    }
+
     /**
      * @param array<\VonNeumannGame\Domain\Manny> $mannies
      */

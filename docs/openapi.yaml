@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '101'
+  version: '104'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 103
+                apiVersion: 104
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1379,6 +1379,29 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
+    get:
+      summary: Get one persisted Manny robot
+      description: >
+        Refreshes and returns the selected Manny with the same visibility and
+        task-detail rules as the Manny list endpoint.
+      responses:
+        '200':
+          description: Manny robot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, nextUsefulRefreshDelayMs]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  nextUsefulRefreshDelayMs:
+                    type: integer
+                    minimum: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     patch:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D/patch'
   /api/probe/{probeId}/mannies/{mannyId}/repair:
@@ -5577,7 +5600,12 @@ components:
           description: Player-facing name to assign to the target object.
     ProbeInventoryItem:
       type: object
-      required: [id, type, name, containerSpace, currentTask, taskProgressPercent]
+      required: [id, type, name, containerSpace]
+      description: >
+        General probe and sector telemetry uses a lightweight Manny inventory
+        projection. For Manny entries in those responses, currentTask and
+        taskProgressPercent are omitted; use the Manny endpoints for live task
+        state.
       properties:
         id:
           type: string
@@ -5592,10 +5620,12 @@ components:
         currentTask:
           type: string
           nullable: true
+          description: Omitted from lightweight Manny inventory projections.
         taskProgressPercent:
           type: number
           minimum: 0
           maximum: 100
+          description: Omitted from lightweight Manny inventory projections.
         location:
           $ref: '#/components/schemas/MannyLocation'
         cargo:

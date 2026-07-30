@@ -17,18 +17,23 @@ final class ProbeInventoryItem
         public readonly ?array $cargo = null,
         public readonly array $metadata = [],
         public readonly ?array $container = null,
+        public readonly bool $includeTaskState = true,
     ) {}
 
     public function toArray(): array
     {
-        return [
+        $item = [
             'id' => $this->id,
             'type' => $this->type,
             'name' => $this->name,
             'containerSpace' => $this->containerSpace,
-            'currentTask' => $this->currentTask,
-            'taskProgressPercent' => $this->taskProgressPercent,
-        ] + ($this->location !== null ? ['location' => $this->location] : [])
+        ];
+        if ($this->includeTaskState) {
+            $item['currentTask'] = $this->currentTask;
+            $item['taskProgressPercent'] = $this->taskProgressPercent;
+        }
+
+        return $item + ($this->location !== null ? ['location' => $this->location] : [])
             + ($this->cargo !== null ? ['cargo' => $this->cargo] : [])
             + ($this->container !== null ? ['container' => $this->container] : [])
             + ($this->metadata !== [] ? ['metadata' => $this->metadata] : []);

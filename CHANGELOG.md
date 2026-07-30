@@ -3,6 +3,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-07-30
+
+### Changed
+- Performance API : les inventaires inclus dans `GET /api/probe`, `GET /api/probe/{probeId}`, `GET /api/probe/sector` et `GET /api/probe/{probeId}/sector` utilisent désormais une projection Manny légère qui ne charge ni n’actualise les tâches et omet `currentTask` et `taskProgressPercent`.
+- API v104 : ajout de `GET /api/probe/{probeId}/mannies/{mannyId}` pour obtenir et actualiser l’état complet d’une seule Manny.
+- Interface : l’inventaire laisse demander l’éjection d’une Manny sans précharger son état de tâche ; l’endpoint d’éjection effectue la validation autoritative et signale notamment une Manny occupée.
+
 ## 2026-07-29
 
 ### Changed

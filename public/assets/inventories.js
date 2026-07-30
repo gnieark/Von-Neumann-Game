@@ -227,7 +227,9 @@
             return true;
         }
         if (item.type === "manny") {
-            return item.location && item.location.type === "probe" && item.currentTask === null;
+            // The generic inventory projection deliberately omits task state.
+            // The authoritative jettison endpoint refreshes and rejects a busy Manny.
+            return item.location && item.location.type === "probe";
         }
 
         return [
