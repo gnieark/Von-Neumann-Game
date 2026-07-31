@@ -1941,6 +1941,19 @@
                 + "</section>";
         }
         if (manny.currentTask === "detaching_storage_container") {
+            const targetProbe = payload.targetProbe && typeof payload.targetProbe === "object"
+                ? payload.targetProbe
+                : {};
+            if (payload.mode === "attach_to_probe") {
+                return "<section class=\"manny-task-panel\">"
+                    + "<h4>" + escaped(tr("detachStorageInProgress", "Container detachment in progress")) + "</h4>"
+                    + "<p>" + escaped(window.VNG.formatText(tr("detachStorageAttachToProbeTaskDetail", "{container} will be detached and attached to {target}."), {
+                        "container": payload.containerId || tr("storageContainer", "Container"),
+                        "target": targetProbe.name || targetProbe.id || payload.targetObjectId || tr("tabProbe", "Probe"),
+                    })) + "</p>"
+                    + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                    + "</section>";
+            }
             const modeLabel = payload.mode === "hidden_on_asteroid"
                 ? tr("detachModeHiddenOnAsteroid", "Hide on an asteroid")
                 : tr("detachModeDrifting", "Leave drifting");

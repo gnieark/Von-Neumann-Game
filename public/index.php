@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260730-lightweight-manny-inventory';
+const ASSET_VERSION = '20260731-manny-container-transfer-details';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);

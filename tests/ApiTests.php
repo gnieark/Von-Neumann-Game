@@ -709,6 +709,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refresh
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'currentSectorProbes'), 'mannies JS includes public same-sector probes as deuterium transfer targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'storageAttachProbeTargets'), 'mannies JS lists owned same-sector probes for attach-to-probe detachment');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"attach_to_probe"'), 'mannies JS can submit attach-to-probe detachment');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'targetProbe.name || targetProbe.id'), 'mannies JS displays the target probe for an active attach-to-probe detachment');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"attach_to_probe"'), 'inventories JS can submit attach-to-probe detachment');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasProbeTransferTargetFuel'), 'mannies JS hides target deuterium values when they are not accessible');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'transferDeuteriumToProbeActionTitle'), 'mannies JS labels the deuterium transfer action');
@@ -771,7 +772,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260730-lightweight-manny-inventory"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260731-manny-container-transfer-details"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -3853,6 +3854,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $test->assertEquals(202, $attachToProbe->status, 'Manny can detach a storage container and attach it to another owned same-sector probe');
             $test->assertEquals('attach_to_probe', $attachToProbe->body['manny']['task']['mode'] ?? null, 'attach-to-probe detach stores the public mode');
             $test->assertEquals((string) $attachTargetProbe->id, $attachToProbe->body['manny']['task']['targetObjectId'] ?? null, 'attach-to-probe detach stores objectId as the target probe id');
+            $test->assertEquals($attachTargetProbe->name, $attachToProbe->body['manny']['task']['targetProbe']['name'] ?? null, 'attach-to-probe detach exposes the target probe name for task details');
             $test->assertEquals(360, $attachToProbe->body['manny']['task']['durationSeconds'] ?? null, 'attach-to-probe detach takes the same duration as hidden detachment');
             $test->assert($storageContainers->findByUidForProbe($detachProbe->id, $attachContainerId) === null, 'attach-to-probe detach removes the source storage container immediately');
             $attachRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');

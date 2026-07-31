@@ -1,5 +1,7 @@
 # Changelog
 
+- Interface : `/mannies` détaille désormais les détachements de container destinés à une autre sonde en affichant le container et le nom de la sonde cible pendant la tâche.
+
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
