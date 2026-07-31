@@ -1,6 +1,6 @@
 (function () {
     const DEFAULT_REFRESH_MS = 15000;
-    const MIN_REFRESH_MS = 750;
+    const MIN_REFRESH_MS = 5000;
     const REFRESH_CUSHION_MS = 500;
     const PROGRESS_TICK_MS = 1000;
     const MINING_RESOURCE_TYPES = ["deuterium", "metals", "ice", "carbon_compounds"];

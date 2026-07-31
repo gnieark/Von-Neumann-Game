@@ -2612,7 +2612,9 @@ paths:
                       endpoint again. It is the delay until the next observable
                       scheduled Manny transition (including an intermediate
                       mining transition), or 30000 when no task has a planned
-                      transition.
+                      transition. When a scheduled transition is already due,
+                      a short settling delay is returned so clients do not
+                      busy-poll while the scheduler worker processes it.
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe/mannies/{mannyId}:

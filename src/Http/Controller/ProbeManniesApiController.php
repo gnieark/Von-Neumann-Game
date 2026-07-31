@@ -19,6 +19,7 @@ use VonNeumannGame\Service\ProbeStorageService;
 final class ProbeManniesApiController
 {
     private const IDLE_REFRESH_DELAY_MS = 30000;
+    private const SCHEDULER_SETTLE_DELAY_MS = 5000;
     private const MAX_BATCH_TASKS = 100;
     private const BATCH_ACTIONS = [
         'repair',
@@ -95,7 +96,9 @@ final class ProbeManniesApiController
             return self::IDLE_REFRESH_DELAY_MS;
         }
 
-        return max(0, ($nextEndAt->getTimestamp() - $now->getTimestamp()) * 1000);
+        $delayMs = ($nextEndAt->getTimestamp() - $now->getTimestamp()) * 1000;
+
+        return $delayMs <= 0 ? self::SCHEDULER_SETTLE_DELAY_MS : $delayMs;
     }
 
     public function rename(Player $player, string $uid, ?string $body, ?NeumannProbe $probe = null): ApiResponse

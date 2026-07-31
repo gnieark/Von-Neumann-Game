@@ -629,6 +629,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'updateL
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remainingMinutesText'), 'mannies JS shows remaining task time next to progress percentages');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/ 60000'), 'mannies JS rounds remaining task time to minutes');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'DEFAULT_REFRESH_MS = 15000'), 'mannies JS uses the shared adaptive refresh default');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'MIN_REFRESH_MS = 5000'), 'mannies JS prevents scheduler lag from causing rapid polling');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'window.VNG.nextRefreshDelay'), 'mannies JS schedules refreshes from API timing hints');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'nextUsefulRefreshDelayMs'), 'mannies JS reads the API recommended useful refresh delay');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector, "nextUsefulRefreshDelayMs"'), 'mannies JS feeds probe, Manny, sector, and API refresh-delay data into adaptive refreshes');
@@ -772,7 +773,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260731-manny-container-transfer-details"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260731-manny-polling-backoff"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -6412,11 +6413,17 @@ if ($createdProbe !== null) {
     );
     $mixedMiningEventRow->execute(['id' => $mixedMannyDbId]);
     $mixedMiningEventBefore = $mixedMiningEventRow->fetch(PDO::FETCH_ASSOC);
-    $pdo->prepare('UPDATE scheduled_events SET updated_at = :updated_at WHERE id = :id')->execute([
+    $overdueMiningPayload = json_decode((string) ($mixedMiningEventBefore['payload_json'] ?? '{}'), true);
+    $overdueMiningPayload = is_array($overdueMiningPayload) ? $overdueMiningPayload : [];
+    $overdueMiningPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] = gmdate('c', time() - 1);
+    $pdo->prepare('UPDATE scheduled_events SET run_at = :run_at, payload_json = :payload_json, updated_at = :updated_at WHERE id = :id')->execute([
         'id' => (int) ($mixedMiningEventBefore['id'] ?? 0),
+        'run_at' => gmdate('c', time() - 1),
+        'payload_json' => json_encode($overdueMiningPayload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         'updated_at' => $stableMiningReadTimestamp,
     ]);
     $readonlyMiningRefresh = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $test->assertEquals(5000, $readonlyMiningRefresh->body['nextUsefulRefreshDelayMs'] ?? null, 'overdue scheduler transitions return a polling backoff instead of zero');
     $readonlyMixedManny = array_values(array_filter(
         $readonlyMiningRefresh->body['mannies'] ?? [],
         static fn(array $manny): bool => ($manny['id'] ?? null) === $thirdMannyId,
