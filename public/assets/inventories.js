@@ -243,6 +243,7 @@
             "integrated_circuit",
             "atomic_printer_part",
             "scut_relay",
+            "scut_transit_beacon",
             "electric_motor",
             "battery_pack",
             "linear_actuator",

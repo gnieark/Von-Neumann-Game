@@ -667,7 +667,12 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'remote-inspect-sector-object'), 'mannies JS exposes remote sector-object inspection for idle same-SCUT Mannys');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargetsFromObjects'), 'mannies JS builds remote inspection targets from the Manny sector scan');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'abandonRemoteMannyTask'), 'mannies JS relabels remote SCUT-visible recall actions without changing the endpoint');
-$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"scut_relay"'), 'inventories JS allows SCUT relay items to be jettisoned');
+$test->assert(
+    is_string($inventoriesScript)
+        && str_contains($inventoriesScript, '"scut_relay",')
+        && str_contains($inventoriesScript, '"scut_transit_beacon",'),
+    'inventories JS allows SCUT relay and transit beacon items to be jettisoned',
+);
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'probeApiPath("/scut-network/"'), 'messaging JS loads selected-probe SCUT network probe contacts');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'String(probe.id) !== String(state.currentProbeId'), 'messaging JS excludes the current probe from SCUT network recipients');
 $test->assert(is_string($messagingScript) && str_contains($messagingScript, 'scutNetworkRecipientLabel'), 'messaging JS labels SCUT network recipients');
@@ -779,7 +784,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260731-inventory-container-sort"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260731-inventory-jettison-sort"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -6795,6 +6800,23 @@ if ($createdProbe !== null) {
     ));
     $test->assertEquals(1, count($scanScutRelays), 'current-sector scan exposes the jettisoned SCUT relay');
     $test->assertEquals(true, $scanScutRelays[0]['salvageable'] ?? null, 'inactive SCUT relays are exposed as salvageable for Manny recovery forms');
+
+    $scutTransitBeaconItemId = $items->create(
+        $createdProbe->id,
+        ProbeItem::TYPE_SCUT_TRANSIT_BEACON,
+        ProbeItem::SCUT_TRANSIT_BEACON_NAME,
+        CraftingRecipeCatalog::SCUT_TRANSIT_BEACON_CONTAINER_SPACE,
+        ['test' => 'transit-beacon-jettison'],
+    )->uid;
+    $jettisonScutTransitBeacon = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($scutTransitBeaconItemId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $jettisonScutTransitBeacon->status, 'POST /api/probe/inventory/{itemId}/jettison ejects a SCUT transit beacon');
+    $test->assertEquals(ProbeItem::TYPE_SCUT_TRANSIT_BEACON, $jettisonScutTransitBeacon->body['jettisoned']['type'] ?? null, 'SCUT transit beacon jettison response exposes the item type');
+    $jettisonedBeacon = $sectorRepository->load($createdProbe->currentSector)->findObjectById(
+        SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_TRANSIT_BEACON),
+    );
+    $test->assertEquals('drifting_item', $jettisonedBeacon?->getType()->value, 'jettisoned SCUT transit beacon is persisted as a drifting item');
+    $test->assertEquals(1, $jettisonedBeacon?->toArray()['quantity'] ?? null, 'jettisoned SCUT transit beacon remains recoverable in the sector');
+
     $sectorWithLegacyDriftingRelay = $sectorRepository->load($createdProbe->currentSector);
     $sectorWithLegacyDriftingRelay->addObject(new SectorDriftingItem(
         SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_RELAY),

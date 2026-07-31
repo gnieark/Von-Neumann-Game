@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-07-31
 
 ### Changed
+- Interface : `/inventories` permet désormais de jeter les balises de transit SCUT ; elles deviennent des objets dérivants récupérables dans le secteur comme les autres composants.
 - Interface : le sélecteur « Vue inventaire » de `/inventories` classe désormais les containers par nom, dans l’ordre alphabétique de la langue affichée.
 - Maintenance : les scripts d’assistance en deutérium ignorent désormais les astéroïdes épuisés par le minage, y compris leur reliquat d’arrondi de `0,0001` container, tout en continuant d’éviter les réserves encore exploitables.
 - Interface : `/mannies` détaille désormais les détachements de container destinés à une autre sonde en affichant le container et le nom de la sonde cible pendant la tâche.
