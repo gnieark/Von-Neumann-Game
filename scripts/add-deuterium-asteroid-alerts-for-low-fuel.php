@@ -246,7 +246,9 @@ function lowFuelAsteroidsObjectIsDeuteriumAsteroid(UniverseObject $object): bool
         return false;
     }
 
-    return (float) ($object->getResourceAmounts()[ResourceComposition::DEUTERIUM] ?? 0.0) > 0.0;
+    // Keep this aligned with the mining engine: a 0.0001-unit rounding
+    // residue is exhausted and must not block a replacement asteroid.
+    return (float) ($object->getResourceAmounts()[ResourceComposition::DEUTERIUM] ?? 0.0) > 0.0001;
 }
 
 /**

@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-07-31
 
 ### Changed
+- Maintenance : les scripts d’assistance en deutérium ignorent désormais les astéroïdes épuisés par le minage, y compris leur reliquat d’arrondi de `0,0001` container, tout en continuant d’éviter les réserves encore exploitables.
 - Interface : `/mannies` détaille désormais les détachements de container destinés à une autre sonde en affichant le container et le nom de la sonde cible pendant la tâche.
 - Scheduler : le worker est désormais seul responsable des trajets, ticks d’extraction, retours et dépôts intermédiaires du minage Manny ; les appels API ne font plus avancer le monde par effet de lecture.
 - Migration : ajout de `scripts/migrate-active-mining-to-scheduler-transitions.php` pour réveiller une fois les minages déjà actifs lors du déploiement.

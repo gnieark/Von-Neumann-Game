@@ -345,7 +345,9 @@ function deuteriumAsteroidObjectIsDeuteriumAsteroid(UniverseObject $object): boo
         return false;
     }
 
-    return (float) ($object->getResourceAmounts()[ResourceComposition::DEUTERIUM] ?? 0.0) > 0.0;
+    // Mining works at four-decimal precision and treats a final 0.0001-unit
+    // residue as exhausted. Do not let that rounding dust prevent assistance.
+    return (float) ($object->getResourceAmounts()[ResourceComposition::DEUTERIUM] ?? 0.0) > 0.0001;
 }
 
 /**

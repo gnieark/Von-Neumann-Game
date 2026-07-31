@@ -2326,6 +2326,17 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($secondDeuteriumAsteroidText, 'already contains a deuterium asteroid'), 'deuterium asteroid CLI skips sectors that already contain a deuterium asteroid');
     $test->assert(!str_contains($secondDeuteriumAsteroidText, 'alert id:'), 'deuterium asteroid CLI does not create a second alert for an existing deuterium asteroid');
     $test->assertEquals($deuteriumAlertCount, (int) $pdo->query("SELECT COUNT(*) FROM probe_damage_warnings WHERE type = 'sector_object_detected'")->fetchColumn(), 'deuterium asteroid CLI does not persist a duplicate object-detection alert');
+
+    // The mining engine considers this four-decimal rounding residue exhausted.
+    // Both assistance scripts must therefore ignore it when looking for an
+    // already usable deuterium asteroid.
+    $deuteriumSector->replaceObject($deuteriumAsteroids[0]->withResourceAmounts([
+        ResourceComposition::DEUTERIUM => 0.0001,
+        ResourceComposition::METALS => 0.0,
+        ResourceComposition::ICE => 0.0,
+        ResourceComposition::CARBON_COMPOUNDS => 0.0,
+    ]));
+    $sectorRepository->save($deuteriumSector);
     $legacyDamageWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $missionHeaders);
     $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
@@ -2344,8 +2355,16 @@ if ($createdProbe !== null) {
     $lowFuelText = implode("\n", $lowFuelOutput);
     $test->assertEquals(0, $lowFuelStatus, 'low-fuel deuterium asteroid CLI exits successfully');
     $test->assert(str_contains($lowFuelText, 'Players below 10% deuterium: 1'), 'low-fuel CLI counts low-fuel players before sector filtering');
-    $test->assert(str_contains($lowFuelText, 'skipped existing deuterium asteroid: 1'), 'low-fuel CLI skips low-fuel players already in sectors with a deuterium asteroid');
-    $test->assert(str_contains($lowFuelText, 'processed: 0'), 'low-fuel CLI does not call the per-player script for skipped sectors');
+    $test->assert(str_contains($lowFuelText, 'Players eligible without existing deuterium asteroid: 1'), 'low-fuel CLI ignores an asteroid exhausted by mining');
+    $test->assert(str_contains($lowFuelText, 'skipped existing deuterium asteroid: 0'), 'low-fuel CLI does not treat an exhausted asteroid as an existing reserve');
+    $test->assert(str_contains($lowFuelText, 'processed: 1'), 'low-fuel CLI adds assistance after the previous asteroid is exhausted');
+    $refilledDeuteriumSector = $sectorRepository->load($createdProbe->currentSector);
+    $usableDeuteriumAsteroids = array_values(array_filter(
+        $refilledDeuteriumSector->getObjects(),
+        static fn($object): bool => $object instanceof Asteroid
+            && (float) ($object->getResourceAmounts()[ResourceComposition::DEUTERIUM] ?? 0.0) > 0.0001,
+    ));
+    $test->assertEquals(1, count($usableDeuteriumAsteroids), 'low-fuel CLI leaves exactly one usable deuterium asteroid beside exhausted remnants');
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $createdProbe->id]);
 
     $storageRepairSession = $auth->createSessionForPlayer($player);
