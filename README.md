@@ -307,6 +307,17 @@ scheduler ponctuel reste disponible pour une exécution manuelle ou via cron :
 php scripts/scheduler.php
 php scripts/scheduler.php --limit=25
 ```
+
+Le scheduler est l'unique responsable des transitions intermédiaires du
+minage (trajets, ticks d'extraction, retours et dépôts). Les endpoints API Manny
+consultent le dernier état persisté sans faire avancer le minage. Lors du
+déploiement initial de ce fonctionnement, après avoir arrêté le worker, réveiller
+les minages déjà actifs avec :
+
+```bash
+php scripts/migrate-active-mining-to-scheduler-transitions.php --database-config=config/database.json
+```
+
 La génération des statistiques est aussi "cronifiée"
 ```bash
 5 * * * * /usr/bin/php /<neumannpath>/scripts/generate-stats.php >> /<neumannpath>/var/stats/stats-cron.log 2>&1

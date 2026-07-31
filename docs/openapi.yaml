@@ -2609,9 +2609,10 @@ paths:
                     minimum: 0
                     description: >
                       Recommended delay, in milliseconds, before polling this
-                      endpoint again. It is the delay until the next active
-                      Manny task end, or 30000 when no Manny task has a planned
-                      end time.
+                      endpoint again. It is the delay until the next observable
+                      scheduled Manny transition (including an intermediate
+                      mining transition), or 30000 when no task has a planned
+                      transition.
         '401':
           $ref: '#/components/responses/Unauthorized'
   /api/probe/mannies/{mannyId}:
@@ -6019,9 +6020,10 @@ components:
             the MannyMiningTask shape, including target.resourceAmounts for
             asteroids and resourceProfile for the selected split. Sensitive
             internal task state such as detached-container reservation objects,
-            detached-container snapshots, and absolute target sectors is omitted
-            from public responses. Idle Mannys and active Mannys outside local
-            or same-SCUT telemetry range may expose an empty payload.
+            detached-container snapshots, scheduler transition deadlines, and
+            absolute target sectors is omitted from public responses. Idle
+            Mannys and active Mannys outside local or same-SCUT telemetry range
+            may expose an empty payload.
           anyOf:
             - $ref: '#/components/schemas/MannyMiningTask'
             - type: object

@@ -38,6 +38,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
      * @param \Closure(SectorDetachedContainer, bool): array<string, mixed> $miningTargetContainerPayload
      * @param \Closure(): int $miningTravelSeconds
      * @param \Closure(float, ?int): int $miningDurationSeconds
+     * @param \Closure(float, int, ?int): ?int $nextMiningTransitionElapsedSeconds
      * @param \Closure(Manny): void $releaseMannyFromStorage
      * @param \Closure(Manny): void $removeMannyFromSector
      * @param \Closure(Manny): void $saveManny
@@ -79,6 +80,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
         private readonly \Closure $miningTargetContainerPayload,
         private readonly \Closure $miningTravelSeconds,
         private readonly \Closure $miningDurationSeconds,
+        private readonly \Closure $nextMiningTransitionElapsedSeconds,
         private readonly \Closure $releaseMannyFromStorage,
         private readonly \Closure $removeMannyFromSector,
         private readonly \Closure $saveManny,
@@ -183,7 +185,9 @@ final class MiningTaskHandler implements TaskHandlerInterface
         $manny->sector = $taskSector;
         $manny->currentTask = Manny::TASK_MINING;
         $manny->taskStartedAt = $now->format('c');
-        $manny->taskEndsAt = $now->modify('+' . ($this->miningDurationSeconds)($targetAmount, $miningTravelSeconds) . ' seconds')->format('c');
+        $durationSeconds = ($this->miningDurationSeconds)($targetAmount, $miningTravelSeconds);
+        $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
+        $nextTransition = ($this->nextMiningTransitionElapsedSeconds)($targetAmount, 0, $miningTravelSeconds);
         $manny->taskPayload = [
             'objectId' => $objectId,
             'resourceType' => $selectedResources[0],
@@ -198,6 +202,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
             'resourceProfile' => $resourceProfile,
             'target' => ($this->miningTargetArray)($target),
             'miningTravelSeconds' => $miningTravelSeconds,
+            Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY => $now->modify('+' . ($nextTransition ?? $durationSeconds) . ' seconds')->format('c'),
         ]
             + ($requestedTargetAmount > $targetAmount ? ['requestedTargetAmount' => $requestedTargetAmount] : [])
             + ($targetContainer !== null ? ['targetContainer' => ($this->miningTargetContainerPayload)($targetContainer['container'], $targetContainer['sameAsteroid'])] : [])
@@ -323,6 +328,18 @@ final class MiningTaskHandler implements TaskHandlerInterface
             $manny->locationType = Manny::LOCATION_PROBE;
             $manny->sector = null;
             ($this->clearTask)($manny, []);
+        }
+
+        if ($manny->currentTask === Manny::TASK_MINING) {
+            $nextTransition = ($this->nextMiningTransitionElapsedSeconds)(
+                $targetAmount,
+                $elapsed,
+                ($this->miningTaskTravelSeconds)($manny),
+            );
+            $manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] = $nextTransition === null
+                ? ($manny->taskEndsAt ?? $now->format('c'))
+                : (new \DateTimeImmutable($manny->taskStartedAt))->modify('+' . $nextTransition . ' seconds')->format('c');
+            $shouldSave = true;
         }
 
         if (!$shouldSave) {

@@ -78,7 +78,12 @@ final class MannyPublicPresenter
     private function publicTaskPayload(Manny $manny): array
     {
         $payload = $manny->taskPayload;
-        unset($payload['snapshot'], $payload['consumedKit'], $payload['targetSector']);
+        unset(
+            $payload['snapshot'],
+            $payload['consumedKit'],
+            $payload['targetSector'],
+            $payload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY],
+        );
 
         if (is_array($payload['reservedDetachedContainer'] ?? null)) {
             unset($payload['reservedDetachedContainer']['object']);

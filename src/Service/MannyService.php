@@ -169,6 +169,7 @@ final class MannyService implements MannyTaskRuntime
             fn(SectorDetachedContainer $container, bool $sameAsteroid): array => $this->miningTargetContainerPayload($container, $sameAsteroid),
             fn(): int => $this->miningTravelSeconds(),
             fn(float $targetAmount, ?int $travelSeconds): int => $this->miningDurationSeconds($targetAmount, $travelSeconds),
+            fn(float $targetAmount, int $elapsedSeconds, ?int $travelSeconds): ?int => $this->nextMiningTransitionElapsedSeconds($targetAmount, $elapsedSeconds, $travelSeconds),
             function (Manny $manny): void {
                 $this->storage->releaseMannyFromStorage($manny);
             },
@@ -2438,6 +2439,38 @@ final class MannyService implements MannyTaskRuntime
         }
 
         return ['phase' => 'complete', 'tripIndex' => max(1, $tripIndex - 1), 'deliveredAmount' => round($targetAmount, 4), 'cargoAmount' => 0.0];
+    }
+
+    private function nextMiningTransitionElapsedSeconds(float $targetAmount, int $elapsedSeconds, ?int $travelSeconds = null): ?int
+    {
+        $remaining = round($targetAmount, 4);
+        $cursor = 0;
+        $travelSeconds ??= $this->miningTravelSeconds();
+        while ($remaining > 0.0001) {
+            $tripAmount = min($this->mannyCargoCapacity(), $remaining);
+            $outboundEnd = $cursor + $travelSeconds;
+            if ($outboundEnd > $elapsedSeconds) {
+                return $outboundEnd;
+            }
+
+            $miningTicks = (int) ceil($tripAmount / $this->miningAmountPerTick());
+            for ($tick = 1; $tick <= $miningTicks; $tick++) {
+                $tickEnd = $outboundEnd + ($tick * $this->miningTickSeconds());
+                if ($tickEnd > $elapsedSeconds) {
+                    return $tickEnd;
+                }
+            }
+
+            $returnEnd = $outboundEnd + ($miningTicks * $this->miningTickSeconds()) + $travelSeconds;
+            if ($returnEnd > $elapsedSeconds) {
+                return $returnEnd;
+            }
+
+            $remaining = round($remaining - $tripAmount, 4);
+            $cursor = $returnEnd;
+        }
+
+        return null;
     }
 
     /**

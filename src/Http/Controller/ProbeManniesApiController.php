@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Http\Controller;
 
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\Player;
@@ -83,7 +84,8 @@ final class ProbeManniesApiController
                 continue;
             }
 
-            $endsAt = new \DateTimeImmutable($manny->taskEndsAt);
+            $nextScheduledTransition = $manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null;
+            $endsAt = new \DateTimeImmutable(is_string($nextScheduledTransition) ? $nextScheduledTransition : $manny->taskEndsAt);
             if ($nextEndAt === null || $endsAt < $nextEndAt) {
                 $nextEndAt = $endsAt;
             }

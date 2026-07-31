@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\ScheduledEvent;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
@@ -126,7 +127,9 @@ final class SchedulerService
             return true;
         }
 
-        $runAt = $manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT;
+        $runAt = is_string($manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null)
+            ? $manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY]
+            : ($manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT);
         if ($runAt <= gmdate('c')) {
             $runAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
                 ->modify('+60 seconds')
