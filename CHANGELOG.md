@@ -1,6 +1,8 @@
 # Changelog
 
 - Interface : `/mannies` détaille désormais les détachements de container destinés à une autre sonde en affichant le container et le nom de la sonde cible pendant la tâche.
+- Scheduler : le worker est désormais seul responsable des trajets, ticks d’extraction, retours et dépôts intermédiaires du minage Manny ; les appels API ne font plus avancer le monde par effet de lecture.
+- Migration : ajout de `scripts/migrate-active-mining-to-scheduler-transitions.php` pour réveiller une fois les minages déjà actifs lors du déploiement.
 
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.

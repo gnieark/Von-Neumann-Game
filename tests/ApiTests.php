@@ -1177,6 +1177,18 @@ $test->assertEquals($mannyTaskMigrationManny->id, (int) ($mannyTaskMigrationRow[
 $test->assertEquals($mannyTaskMigrationRunAt, $mannyTaskMigrationRow['run_at'] ?? null, 'Manny task migration preserves task end time');
 $test->assertEquals('pending', $mannyTaskMigrationRow['status'] ?? null, 'Manny task migration creates pending events');
 $test->assertEquals(4.5, (float) ($mannyTaskMigrationPayload['integrityPercent'] ?? 0), 'Manny task migration moves the task payload into scheduled_events');
+$mannyTaskMigrationPdo->prepare("UPDATE mannies SET current_task = 'mining' WHERE id = :id")->execute(['id' => $mannyTaskMigrationManny->id]);
+$miningTransitionMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/migrate-active-mining-to-scheduler-transitions.php')
+    . ' --database-config=' . escapeshellarg($mannyTaskMigrationConfig);
+exec($miningTransitionMigrationCommand . ' 2>&1', $miningTransitionMigrationOutput, $miningTransitionMigrationStatus);
+$test->assertEquals(0, $miningTransitionMigrationStatus, 'active-mining scheduler transition migration exits successfully');
+$migratedMiningEvent = $mannyTaskMigrationPdo->query(
+    "SELECT run_at, payload_json FROM scheduled_events WHERE entity_type = 'manny' AND entity_id = " . $mannyTaskMigrationManny->id
+)->fetch(PDO::FETCH_ASSOC);
+$migratedMiningPayload = json_decode((string) ($migratedMiningEvent['payload_json'] ?? '{}'), true);
+$test->assert((new DateTimeImmutable((string) ($migratedMiningEvent['run_at'] ?? '9999-01-01')))->getTimestamp() <= time(), 'active-mining migration wakes the existing scheduler event immediately');
+$test->assertEquals($migratedMiningEvent['run_at'] ?? null, $migratedMiningPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null, 'active-mining migration stores the internal scheduler transition deadline');
 $visitedMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration.sqlite';
 $visitedMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration-database.json';
 file_put_contents($visitedMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $visitedMigrationDbPath], JSON_THROW_ON_ERROR));
@@ -1371,6 +1383,18 @@ $movementService = new ProbeMovementService($probes, $movements, $visitedSectors
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
+$processScheduledMannyNow = static function (int $mannyId) use ($pdo, $scheduler): array {
+    $pdo->prepare(
+        "UPDATE scheduled_events
+         SET run_at = :run_at
+         WHERE type = 'manny.task' AND entity_type = 'manny' AND entity_id = :entity_id AND status = 'pending'"
+    )->execute([
+        'entity_id' => $mannyId,
+        'run_at' => gmdate('c', time() - 1),
+    ]);
+
+    return $scheduler->processDueEvents(100);
+};
 $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
 
 $multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
@@ -3649,6 +3673,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'started' => gmdate('c', time() - 2200),
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachSecondMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $driftingMinedContainer = $sectorService->getOrCreateSector($detachProbe->currentSector)->findObjectById($detachedObjectId);
         $test->assertEquals(0.21, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a drifting detached container updates its stored resources');
@@ -3951,6 +3976,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'started' => gmdate('c', time() - 400),
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachSecondMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $hiddenMinedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
@@ -3969,13 +3995,8 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'started' => gmdate('c', time() - 1000),
             'ended' => gmdate('c', time() - 1),
         ]);
-        $staleHiddenMineA = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
-        $staleHiddenMineB = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
-        $staleHiddenProbe = $probes->findByPlayerId($detachPlayer->id);
-        if ($staleHiddenMineA !== null && $staleHiddenMineB !== null && $staleHiddenProbe !== null) {
-            $mannyService->refreshMannyState($staleHiddenMineA, $staleHiddenProbe);
-            $mannyService->refreshMannyState($staleHiddenMineB, $staleHiddenProbe);
-        }
+        $processScheduledMannyNow($detachSecondMannyDbId);
+        $processScheduledMannyNow($detachSecondMannyDbId);
         $hiddenMinedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
         $test->assertEquals(0.231, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'duplicate stale mining refreshes do not deliver hidden-container mining twice');
@@ -4061,6 +4082,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'started' => gmdate('c', time() - 400),
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($remoteScutMineMannyDbId);
         $remoteScutMineCompletedList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $remoteScutMineCompletedManny = array_values(array_filter(
             $remoteScutMineCompletedList->body['mannies'] ?? [],
@@ -4193,6 +4215,10 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                     'started' => gmdate('c', time() - 350),
                     'ended' => gmdate('c', time() + 250),
                 ]);
+                $multiInterruptedMiningEntity = $mannies->findByUidForProbe($multiHiddenProbe->id, $multiHiddenMannyIds[0]);
+                if ($multiInterruptedMiningEntity !== null) {
+                    $processScheduledMannyNow($multiInterruptedMiningEntity->id);
+                }
 
                 $multiRecoverA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[2]) . '/recover-storage-container', $multiHiddenHeaders, json_encode([
                     'objectId' => $multiHiddenObjectIdA,
@@ -6184,15 +6210,33 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $mineManny->status, 'POST /api/probe/mannies/{id}/mine starts a mining task');
     $test->assertEquals('mining', $mineManny->body['manny']['currentTask'] ?? null, 'mining task is exposed on Manny');
     $test->assertEquals('sector', $mineManny->body['manny']['location']['type'] ?? null, 'mining moves the Manny outside the probe');
+    $test->assert(!array_key_exists(Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY, $mineManny->body['manny']['task'] ?? []), 'mining API payload hides its internal scheduler deadline');
 
     $mineRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $mineRow->execute(['uid' => $secondMannyId]);
     $mineMannyDbId = (int) $mineRow->fetchColumn();
+    $initialMiningSchedule = $pdo->query(
+        "SELECT m.task_started_at, m.task_ends_at, se.run_at
+         FROM mannies m
+         INNER JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.id = " . $mineMannyDbId
+    )->fetch(PDO::FETCH_ASSOC);
+    $test->assertEquals(
+        900,
+        (new DateTimeImmutable((string) ($initialMiningSchedule['run_at'] ?? 'now')))->getTimestamp()
+            - (new DateTimeImmutable((string) ($initialMiningSchedule['task_started_at'] ?? 'now')))->getTimestamp(),
+        'new mining tasks schedule their first outbound transition rather than only their final completion',
+    );
+    $test->assert(
+        (string) ($initialMiningSchedule['run_at'] ?? '') < (string) ($initialMiningSchedule['task_ends_at'] ?? ''),
+        'first mining scheduler transition precedes the overall task end',
+    );
     $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $mineMannyDbId,
         'started' => gmdate('c', time() - 2200),
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($mineMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $minedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(0.04, $minedProbe?->metalsStock, 'completed Manny mining transfers metals to the probe inventory');
@@ -6215,13 +6259,8 @@ if ($createdProbe !== null) {
         'started' => gmdate('c', time() - 4000),
         'ended' => gmdate('c', time() - 1),
     ]);
-    $staleMineA = $mannies->findById($mineMannyDbId);
-    $staleMineB = $mannies->findById($mineMannyDbId);
-    $staleMineProbe = $probes->findByPlayerId($player->id);
-    if ($staleMineA !== null && $staleMineB !== null && $staleMineProbe !== null) {
-        $mannyService->refreshMannyState($staleMineA, $staleMineProbe);
-        $mannyService->refreshMannyState($staleMineB, $staleMineProbe);
-    }
+    $processScheduledMannyNow($mineMannyDbId);
+    $processScheduledMannyNow($mineMannyDbId);
     $test->assertEquals(0.08, $probes->findByPlayerId($player->id)?->metalsStock, 'duplicate stale mining refreshes do not deliver regular mining twice');
     $staleMinedAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('stale-mine-rock');
     $test->assertEquals(0.96, $staleMinedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'duplicate stale mining refreshes do not deplete regular mining twice');
@@ -6251,14 +6290,8 @@ if ($createdProbe !== null) {
             'ended' => gmdate('c', time() - 1),
         ]);
     }
-    $parallelMetalMannyA = $mannies->findById($mineMannyDbId);
-    $parallelMetalMannyB = $mannies->findById($parallelThirdMannyDbId);
-    $parallelMetalProbeA = $probes->findByPlayerId($player->id);
-    $parallelMetalProbeB = $probes->findByPlayerId($player->id);
-    if ($parallelMetalMannyA !== null && $parallelMetalMannyB !== null && $parallelMetalProbeA !== null && $parallelMetalProbeB !== null) {
-        $mannyService->refreshMannyState($parallelMetalMannyA, $parallelMetalProbeA);
-        $mannyService->refreshMannyState($parallelMetalMannyB, $parallelMetalProbeB);
-    }
+    $processScheduledMannyNow($mineMannyDbId);
+    $processScheduledMannyNow($parallelThirdMannyDbId);
     $test->assertEquals(0.16, $probes->findByPlayerId($player->id)?->metalsStock, 'parallel Manny mining deliveries preserve both metal additions');
     $parallelMetalAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-metal-rock');
     $test->assertEquals(0.12, $parallelMetalAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'parallel Manny mining depletes both metal deliveries');
@@ -6287,14 +6320,8 @@ if ($createdProbe !== null) {
             'ended' => gmdate('c', time() - 1),
         ]);
     }
-    $parallelDeuteriumMannyA = $mannies->findById($mineMannyDbId);
-    $parallelDeuteriumMannyB = $mannies->findById($parallelThirdMannyDbId);
-    $parallelDeuteriumProbeA = $probes->findByPlayerId($player->id);
-    $parallelDeuteriumProbeB = $probes->findByPlayerId($player->id);
-    if ($parallelDeuteriumMannyA !== null && $parallelDeuteriumMannyB !== null && $parallelDeuteriumProbeA !== null && $parallelDeuteriumProbeB !== null) {
-        $mannyService->refreshMannyState($parallelDeuteriumMannyA, $parallelDeuteriumProbeA);
-        $mannyService->refreshMannyState($parallelDeuteriumMannyB, $parallelDeuteriumProbeB);
-    }
+    $processScheduledMannyNow($mineMannyDbId);
+    $processScheduledMannyNow($parallelThirdMannyDbId);
     $test->assertEquals(20.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'parallel Manny mining deliveries preserve both deuterium additions');
     $parallelDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-deuterium-rock');
     $test->assertEquals(0.0, $parallelDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'parallel Manny mining depletes both deuterium deliveries');
@@ -6313,11 +6340,7 @@ if ($createdProbe !== null) {
         'id' => $mineMannyDbId,
         'started' => gmdate('c', time() - 3400),
     ]);
-    $tripDeuteriumEntity = $mannies->findById($mineMannyDbId);
-    $tripDeuteriumProbe = $probes->findByPlayerId($player->id);
-    if ($tripDeuteriumEntity !== null && $tripDeuteriumProbe !== null) {
-        $mannyService->refreshMannyState($tripDeuteriumEntity, $tripDeuteriumProbe);
-    }
+    $processScheduledMannyNow($mineMannyDbId);
     $tripDeuteriumProgress = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $tripDeuteriumManny = array_values(array_filter(
         $tripDeuteriumProgress->body['mannies'] ?? [],
@@ -6326,11 +6349,23 @@ if ($createdProbe !== null) {
     $test->assertEquals(30.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'intermediate Manny deuterium delivery adds one 0.05 ECE trip as five tank points');
     $test->assertEquals(0.05, $tripDeuteriumManny['task']['depositedAmount'] ?? null, 'intermediate deuterium mining records the first delivered trip');
     $test->assertEquals(0.0, $tripDeuteriumManny['cargo']['deuterium'] ?? null, 'Manny starts the next deuterium trip without stale cargo');
+    $rescheduledMiningTransition = $pdo->query(
+        "SELECT se.run_at, m.task_ends_at
+         FROM mannies m
+         INNER JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+         WHERE m.id = " . $mineMannyDbId
+    )->fetch(PDO::FETCH_ASSOC);
+    $test->assert(
+        (string) ($rescheduledMiningTransition['run_at'] ?? '') > gmdate('c')
+            && (string) ($rescheduledMiningTransition['run_at'] ?? '') < (string) ($rescheduledMiningTransition['task_ends_at'] ?? ''),
+        'scheduler persists the next future mining transition after an intermediate delivery',
+    );
     $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $mineMannyDbId,
         'started' => gmdate('c', time() - 7000),
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($mineMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals(35.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed two-trip deuterium mining adds the final five tank points only once');
     $tripDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('trip-deuterium-rock');
@@ -6403,11 +6438,7 @@ if ($createdProbe !== null) {
         'id' => $mixedMannyDbId,
         'started' => gmdate('c', time() - 1500),
     ]);
-    $haulingMixedEntity = $mannies->findById($mixedMannyDbId);
-    $haulingMixedProbe = $probes->findByPlayerId($player->id);
-    if ($haulingMixedEntity !== null && $haulingMixedProbe !== null) {
-        $mannyService->refreshMannyState($haulingMixedEntity, $haulingMixedProbe);
-    }
+    $processScheduledMannyNow($mixedMannyDbId);
     $haulingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $haulingMixedManny = array_values(array_filter(
         $haulingMannies->body['mannies'] ?? [],
@@ -6423,6 +6454,7 @@ if ($createdProbe !== null) {
         'started' => gmdate('c', time() - 3000),
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($mixedMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $mixedProbe = $probes->findByPlayerId($player->id);
     $test->assertEquals(0.09, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
@@ -6447,11 +6479,7 @@ if ($createdProbe !== null) {
         'id' => $mineMannyDbId,
         'started' => gmdate('c', time() - 3500),
     ]);
-    $haulingSecondEntity = $mannies->findById($mineMannyDbId);
-    $haulingSecondProbe = $probes->findByPlayerId($player->id);
-    if ($haulingSecondEntity !== null && $haulingSecondProbe !== null) {
-        $mannyService->refreshMannyState($haulingSecondEntity, $haulingSecondProbe);
-    }
+    $processScheduledMannyNow($mineMannyDbId);
     $haulingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $haulingSecondManny = array_values(array_filter(
         $haulingMannies->body['mannies'] ?? [],
@@ -6465,6 +6493,7 @@ if ($createdProbe !== null) {
         'started' => gmdate('c', time() - 6000),
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($mineMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'Manny returns to the probe after completing all mining trips');
 

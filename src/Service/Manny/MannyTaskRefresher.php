@@ -31,6 +31,12 @@ final class MannyTaskRefresher
         if ($manny->currentTask === null) {
             return $manny;
         }
+        // Mining changes the shared world progressively. Only a claimed
+        // scheduler event may apply those transitions; API reads and actions
+        // observe the last persisted scheduler state.
+        if ($manny->currentTask === Manny::TASK_MINING && !$this->allowOutOfRangeTasks) {
+            return $manny;
+        }
         if ($enforceVisibilityGate && !$this->canRefreshFromProbe($probe, $manny)) {
             return $manny;
         }

@@ -200,7 +200,9 @@ final class MannyRepository
         $taskPayloadForMannyRow = $manny->taskPayload;
         if ($this->scheduledEvents !== null) {
             if ($manny->currentTask !== null) {
-                $runAt = $manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT;
+                $runAt = is_string($manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null)
+                    ? $manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY]
+                    : ($manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT);
                 if ($manny->taskScheduledEventId === null) {
                     $event = $this->scheduledEvents->schedule(
                         'manny.task',
