@@ -532,8 +532,15 @@
             return;
         }
 
+        const filterContainers = [...containers].sort((left, right) => (
+            containerLabel(left).localeCompare(
+                containerLabel(right),
+                document.documentElement.lang || undefined,
+                {"sensitivity": "base", "numeric": true},
+            )
+        ));
         const filterOptions = ["<option value=\"all\">" + window.VNG.escapeHtml(tr("allContainers", "All containers")) + "</option>"]
-            .concat(containers.map((container) => (
+            .concat(filterContainers.map((container) => (
                 "<option value=\"" + window.VNG.escapeHtml(container.id) + "\"" + (selectedContainerId() === container.id ? " selected" : "") + ">"
                 + window.VNG.escapeHtml(containerLabel(container))
                 + "</option>"
