@@ -30,6 +30,9 @@ AGENTS.md
 /tmp/
 .phpunit.result.cache
 
+# Local production deployment helper (contains host-specific service names)
+/update-production.sh
+
 # IDE/editor files
 .idea/
 .vscode/
