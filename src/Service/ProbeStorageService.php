@@ -439,8 +439,9 @@ final class ProbeStorageService
     private function placeResourceAmount(NeumannProbe $probe, string $type, float $amount): float
     {
         $accepted = 0.0;
-        foreach ($this->placementCandidates($probe, $type) as $container) {
-            $free = $this->freeCapacityForContainer($probe, $container);
+        $snapshot = $this->capacitySnapshot($probe);
+        foreach ($this->placementCandidatesFrom($snapshot['containers'], $type) as $container) {
+            $free = $this->freeCapacityFromSnapshot($container, $snapshot);
             if ($free <= self::EPSILON) {
                 continue;
             }
@@ -449,6 +450,7 @@ final class ProbeStorageService
                 continue;
             }
             $this->containers->incrementResourceAmount($container->id, $type, $added);
+            $snapshot['used'][$container->id] = round((float) ($snapshot['used'][$container->id] ?? 0.0) + $added, 4);
             $accepted = round($accepted + $added, 4);
             if ($accepted + self::EPSILON >= $amount) {
                 break;
@@ -1489,6 +1491,107 @@ final class ProbeStorageService
         return round(max(0.0, $container->capacity - (float) ($used[$container->id] ?? 0.0) - $reservedIncoming), 4);
     }
 
+    /**
+     * Loads every component of cargo occupancy once for a placement operation.
+     *
+     * @return array{containers:array<StorageContainer>, used:array<int,float>, incoming:array<int,float>}
+     */
+    private function capacitySnapshot(NeumannProbe $probe, ?int $ignoredStorageMoveMannyId = null): array
+    {
+        $containers = $this->containers->findByProbeId($probe->id);
+        $mannies = $this->mannies->findByProbeId($probe->id);
+        $items = $this->items->findByProbeId($probe->id);
+
+        return [
+            'containers' => $containers,
+            'used' => $this->usedCapacityByContainer($probe, $containers, $mannies, $items),
+            'incoming' => $this->reservedIncomingCapacityByContainer(
+                $containers,
+                $mannies,
+                $items,
+                $ignoredStorageMoveMannyId,
+            ),
+        ];
+    }
+
+    /** @param array{used:array<int,float>, incoming:array<int,float>} $snapshot */
+    private function freeCapacityFromSnapshot(StorageContainer $container, array $snapshot): float
+    {
+        return round(max(
+            0.0,
+            $container->capacity
+                - (float) ($snapshot['used'][$container->id] ?? 0.0)
+                - (float) ($snapshot['incoming'][$container->id] ?? 0.0),
+        ), 4);
+    }
+
+    /**
+     * @param array<StorageContainer> $containers
+     * @param array<Manny> $mannies
+     * @param array<ProbeItem> $items
+     * @return array<int, float>
+     */
+    private function reservedIncomingCapacityByContainer(
+        array $containers,
+        array $mannies,
+        array $items,
+        ?int $ignoredStorageMoveMannyId = null,
+    ): array {
+        $incoming = array_fill_keys(array_map(static fn(StorageContainer $container): int => $container->id, $containers), 0.0);
+        $containerIdsByUid = [];
+        foreach ($containers as $container) {
+            $containerIdsByUid[$container->uid] = $container->id;
+        }
+        $itemsByUid = [];
+        foreach ($items as $item) {
+            $itemsByUid[$item->uid] = $item;
+        }
+        $manniesByUid = [];
+        foreach ($mannies as $manny) {
+            $manniesByUid[$manny->uid] = $manny;
+        }
+
+        foreach ($mannies as $manny) {
+            if ($ignoredStorageMoveMannyId !== null && $manny->id === $ignoredStorageMoveMannyId) {
+                continue;
+            }
+            if ($manny->currentTask !== Manny::TASK_MOVING_STORAGE) {
+                continue;
+            }
+            $toUid = (string) ($manny->taskPayload['toContainerId'] ?? '');
+            $toId = $containerIdsByUid[$toUid] ?? null;
+            if ($toId === null) {
+                continue;
+            }
+            $kind = (string) ($manny->taskPayload['kind'] ?? '');
+            if ($kind === 'resource') {
+                if ((string) ($manny->taskPayload['fromContainerId'] ?? '') !== $toUid) {
+                    $incoming[$toId] = round($incoming[$toId] + max(0.0, (float) ($manny->taskPayload['amount'] ?? 0.0)), 4);
+                }
+                continue;
+            }
+            if ($kind === 'item') {
+                foreach ($this->stringList($manny->taskPayload['itemIds'] ?? null, $manny->taskPayload['itemId'] ?? null) as $uid) {
+                    $item = $itemsByUid[$uid] ?? null;
+                    if ($item !== null && $item->storageContainerId !== $toId) {
+                        $incoming[$toId] = round($incoming[$toId] + max(0.0, $item->containerSpace), 4);
+                    }
+                }
+                continue;
+            }
+            if ($kind === 'manny') {
+                foreach ($this->stringList($manny->taskPayload['targetMannyIds'] ?? null, $manny->taskPayload['targetMannyId'] ?? null) as $uid) {
+                    $storedManny = $manniesByUid[$uid] ?? null;
+                    if ($storedManny !== null && $storedManny->storageContainerId !== $toId) {
+                        $incoming[$toId] = round($incoming[$toId] + $this->mannyContainerSpace(), 4);
+                    }
+                }
+            }
+        }
+
+        return $incoming;
+    }
+
     private function reservedIncomingCapacityForContainer(NeumannProbe $probe, StorageContainer $container, ?int $ignoredStorageMoveMannyId = null): float
     {
         $reserved = 0.0;
@@ -1558,8 +1661,9 @@ final class ProbeStorageService
     private function placeUnit(NeumannProbe $probe, string $type, float $space): ?StorageContainer
     {
         $space = round(max(0.0, $space), 4);
-        foreach ($this->placementCandidates($probe, $type) as $container) {
-            if ($this->freeCapacityForContainer($probe, $container) + self::EPSILON >= $space) {
+        $snapshot = $this->capacitySnapshot($probe);
+        foreach ($this->placementCandidatesFrom($snapshot['containers'], $type) as $container) {
+            if ($this->freeCapacityFromSnapshot($container, $snapshot) + self::EPSILON >= $space) {
                 return $container;
             }
         }
