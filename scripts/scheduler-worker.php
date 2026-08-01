@@ -11,6 +11,8 @@ $factory = new AppFactory(dirname(__DIR__));
 $appConfig = $factory->appConfig();
 $limit = max(1, (int) ($appConfig['schedulerProcessLimit'] ?? 100));
 $maximumSleepSeconds = 5;
+$leaseSeconds = max(60, (int) ($appConfig['schedulerLeaseSeconds'] ?? 3600));
+$recoveryIntervalSeconds = max(10, (int) ($appConfig['schedulerRecoveryIntervalSeconds'] ?? 60));
 
 foreach (array_slice($argv, 1) as $argument) {
     if (str_starts_with($argument, '--limit=')) {
@@ -18,6 +20,9 @@ foreach (array_slice($argv, 1) as $argument) {
     }
     if (str_starts_with($argument, '--maximum-sleep=')) {
         $maximumSleepSeconds = max(1, (int) substr($argument, strlen('--maximum-sleep=')));
+    }
+    if (str_starts_with($argument, '--lease-seconds=')) {
+        $leaseSeconds = max(60, (int) substr($argument, strlen('--lease-seconds=')));
     }
 }
 
@@ -37,8 +42,16 @@ $scheduler = $factory->schedulerService($pdo);
 $events = new ScheduledEventRepository($pdo);
 
 fwrite(STDOUT, sprintf("[%s] scheduler worker started\n", gmdate('c')));
+$lastRecoveryAt = 0;
 
 while ($running) {
+    if (time() - $lastRecoveryAt >= $recoveryIntervalSeconds) {
+        $recovered = $scheduler->recoverExpiredRunningEvents($leaseSeconds);
+        $lastRecoveryAt = time();
+        if ($recovered > 0) {
+            fwrite(STDOUT, sprintf("[%s] recovered expired scheduled events: %d\n", gmdate('c'), $recovered));
+        }
+    }
     $stats = $scheduler->processDueEvents($limit);
 
     if ($stats['processed'] > 0 || $stats['failed'] > 0) {

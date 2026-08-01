@@ -394,6 +394,7 @@ final class SchemaInitializer
                 payload_json TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
                 locked_at $nullableText,
+                locked_by $nullableText,
                 processed_at $nullableText,
                 last_error TEXT NULL,
                 created_at $text NOT NULL,
@@ -557,6 +558,7 @@ final class SchemaInitializer
             $this->ensureSqliteColumn($pdo, 'mannies', 'reserved_cargo_type', 'TEXT NULL');
             $this->ensureSqliteColumn($pdo, 'mannies', 'reserved_cargo_space', 'REAL NOT NULL DEFAULT 0');
             $this->ensureSqliteColumn($pdo, 'mannies', 'reserved_storage_container_id', 'INTEGER NULL');
+            $this->ensureSqliteColumn($pdo, 'scheduled_events', 'locked_by', 'TEXT NULL');
             $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
             $this->backfillMannyCraftingReservations($pdo);
             $this->migrateRepairTaskPayloads($pdo);
@@ -602,6 +604,7 @@ final class SchemaInitializer
             $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_cargo_type', 'VARCHAR(255) NULL AFTER task_payload_json');
             $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_cargo_space', 'DOUBLE NOT NULL DEFAULT 0 AFTER reserved_cargo_type');
             $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_storage_container_id', 'INTEGER NULL AFTER reserved_cargo_space');
+            $this->ensureMysqlColumn($pdo, 'scheduled_events', 'locked_by', 'VARCHAR(255) NULL AFTER locked_at');
             if (!$this->mysqlIndexExists($pdo, 'mannies', 'idx_mannies_task_scheduled_event_id')) {
                 $pdo->exec('CREATE INDEX idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
             }

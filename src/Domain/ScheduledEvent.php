@@ -16,6 +16,7 @@ final class ScheduledEvent
         public array $payload,
         public int $attempts,
         public ?string $lockedAt,
+        public ?string $lockedBy,
         public ?string $processedAt,
         public ?string $lastError,
         public readonly string $createdAt,

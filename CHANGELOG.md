@@ -10,6 +10,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Performance : la finalisation d'un craft ne verrouille plus toute la sonde, seulement la ligne du Manny propriétaire de la réservation. Les crafts actifs antérieurs doivent être préparés, worker arrêté, avec `scripts/migrate-active-crafts-to-output-reservations.php` ; le scheduler ne contient aucun chemin de compatibilité implicite.
 - Performance : chaque placement d'objet ou de ressource calcule désormais une seule fois l'occupation globale et les transferts entrants réservés, puis réutilise cet instantané pour parcourir les containers candidats.
 - Fiabilité/performance : `ensureProbeStorage()` n'effectue plus de réparation opportuniste lors des lectures et placements. Une sonde neuve et vide reste initialisée normalement ; les containers manquants, inventaires orphelins et migrations de stocks passent désormais par l'opération explicite `repairProbeStorage()` du script de maintenance.
+- Fiabilité scheduler : les événements `running` portent désormais l'identifiant de leur worker et un bail renouvelable. Le worker récupère périodiquement les événements dont le bail a expiré, tandis que les transitions `done`, `failed` et `pending` vérifient encore la propriété du verrou.
 
 ## 2026-08-01
 

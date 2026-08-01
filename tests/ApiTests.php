@@ -1421,6 +1421,26 @@ $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $scheduledEvents = new ScheduledEventRepository($pdo);
+$scheduledEventSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(scheduled_events)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('locked_by', $scheduledEventSchemaColumns, true), 'scheduled events store their worker lease owner');
+$leaseOwnerA = new ScheduledEventRepository($pdo, 'test-worker-a');
+$leaseOwnerB = new ScheduledEventRepository($pdo, 'test-worker-b');
+$leaseEvent = $leaseOwnerA->schedule('test.lease', 'test', 1, gmdate('c', time() - 1));
+$claimedLeaseEvent = $leaseOwnerA->claim($leaseEvent) ?? throw new RuntimeException('Unable to claim lease test event.');
+$leaseOwnerB->markDone($claimedLeaseEvent);
+$test->assertEquals('running', $leaseOwnerA->findById($leaseEvent->id)?->status, 'another worker cannot complete a claimed event');
+$pdo->prepare('UPDATE scheduled_events SET locked_at = :locked_at WHERE id = :id')->execute([
+    'id' => $leaseEvent->id,
+    'locked_at' => '2000-01-01T00:00:00+00:00',
+]);
+$test->assertEquals(1, $leaseOwnerB->recoverExpiredLeases('2001-01-01T00:00:00+00:00'), 'expired scheduler leases are recovered automatically');
+$recoveredLeaseEvent = $leaseOwnerA->findById($leaseEvent->id);
+$test->assertEquals('pending', $recoveredLeaseEvent?->status, 'recovered scheduler events return to pending');
+$test->assertEquals(null, $recoveredLeaseEvent?->lockedBy, 'recovered scheduler events release their owner');
+$pdo->prepare('DELETE FROM scheduled_events WHERE id = :id')->execute(['id' => $leaseEvent->id]);
 $mannies = new MannyRepository($pdo, scheduledEvents: $scheduledEvents);
 $items = new ProbeItemRepository($pdo);
 $probeImprovements = new ProbeImprovementRepository($pdo);
