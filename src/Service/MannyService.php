@@ -1738,10 +1738,6 @@ final class MannyService implements MannyTaskRuntime
         }
 
         try {
-            $manny->reservedCargoType = null;
-            $manny->reservedCargoSpace = 0.0;
-            $manny->reservedStorageContainerId = null;
-            $this->mannies->save($manny);
             $this->crafting->createCraftingOutput($probe, $manny, $now);
         } catch (MannyActionException $e) {
             if ($e->errorCode !== 'insufficient_cargo_capacity') {

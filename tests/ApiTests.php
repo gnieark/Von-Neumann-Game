@@ -3345,11 +3345,15 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
             $storage->addItem($craftProbeEntity, $type, $name, $space, ['seededFor' => 'manny-duplicate-refresh-test']);
         }
     }
-    $mannyCountBeforeCraft = count($mannies->findByProbeId($craftProbeEntity->id));
+    $manniesBeforeCraft = $mannies->findByProbeId($craftProbeEntity->id);
+    $mannyCountBeforeCraft = count($manniesBeforeCraft);
+    $mannyIdsBeforeCraft = array_map(static fn(Manny $candidate): int => $candidate->id, $manniesBeforeCraft);
     $mannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'manny',
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $mannyCraft->status, 'Manny can start a Manny craft from stored components');
+    $mannyCraftReservation = $mannies->findById($craftMannyDbId)?->reservedStorageContainerId;
+    $test->assert($mannyCraftReservation !== null, 'Manny craft reserves a precise output container');
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
@@ -3361,7 +3365,13 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $mannyService->refreshMannyState($staleMannyCraftA, $craftProbeForStaleMannyRefresh);
         $mannyService->refreshMannyState($staleMannyCraftB, $craftProbeForStaleMannyRefresh);
     }
-    $test->assertEquals($mannyCountBeforeCraft + 1, count($mannies->findByProbeId($craftProbeEntity->id)), 'completed Manny craft creates exactly one Manny after duplicate stale refreshes');
+    $manniesAfterCraft = $mannies->findByProbeId($craftProbeEntity->id);
+    $test->assertEquals($mannyCountBeforeCraft + 1, count($manniesAfterCraft), 'completed Manny craft creates exactly one Manny after duplicate stale refreshes');
+    $craftedMannies = array_values(array_filter(
+        $manniesAfterCraft,
+        static fn(Manny $candidate): bool => !in_array($candidate->id, $mannyIdsBeforeCraft, true),
+    ));
+    $test->assertEquals($mannyCraftReservation, $craftedMannies[0]->storageContainerId ?? null, 'completed Manny craft deposits directly into its reserved container');
 
     $probeImprovements->markDone($craftProbeEntity->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
@@ -3473,6 +3483,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals('steel_bar', $craftReservationRow['reserved_cargo_type'] ?? null, 'steel-bar craft persists its reserved output type');
     $test->assertEquals(0.01, (float) ($craftReservationRow['reserved_cargo_space'] ?? 0.0), 'steel-bar craft persists its reserved output space');
     $test->assert((int) ($craftReservationRow['reserved_storage_container_id'] ?? 0) > 0, 'steel-bar craft reserves a precise storage container');
+    $steelBarReservedContainerId = (int) ($craftReservationRow['reserved_storage_container_id'] ?? 0);
 
     $freeBeforeCrowding = $storage->freeCargoCapacity($craftProbeEntity);
     $storage->addResource($craftProbeEntity, 'metals', max(0.0, $freeBeforeCrowding - 0.005));
@@ -3505,6 +3516,9 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ));
     $test->assertEquals(1, count($steelBars), 'completed steel-bar craft adds a steel bar item');
     $test->assertEquals(0.01, $steelBars[0]['containerSpace'] ?? null, 'steel bar item occupies 0.01 containers');
+    $steelBarStorage = $pdo->prepare('SELECT storage_container_id FROM probe_items WHERE uid = :uid');
+    $steelBarStorage->execute(['uid' => (string) ($steelBars[0]['id'] ?? '')]);
+    $test->assertEquals($steelBarReservedContainerId, (int) $steelBarStorage->fetchColumn(), 'completed item craft deposits directly into its reserved container');
     $storage->consumeResource($craftProbeEntity, 'metals', $storage->resourceStock($craftProbeEntity, 'metals'));
     $storageMove = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
         'actorMannyId' => $craftMannyId,
