@@ -44,6 +44,9 @@ final class SchedulerService
             }
 
             try {
+                if (!$this->events->renewLease($claimed)) {
+                    continue;
+                }
                 if ($this->process($claimed)) {
                     $this->events->markDone($claimed);
                     $stats['processed']++;
@@ -55,6 +58,16 @@ final class SchedulerService
         }
 
         return $stats;
+    }
+
+    public function recoverExpiredRunningEvents(int $leaseSeconds): int
+    {
+        $leaseSeconds = max(60, $leaseSeconds);
+        $expiredBefore = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->modify('-' . $leaseSeconds . ' seconds')
+            ->format('c');
+
+        return $this->events->recoverExpiredLeases($expiredBefore);
     }
 
     private function process(ScheduledEvent $event): bool

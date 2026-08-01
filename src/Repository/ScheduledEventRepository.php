@@ -11,7 +11,12 @@ final class ScheduledEventRepository
 {
     public const UNSCHEDULED_RUN_AT = '9999-12-31T00:00:00+00:00';
 
-    public function __construct(private readonly PDO $pdo) {}
+    private readonly string $workerId;
+
+    public function __construct(private readonly PDO $pdo, ?string $workerId = null)
+    {
+        $this->workerId = $workerId ?? ('worker-' . bin2hex(random_bytes(12)));
+    }
 
     public function schedule(
         string $type,
@@ -23,8 +28,8 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             'INSERT INTO scheduled_events
-             (type, entity_type, entity_id, run_at, status, payload_json, attempts, locked_at, processed_at, last_error, created_at, updated_at)
-             VALUES (:type, :entity_type, :entity_id, :run_at, :status, :payload_json, 0, NULL, NULL, NULL, :created_at, :updated_at)'
+             (type, entity_type, entity_id, run_at, status, payload_json, attempts, locked_at, locked_by, processed_at, last_error, created_at, updated_at)
+             VALUES (:type, :entity_type, :entity_id, :run_at, :status, :payload_json, 0, NULL, NULL, NULL, NULL, :created_at, :updated_at)'
         );
         $stmt->execute([
             'type' => $type,
@@ -73,12 +78,13 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
-             SET status = 'running', locked_at = :locked_at, attempts = attempts + 1, updated_at = :updated_at
+             SET status = 'running', locked_at = :locked_at, locked_by = :locked_by, attempts = attempts + 1, updated_at = :updated_at
              WHERE id = :id AND status = 'pending'"
         );
         $stmt->execute([
             'id' => $event->id,
             'locked_at' => $now,
+            'locked_by' => $this->workerId,
             'updated_at' => $now,
         ]);
 
@@ -91,7 +97,13 @@ final class ScheduledEventRepository
 
     public function markDone(ScheduledEvent $event): void
     {
-        $this->markDoneById($event->id);
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            "UPDATE scheduled_events SET status = 'done', processed_at = :processed_at,
+             locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = :updated_at
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+        );
+        $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'processed_at' => $now, 'updated_at' => $now]);
     }
 
     public function markDoneById(int $id): void
@@ -99,7 +111,7 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
-             SET status = 'done', processed_at = :processed_at, locked_at = NULL, last_error = NULL, updated_at = :updated_at
+             SET status = 'done', processed_at = :processed_at, locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = :updated_at
              WHERE id = :id"
         );
         $stmt->execute([
@@ -130,11 +142,12 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
-             SET status = 'pending', run_at = :run_at, payload_json = :payload_json, locked_at = NULL, updated_at = :updated_at
-             WHERE id = :id AND status = 'running'"
+             SET status = 'pending', run_at = :run_at, payload_json = :payload_json, locked_at = NULL, locked_by = NULL, updated_at = :updated_at
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
         );
         $stmt->execute([
             'id' => $event->id,
+            'locked_by' => $this->workerId,
             'run_at' => $runAt,
             'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'updated_at' => $now,
@@ -146,11 +159,12 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
-             SET status = 'failed', processed_at = :processed_at, locked_at = NULL, last_error = :last_error, updated_at = :updated_at
-             WHERE id = :id"
+             SET status = 'failed', processed_at = :processed_at, locked_at = NULL, locked_by = NULL, last_error = :last_error, updated_at = :updated_at
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
         );
         $stmt->execute([
             'id' => $event->id,
+            'locked_by' => $this->workerId,
             'processed_at' => $now,
             'last_error' => substr($error->getMessage(), 0, 1000),
             'updated_at' => $now,
@@ -162,7 +176,7 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
-             SET status = 'cancelled', processed_at = :processed_at, locked_at = NULL, updated_at = :updated_at
+             SET status = 'cancelled', processed_at = :processed_at, locked_at = NULL, locked_by = NULL, updated_at = :updated_at
              WHERE type = :type AND entity_type = :entity_type AND entity_id = :entity_id AND status = 'pending'"
         );
         $stmt->execute([
@@ -182,6 +196,36 @@ final class ScheduledEventRepository
         $stmt->execute(['status' => $status]);
 
         return (int) $stmt->fetchColumn();
+    }
+
+    public function renewLease(ScheduledEvent $event): bool
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            "UPDATE scheduled_events SET locked_at = :locked_at, updated_at = :updated_at
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+        );
+        $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'locked_at' => $now, 'updated_at' => $now]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    public function recoverExpiredLeases(string $expiredBefore): int
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            "UPDATE scheduled_events
+             SET status = 'pending', locked_at = NULL, locked_by = NULL, processed_at = NULL,
+                 last_error = :last_error, updated_at = :updated_at
+             WHERE status = 'running' AND (locked_at IS NULL OR locked_at < :expired_before)"
+        );
+        $stmt->execute([
+            'expired_before' => $expiredBefore,
+            'last_error' => 'Recovered automatically after scheduler worker lease expired.',
+            'updated_at' => $now,
+        ]);
+
+        return $stmt->rowCount();
     }
 
     public function findById(int $id): ?ScheduledEvent
@@ -227,6 +271,7 @@ final class ScheduledEventRepository
             $payload,
             (int) $row['attempts'],
             $row['locked_at'] !== null ? (string) $row['locked_at'] : null,
+            $row['locked_by'] !== null ? (string) $row['locked_by'] : null,
             $row['processed_at'] !== null ? (string) $row['processed_at'] : null,
             $row['last_error'] !== null ? (string) $row['last_error'] : null,
             (string) $row['created_at'],

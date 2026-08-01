@@ -1421,6 +1421,26 @@ $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
 $scheduledEvents = new ScheduledEventRepository($pdo);
+$scheduledEventSchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(scheduled_events)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('locked_by', $scheduledEventSchemaColumns, true), 'scheduled events store their worker lease owner');
+$leaseOwnerA = new ScheduledEventRepository($pdo, 'test-worker-a');
+$leaseOwnerB = new ScheduledEventRepository($pdo, 'test-worker-b');
+$leaseEvent = $leaseOwnerA->schedule('test.lease', 'test', 1, gmdate('c', time() - 1));
+$claimedLeaseEvent = $leaseOwnerA->claim($leaseEvent) ?? throw new RuntimeException('Unable to claim lease test event.');
+$leaseOwnerB->markDone($claimedLeaseEvent);
+$test->assertEquals('running', $leaseOwnerA->findById($leaseEvent->id)?->status, 'another worker cannot complete a claimed event');
+$pdo->prepare('UPDATE scheduled_events SET locked_at = :locked_at WHERE id = :id')->execute([
+    'id' => $leaseEvent->id,
+    'locked_at' => '2000-01-01T00:00:00+00:00',
+]);
+$test->assertEquals(1, $leaseOwnerB->recoverExpiredLeases('2001-01-01T00:00:00+00:00'), 'expired scheduler leases are recovered automatically');
+$recoveredLeaseEvent = $leaseOwnerA->findById($leaseEvent->id);
+$test->assertEquals('pending', $recoveredLeaseEvent?->status, 'recovered scheduler events return to pending');
+$test->assertEquals(null, $recoveredLeaseEvent?->lockedBy, 'recovered scheduler events release their owner');
+$pdo->prepare('DELETE FROM scheduled_events WHERE id = :id')->execute(['id' => $leaseEvent->id]);
 $mannies = new MannyRepository($pdo, scheduledEvents: $scheduledEvents);
 $items = new ProbeItemRepository($pdo);
 $probeImprovements = new ProbeImprovementRepository($pdo);
@@ -2459,15 +2479,20 @@ if ($createdProbe !== null) {
     $pdo->prepare('DELETE FROM storage_container_resources WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)')->execute(['probe_id' => $createdProbe->id]);
     $pdo->prepare('DELETE FROM storage_containers WHERE probe_id = :probe_id')->execute(['probe_id' => $createdProbe->id]);
 
+    $test->assertThrows(
+        fn() => $storage->ensureProbeStorage($createdProbe),
+        'regular storage initialization refuses to repair orphaned inventory',
+    );
+    $storage->repairProbeStorage($createdProbe);
     $orphanedStorageRepair = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
-    $test->assertEquals(200, $orphanedStorageRepair->status, 'GET /api/probe/mannies repairs missing storage containers');
+    $test->assertEquals(200, $orphanedStorageRepair->status, 'GET /api/probe/mannies works after explicit storage repair');
     $recreatedCore = $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core');
-    $test->assert($recreatedCore !== null, 'orphaned storage repair recreates the probe core container');
+    $test->assert($recreatedCore !== null, 'explicit storage repair recreates the probe core container');
     if ($recreatedCore !== null) {
         foreach ($mannies->findByProbeId($createdProbe->id) as $manny) {
-            $test->assertEquals($recreatedCore->id, $manny->storageContainerId, 'orphaned storage repair moves onboard Mannys back to a known container');
+            $test->assertEquals($recreatedCore->id, $manny->storageContainerId, 'explicit storage repair moves onboard Mannys back to a known container');
         }
-        $test->assertEquals($recreatedCore->id, $items->findByUidForProbe($createdProbe->id, $orphanedItem->uid)?->storageContainerId, 'orphaned storage repair moves items back to a known container');
+        $test->assertEquals($recreatedCore->id, $items->findByUidForProbe($createdProbe->id, $orphanedItem->uid)?->storageContainerId, 'explicit storage repair moves items back to a known container');
     }
     $storedOrphanedItem = $items->findByUidForProbe($createdProbe->id, $orphanedItem->uid);
     if ($storedOrphanedItem !== null) {
@@ -5630,6 +5655,12 @@ $test->assert(
     'storage placement computes probe occupancy once per operation',
 );
 $test->assert(
+    is_string($probeStorageServiceSource)
+        && str_contains($probeStorageServiceSource, 'public function repairProbeStorage(')
+        && str_contains($probeStorageServiceSource, 'run the explicit storage repair script'),
+    'regular storage access delegates inconsistent legacy state to explicit maintenance',
+);
+$test->assert(
     is_string($storageContainerRepositorySource)
         && str_contains($storageContainerRepositorySource, 'public static function uidForItem('),
     'storage container ids use one shared derivation for bulk existence checks and creation',
@@ -6759,7 +6790,7 @@ if ($createdProbe !== null) {
         $storageContainers->setResourceAmount($createdCoreContainer->id, 'metals', 0.45);
     }
     $createdProbe = $probes->findById($createdProbe->id) ?? $createdProbe;
-    $storage->ensureProbeStorage($createdProbe);
+    $storage->repairProbeStorage($createdProbe);
     $pdo->prepare(
         'UPDATE mannies
          SET storage_container_id = NULL,
@@ -6807,7 +6838,7 @@ if ($createdProbe !== null) {
         $storageContainers->setResourceAmount($createdCoreContainer->id, 'metals', 0.55);
     }
     $createdProbe = $probes->findById($createdProbe->id) ?? $createdProbe;
-    $storage->ensureProbeStorage($createdProbe);
+    $storage->repairProbeStorage($createdProbe);
     $pdo->prepare(
         'UPDATE mannies
          SET storage_container_id = NULL,
