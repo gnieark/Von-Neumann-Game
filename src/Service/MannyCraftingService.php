@@ -325,27 +325,15 @@ final class MannyCraftingService
         }
 
         try {
-            if ($manny->reservedStorageContainerId !== null) {
-                $this->storage->addItemToReservedContainer(
-                    $probe,
-                    $manny,
-                    $type,
-                    (string) ($output['name'] ?? $type),
-                    round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
-                    $metadata,
-                    $outputUid,
-                );
-            } else {
-                // Compatibility path for crafts started before persistent output reservations existed.
-                $this->storage->addItem(
-                    $probe,
-                    $type,
-                    (string) ($output['name'] ?? $type),
-                    round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
-                    $metadata,
-                    $outputUid,
-                );
-            }
+            $this->storage->addItemToReservedContainer(
+                $probe,
+                $manny,
+                $type,
+                (string) ($output['name'] ?? $type),
+                round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4),
+                $metadata,
+                $outputUid,
+            );
         } catch (\RuntimeException $e) {
             if ($this->items->findByUidForProbe($probe->id, $outputUid) !== null) {
                 return;
@@ -585,11 +573,7 @@ final class MannyCraftingService
 
             throw $e;
         }
-        if ($craftingManny->reservedStorageContainerId !== null) {
-            $this->storage->placeMannyInReservedContainer($probe, $craftingManny, $newManny);
-        } elseif (!$this->storage->placeMannyOnProbe($probe, $newManny)) {
-            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted Manny.');
-        }
+        $this->storage->placeMannyInReservedContainer($probe, $craftingManny, $newManny);
         $newManny->taskPayload = [
             'craftedFromRecipe' => (string) ($craftingManny->taskPayload['recipe'] ?? 'manny'),
             'craftingRunId' => $this->craftingRunId($craftingManny, 'manny'),
@@ -608,11 +592,7 @@ final class MannyCraftingService
         if ($manny->storageContainerId !== null) {
             return;
         }
-        if ($craftingManny->reservedStorageContainerId !== null) {
-            $this->storage->placeMannyInReservedContainer($probe, $craftingManny, $manny);
-        } elseif (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-            throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted Manny.');
-        }
+        $this->storage->placeMannyInReservedContainer($probe, $craftingManny, $manny);
 
         $this->mannies->save($manny);
     }

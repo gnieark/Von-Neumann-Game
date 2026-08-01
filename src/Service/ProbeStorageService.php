@@ -568,10 +568,6 @@ final class ProbeStorageService
     public function reserveCraftingOutput(NeumannProbe $probe, string $type, float $space): ?int
     {
         $space = round(max(0.0, $space), 4);
-        if ($space <= 0.0) {
-            return null;
-        }
-
         return ($this->placeUnit($probe, $type, $space)
             ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.'))->id;
     }

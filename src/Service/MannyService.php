@@ -721,8 +721,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->waypointBookmarkInstallationTaskHandler,
             ),
             $this,
-            fn(NeumannProbe $probe, callable $callback): mixed => $this->withProbeLock($probe, $callback),
-            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+            fn(Manny $manny, NeumannProbe $probe, callable $callback): mixed => $this->withTaskLock($manny, $probe, $callback),
             fn(NeumannProbe $probe, Manny $manny): bool => $this->canRefreshMannyTaskFromProbe($probe, $manny),
         );
     }
@@ -744,6 +743,24 @@ final class MannyService implements MannyTaskRuntime
     }
 
     /**
+     * Craft completion only serializes the Manny owning the persistent output
+     * reservation. Other task families retain the probe lock until their shared
+     * resource mutations can be isolated independently.
+     */
+    private function withTaskLock(Manny $manny, NeumannProbe $probe, callable $callback): mixed
+    {
+        if (in_array($manny->currentTask, [Manny::TASK_CRAFTING, Manny::TASK_ASSISTING_ATOMIC_PRINTER], true)) {
+            return $this->mannies->withMannyLock($manny->id, function (Manny $lockedManny) use ($probe, $callback): mixed {
+                return $callback($lockedManny, $this->probes->findById($probe->id) ?? $probe);
+            });
+        }
+
+        return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $callback): mixed {
+            return $callback($this->mannies->findById($manny->id) ?? $manny, $lockedProbe);
+        });
+    }
+
+    /**
      * Runs a Manny task batch under one probe lock after refreshing pre-existing
      * tasks once. Tasks started by the batch are too recent to need refreshing.
      *
@@ -757,11 +774,11 @@ final class MannyService implements MannyTaskRuntime
             throw new \LogicException('A Manny task batch is already being prepared.');
         }
 
+        $this->refreshAllMannyStates($probe);
+
         return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($callback): mixed {
             $this->preparedBatchProbeId = $lockedProbe->id;
             try {
-                $this->refreshAllMannyStates($lockedProbe);
-
                 return $callback($lockedProbe);
             } finally {
                 $this->preparedBatchProbeId = null;
@@ -933,7 +950,7 @@ final class MannyService implements MannyTaskRuntime
             'output' => $craftingPlan['output'],
             'containerSpace' => (float) ($craftingPlan['output']['containerSpace'] ?? 0.0),
         ];
-        $manny->reservedCargoType = $reservedCargoSpace > 0.0 ? $reservedCargoType : null;
+        $manny->reservedCargoType = $reservedCargoType;
         $manny->reservedCargoSpace = $reservedCargoSpace;
         $manny->reservedStorageContainerId = $reservedStorageContainerId;
         $this->mannies->save($manny);
@@ -999,7 +1016,7 @@ final class MannyService implements MannyTaskRuntime
             'fabricator' => CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER,
             'printerId' => 'probe-' . $probe->id . '-atomic-3d-printer',
         ];
-        $manny->reservedCargoType = $reservedCargoSpace > 0.0 ? $reservedCargoType : null;
+        $manny->reservedCargoType = $reservedCargoType;
         $manny->reservedCargoSpace = $reservedCargoSpace;
         $manny->reservedStorageContainerId = $reservedStorageContainerId;
         $this->mannies->save($manny);
