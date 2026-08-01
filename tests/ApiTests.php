@@ -27,6 +27,8 @@ use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
 use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
+use VonNeumannGame\FrontRoute\FrontRouteHome;
+use VonNeumannGame\FrontRoute\FrontRouteMovement;
 use VonNeumannGame\FrontRoute\MenuLinkItem;
 use VonNeumannGame\Http\ApiKernel;
 use VonNeumannGame\RateLimit\RateLimitDecision;
@@ -432,6 +434,10 @@ $test->assert(
 $probeScript = file_get_contents($root . '/public/assets/probe.js');
 $movementScript = file_get_contents($root . '/public/assets/movement.js');
 $movementTemplate = file_get_contents($root . '/templates/movement.html');
+$renderedProbeView = (new FrontRouteHome())->getContent('GET', '/', 'test-bearer', 'fr');
+$renderedMovementView = (new FrontRouteMovement())->getContent('GET', '/movement', 'test-bearer', 'fr');
+$test->assert(str_contains($renderedProbeView, 'data-preparation-duration-ms="300000"'), 'probe route renders the configured effective movement preparation duration');
+$test->assert(str_contains($renderedMovementView, 'data-preparation-duration-ms="300000"'), 'movement route renders the configured effective movement preparation duration');
 $manniesTemplate = file_get_contents($root . '/templates/mannies.html');
 $scutTemplate = file_get_contents($root . '/templates/scut.html');
 $statsTemplate = file_get_contents($root . '/templates/stats.html');
@@ -503,6 +509,10 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-l
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
+$test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'id="movement-cancel"'), 'movement view exposes movement cancellation during preparation');
+$test->assert(is_string($movementScript) && str_contains($movementScript, '(movement.phase || movement.status) === "preparing"'), 'movement JS only offers cancellation during the preparing phase');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'preparationEndsAt - Date.now()'), 'movement JS hides cancellation at the locally computed preparation deadline');
+$test->assert(is_string($movementScript) && str_contains($movementScript, '"/api/probe/" + encodeURIComponent(state.currentProbeId) + "/move"'), 'movement JS cancels through the explicit probe endpoint');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'id="scut-transit-panel"'), 'movement view exposes the secured SCUT transit corridor panel');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'function loadScutTransitDestinations'), 'movement JS loads secured SCUT transit destinations');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'probeApiPath("/scut-network/"'), 'movement JS reads SCUT network details for secured transit corridors');
@@ -525,6 +535,9 @@ $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="pro
 $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, '<h3 class="probe-logbook-heading">Logbook</h3>'), 'Probe template exposes the Logbook panel heading');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'function logbookApiPath'), 'probe JS builds explicit probe-scoped logbook endpoints');
 $test->assert(is_string($probeScript) && str_contains($probeScript, '"/api/probe/" + encodeURIComponent(String(probeId)) + normalizedSuffix'), 'probe JS uses explicit probe ids for logbook API calls on / and /{probeId}');
+$test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="probe-movement-cancel"'), 'probe views expose movement cancellation during preparation');
+$test->assert(is_string($probeScript) && str_contains($probeScript, '(movement.phase || movement.status) === "preparing"'), 'probe JS only offers movement cancellation during the preparing phase');
+$test->assert(is_string($probeScript) && str_contains($probeScript, 'preparationEndsAt - Date.now()'), 'probe JS hides movement cancellation at the locally computed preparation deadline');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'ensureLogbookLoadedForCurrentProbe();'), 'probe JS loads the logbook lazily when the current probe is known');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'logbookLoading || logbookProbeId === probeId'), 'probe JS does not poll the logbook on regular probe refreshes');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'logbookContentHtml'), 'probe JS renders logbook content through an escaped multiline formatter');
@@ -786,7 +799,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260731-inventory-jettison-sort"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260801-movement-cancel"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1705,7 +1718,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(104, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(105, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -7131,6 +7144,28 @@ if ($moveProbe !== null) {
     $test->assertEquals(SectorManny::STATE_FORGOTTEN, $forgottenSectorManny?->toArray()['state'] ?? null, 'movement registers outside owned Mannys as forgotten sector objects');
     $test->assertEquals($moveProbe->id, $mannies->findByUid($firstMannyId)?->probeId, 'forgotten Manny keeps its owner probe link in the database');
 
+    $cancelMove = $kernel->handle('DELETE', '/api/probe/' . $moveProbe->id . '/move', $moveHeaders);
+    $test->assertEquals(204, $cancelMove->status, 'DELETE /api/probe/{probeId}/move cancels movement during preparation');
+    $test->assertEquals([], $cancelMove->body, 'movement cancellation returns no response body');
+    $cancelledMovement = $movements->findById($startedMovement?->id ?? 0);
+    $test->assertEquals('cancelled', $cancelledMovement?->status, 'cancelled movement remains in history');
+    $test->assertEquals(null, $movements->findActiveByProbeId($moveProbe->id), 'cancelled movement is no longer active');
+    $afterCancellationProbe = $probes->findByPlayerId($player->id);
+    $test->assertEquals(100.0, $afterCancellationProbe?->deuteriumStock, 'movement cancellation refunds reserved deuterium');
+    $test->assertEquals('idle', $afterCancellationProbe?->status->value, 'movement cancellation restores idle probe status');
+    $cancelledMovementPhaseEvents = $pdo->prepare("SELECT COUNT(*) FROM scheduled_events WHERE status = 'cancelled' AND type = 'probe.movement.phase' AND entity_type = 'probe_movement' AND entity_id = :movement_id");
+    $cancelledMovementPhaseEvents->execute(['movement_id' => $startedMovement?->id ?? 0]);
+    $test->assertEquals(4, (int) $cancelledMovementPhaseEvents->fetchColumn(), 'movement cancellation cancels scheduled phase events');
+    $sectorAfterCancellation = $sectorRepository->load($originBeforeMove);
+    $test->assertEquals(null, $sectorAfterCancellation->findObjectById(SectorManny::objectIdForUid($firstMannyId)), 'movement cancellation removes synthetic forgotten Manny objects');
+
+    $secondCancellation = $kernel->handle('DELETE', '/api/probe/' . $moveProbe->id . '/move', $moveHeaders);
+    $test->assertEquals(404, $secondCancellation->status, 'movement cancellation reports a missing active movement');
+    $test->assertEquals('active_movement_not_found', $secondCancellation->body['error']['code'] ?? null, 'missing active movement cancellation has an explicit error code');
+
+    $restartMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $restartMove->status, 'a new movement can start after cancellation');
+
     $secondMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 2, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(409, $secondMove->status, 'second movement cannot start while active movement exists');
 
@@ -7156,6 +7191,10 @@ if ($moveProbe !== null) {
         $test->assertEquals('degraded', $acceleratingProbe->body['probe']['movement']['sensorMode'] ?? null, 'acceleration sensor mode is degraded');
         $test->assertEquals('preparing', $movements->findActiveByProbeId($moveProbe->id)?->status, 'GET /api/probe does not persist a computed acceleration phase');
         $test->assertEquals('preparing', $probes->findByPlayerId($player->id)?->status->value, 'GET /api/probe does not persist computed probe acceleration state');
+        $lateCancellation = $kernel->handle('DELETE', '/api/probe/' . $moveProbe->id . '/move', $moveHeaders);
+        $test->assertEquals(409, $lateCancellation->status, 'movement cancellation is rejected after preparation');
+        $test->assertEquals('movement_cancellation_window_closed', $lateCancellation->body['error']['code'] ?? null, 'late movement cancellation has an explicit error code');
+        $test->assert($movements->findActiveByProbeId($moveProbe->id) !== null, 'rejected late cancellation keeps movement active');
         $scheduledEvents->schedule(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $movement->id, gmdate('c'), ['probeId' => $movement->probeId, 'phase' => 'accelerating']);
         $acceleratingSchedulerStats = $scheduler->processDueEvents();
         $test->assertEquals(1, $acceleratingSchedulerStats['processed'], 'scheduler processes due movement phase persistence events');

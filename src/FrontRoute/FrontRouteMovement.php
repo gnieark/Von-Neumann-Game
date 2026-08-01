@@ -30,6 +30,10 @@ class FrontRouteMovement extends FrontRoute{
         $destructionRisk = is_numeric($destructionRisks[(string) $destructionWarningDistance] ?? null)
             ? (float) $destructionRisks[(string) $destructionWarningDistance]
             : (float) ($destructionRisks['default'] ?? 0.05);
+        $preparationMinutes = max(1, (int) round(
+            Config::int($movementConfig, 'preparationMinutes', 10)
+            * Config::float($movementConfig, 'durationFactor', 0.5)
+        ));
         $tpl = new TplBlock();
         $tpl->addPrefixedVars('t', $translator->allEscaped());
         $tpl->addVars([
@@ -38,6 +42,7 @@ class FrontRouteMovement extends FrontRoute{
             'initialZ' => self::e((string) ($coordinates['z'] ?? 0)),
             'destructionWarningDistance' => self::e((string) $destructionWarningDistance),
             'destructionWarningRiskPercent' => self::e((string) round(max(0.0, min(1.0, $destructionRisk)) * 100, 2)),
+            'movementPreparationDurationMs' => self::e((string) ($preparationMinutes * 60 * 1000)),
         ]);
 
         return $tpl->applyTplFile($projectRoot . '/templates/movement.html');

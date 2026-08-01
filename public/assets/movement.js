@@ -6,6 +6,8 @@
     const state = {
         currentMannies: [],
         currentProbeSectorRelative: null,
+        currentProbeId: "",
+        currentMovement: null,
         hasExplicitRouteTarget: /^\/movement(?:\/\d+)?\/-?\d+\/-?\d+\/-?\d+$/.test(window.location.pathname),
         probeAlreadyMoving: false,
         probeDeuteriumSufficient: false,
@@ -15,6 +17,7 @@
 
     let i18n = {};
     let refreshTimer = null;
+    let movementCancelTimer = null;
     let loadInProgress = false;
 
     function withVng(callback) {
@@ -34,6 +37,62 @@
         const node = document.getElementById(id);
         if (node) {
             node.textContent = value;
+        }
+    }
+
+    function clearMovementCancelTimer() {
+        if (movementCancelTimer !== null) {
+            window.clearTimeout(movementCancelTimer);
+            movementCancelTimer = null;
+        }
+    }
+
+    function renderMovementCancelControl() {
+        const control = document.getElementById("movement-cancel-control");
+        if (!control) {
+            return;
+        }
+
+        clearMovementCancelTimer();
+        const movement = state.currentMovement;
+        const preparationDurationMs = Number(control.dataset.preparationDurationMs);
+        const startedAt = Date.parse(movement && movement.startedAt || "");
+        const preparationEndsAt = startedAt + preparationDurationMs;
+        const canCancel = movement
+            && (movement.phase || movement.status) === "preparing"
+            && Number.isFinite(startedAt)
+            && Number.isFinite(preparationDurationMs)
+            && preparationDurationMs > 0
+            && Date.now() < preparationEndsAt;
+
+        control.hidden = !canCancel;
+        if (canCancel) {
+            movementCancelTimer = window.setTimeout(() => {
+                control.hidden = true;
+                movementCancelTimer = null;
+            }, Math.max(0, preparationEndsAt - Date.now()));
+        }
+    }
+
+    async function cancelMovement() {
+        const control = document.getElementById("movement-cancel-control");
+        const button = document.getElementById("movement-cancel");
+        if (!control || control.hidden || !button || !state.currentProbeId
+            || !window.confirm(tr("cancelMovementConfirm", "Cancel this movement and remain in the current sector?"))) {
+            return;
+        }
+
+        button.disabled = true;
+        setText("action-status", tr("cancellingMovement", "Cancelling movement..."));
+        try {
+            await window.VNG.apiJson("/api/probe/" + encodeURIComponent(state.currentProbeId) + "/move", {"method": "DELETE"});
+            control.hidden = true;
+            setText("action-status", tr("movementCancelled", "Movement cancelled."));
+            await refreshMovementState();
+        } catch (error) {
+            setText("action-status", error && error.message ? error.message : tr("requestDenied", "Request denied"));
+        } finally {
+            button.disabled = false;
         }
     }
 
@@ -319,7 +378,10 @@
         const sector = probe.sector && probe.sector.relative ? probe.sector.relative : null;
 
         state.currentProbeSectorRelative = sector ? relativeCoordinates(sector) : null;
+        state.currentProbeId = probe && probe.id ? String(probe.id) : "";
+        state.currentMovement = movement;
         state.probeAlreadyMoving = Boolean(movement && ["preparing", "accelerating", "cruising", "decelerating"].includes(movement.phase || movement.status));
+        renderMovementCancelControl();
         state.probeDeuteriumSufficient = Number(probe && probe.fuel ? probe.fuel.deuterium : 0) > 0.0001;
         syncDefaultTargetFromCurrentSector();
 
@@ -367,6 +429,8 @@
             renderScutTransitDestinations(scutTransitDestinations);
             scheduleRefresh({"probe": probeData.probe, "mannies": mannyData.mannies});
         } catch (error) {
+            state.currentMovement = null;
+            renderMovementCancelControl();
             if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"statusId": "action-status", "panelId": "actions-panel"})) {
                 window.VNG.setProbeUnreachablePanel?.("actions-panel", false);
                 setText("action-status", error.message || tr("requestDenied", "Request denied"));
@@ -452,6 +516,7 @@
     }
 
     function bindPage() {
+        document.getElementById("movement-cancel")?.addEventListener("click", cancelMovement);
         document.getElementById("move-form")?.addEventListener("submit", submitMovement);
         document.getElementById("move-form")?.addEventListener("input", () => {
             state.userEditedTarget = true;

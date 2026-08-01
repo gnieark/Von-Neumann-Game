@@ -4,6 +4,8 @@ namespace VonNeumannGame\FrontRoute;
 use Throwable;
 use VonNeumannGame\Auth\OAuthConfig;
 use VonNeumannGame\Auth\OAuthService;
+use VonNeumannGame\Config\Config;
+use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\View\TplBlock;
 
@@ -42,8 +44,16 @@ class FrontRouteHome extends FrontRoute{
     {
         $projectRoot = dirname(__DIR__, 2);
         $translator = new Translator(Translator::normalize($language));
+        $movementConfig = Config::getArray((new JsonConfigLoader($projectRoot))->load('gameplay'), 'movement');
+        $preparationMinutes = max(1, (int) round(
+            Config::int($movementConfig, 'preparationMinutes', 10)
+            * Config::float($movementConfig, 'durationFactor', 0.5)
+        ));
         $tpl = new TplBlock();
         $tpl->addPrefixedVars('t', $translator->allEscaped());
+        $tpl->addVars([
+            'movementPreparationDurationMs' => self::e((string) ($preparationMinutes * 60 * 1000)),
+        ]);
 
         return $tpl->applyTplFile($projectRoot . '/templates/Probe.html');
         

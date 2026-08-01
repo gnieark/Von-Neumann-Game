@@ -267,6 +267,22 @@ button:disabled {
     color: var(--error);
 }
 
+.movement-cancel-control {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0;
+}
+
+.movement-cancel-control[hidden] {
+    display: none;
+}
+
+.movement-cancel-control button {
+    border-color: rgba(255, 114, 114, .58);
+    color: var(--error);
+}
+
 .game-brief {
     display: grid;
     grid-template-columns: minmax(260px, .6fr) minmax(0, 1.4fr);

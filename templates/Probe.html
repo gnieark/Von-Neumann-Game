@@ -6,6 +6,10 @@
         <button class="icon-button" data-refresh="probe" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">⟳</button>
     </div>
     <div id="probe-terminal-alert" class="probe-terminal-alert" hidden></div>
+    <div id="probe-movement-cancel-control" class="movement-cancel-control" data-preparation-duration-ms="{{movementPreparationDurationMs}}" hidden>
+        <button id="probe-movement-cancel" type="button">{{t.cancelMovement}}</button>
+        <p id="probe-movement-cancel-status" class="action-status" aria-live="polite"></p>
+    </div>
     <div id="probe-summary" class="metrics" aria-live="polite">
         <div class="metric" data-metric="status">
             <span>{{t.status}}</span>

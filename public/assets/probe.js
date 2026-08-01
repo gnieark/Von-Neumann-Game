@@ -6,6 +6,7 @@
     let i18n = {};
     let refreshTimer = null;
     let movementTickTimer = null;
+    let movementCancelTimer = null;
     let loadInProgress = false;
     let probeImprovements = null;
     let probeImprovementsLoadPromise = null;
@@ -72,6 +73,75 @@
         if (movementTickTimer !== null) {
             window.clearTimeout(movementTickTimer);
             movementTickTimer = null;
+        }
+    }
+
+    function clearMovementCancelTimer() {
+        if (movementCancelTimer !== null) {
+            window.clearTimeout(movementCancelTimer);
+            movementCancelTimer = null;
+        }
+    }
+
+    function renderMovementCancelControl(probe) {
+        const control = document.getElementById("probe-movement-cancel-control");
+        if (!control) {
+            return;
+        }
+
+        clearMovementCancelTimer();
+        const movement = probe && probe.movement ? probe.movement : null;
+        const preparationDurationMs = Number(control.dataset.preparationDurationMs);
+        const startedAt = Date.parse(movement && movement.startedAt || "");
+        const preparationEndsAt = startedAt + preparationDurationMs;
+        const canCancel = movement
+            && (movement.phase || movement.status) === "preparing"
+            && Number.isFinite(startedAt)
+            && Number.isFinite(preparationDurationMs)
+            && preparationDurationMs > 0
+            && Date.now() < preparationEndsAt;
+
+        control.hidden = !canCancel;
+        if (!canCancel) {
+            return;
+        }
+        const movementKey = String(movement.startedAt || "");
+        if (control.dataset.movementStartedAt !== movementKey) {
+            control.dataset.movementStartedAt = movementKey;
+            const status = document.getElementById("probe-movement-cancel-status");
+            if (status) {
+                status.textContent = "";
+            }
+        }
+        movementCancelTimer = window.setTimeout(() => {
+            control.hidden = true;
+            movementCancelTimer = null;
+        }, Math.max(0, preparationEndsAt - Date.now()));
+    }
+
+    async function cancelMovement() {
+        const control = document.getElementById("probe-movement-cancel-control");
+        const button = document.getElementById("probe-movement-cancel");
+        const status = document.getElementById("probe-movement-cancel-status");
+        if (!control || control.hidden || !button || !currentProbeId
+            || !window.confirm(translate("cancelMovementConfirm", "Cancel this movement and remain in the current sector?"))) {
+            return;
+        }
+
+        button.disabled = true;
+        if (status) {
+            status.textContent = translate("cancellingMovement", "Cancelling movement...");
+        }
+        try {
+            await window.VNG.apiJson("/api/probe/" + encodeURIComponent(currentProbeId) + "/move", {"method": "DELETE"});
+            control.hidden = true;
+            await loadProbe();
+        } catch (error) {
+            if (status) {
+                status.textContent = error && error.message ? error.message : translate("requestDenied", "Request denied");
+            }
+        } finally {
+            button.disabled = false;
         }
     }
 
@@ -521,6 +591,7 @@
         renderTerminalAlert(probe);
         renderProbeIdentity(data);
         renderProbeUnreachableContext(probe);
+        renderMovementCancelControl(probe);
         window.VNG.renderMetrics(document.getElementById("probe-summary"), [
             {
                 "name": "status",
@@ -752,6 +823,7 @@
     }
 
     function renderProbeError(error) {
+        renderMovementCancelControl(null);
         renderTerminalAlert(null);
         renderProbeIdentity(null);
         renderProbeUnreachableContext(null);
@@ -851,6 +923,10 @@
         document.querySelector("[data-refresh=\"probe\"]")?.addEventListener("click", () => {
             loadProbe();
         });
+    }
+
+    function bindMovementCancellation() {
+        document.getElementById("probe-movement-cancel")?.addEventListener("click", cancelMovement);
     }
 
     function bindLogbook() {
@@ -986,6 +1062,7 @@
             i18n = await window.VNG.loadI18n();
             await loadProbeImprovementsOnce();
             bindRefreshButton();
+            bindMovementCancellation();
             bindProbeIdentity();
             bindLogbook();
             renderLogbook();

@@ -120,6 +120,41 @@ final class ProbeMovementService
         return $movement;
     }
 
+    public function cancelMovement(NeumannProbe $probe): void
+    {
+        $this->probes->withProbeLock($probe->id, function () use ($probe): void {
+            $lockedProbe = $this->probes->findById($probe->id) ?? $probe;
+            $movement = $this->movements->findActiveByProbeId($lockedProbe->id);
+            if ($movement === null) {
+                throw new ProbeMovementException(404, 'active_movement_not_found', 'No active movement was found for this probe.');
+            }
+
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            if (!$this->isBefore($now, $movement->preparationEndsAt)) {
+                throw new ProbeMovementException(409, 'movement_cancellation_window_closed', 'The movement can no longer be cancelled after preparation.');
+            }
+
+            $movement->status = 'cancelled';
+            $this->movements->save($movement);
+
+            $lockedProbe->deuteriumStock = round($lockedProbe->deuteriumStock + $movement->fuelCostDeuterium, 4);
+            $lockedProbe->status = ProbeStatus::Idle;
+            $lockedProbe->velocityC = 0.0;
+            $lockedProbe->accelerationCPerDay = 0.0;
+            $lockedProbe->direction = new ProbeDirection(0.0, 0.0, 0.0);
+            $lockedProbe->currentTask = null;
+            $this->probes->save($lockedProbe);
+
+            $this->scheduledEvents?->cancelPending(SchedulerService::PROBE_MOVEMENT_PHASE, 'probe_movement', $movement->id);
+            foreach ($this->damageWarnings?->idsByMovementId($movement->id) ?? [] as $warningId) {
+                $this->scheduledEvents?->cancelPending(SchedulerService::PROBE_STORAGE_CONTAINER_BREAK, 'probe_damage_warning', $warningId);
+                $this->damageWarnings?->markResolved($warningId);
+            }
+            $this->removeForgottenManniesAfterCancellation($lockedProbe);
+            $this->scheduleBlackHoleTrapIfNeeded($lockedProbe);
+        });
+    }
+
     public function refreshProbeMovementState(NeumannProbe $probe, bool $persistIntermediatePhase = false): NeumannProbe
     {
         $movement = $this->movements->findActiveByProbeId($probe->id);
@@ -430,6 +465,30 @@ final class ProbeMovementService
         }
 
         if ($changed && $sector !== null) {
+            $this->sectors->saveSector($sector);
+        }
+    }
+
+    private function removeForgottenManniesAfterCancellation(NeumannProbe $probe): void
+    {
+        if ($this->mannies === null || $this->sectors === null) {
+            return;
+        }
+
+        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
+        $changed = false;
+        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
+            if ($manny->sector === null || !$manny->sector->equals($probe->currentSector)) {
+                continue;
+            }
+            $objectId = SectorManny::objectIdForUid($manny->uid);
+            $object = $sector->findObjectById($objectId);
+            if ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_FORGOTTEN) {
+                $changed = $sector->removeObjectById($objectId) || $changed;
+            }
+        }
+
+        if ($changed) {
             $this->sectors->saveSector($sector);
         }
     }

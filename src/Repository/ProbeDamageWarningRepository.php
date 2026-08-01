@@ -449,6 +449,17 @@ final class ProbeDamageWarningRepository
         ]);
     }
 
+    /**
+     * @return array<int>
+     */
+    public function idsByMovementId(int $movementId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM probe_damage_warnings WHERE movement_id = :movement_id');
+        $stmt->execute(['movement_id' => $movementId]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     private function hydrate(array $row): ProbeDamageWarning
     {
         return new ProbeDamageWarning(

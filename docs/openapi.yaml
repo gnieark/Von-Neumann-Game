@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '104'
+  version: '105'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -1307,6 +1307,30 @@ paths:
           $ref: '#/paths/~1api~1probe~1move/post/responses/409'
         '422':
           $ref: '#/paths/~1api~1probe~1move/post/responses/422'
+    delete:
+      summary: Cancel the active intersector movement during preparation
+      description: >
+        Cancels the active movement only while it is still in its preparation
+        phase. The reserved deuterium is refunded.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+      responses:
+        '204':
+          description: Movement cancelled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Probe or active movement not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Movement preparation is already over
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/inventory/{itemId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'

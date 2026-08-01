@@ -53,7 +53,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 104;
+    public const API_VERSION = 105;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -239,7 +239,14 @@ final class ApiKernel
             ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeDamageWarningsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/visited-sectors$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeVisitedSectorsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/sector$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeSectorResponse($player, $probe), $ctx->intParam(0), ['GET'])),
-            ApiRoute::regex('#^/api/probe/(\d+)/move$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMoveResponse($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/move$#', ['POST', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => $ctx->method === 'DELETE'
+                    ? $this->probeMoveCancelResponse($probe)
+                    : $this->probeMoveResponse($player, $ctx->body, $probe),
+                $ctx->intParam(0),
+                ['POST', 'DELETE'],
+            )),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->list($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)$#', ['GET', 'PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute(
                 $ctx->method,
@@ -1598,6 +1605,13 @@ final class ApiKernel
         $movement = $this->movements->startMovement($probe, $target, $player);
 
         return new ApiResponse(202, ['movement' => $this->movementArray($player, $movement)]);
+    }
+
+    private function probeMoveCancelResponse(NeumannProbe $probe): ApiResponse
+    {
+        $this->movements->cancelMovement($probe);
+
+        return new ApiResponse(204, []);
     }
 
     private function probeScutNetworkResponse(Player $player, int $networkId, ?NeumannProbe $probe = null): ApiResponse

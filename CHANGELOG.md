@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-08-01
 
 ### Changed
+- API v105 : ajout de `DELETE /api/probe/{probeId}/move` pour annuler un déplacement encore en préparation, rembourser son deutérium réservé et neutraliser ses événements planifiés.
+- Interface : les pages `/`, `/{probeId}` et `/movement` proposent l’annulation d’un déplacement pendant sa préparation ; le bouton disparaît à l’échéance calculée localement sans polling supplémentaire.
 - API : `GET /api/probe/{probeId}/messages` (et sa variante sur la sonde par défaut) accepte désormais `status=unread` pour ne retourner que les messages non lus.
 - Interface : le polling léger du voyant de messagerie ne charge plus que les messages non lus ; la page `/messaging` conserve sa liste complète et sa pagination.
 - API : `GET /api/probe/{probeId}/alerts` (et sa variante sur la sonde par défaut) accepte désormais `status=unread` pour ne retourner que les alertes non lues.

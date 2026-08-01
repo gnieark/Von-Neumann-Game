@@ -6,6 +6,9 @@
         <button class="icon-button" data-refresh="movement" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
     </div>
     <div id="jump-checklist" class="jump-checklist" aria-live="polite"></div>
+    <div id="movement-cancel-control" class="movement-cancel-control" data-preparation-duration-ms="{{movementPreparationDurationMs}}" hidden>
+        <button id="movement-cancel" type="button">{{t.cancelMovement}}</button>
+    </div>
     <form id="move-form" class="action-panel" data-destruction-warning-distance="{{destructionWarningDistance}}" data-destruction-warning-risk-percent="{{destructionWarningRiskPercent}}">
         <label>{{t.targetX}}<input name="x" type="number" step="1" value="{{initialX}}"></label>
         <label>{{t.targetY}}<input name="y" type="number" step="1" value="{{initialY}}"></label>
