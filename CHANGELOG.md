@@ -8,6 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 - Performance/fiabilité : la sortie d'une fabrication Manny ou imprimante est désormais déposée directement dans le container réservé au lancement ; la réservation n'est libérée qu'après la création réussie, sans recalcul global de placement à l'échéance.
 - Performance : la finalisation d'un craft ne verrouille plus toute la sonde, seulement la ligne du Manny propriétaire de la réservation. Les crafts actifs antérieurs doivent être préparés, worker arrêté, avec `scripts/migrate-active-crafts-to-output-reservations.php` ; le scheduler ne contient aucun chemin de compatibilité implicite.
+- Performance : chaque placement d'objet ou de ressource calcule désormais une seule fois l'occupation globale et les transferts entrants réservés, puis réutilise cet instantané pour parcourir les containers candidats.
 
 ## 2026-08-01
 

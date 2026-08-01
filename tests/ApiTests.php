@@ -5624,6 +5624,12 @@ $test->assert(
     'probe storage repair checks existing additional-container ids in memory',
 );
 $test->assert(
+    is_string($probeStorageServiceSource)
+        && str_contains($probeStorageServiceSource, '$snapshot = $this->capacitySnapshot($probe);')
+        && str_contains($probeStorageServiceSource, '$this->placementCandidatesFrom($snapshot[\'containers\'], $type)'),
+    'storage placement computes probe occupancy once per operation',
+);
+$test->assert(
     is_string($storageContainerRepositorySource)
         && str_contains($storageContainerRepositorySource, 'public static function uidForItem('),
     'storage container ids use one shared derivation for bulk existence checks and creation',
