@@ -1244,6 +1244,13 @@ $itemSchemaColumns = array_map(
     $pdo->query('PRAGMA table_info(probe_items)')->fetchAll(PDO::FETCH_ASSOC),
 );
 $test->assert(in_array('storage_container_id', $itemSchemaColumns, true), 'Probe item table stores its storage container');
+$mannySchemaColumns = array_map(
+    static fn(array $row): string => (string) $row['name'],
+    $pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC),
+);
+$test->assert(in_array('reserved_cargo_type', $mannySchemaColumns, true), 'Manny table stores the reserved crafting output type');
+$test->assert(in_array('reserved_cargo_space', $mannySchemaColumns, true), 'Manny table stores the reserved crafting output space');
+$test->assert(in_array('reserved_storage_container_id', $mannySchemaColumns, true), 'Manny table stores the container selected for a crafting reservation');
 $messageSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_messages)')->fetchAll(PDO::FETCH_ASSOC),
@@ -3430,6 +3437,12 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(202, $steelBarCraft->status, 'Manny can start a steel-bar craft');
     $test->assertEquals(300, $steelBarCraft->body['manny']['task']['durationSeconds'] ?? null, 'steel-bar craft task lasts five minutes');
     $test->assertEquals(0.0, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'steel-bar craft commits its metals immediately');
+    $craftReservation = $pdo->prepare('SELECT reserved_cargo_type, reserved_cargo_space, reserved_storage_container_id FROM mannies WHERE id = :id');
+    $craftReservation->execute(['id' => $craftMannyDbId]);
+    $craftReservationRow = $craftReservation->fetch(PDO::FETCH_ASSOC);
+    $test->assertEquals('steel_bar', $craftReservationRow['reserved_cargo_type'] ?? null, 'steel-bar craft persists its reserved output type');
+    $test->assertEquals(0.01, (float) ($craftReservationRow['reserved_cargo_space'] ?? 0.0), 'steel-bar craft persists its reserved output space');
+    $test->assert((int) ($craftReservationRow['reserved_storage_container_id'] ?? 0) > 0, 'steel-bar craft reserves a precise storage container');
 
     $freeBeforeCrowding = $storage->freeCargoCapacity($craftProbeEntity);
     $storage->addResource($craftProbeEntity, 'metals', max(0.0, $freeBeforeCrowding - 0.005));
@@ -3443,8 +3456,12 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $crowdedCraftRefresh->body['mannies'] ?? [],
         static fn(array $manny): bool => ($manny['id'] ?? null) === $craftMannyId,
     ))[0] ?? null;
-    $test->assertEquals('crafting', $crowdedCraftManny['currentTask'] ?? null, 'completed craft remains pending while storage is full');
-    $test->assertEquals('storage_space', $crowdedCraftManny['task']['waitingFor'] ?? null, 'completed craft records that storage space is required');
+    $test->assertEquals(null, $crowdedCraftManny['currentTask'] ?? null, 'reserved output space lets a completed craft finish after unrelated storage fills');
+    $craftReservation->execute(['id' => $craftMannyDbId]);
+    $releasedCraftReservation = $craftReservation->fetch(PDO::FETCH_ASSOC);
+    $test->assertEquals(null, $releasedCraftReservation['reserved_cargo_type'] ?? null, 'completed craft releases its reserved output type');
+    $test->assertEquals(0.0, (float) ($releasedCraftReservation['reserved_cargo_space'] ?? 0.0), 'completed craft releases its reserved output space');
+    $test->assertEquals(null, $releasedCraftReservation['reserved_storage_container_id'] ?? null, 'completed craft releases its reserved storage container');
     $crowdedProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $test->assertEquals(200, $crowdedProbe->status, 'GET /api/probe tolerates completed craft output waiting for storage');
     $jettisonCrowdedMetals = $kernel->handle('POST', '/api/probe/inventory/probe-' . $craftProbeEntity->id . '-stock-metals/jettison', $craftHeaders, json_encode([

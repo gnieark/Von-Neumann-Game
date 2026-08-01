@@ -109,6 +109,9 @@ final class SchemaInitializer
                 task_ends_at $nullableText,
                 task_scheduled_event_id INTEGER NULL,
                 task_payload_json TEXT NOT NULL,
+                reserved_cargo_type $nullableText,
+                reserved_cargo_space $decimal NOT NULL DEFAULT 0,
+                reserved_storage_container_id INTEGER NULL,
                 cargo_deuterium $decimal NOT NULL DEFAULT 0,
                 cargo_metals $decimal NOT NULL DEFAULT 0,
                 cargo_ice $decimal NOT NULL DEFAULT 0,
@@ -551,7 +554,11 @@ final class SchemaInitializer
             $this->ensureSqliteMannyCargoColumns($pdo);
             $this->ensureSqliteMannyProbeIdNullable($pdo);
             $this->ensureSqliteColumn($pdo, 'mannies', 'task_scheduled_event_id', 'INTEGER NULL');
+            $this->ensureSqliteColumn($pdo, 'mannies', 'reserved_cargo_type', 'TEXT NULL');
+            $this->ensureSqliteColumn($pdo, 'mannies', 'reserved_cargo_space', 'REAL NOT NULL DEFAULT 0');
+            $this->ensureSqliteColumn($pdo, 'mannies', 'reserved_storage_container_id', 'INTEGER NULL');
             $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
+            $this->backfillMannyCraftingReservations($pdo);
             $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
@@ -592,9 +599,13 @@ final class SchemaInitializer
             $this->ensureMysqlMannyProbeIdNullable($pdo);
             $this->ensureMysqlMannyCargoColumns($pdo);
             $this->ensureMysqlColumn($pdo, 'mannies', 'task_scheduled_event_id', 'INTEGER NULL AFTER task_ends_at');
+            $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_cargo_type', 'VARCHAR(255) NULL AFTER task_payload_json');
+            $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_cargo_space', 'DOUBLE NOT NULL DEFAULT 0 AFTER reserved_cargo_type');
+            $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_storage_container_id', 'INTEGER NULL AFTER reserved_cargo_space');
             if (!$this->mysqlIndexExists($pdo, 'mannies', 'idx_mannies_task_scheduled_event_id')) {
                 $pdo->exec('CREATE INDEX idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
             }
+            $this->backfillMannyCraftingReservations($pdo);
             $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
@@ -724,6 +735,41 @@ final class SchemaInitializer
             )"
         );
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_probe_improvement_installations_probe_id ON probe_improvement_installations(probe_id)');
+    }
+
+    private function backfillMannyCraftingReservations(PDO $pdo): void
+    {
+        $stmt = $pdo->query(
+            "SELECT m.id, m.task_payload_json, e.payload_json AS scheduled_payload_json
+             FROM mannies m
+             LEFT JOIN scheduled_events e ON e.id = m.task_scheduled_event_id
+             WHERE m.current_task IN ('crafting', 'assisting_atomic_printer')
+               AND m.reserved_cargo_space = 0"
+        );
+        $update = $pdo->prepare(
+            'UPDATE mannies
+             SET reserved_cargo_type = :reserved_cargo_type,
+                 reserved_cargo_space = :reserved_cargo_space
+             WHERE id = :id AND reserved_cargo_space = 0'
+        );
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $payloadJson = (string) ($row['scheduled_payload_json'] ?? '');
+            if ($payloadJson === '') {
+                $payloadJson = (string) ($row['task_payload_json'] ?? '{}');
+            }
+            $payload = json_decode($payloadJson, true);
+            $output = is_array($payload) && is_array($payload['output'] ?? null) ? $payload['output'] : null;
+            $type = is_array($output) ? trim((string) ($output['type'] ?? '')) : '';
+            $space = is_array($output) ? round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4) : 0.0;
+            if ($type === '' || $space <= 0.0) {
+                continue;
+            }
+            $update->execute([
+                'id' => (int) $row['id'],
+                'reserved_cargo_type' => $type,
+                'reserved_cargo_space' => $space,
+            ]);
+        }
     }
 
     private function ensureScutSchema(PDO $pdo): void

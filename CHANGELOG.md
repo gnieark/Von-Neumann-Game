@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-08-01
 
 ### Changed
+- Performance : démarrer une fabrication Manny ou imprimante ne rafraîchit plus toutes les tâches de la sonde ; chaque sortie réserve désormais durablement son volume et son container dès le début de la fabrication, puis le scheduler remplace cette réservation par l’objet produit.
 - API v105 : ajout de `DELETE /api/probe/{probeId}/move` pour annuler un déplacement encore en préparation, rembourser son deutérium réservé et neutraliser ses événements planifiés.
 - Interface : les pages `/`, `/{probeId}` et `/movement` proposent l’annulation d’un déplacement pendant sa préparation ; le bouton disparaît à l’échéance calculée localement sans polling supplémentaire.
 - API : `GET /api/probe/{probeId}/messages` (et sa variante sur la sonde par défaut) accepte désormais `status=unread` pour ne retourner que les messages non lus.

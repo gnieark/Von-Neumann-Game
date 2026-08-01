@@ -565,6 +565,17 @@ final class ProbeStorageService
         ), 4);
     }
 
+    public function reserveCraftingOutput(NeumannProbe $probe, string $type, float $space): ?int
+    {
+        $space = round(max(0.0, $space), 4);
+        if ($space <= 0.0) {
+            return null;
+        }
+
+        return ($this->placeUnit($probe, $type, $space)
+            ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.'))->id;
+    }
+
     /**
      * @param array<string, float> $resources
      * @param list<array{type:string, space:float}> $units
@@ -1265,6 +1276,23 @@ final class ProbeStorageService
         foreach ($mannies as $manny) {
             if ($manny->isOnProbe() && $manny->storageContainerId !== null) {
                 $used[$manny->storageContainerId] = round((float) ($used[$manny->storageContainerId] ?? 0.0) + $this->mannyContainerSpace(), 4);
+            }
+        }
+        foreach ($this->mannies->findCargoReservationsByProbeId($probe->id) as $reservation) {
+            $space = round(max(0.0, $reservation['space']), 4);
+            if ($space <= 0.0) {
+                continue;
+            }
+            if ($reservation['containerId'] !== null && array_key_exists($reservation['containerId'], $used)) {
+                $used[$reservation['containerId']] = round((float) $used[$reservation['containerId']] + $space, 4);
+                continue;
+            }
+            if ($reservation['containerId'] === null && !$this->simulateUnitPlacement($probe, $containers, $used, $reservation['type'], $space)) {
+                $candidates = $this->placementCandidatesFrom($containers, $reservation['type']);
+                $container = $candidates[0] ?? ($containers[0] ?? null);
+                if ($container !== null) {
+                    $used[$container->id] = round((float) ($used[$container->id] ?? 0.0) + $space, 4);
+                }
             }
         }
 

@@ -48,8 +48,8 @@ final class MannyRepository
         }
         $stmt = $this->pdo->prepare(
             'INSERT INTO mannies
-             (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_scheduled_event_id, task_payload_json, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
-             VALUES (:uid, :probe_id, :storage_container_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, 0, 0, 0, 0, :created_at, :updated_at)'
+             (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_scheduled_event_id, task_payload_json, reserved_cargo_type, reserved_cargo_space, reserved_storage_container_id, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
+             VALUES (:uid, :probe_id, :storage_container_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, NULL, 0, NULL, 0, 0, 0, 0, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
@@ -114,6 +114,30 @@ final class MannyRepository
                 (float) ($row['cargo_ice'] ?? 0),
                 (float) ($row['cargo_organic_compounds'] ?? 0),
             ),
+            $stmt->fetchAll(),
+        );
+    }
+
+    /**
+     * @return list<array{mannyId:int,type:string,space:float,containerId:?int}>
+     */
+    public function findCargoReservationsByProbeId(int $probeId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, reserved_cargo_type, reserved_cargo_space, reserved_storage_container_id
+             FROM mannies
+             WHERE probe_id = :probe_id AND reserved_cargo_space > 0
+             ORDER BY id ASC'
+        );
+        $stmt->execute(['probe_id' => $probeId]);
+
+        return array_map(
+            static fn(array $row): array => [
+                'mannyId' => (int) $row['id'],
+                'type' => (string) ($row['reserved_cargo_type'] ?? ''),
+                'space' => (float) $row['reserved_cargo_space'],
+                'containerId' => $row['reserved_storage_container_id'] !== null ? (int) $row['reserved_storage_container_id'] : null,
+            ],
             $stmt->fetchAll(),
         );
     }
@@ -236,6 +260,9 @@ final class MannyRepository
                 task_ends_at = :task_ends_at,
                 task_scheduled_event_id = :task_scheduled_event_id,
                 task_payload_json = :task_payload_json,
+                reserved_cargo_type = :reserved_cargo_type,
+                reserved_cargo_space = :reserved_cargo_space,
+                reserved_storage_container_id = :reserved_storage_container_id,
                 cargo_deuterium = :cargo_deuterium,
                 cargo_metals = :cargo_metals,
                 cargo_ice = :cargo_ice,
@@ -257,6 +284,9 @@ final class MannyRepository
             'task_ends_at' => $manny->taskEndsAt,
             'task_scheduled_event_id' => $manny->taskScheduledEventId,
             'task_payload_json' => $this->encodePayload($taskPayloadForMannyRow),
+            'reserved_cargo_type' => $manny->reservedCargoType,
+            'reserved_cargo_space' => $manny->reservedCargoSpace,
+            'reserved_storage_container_id' => $manny->reservedStorageContainerId,
             'cargo_deuterium' => $manny->cargoDeuterium,
             'cargo_metals' => $manny->cargoMetals,
             'cargo_ice' => $manny->cargoIce,
@@ -298,6 +328,9 @@ final class MannyRepository
             $row['task_ends_at'] !== null ? (string) $row['task_ends_at'] : null,
             $taskScheduledEventId,
             $payload,
+            isset($row['reserved_cargo_type']) && $row['reserved_cargo_type'] !== null ? (string) $row['reserved_cargo_type'] : null,
+            (float) ($row['reserved_cargo_space'] ?? 0),
+            isset($row['reserved_storage_container_id']) && $row['reserved_storage_container_id'] !== null ? (int) $row['reserved_storage_container_id'] : null,
             (float) ($row['cargo_deuterium'] ?? 0),
             (float) ($row['cargo_metals'] ?? 0),
             (float) ($row['cargo_ice'] ?? 0),

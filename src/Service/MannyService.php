@@ -898,7 +898,6 @@ final class MannyService implements MannyTaskRuntime
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
         $this->ensureMannyInRange($manny, $probe);
         $this->ensureMannyIdle($manny);
-        $this->refreshOtherMannyStates($probe, $manny);
         if (!$manny->isOnProbe()) {
             throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to craft.');
         }
@@ -922,6 +921,10 @@ final class MannyService implements MannyTaskRuntime
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $this->crafting->consumeCraftingPlan($probe, $craftingPlan);
 
+        $reservedCargoType = (string) ($craftingPlan['output']['type'] ?? '');
+        $reservedCargoSpace = round(max(0.0, (float) ($craftingPlan['output']['containerSpace'] ?? 0.0)), 4);
+        $reservedStorageContainerId = $this->storage->reserveCraftingOutput($probe, $reservedCargoType, $reservedCargoSpace);
+
         $manny->currentTask = Manny::TASK_CRAFTING;
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
@@ -936,6 +939,9 @@ final class MannyService implements MannyTaskRuntime
             'output' => $craftingPlan['output'],
             'containerSpace' => (float) ($craftingPlan['output']['containerSpace'] ?? 0.0),
         ];
+        $manny->reservedCargoType = $reservedCargoSpace > 0.0 ? $reservedCargoType : null;
+        $manny->reservedCargoSpace = $reservedCargoSpace;
+        $manny->reservedStorageContainerId = $reservedStorageContainerId;
         $this->mannies->save($manny);
 
         return $this->requiredManny($probe, $uid);
@@ -952,7 +958,6 @@ final class MannyService implements MannyTaskRuntime
     private function startAtomicPrinterCraftingLocked(NeumannProbe $probe, string $recipe): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
-        $this->refreshAllMannyStates($probe);
         if ($this->atomicPrinterAssistant($probe) !== null) {
             throw new MannyActionException(409, 'atomic_printer_busy', 'The atomic printer is already executing an order.');
         }
@@ -980,6 +985,10 @@ final class MannyService implements MannyTaskRuntime
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $this->crafting->consumeCraftingPlan($probe, $craftingPlan);
 
+        $reservedCargoType = (string) ($craftingPlan['output']['type'] ?? '');
+        $reservedCargoSpace = round(max(0.0, (float) ($craftingPlan['output']['containerSpace'] ?? 0.0)), 4);
+        $reservedStorageContainerId = $this->storage->reserveCraftingOutput($probe, $reservedCargoType, $reservedCargoSpace);
+
         $manny->currentTask = Manny::TASK_ASSISTING_ATOMIC_PRINTER;
         $manny->taskStartedAt = $now->format('c');
         $manny->taskEndsAt = $now->modify('+' . (int) $craftingPlan['durationSeconds'] . ' seconds')->format('c');
@@ -996,6 +1005,9 @@ final class MannyService implements MannyTaskRuntime
             'fabricator' => CraftingRecipeCatalog::FABRICATOR_ATOMIC_PRINTER,
             'printerId' => 'probe-' . $probe->id . '-atomic-3d-printer',
         ];
+        $manny->reservedCargoType = $reservedCargoSpace > 0.0 ? $reservedCargoType : null;
+        $manny->reservedCargoSpace = $reservedCargoSpace;
+        $manny->reservedStorageContainerId = $reservedStorageContainerId;
         $this->mannies->save($manny);
 
         return $this->mannies->findById($manny->id) ?? $manny;
@@ -1732,6 +1744,10 @@ final class MannyService implements MannyTaskRuntime
         }
 
         try {
+            $manny->reservedCargoType = null;
+            $manny->reservedCargoSpace = 0.0;
+            $manny->reservedStorageContainerId = null;
+            $this->mannies->save($manny);
             $this->crafting->createCraftingOutput($probe, $manny, $now);
         } catch (MannyActionException $e) {
             if ($e->errorCode !== 'insufficient_cargo_capacity') {
@@ -3007,6 +3023,9 @@ final class MannyService implements MannyTaskRuntime
         $manny->taskStartedAt = null;
         $manny->taskEndsAt = null;
         $manny->taskPayload = $payload;
+        $manny->reservedCargoType = null;
+        $manny->reservedCargoSpace = 0.0;
+        $manny->reservedStorageContainerId = null;
     }
 
     private function isAtOrAfter(\DateTimeImmutable $now, ?string $date): bool
