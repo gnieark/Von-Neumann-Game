@@ -9,9 +9,9 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Service\ProbeStorageService;
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
 
-$factory = new AppFactory(dirname(__DIR__));
+$factory = new AppFactory(dirname(__DIR__, 2));
 $gameplayConfig = $factory->gameplayConfig();
 $dbFactory = $factory->databaseFactory();
 $pdo = $dbFactory->create();
@@ -34,7 +34,7 @@ foreach ($ids as $id) {
         continue;
     }
 
-    $storage->ensureProbeStorage($probe);
+    $storage->repairProbeStorage($probe);
     $storage->migrateLegacyProbe($probe);
     $migrated++;
 }

@@ -53,6 +53,39 @@ final class ProbeStorageService
     public function ensureProbeStorage(NeumannProbe $probe): void
     {
         $existingContainers = $this->containers->findByProbeId($probe->id);
+        if ($existingContainers === []) {
+            $items = $this->items->findByProbeId($probe->id);
+            $mannies = $this->mannies->findByProbeId($probe->id);
+            $hasPreviouslyPlacedInventory = $items !== [];
+            foreach ($mannies as $manny) {
+                if ($manny->isOnProbe() && $manny->storageContainerId !== null) {
+                    $hasPreviouslyPlacedInventory = true;
+                    break;
+                }
+            }
+            if ($hasPreviouslyPlacedInventory || $this->resourceRowsDifferFromProbeTotals($probe)) {
+                throw new \RuntimeException('Probe storage is not initialized or is inconsistent; run the explicit storage repair script.');
+            }
+
+            $core = $this->containers->ensureCoreContainer($probe);
+            foreach ($mannies as $manny) {
+                if ($manny->isOnProbe() && $manny->storageContainerId === null) {
+                    $manny->storageContainerId = $core->id;
+                    $this->mannies->save($manny);
+                }
+            }
+            return;
+        }
+
+        if ($this->containerByUid($existingContainers, StorageContainer::CORE_UID) === null) {
+            throw new \RuntimeException('Probe core storage container is missing; run the explicit storage repair script.');
+        }
+    }
+
+    /** Explicit maintenance operation; never called from API reads or placements. */
+    public function repairProbeStorage(NeumannProbe $probe): void
+    {
+        $existingContainers = $this->containers->findByProbeId($probe->id);
         $containerUids = array_fill_keys(
             array_map(static fn(StorageContainer $container): string => $container->uid, $existingContainers),
             true,
