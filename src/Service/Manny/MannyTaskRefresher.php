@@ -13,15 +13,13 @@ final class MannyTaskRefresher
 
     /**
      * @param list<TaskHandlerInterface> $handlers
-     * @param \Closure(NeumannProbe, callable): mixed $withProbeLock
-     * @param callable(int): ?Manny $findMannyById
+     * @param \Closure(Manny, NeumannProbe, callable): mixed $withTaskLock
      * @param callable(NeumannProbe, Manny): bool $canRefreshFromProbe
      */
     public function __construct(
         private readonly array $handlers,
         private readonly MannyTaskRuntime $runtime,
-        private readonly \Closure $withProbeLock,
-        private readonly \Closure $findMannyById,
+        private readonly \Closure $withTaskLock,
         private readonly \Closure $canRefreshFromProbe,
     ) {
     }
@@ -48,8 +46,7 @@ final class MannyTaskRefresher
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
-        return ($this->withProbeLock)($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny {
-            $fresh = ($this->findMannyById)($manny->id) ?? $manny;
+        return ($this->withTaskLock)($manny, $probe, function (Manny $fresh, NeumannProbe $lockedProbe) use ($handler, $now): Manny {
             if ($fresh->currentTask === null || !$handler->supports($fresh->currentTask)) {
                 return $fresh;
             }

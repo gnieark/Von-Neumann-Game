@@ -845,7 +845,8 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_installations'), 'schema stores completed probe improvements by probe');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvements ('), 'schema no longer creates the legacy mixed probe_improvements table');
 $test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'flock('), 'Manny mining refresh no longer uses a file lock');
-$test->assert(is_string($mannyTaskRefresherSource) && str_contains($mannyTaskRefresherSource, 'return ($this->withProbeLock)($probe, function (NeumannProbe $lockedProbe) use ($manny, $handler, $now): Manny'), 'Manny task completions run under the probe lock');
+$test->assert(is_string($mannyTaskRefresherSource) && str_contains($mannyTaskRefresherSource, 'return ($this->withTaskLock)($manny, $probe,'), 'Manny task completions delegate to the task-specific lock');
+$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->mannies->withMannyLock($manny->id'), 'craft completion locks only its reservation-owning Manny');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
 $test->assert(is_string($probeStorageServiceSource) && str_contains($probeStorageServiceSource, 'private function moveResourceLocked'), 'resource storage moves run through a locked implementation');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
@@ -3345,11 +3346,15 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
             $storage->addItem($craftProbeEntity, $type, $name, $space, ['seededFor' => 'manny-duplicate-refresh-test']);
         }
     }
-    $mannyCountBeforeCraft = count($mannies->findByProbeId($craftProbeEntity->id));
+    $manniesBeforeCraft = $mannies->findByProbeId($craftProbeEntity->id);
+    $mannyCountBeforeCraft = count($manniesBeforeCraft);
+    $mannyIdsBeforeCraft = array_map(static fn(Manny $candidate): int => $candidate->id, $manniesBeforeCraft);
     $mannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'manny',
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $mannyCraft->status, 'Manny can start a Manny craft from stored components');
+    $mannyCraftReservation = $mannies->findById($craftMannyDbId)?->reservedStorageContainerId;
+    $test->assert($mannyCraftReservation !== null, 'Manny craft reserves a precise output container');
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
@@ -3361,7 +3366,13 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $mannyService->refreshMannyState($staleMannyCraftA, $craftProbeForStaleMannyRefresh);
         $mannyService->refreshMannyState($staleMannyCraftB, $craftProbeForStaleMannyRefresh);
     }
-    $test->assertEquals($mannyCountBeforeCraft + 1, count($mannies->findByProbeId($craftProbeEntity->id)), 'completed Manny craft creates exactly one Manny after duplicate stale refreshes');
+    $manniesAfterCraft = $mannies->findByProbeId($craftProbeEntity->id);
+    $test->assertEquals($mannyCountBeforeCraft + 1, count($manniesAfterCraft), 'completed Manny craft creates exactly one Manny after duplicate stale refreshes');
+    $craftedMannies = array_values(array_filter(
+        $manniesAfterCraft,
+        static fn(Manny $candidate): bool => !in_array($candidate->id, $mannyIdsBeforeCraft, true),
+    ));
+    $test->assertEquals($mannyCraftReservation, $craftedMannies[0]->storageContainerId ?? null, 'completed Manny craft deposits directly into its reserved container');
 
     $probeImprovements->markDone($craftProbeEntity->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
@@ -3473,6 +3484,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals('steel_bar', $craftReservationRow['reserved_cargo_type'] ?? null, 'steel-bar craft persists its reserved output type');
     $test->assertEquals(0.01, (float) ($craftReservationRow['reserved_cargo_space'] ?? 0.0), 'steel-bar craft persists its reserved output space');
     $test->assert((int) ($craftReservationRow['reserved_storage_container_id'] ?? 0) > 0, 'steel-bar craft reserves a precise storage container');
+    $steelBarReservedContainerId = (int) ($craftReservationRow['reserved_storage_container_id'] ?? 0);
 
     $freeBeforeCrowding = $storage->freeCargoCapacity($craftProbeEntity);
     $storage->addResource($craftProbeEntity, 'metals', max(0.0, $freeBeforeCrowding - 0.005));
@@ -3505,6 +3517,9 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ));
     $test->assertEquals(1, count($steelBars), 'completed steel-bar craft adds a steel bar item');
     $test->assertEquals(0.01, $steelBars[0]['containerSpace'] ?? null, 'steel bar item occupies 0.01 containers');
+    $steelBarStorage = $pdo->prepare('SELECT storage_container_id FROM probe_items WHERE uid = :uid');
+    $steelBarStorage->execute(['uid' => (string) ($steelBars[0]['id'] ?? '')]);
+    $test->assertEquals($steelBarReservedContainerId, (int) $steelBarStorage->fetchColumn(), 'completed item craft deposits directly into its reserved container');
     $storage->consumeResource($craftProbeEntity, 'metals', $storage->resourceStock($craftProbeEntity, 'metals'));
     $storageMove = $kernel->handle('POST', '/api/probe/storage-moves', $craftHeaders, json_encode([
         'actorMannyId' => $craftMannyId,
@@ -5600,7 +5615,7 @@ $storageContainerRepositorySource = file_get_contents($root . '/src/Repository/S
 $apiKernelSource = file_get_contents($root . '/src/Http/ApiKernel.php');
 $probeManniesControllerSource = file_get_contents($root . '/src/Http/Controller/ProbeManniesApiController.php');
 $test->assert(is_string($probeManniesControllerSource) && str_contains($probeManniesControllerSource, '$this->mannies->withPreparedBatch('), 'Manny task batches delegate their transaction and preparation to the Manny service');
-$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->refreshAllMannyStates($lockedProbe);'), 'Manny task batches refresh pre-existing tasks once before assigning orders');
+$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->refreshAllMannyStates($probe);'), 'Manny task batches refresh pre-existing tasks once before assigning orders');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'if ($this->preparedBatchProbeId === $probe->id)'), 'Manny task batch assignments skip repeated peer refreshes and nested probe locks');
 $test->assert(
     is_string($probeStorageServiceSource)

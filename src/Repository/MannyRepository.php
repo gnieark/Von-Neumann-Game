@@ -201,6 +201,43 @@ final class MannyRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    /**
+     * @template T
+     * @param callable(Manny): T $callback
+     * @return T
+     */
+    public function withMannyLock(int $id, callable $callback): mixed
+    {
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $sql = 'SELECT * FROM mannies WHERE id = :id';
+            if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
+                $sql .= ' FOR UPDATE';
+            }
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute(['id' => $id]);
+            $row = $stmt->fetch();
+            if (!$row) {
+                throw new \RuntimeException('Manny not found while acquiring task lock.');
+            }
+            $result = $callback($this->hydrate($row));
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $result;
+        } catch (\Throwable $error) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
+        }
+    }
+
     public function nameExistsForProbe(int $probeId, string $name, ?int $exceptId = null): bool
     {
         $stmt = $this->pdo->prepare('SELECT id, name FROM mannies WHERE probe_id = :probe_id');

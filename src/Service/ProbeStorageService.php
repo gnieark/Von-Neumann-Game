@@ -568,10 +568,6 @@ final class ProbeStorageService
     public function reserveCraftingOutput(NeumannProbe $probe, string $type, float $space): ?int
     {
         $space = round(max(0.0, $space), 4);
-        if ($space <= 0.0) {
-            return null;
-        }
-
         return ($this->placeUnit($probe, $type, $space)
             ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.'))->id;
     }
@@ -621,6 +617,30 @@ final class ProbeStorageService
         }
 
         return $item;
+    }
+
+    public function addItemToReservedContainer(
+        NeumannProbe $probe,
+        Manny $reservationOwner,
+        string $type,
+        string $name,
+        float $containerSpace,
+        array $metadata = [],
+        ?string $uid = null,
+    ): ProbeItem {
+        $container = $this->reservedOutputContainer($probe, $reservationOwner, $type, $containerSpace);
+        $item = $this->items->create($probe->id, $type, $name, $containerSpace, $metadata, $container->id, $uid);
+        if ($type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
+            $this->containers->ensureContainerForItem($probe->id, $item->uid);
+        }
+
+        return $item;
+    }
+
+    public function placeMannyInReservedContainer(NeumannProbe $probe, Manny $reservationOwner, Manny $manny): void
+    {
+        $container = $this->reservedOutputContainer($probe, $reservationOwner, 'manny', $this->mannyContainerSpace());
+        $manny->storageContainerId = $container->id;
     }
 
     /**
@@ -1297,6 +1317,27 @@ final class ProbeStorageService
         }
 
         return $used;
+    }
+
+    private function reservedOutputContainer(
+        NeumannProbe $probe,
+        Manny $reservationOwner,
+        string $type,
+        float $space,
+    ): StorageContainer {
+        $space = round(max(0.0, $space), 4);
+        if (
+            $reservationOwner->reservedStorageContainerId === null
+            || $reservationOwner->reservedCargoType !== $type
+            || $reservationOwner->reservedCargoSpace + self::EPSILON < $space
+        ) {
+            throw new MannyActionException(422, 'invalid_cargo_reservation', 'The crafting output reservation is missing or invalid.');
+        }
+
+        $container = $this->containers->findByDatabaseIdForProbe($probe->id, $reservationOwner->reservedStorageContainerId)
+            ?? throw new MannyActionException(422, 'invalid_cargo_reservation', 'The reserved storage container is unavailable.');
+
+        return $container;
     }
 
     /**
