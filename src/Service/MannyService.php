@@ -169,7 +169,6 @@ final class MannyService implements MannyTaskRuntime
             fn(SectorDetachedContainer $container, bool $sameAsteroid): array => $this->miningTargetContainerPayload($container, $sameAsteroid),
             fn(): int => $this->miningTravelSeconds(),
             fn(float $targetAmount, ?int $travelSeconds): int => $this->miningDurationSeconds($targetAmount, $travelSeconds),
-            fn(float $targetAmount, int $elapsedSeconds, ?int $travelSeconds): ?int => $this->nextMiningTransitionElapsedSeconds($targetAmount, $elapsedSeconds, $travelSeconds),
             function (Manny $manny): void {
                 $this->storage->releaseMannyFromStorage($manny);
             },
@@ -179,16 +178,11 @@ final class MannyService implements MannyTaskRuntime
             function (Manny $manny): void {
                 $this->mannies->save($manny);
             },
-            fn(float $targetAmount, int $elapsedSeconds, ?int $travelSeconds): array => $this->miningProgress($targetAmount, $elapsedSeconds, $travelSeconds),
-            fn(Manny $manny): int => $this->miningTaskTravelSeconds($manny),
             fn(Manny $manny): array => $this->miningResourceProfile($manny),
             fn(Manny $manny): ?string => $this->miningTaskTargetContainerId($manny),
             fn(Manny $manny, array $resourceProfile, float $amount): float => $this->depleteMiningTarget($manny, $resourceProfile, $amount),
             fn(Manny $manny, array $resourceProfile, float $amount): float => $this->transferMiningResourcesToDetachedContainer($manny, $resourceProfile, $amount),
             fn(NeumannProbe $probe, array $resourceProfile, float $amount, bool $includeManny): bool => $this->canAcceptMiningDelivery($probe, $resourceProfile, $amount, $includeManny),
-            function (Manny $manny, array $resourceProfile, float $amount): void {
-                $this->setMannyCargoProfile($manny, $resourceProfile, $amount);
-            },
             function (Manny $manny, array $payload): void {
                 $this->cargo->waitForStorageSpace($manny, $payload);
             },
@@ -2420,75 +2414,6 @@ final class MannyService implements MannyTaskRuntime
         return $elapsedSeconds < $defaultDuration ? $elapsedSeconds : $defaultDuration;
     }
 
-    private function miningProgress(float $targetAmount, int $elapsedSeconds, ?int $travelSeconds = null): array
-    {
-        $remaining = round($targetAmount, 4);
-        $cursor = 0;
-        $delivered = 0.0;
-        $tripIndex = 1;
-        $travelSeconds ??= $this->miningTravelSeconds();
-        while ($remaining > 0.0001) {
-            $tripAmount = min($this->mannyCargoCapacity(), $remaining);
-            $outboundEnd = $cursor + $travelSeconds;
-            if ($elapsedSeconds < $outboundEnd) {
-                return ['phase' => 'outbound', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => 0.0];
-            }
-
-            $miningTicks = (int) ceil($tripAmount / $this->miningAmountPerTick());
-            $miningEnd = $outboundEnd + ($miningTicks * $this->miningTickSeconds());
-            if ($elapsedSeconds < $miningEnd) {
-                $ticksDone = (int) floor(($elapsedSeconds - $outboundEnd) / $this->miningTickSeconds());
-                $cargo = min($tripAmount, $ticksDone * $this->miningAmountPerTick());
-
-                return ['phase' => 'mining', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => round($cargo, 4)];
-            }
-
-            $returnEnd = $miningEnd + $travelSeconds;
-            if ($elapsedSeconds < $returnEnd) {
-                return ['phase' => 'returning', 'tripIndex' => $tripIndex, 'deliveredAmount' => $delivered, 'cargoAmount' => round($tripAmount, 4)];
-            }
-
-            $delivered = round($delivered + $tripAmount, 4);
-            $remaining = round($remaining - $tripAmount, 4);
-            $cursor = $returnEnd;
-            $tripIndex++;
-        }
-
-        return ['phase' => 'complete', 'tripIndex' => max(1, $tripIndex - 1), 'deliveredAmount' => round($targetAmount, 4), 'cargoAmount' => 0.0];
-    }
-
-    private function nextMiningTransitionElapsedSeconds(float $targetAmount, int $elapsedSeconds, ?int $travelSeconds = null): ?int
-    {
-        $remaining = round($targetAmount, 4);
-        $cursor = 0;
-        $travelSeconds ??= $this->miningTravelSeconds();
-        while ($remaining > 0.0001) {
-            $tripAmount = min($this->mannyCargoCapacity(), $remaining);
-            $outboundEnd = $cursor + $travelSeconds;
-            if ($outboundEnd > $elapsedSeconds) {
-                return $outboundEnd;
-            }
-
-            $miningTicks = (int) ceil($tripAmount / $this->miningAmountPerTick());
-            for ($tick = 1; $tick <= $miningTicks; $tick++) {
-                $tickEnd = $outboundEnd + ($tick * $this->miningTickSeconds());
-                if ($tickEnd > $elapsedSeconds) {
-                    return $tickEnd;
-                }
-            }
-
-            $returnEnd = $outboundEnd + ($miningTicks * $this->miningTickSeconds()) + $travelSeconds;
-            if ($returnEnd > $elapsedSeconds) {
-                return $returnEnd;
-            }
-
-            $remaining = round($remaining - $tripAmount, 4);
-            $cursor = $returnEnd;
-        }
-
-        return null;
-    }
-
     /**
      * @param array<string, float> $profile
      */
@@ -2627,19 +2552,6 @@ final class MannyService implements MannyTaskRuntime
     }
 
     /**
-     * @param array<string, float> $profile
-     */
-    private function setMannyCargoProfile(Manny $manny, array $profile, float $amount): void
-    {
-        $this->cargo->clearMannyCargo($manny);
-        $amounts = $this->resourceAmountsForTotal($amount, $profile);
-        $manny->cargoDeuterium = $amounts[ResourceComposition::DEUTERIUM] ?? 0.0;
-        $manny->cargoMetals = $amounts[ResourceComposition::METALS] ?? 0.0;
-        $manny->cargoIce = $amounts[ResourceComposition::ICE] ?? 0.0;
-        $manny->cargoOrganicCompounds = $amounts[ResourceComposition::CARBON_COMPOUNDS] ?? 0.0;
-    }
-
-    /**
      * @return array<string, float>
      */
     private function miningResourceProfile(Manny $manny): array
@@ -2671,15 +2583,6 @@ final class MannyService implements MannyTaskRuntime
         $legacyProfile[$resourceType] = 1.0;
 
         return $legacyProfile;
-    }
-
-    private function miningTaskTravelSeconds(Manny $manny): int
-    {
-        if (isset($manny->taskPayload['miningTravelSeconds']) && is_numeric($manny->taskPayload['miningTravelSeconds'])) {
-            return max(0, (int) $manny->taskPayload['miningTravelSeconds']);
-        }
-
-        return $this->miningTravelSeconds();
     }
 
     private function miningTaskTargetContainerId(Manny $manny): ?string

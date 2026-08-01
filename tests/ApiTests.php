@@ -1204,18 +1204,48 @@ $test->assertEquals($mannyTaskMigrationManny->id, (int) ($mannyTaskMigrationRow[
 $test->assertEquals($mannyTaskMigrationRunAt, $mannyTaskMigrationRow['run_at'] ?? null, 'Manny task migration preserves task end time');
 $test->assertEquals('pending', $mannyTaskMigrationRow['status'] ?? null, 'Manny task migration creates pending events');
 $test->assertEquals(4.5, (float) ($mannyTaskMigrationPayload['integrityPercent'] ?? 0), 'Manny task migration moves the task payload into scheduled_events');
-$mannyTaskMigrationPdo->prepare("UPDATE mannies SET current_task = 'mining' WHERE id = :id")->execute(['id' => $mannyTaskMigrationManny->id]);
+$terminalMiningPayload = [
+    'objectId' => 'ast_migration',
+    'resourceType' => 'metals',
+    'resourceTypes' => ['metals'],
+    'resourceProfile' => ['metals' => 1.0],
+    'targetAmount' => 0.1,
+    'extractedAmount' => 0.05,
+    'depositedAmount' => 0.04,
+    'phase' => 'returning',
+    'tripIndex' => 1,
+    'miningTravelSeconds' => 900,
+];
+$mannyTaskMigrationPdo->prepare(
+    "UPDATE mannies SET current_task = 'mining', cargo_metals = 0.01 WHERE id = :id"
+)->execute(['id' => $mannyTaskMigrationManny->id]);
+$mannyTaskMigrationPdo->prepare(
+    'UPDATE scheduled_events SET status = :status, payload_json = :payload WHERE id = :id'
+)->execute([
+    'id' => (int) $mannyTaskMigrationRow['task_scheduled_event_id'],
+    'status' => 'running',
+    'payload' => json_encode($terminalMiningPayload, JSON_THROW_ON_ERROR),
+]);
 $miningTransitionMigrationCommand = escapeshellarg(PHP_BINARY)
-    . ' ' . escapeshellarg($root . '/scripts/migrate-active-mining-to-scheduler-transitions.php')
+    . ' ' . escapeshellarg($root . '/scripts/migrate-mining-to-terminal-events.php')
     . ' --database-config=' . escapeshellarg($mannyTaskMigrationConfig);
 exec($miningTransitionMigrationCommand . ' 2>&1', $miningTransitionMigrationOutput, $miningTransitionMigrationStatus);
-$test->assertEquals(0, $miningTransitionMigrationStatus, 'active-mining scheduler transition migration exits successfully');
+$test->assertEquals(0, $miningTransitionMigrationStatus, 'terminal-mining migration exits successfully');
 $migratedMiningEvent = $mannyTaskMigrationPdo->query(
-    "SELECT run_at, payload_json FROM scheduled_events WHERE entity_type = 'manny' AND entity_id = " . $mannyTaskMigrationManny->id
+    "SELECT se.run_at, se.status, se.payload_json, m.task_started_at, m.task_ends_at, m.cargo_metals
+     FROM scheduled_events se
+     INNER JOIN mannies m ON m.task_scheduled_event_id = se.id
+     WHERE se.entity_type = 'manny' AND se.entity_id = " . $mannyTaskMigrationManny->id
 )->fetch(PDO::FETCH_ASSOC);
 $migratedMiningPayload = json_decode((string) ($migratedMiningEvent['payload_json'] ?? '{}'), true);
-$test->assert((new DateTimeImmutable((string) ($migratedMiningEvent['run_at'] ?? '9999-01-01')))->getTimestamp() <= time(), 'active-mining migration wakes the existing scheduler event immediately');
-$test->assertEquals($migratedMiningEvent['run_at'] ?? null, $migratedMiningPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null, 'active-mining migration stores the internal scheduler transition deadline');
+$test->assertEquals('pending', $migratedMiningEvent['status'] ?? null, 'terminal-mining migration releases a formerly running event');
+$test->assert((new DateTimeImmutable((string) ($migratedMiningEvent['run_at'] ?? '1970-01-01')))->getTimestamp() > time(), 'terminal-mining migration schedules a future final deadline');
+$test->assertEquals($migratedMiningEvent['task_ends_at'] ?? null, $migratedMiningEvent['run_at'] ?? null, 'terminal-mining migration aligns the event and task deadlines');
+$test->assertEquals($migratedMiningEvent['run_at'] ?? null, $migratedMiningPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null, 'terminal-mining migration stores the final scheduler deadline');
+$test->assertEquals(0.06, (float) ($migratedMiningPayload['targetAmount'] ?? 0), 'terminal-mining migration keeps only the amount not already delivered');
+$test->assertEquals(0.0, (float) ($migratedMiningPayload['extractedAmount'] ?? -1), 'terminal-mining migration resets intermediate extraction progress');
+$test->assertEquals(0.0, (float) ($migratedMiningEvent['cargo_metals'] ?? -1), 'terminal-mining migration clears intermediate Manny cargo');
+$test->assert(!array_key_exists('phase', $migratedMiningPayload) && !array_key_exists('tripIndex', $migratedMiningPayload), 'terminal-mining migration removes intermediate transition state');
 $visitedMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration.sqlite';
 $visitedMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration-database.json';
 file_put_contents($visitedMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $visitedMigrationDbPath], JSON_THROW_ON_ERROR));
@@ -1725,7 +1755,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(105, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(106, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -4306,7 +4336,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $test->assertEquals('target_container_recovered', $multiInterruptedManny?->taskPayload['reason'] ?? null, 'interrupted mining recall records the recovered target-container reason');
                 $test->assertEquals($multiHiddenObjectIdA, $multiInterruptedManny?->taskPayload['targetContainerId'] ?? null, 'interrupted mining recall records the recovered target container id');
                 $test->assertEquals(0.0, $multiInterruptedManny?->cargoMetals, 'interrupted mining recall drops the Manny mining cargo');
-                $test->assertEquals(0.01, $multiInterruptedManny?->taskPayload['droppedCargo'][0]['resources']['metals'] ?? null, 'interrupted mining recall records the dropped metal cargo');
+                $test->assertEquals(null, $multiInterruptedManny?->taskPayload['droppedCargo'][0]['resources']['metals'] ?? null, 'interrupted terminal mining has no intermediate cargo to drop');
 
                 foreach ([$multiHiddenMannyIds[2], $multiHiddenMannyIds[3]] as $multiRecoverMannyId) {
                     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
@@ -6305,14 +6335,14 @@ if ($createdProbe !== null) {
          WHERE m.id = " . $mineMannyDbId
     )->fetch(PDO::FETCH_ASSOC);
     $test->assertEquals(
-        900,
+        2100,
         (new DateTimeImmutable((string) ($initialMiningSchedule['run_at'] ?? 'now')))->getTimestamp()
             - (new DateTimeImmutable((string) ($initialMiningSchedule['task_started_at'] ?? 'now')))->getTimestamp(),
-        'new mining tasks schedule their first outbound transition rather than only their final completion',
+        'new mining tasks schedule only their final completion',
     );
     $test->assert(
-        (string) ($initialMiningSchedule['run_at'] ?? '') < (string) ($initialMiningSchedule['task_ends_at'] ?? ''),
-        'first mining scheduler transition precedes the overall task end',
+        (string) ($initialMiningSchedule['run_at'] ?? '') === (string) ($initialMiningSchedule['task_ends_at'] ?? ''),
+        'mining scheduler deadline matches the overall task end',
     );
     $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $mineMannyDbId,
@@ -6429,9 +6459,9 @@ if ($createdProbe !== null) {
         $tripDeuteriumProgress->body['mannies'] ?? [],
         static fn(array $manny): bool => ($manny['id'] ?? null) === $secondMannyId,
     ))[0] ?? null;
-    $test->assertEquals(30.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'intermediate Manny deuterium delivery adds one 0.05 ECE trip as five tank points');
-    $test->assertEquals(0.05, $tripDeuteriumManny['task']['depositedAmount'] ?? null, 'intermediate deuterium mining records the first delivered trip');
-    $test->assertEquals(0.0, $tripDeuteriumManny['cargo']['deuterium'] ?? null, 'Manny starts the next deuterium trip without stale cargo');
+    $test->assertEquals(25.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'terminal mining does not deliver deuterium before task completion');
+    $test->assertEquals(0, $tripDeuteriumManny['task']['depositedAmount'] ?? null, 'terminal mining records no intermediate delivery');
+    $test->assertEquals(0.0, $tripDeuteriumManny['cargo']['deuterium'] ?? null, 'terminal mining exposes no intermediate cargo');
     $rescheduledMiningTransition = $pdo->query(
         "SELECT se.run_at, m.task_ends_at
          FROM mannies m
@@ -6439,9 +6469,8 @@ if ($createdProbe !== null) {
          WHERE m.id = " . $mineMannyDbId
     )->fetch(PDO::FETCH_ASSOC);
     $test->assert(
-        (string) ($rescheduledMiningTransition['run_at'] ?? '') > gmdate('c')
-            && (string) ($rescheduledMiningTransition['run_at'] ?? '') < (string) ($rescheduledMiningTransition['task_ends_at'] ?? ''),
-        'scheduler persists the next future mining transition after an intermediate delivery',
+        (string) ($rescheduledMiningTransition['run_at'] ?? '') === (string) ($rescheduledMiningTransition['task_ends_at'] ?? ''),
+        'scheduler keeps the single terminal mining deadline before completion',
     );
     $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $mineMannyDbId,
@@ -6534,9 +6563,9 @@ if ($createdProbe !== null) {
         static fn(array $manny): bool => ($manny['id'] ?? null) === $thirdMannyId,
     ))[0] ?? null;
     $haulingCargo = $haulingMixedManny['cargo'] ?? [];
-    $test->assertEquals(0.0067, $haulingCargo['metals'] ?? null, 'active multi-resource mining exposes Manny metals cargo');
-    $test->assertEquals(0.0067, $haulingCargo['ice'] ?? null, 'active multi-resource mining exposes Manny ice cargo');
-    $test->assertEquals(0.0066, $haulingCargo['organicCompounds'] ?? null, 'active multi-resource mining exposes Manny organic-compound cargo');
+    $test->assertEquals(0.0, $haulingCargo['metals'] ?? null, 'active terminal mining exposes no intermediate metals cargo');
+    $test->assertEquals(0.0, $haulingCargo['ice'] ?? null, 'active terminal mining exposes no intermediate ice cargo');
+    $test->assertEquals(0.0, $haulingCargo['organicCompounds'] ?? null, 'active terminal mining exposes no intermediate organic-compound cargo');
     $test->assert(!array_key_exists('other', $haulingCargo), 'active Manny cargo no longer exposes generic other');
     $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $mixedMannyDbId,
@@ -6574,9 +6603,9 @@ if ($createdProbe !== null) {
         $haulingMannies->body['mannies'] ?? [],
         static fn(array $manny): bool => ($manny['id'] ?? null) === $secondMannyId,
     ))[0] ?? null;
-    $test->assertEquals(2, $haulingSecondManny['task']['tripIndex'] ?? null, 'Manny mining starts a second trip after carrying 0.05 containers');
-    $test->assertEquals(0.05, $haulingSecondManny['task']['depositedAmount'] ?? null, 'Manny deposits one 0.05-container cargo before the next trip');
-    $test->assertEquals(0.0, $haulingSecondManny['cargo']['metals'] ?? null, 'Manny begins the second trip without cargo');
+    $test->assertEquals(null, $haulingSecondManny['task']['tripIndex'] ?? null, 'terminal mining does not persist intermediate trip indices');
+    $test->assertEquals(0, $haulingSecondManny['task']['depositedAmount'] ?? null, 'terminal mining deposits nothing before the final transaction');
+    $test->assertEquals(0.0, $haulingSecondManny['cargo']['metals'] ?? null, 'terminal mining carries no observable intermediate cargo');
     $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $mineMannyDbId,
         'started' => gmdate('c', time() - 6000),

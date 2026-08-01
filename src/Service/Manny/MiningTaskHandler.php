@@ -38,18 +38,14 @@ final class MiningTaskHandler implements TaskHandlerInterface
      * @param \Closure(SectorDetachedContainer, bool): array<string, mixed> $miningTargetContainerPayload
      * @param \Closure(): int $miningTravelSeconds
      * @param \Closure(float, ?int): int $miningDurationSeconds
-     * @param \Closure(float, int, ?int): ?int $nextMiningTransitionElapsedSeconds
      * @param \Closure(Manny): void $releaseMannyFromStorage
      * @param \Closure(Manny): void $removeMannyFromSector
      * @param \Closure(Manny): void $saveManny
-     * @param \Closure(float, int, ?int): array{phase:string, tripIndex:int, deliveredAmount:float, cargoAmount:float} $miningProgress
-     * @param \Closure(Manny): int $miningTaskTravelSeconds
      * @param \Closure(Manny): array<string, float> $miningResourceProfile
      * @param \Closure(Manny): ?string $miningTaskTargetContainerId
      * @param \Closure(Manny, array<string, float>, float): float $depleteMiningTarget
      * @param \Closure(Manny, array<string, float>, float): float $transferMiningResourcesToDetachedContainer
      * @param \Closure(NeumannProbe, array<string, float>, float, bool): bool $canAcceptMiningDelivery
-     * @param \Closure(Manny, array<string, float>, float): void $setMannyCargoProfile
      * @param \Closure(Manny, array<string, mixed>): void $waitForStorageSpace
      * @param \Closure(NeumannProbe, array<string, float>, float): void $transferMiningResourcesToProbe
      * @param \Closure(Manny): void $clearMannyCargo
@@ -80,18 +76,14 @@ final class MiningTaskHandler implements TaskHandlerInterface
         private readonly \Closure $miningTargetContainerPayload,
         private readonly \Closure $miningTravelSeconds,
         private readonly \Closure $miningDurationSeconds,
-        private readonly \Closure $nextMiningTransitionElapsedSeconds,
         private readonly \Closure $releaseMannyFromStorage,
         private readonly \Closure $removeMannyFromSector,
         private readonly \Closure $saveManny,
-        private readonly \Closure $miningProgress,
-        private readonly \Closure $miningTaskTravelSeconds,
         private readonly \Closure $miningResourceProfile,
         private readonly \Closure $miningTaskTargetContainerId,
         private readonly \Closure $depleteMiningTarget,
         private readonly \Closure $transferMiningResourcesToDetachedContainer,
         private readonly \Closure $canAcceptMiningDelivery,
-        private readonly \Closure $setMannyCargoProfile,
         private readonly \Closure $waitForStorageSpace,
         private readonly \Closure $transferMiningResourcesToProbe,
         private readonly \Closure $clearMannyCargo,
@@ -187,7 +179,6 @@ final class MiningTaskHandler implements TaskHandlerInterface
         $manny->taskStartedAt = $now->format('c');
         $durationSeconds = ($this->miningDurationSeconds)($targetAmount, $miningTravelSeconds);
         $manny->taskEndsAt = $now->modify('+' . $durationSeconds . ' seconds')->format('c');
-        $nextTransition = ($this->nextMiningTransitionElapsedSeconds)($targetAmount, 0, $miningTravelSeconds);
         $manny->taskPayload = [
             'objectId' => $objectId,
             'resourceType' => $selectedResources[0],
@@ -202,7 +193,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
             'resourceProfile' => $resourceProfile,
             'target' => ($this->miningTargetArray)($target),
             'miningTravelSeconds' => $miningTravelSeconds,
-            Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY => $now->modify('+' . ($nextTransition ?? $durationSeconds) . ' seconds')->format('c'),
+            Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY => $manny->taskEndsAt,
         ]
             + ($requestedTargetAmount > $targetAmount ? ['requestedTargetAmount' => $requestedTargetAmount] : [])
             + ($targetContainer !== null ? ['targetContainer' => ($this->miningTargetContainerPayload)($targetContainer['container'], $targetContainer['sameAsteroid'])] : [])
@@ -220,131 +211,63 @@ final class MiningTaskHandler implements TaskHandlerInterface
 
     public function refresh(MannyTaskRuntime $runtime, Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
-        if ($manny->taskStartedAt === null) {
+        if ($manny->taskStartedAt === null || !$this->isAtOrAfter($now, $manny->taskEndsAt)) {
             return $manny;
         }
 
-        $elapsed = max(0, $now->getTimestamp() - (new \DateTimeImmutable($manny->taskStartedAt))->getTimestamp());
         $targetAmount = (float) ($manny->taskPayload['targetAmount'] ?? 0);
-        $progress = ($this->miningProgress)($targetAmount, $elapsed, ($this->miningTaskTravelSeconds)($manny));
         $resourceProfile = ($this->miningResourceProfile)($manny);
         $targetContainerId = ($this->miningTaskTargetContainerId)($manny);
-        $plannedExtracted = round(min($targetAmount, (float) $progress['deliveredAmount'] + (float) $progress['cargoAmount']), 4);
-        $extracted = round((float) ($manny->taskPayload['extractedAmount'] ?? 0), 4);
-        $shouldSave = false;
-        if ($plannedExtracted > $extracted) {
-            $requestedDelta = round($plannedExtracted - $extracted, 4);
-            $actualDelta = ($this->depleteMiningTarget)($manny, $resourceProfile, $requestedDelta);
-            $extracted = round($extracted + $actualDelta, 4);
-            $manny->taskPayload['extractedAmount'] = $extracted;
-            $manny->taskPayload['extractedResources'] = ($this->resourceAmountsForTotal)($extracted, $resourceProfile);
-            $shouldSave = true;
-            if ($actualDelta + 0.00001 < $requestedDelta) {
-                $manny->taskPayload['sourceExhausted'] = true;
+        if ($targetContainerId !== null) {
+            $sector = ($this->getOrCreateSector)($manny->sector ?? $probe->currentSector);
+            $targetContainer = ($this->miningTargetContainer)($sector, $targetContainerId, (string) ($manny->taskPayload['objectId'] ?? ''));
+            if (($this->detachedContainerFreeCapacity)($targetContainer['container']) + 0.00001 < $targetAmount) {
+                $manny->taskPayload['waitingFor'] = 'storage_space';
+                $manny->taskPayload['reason'] = 'mining_output';
+                ($this->saveManny)($manny);
+                return ($this->findMannyById)($manny->id) ?? $manny;
             }
+        } elseif (!($this->canAcceptMiningDelivery)($probe, $resourceProfile, $targetAmount, true)) {
+            $manny->taskPayload['waitingFor'] = 'storage_space';
+            $manny->taskPayload['reason'] = 'mining_output';
+            ($this->saveManny)($manny);
+            return ($this->findMannyById)($manny->id) ?? $manny;
         }
 
-        $deposited = (float) ($manny->taskPayload['depositedAmount'] ?? 0);
-        $complete = $progress['phase'] === 'complete' || $this->isAtOrAfter($now, $manny->taskEndsAt);
-        $delivered = $complete ? $deposited : round(min((float) $progress['deliveredAmount'], $extracted), 4);
-        if ($delivered > $deposited) {
-            $deliveryAmount = round($delivered - $deposited, 4);
-            if ($targetContainerId !== null) {
-                $acceptedDelivery = ($this->transferMiningResourcesToDetachedContainer)($manny, $resourceProfile, $deliveryAmount);
-                $delivered = round($deposited + $acceptedDelivery, 4);
-                $shouldSave = true;
-                if ($acceptedDelivery + 0.00001 < $deliveryAmount) {
-                    $complete = true;
-                    $manny->taskPayload['targetContainerFull'] = true;
-                }
-            } elseif (!($this->canAcceptMiningDelivery)($probe, $resourceProfile, $deliveryAmount, false)) {
-                ($this->setMannyCargoProfile)($manny, $resourceProfile, $deliveryAmount);
-                ($this->waitForStorageSpace)($manny, [
-                    'reason' => 'cargo_delivery',
-                    'pendingAmount' => $deliveryAmount,
-                    'resourceProfile' => $resourceProfile,
-                ]);
-                ($this->saveManny)($manny);
-
-                return ($this->findMannyById)($manny->id) ?? $manny;
-            }
-
-            if ($targetContainerId === null) {
-                ($this->transferMiningResourcesToProbe)($probe, $resourceProfile, $deliveryAmount);
-                $shouldSave = true;
-            }
-            $manny->taskPayload['depositedAmount'] = $delivered;
-            $manny->taskPayload['depositedResources'] = ($this->resourceAmountsForTotal)((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
+        unset($manny->taskPayload['waitingFor'], $manny->taskPayload['reason'], $manny->taskPayload['failureReason']);
+        $extracted = ($this->depleteMiningTarget)($manny, $resourceProfile, $targetAmount);
+        $manny->taskPayload['extractedAmount'] = $extracted;
+        $manny->taskPayload['extractedResources'] = ($this->resourceAmountsForTotal)($extracted, $resourceProfile);
+        if ($extracted + 0.00001 < $targetAmount) {
+            $manny->taskPayload['sourceExhausted'] = true;
         }
+        if ($targetContainerId !== null) {
+            $delivered = ($this->transferMiningResourcesToDetachedContainer)($manny, $resourceProfile, $extracted);
+        } else {
+            ($this->transferMiningResourcesToProbe)($probe, $resourceProfile, $extracted);
+            $delivered = $extracted;
+        }
+        $manny->taskPayload['depositedAmount'] = $delivered;
+        $manny->taskPayload['depositedResources'] = ($this->resourceAmountsForTotal)($delivered, $resourceProfile);
 
-        $cargoAmount = round(min((float) $progress['cargoAmount'], max(0.0, $extracted - $delivered)), 4);
-        ($this->setMannyCargoProfile)($manny, $resourceProfile, $cargoAmount);
-        $manny->taskPayload['phase'] = $progress['phase'];
-        $manny->taskPayload['tripIndex'] = $progress['tripIndex'];
-
-        if ($complete) {
-            $shouldSave = true;
-            $remaining = round((float) ($manny->taskPayload['extractedAmount'] ?? 0) - (float) ($manny->taskPayload['depositedAmount'] ?? 0), 4);
-            if ($targetContainerId !== null) {
-                $acceptedRemaining = ($this->transferMiningResourcesToDetachedContainer)($manny, $resourceProfile, $remaining);
-                if ($acceptedRemaining > 0.0) {
-                    $manny->taskPayload['depositedAmount'] = round((float) ($manny->taskPayload['depositedAmount'] ?? 0) + $acceptedRemaining, 4);
-                    $manny->taskPayload['depositedResources'] = ($this->resourceAmountsForTotal)((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
-                }
-                if ($acceptedRemaining + 0.00001 < $remaining) {
-                    $manny->taskPayload['targetContainerFull'] = true;
-                }
-            } elseif (!($this->canAcceptMiningDelivery)($probe, $resourceProfile, $remaining, true)) {
-                ($this->setMannyCargoProfile)($manny, $resourceProfile, $remaining);
-                ($this->waitForStorageSpace)($manny, [
-                    'reason' => 'return_to_probe',
-                    'pendingAmount' => $remaining,
-                    'resourceProfile' => $resourceProfile,
-                ]);
-                ($this->saveManny)($manny);
-
-                return ($this->findMannyById)($manny->id) ?? $manny;
-            }
-            if ($targetContainerId === null && $remaining > 0) {
-                ($this->transferMiningResourcesToProbe)($probe, $resourceProfile, $remaining);
-                $manny->taskPayload['depositedAmount'] = round((float) ($manny->taskPayload['depositedAmount'] ?? 0) + $remaining, 4);
-                $manny->taskPayload['depositedResources'] = ($this->resourceAmountsForTotal)((float) $manny->taskPayload['depositedAmount'], $resourceProfile);
-            }
-            ($this->clearMannyCargo)($manny);
-            if (!$manny->isInSameSectorAs($probe)) {
-                ($this->clearTask)($manny, []);
-                ($this->registerMannyInSector)($manny, SectorManny::STATE_FORGOTTEN);
-                ($this->saveManny)($manny);
-
-                return ($this->findMannyById)($manny->id) ?? $manny;
-            }
-            if (!($this->placeMannyOnProbe)($probe, $manny)) {
-                ($this->waitForStorageSpace)($manny, ['reason' => 'return_to_probe']);
-                ($this->saveManny)($manny);
-
-                return ($this->findMannyById)($manny->id) ?? $manny;
-            }
-            ($this->removeMannyFromSector)($manny);
-            $manny->locationType = Manny::LOCATION_PROBE;
-            $manny->sector = null;
+        ($this->clearMannyCargo)($manny);
+        if (!$manny->isInSameSectorAs($probe)) {
             ($this->clearTask)($manny, []);
-        }
+            ($this->registerMannyInSector)($manny, SectorManny::STATE_FORGOTTEN);
+            ($this->saveManny)($manny);
 
-        if ($manny->currentTask === Manny::TASK_MINING) {
-            $nextTransition = ($this->nextMiningTransitionElapsedSeconds)(
-                $targetAmount,
-                $elapsed,
-                ($this->miningTaskTravelSeconds)($manny),
-            );
-            $manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] = $nextTransition === null
-                ? ($manny->taskEndsAt ?? $now->format('c'))
-                : (new \DateTimeImmutable($manny->taskStartedAt))->modify('+' . $nextTransition . ' seconds')->format('c');
-            $shouldSave = true;
+            return ($this->findMannyById)($manny->id) ?? $manny;
         }
+        if (!($this->placeMannyOnProbe)($probe, $manny)) {
+            ($this->waitForStorageSpace)($manny, ['reason' => 'return_to_probe']);
+            ($this->saveManny)($manny);
 
-        if (!$shouldSave) {
-            return $manny;
+            return ($this->findMannyById)($manny->id) ?? $manny;
         }
+        ($this->removeMannyFromSector)($manny);
+        $manny->locationType = Manny::LOCATION_PROBE;
+        $manny->sector = null;
+        ($this->clearTask)($manny, []);
 
         ($this->saveManny)($manny);
 

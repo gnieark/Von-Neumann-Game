@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '105'
+  version: '106'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -2656,9 +2656,9 @@ paths:
                     description: >
                       Recommended delay, in milliseconds, before polling this
                       endpoint again. It is the delay until the next observable
-                      scheduled Manny transition (including an intermediate
-                      mining transition), or 30000 when no task has a planned
-                      transition. When a scheduled transition is already due,
+                      scheduled Manny task deadline. Mining exposes a single
+                      final deadline, or 30000 when no task has a planned
+                      transition. When a scheduled deadline is already due,
                       a short settling delay is returned so clients do not
                       busy-poll while the scheduler worker processes it.
         '401':
@@ -5968,7 +5968,7 @@ components:
         depositedAmount:
           type: number
           minimum: 0
-          description: Amount already delivered to the probe.
+          description: Amount delivered by this task. It remains zero while terminal mining is active; extraction and delivery are applied atomically at completion.
         depositedResources:
           anyOf:
             - $ref: '#/components/schemas/ResourceAmountMap'
@@ -5977,7 +5977,7 @@ components:
         extractedAmount:
           type: number
           minimum: 0
-          description: Amount already extracted from the target.
+          description: Amount extracted by this task. It remains zero while terminal mining is active; extraction and delivery are applied atomically at completion.
         extractedResources:
           anyOf:
             - $ref: '#/components/schemas/ResourceAmountMap'
