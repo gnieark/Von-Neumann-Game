@@ -206,7 +206,7 @@ final class ApiKernel
             ApiRoute::path('/api/probe/atomic-printer/craft', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->atomicPrinterCraft($player, $ctx->body))),
             ApiRoute::path('/api/probe/messages/sent', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeSentMessagesResponse($player, $ctx->query))),
             ApiRoute::path('/api/probe/messages', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'POST'], $ctx->headers, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->probeMessageSendResponse($player, $ctx->body) : $this->probeMessagesResponse($player, $ctx->query))),
-            ApiRoute::path('/api/probe/alerts', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAlertsResponse($player))),
+            ApiRoute::path('/api/probe/alerts', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAlertsResponse($player, $ctx->query))),
             ApiRoute::path('/api/probe/damage-warnings', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeDamageWarningsResponse($player))),
             ApiRoute::path('/api/probe/visited-sectors', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeVisitedSectorsResponse($player))),
             ApiRoute::path('/api/probe/sector', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeSectorResponse($player))),
@@ -235,7 +235,7 @@ final class ApiKernel
                 ['GET', 'POST'],
             )),
             ApiRoute::regex('#^/api/probe/(\d+)/logbook-page$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeLogbookPageCreateResponse($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
-            ApiRoute::regex('#^/api/probe/(\d+)/alerts$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeAlertsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/alerts$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeAlertsResponse($player, $ctx->query, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeDamageWarningsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/visited-sectors$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeVisitedSectorsResponse($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/sector$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeSectorResponse($player, $probe), $ctx->intParam(0), ['GET'])),
@@ -924,13 +924,18 @@ final class ApiKernel
         if ($offset instanceof ApiResponse) {
             return $offset;
         }
+        $status = isset($query['status']) ? trim((string) $query['status']) : null;
+        if (!$sent && $status !== null && $status !== ProbeMessage::STATUS_UNREAD) {
+            return new ApiResponse(400, ['error' => 'status must be unread']);
+        }
+        $unreadOnly = !$sent && $status === ProbeMessage::STATUS_UNREAD;
 
         $messages = $sent
             ? $this->messages->sentByProbe($probe->id, $limit, $offset)
-            : $this->messages->receivedByProbe($probe->id, $limit, $offset);
+            : $this->messages->receivedByProbe($probe->id, $limit, $offset, $unreadOnly);
         $total = $sent
             ? $this->messages->countSentByProbe($probe->id)
-            : $this->messages->countReceivedByProbe($probe->id);
+            : $this->messages->countReceivedByProbe($probe->id, $unreadOnly);
 
         return new ApiResponse(200, [
             'messages' => array_map(
@@ -1080,10 +1085,14 @@ final class ApiKernel
         ]);
     }
 
-    private function probeAlertsResponse(Player $player, ?NeumannProbe $probe = null): ApiResponse
+    private function probeAlertsResponse(Player $player, array $query = [], ?NeumannProbe $probe = null): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
-        $alerts = $this->damageWarnings->findByProbeId($probe->id);
+        $status = isset($query['status']) ? trim((string) $query['status']) : null;
+        if ($status !== null && $status !== ProbeDamageWarning::STATUS_UNREAD) {
+            return new ApiResponse(400, ['error' => 'status must be unread']);
+        }
+        $alerts = $this->damageWarnings->findByProbeId($probe->id, $status === ProbeDamageWarning::STATUS_UNREAD);
 
         return new ApiResponse(200, [
             'alerts' => array_map(

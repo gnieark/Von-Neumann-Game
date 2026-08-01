@@ -798,9 +798,9 @@ async function syncNavigationWarnings() {
 
     const messages = await loadI18n();
     const [messageData, sectorData, alertData] = await Promise.all([
-        apiJson(probeApiPath("/messages") + "?limit=50&offset=0", {"method": "GET"}).catch(() => null),
+        apiJson(probeApiPath("/messages") + "?status=unread&limit=50&offset=0", {"method": "GET"}).catch(() => null),
         apiJson(probeApiPath("/sector"), {"method": "GET"}).catch(() => null),
-        apiJson(probeApiPath("/alerts"), {"method": "GET"}).catch(() => null),
+        apiJson(probeApiPath("/alerts") + "?status=unread", {"method": "GET"}).catch(() => null),
     ]);
 
     const persistentAlerts = Array.isArray(alertData && alertData.alerts) ? alertData.alerts : [];

@@ -3,6 +3,14 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-01
+
+### Changed
+- API : `GET /api/probe/{probeId}/messages` (et sa variante sur la sonde par défaut) accepte désormais `status=unread` pour ne retourner que les messages non lus.
+- Interface : le polling léger du voyant de messagerie ne charge plus que les messages non lus ; la page `/messaging` conserve sa liste complète et sa pagination.
+- API : `GET /api/probe/{probeId}/alerts` (et sa variante sur la sonde par défaut) accepte désormais `status=unread` pour ne retourner que les alertes non lues.
+- Interface : le polling léger du voyant d’alertes ne charge plus que les alertes non lues ; la page `/alerts` conserve sa liste complète.
+
 
 ## 2026-07-31
 

@@ -311,14 +311,19 @@ final class ProbeDamageWarningRepository
     /**
      * @return array<ProbeDamageWarning>
      */
-    public function findByProbeId(int $probeId): array
+    public function findByProbeId(int $probeId, bool $unreadOnly = false): array
     {
+        $statusClause = $unreadOnly ? ' AND status = :status' : '';
         $stmt = $this->pdo->prepare(
             'SELECT * FROM probe_damage_warnings
-             WHERE probe_id = :probe_id
+             WHERE probe_id = :probe_id' . $statusClause . '
              ORDER BY created_at DESC, id DESC'
         );
-        $stmt->execute(['probe_id' => $probeId]);
+        $parameters = ['probe_id' => $probeId];
+        if ($unreadOnly) {
+            $parameters['status'] = ProbeDamageWarning::STATUS_UNREAD;
+        }
+        $stmt->execute($parameters);
 
         return array_map(fn(array $row): ProbeDamageWarning => $this->hydrate($row), $stmt->fetchAll());
     }

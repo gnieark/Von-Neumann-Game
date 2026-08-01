@@ -986,6 +986,13 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: status
+          in: query
+          required: false
+          description: Set to `unread` to return only unread received messages.
+          schema:
+            type: string
+            enum: [unread]
       responses:
         '200':
           $ref: '#/paths/~1api~1probe~1messages/get/responses/200'
@@ -1200,6 +1207,13 @@ paths:
         detections.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
+        - name: status
+          in: query
+          required: false
+          description: Set to `unread` to return only unread alerts.
+          schema:
+            type: string
+            enum: [unread]
       responses:
         '200':
           $ref: '#/paths/~1api~1probe~1alerts/get/responses/200'
@@ -2014,6 +2028,14 @@ paths:
         intelligent-life detections when the probe arrives in a sector,
         instance-switch mind snapshot transfer notices, debug-injected sector
         object detections, and anomaly detections.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Set to `unread` to return only unread alerts.
+          schema:
+            type: string
+            enum: [unread]
       responses:
         '200':
           description: Current and past alerts for the authenticated probe

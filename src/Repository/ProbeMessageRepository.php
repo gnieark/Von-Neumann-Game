@@ -80,15 +80,19 @@ final class ProbeMessageRepository
     /**
      * @return array<ProbeMessage>
      */
-    public function receivedByProbe(int $probeId, int $limit = 50, int $offset = 0): array
+    public function receivedByProbe(int $probeId, int $limit = 50, int $offset = 0, bool $unreadOnly = false): array
     {
+        $statusClause = $unreadOnly ? ' AND status = :status' : '';
         $stmt = $this->pdo->prepare(
             'SELECT * FROM probe_messages
-             WHERE recipient_probe_id = :probe_id
+             WHERE recipient_probe_id = :probe_id' . $statusClause . '
              ORDER BY created_at DESC, id DESC
              LIMIT :limit OFFSET :offset'
         );
         $stmt->bindValue(':probe_id', $probeId, PDO::PARAM_INT);
+        if ($unreadOnly) {
+            $stmt->bindValue(':status', ProbeMessage::STATUS_UNREAD);
+        }
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
@@ -96,13 +100,18 @@ final class ProbeMessageRepository
         return array_map(fn(array $row): ProbeMessage => $this->hydrate($row), $stmt->fetchAll());
     }
 
-    public function countReceivedByProbe(int $probeId): int
+    public function countReceivedByProbe(int $probeId, bool $unreadOnly = false): int
     {
+        $statusClause = $unreadOnly ? ' AND status = :status' : '';
         $stmt = $this->pdo->prepare(
             'SELECT COUNT(*) FROM probe_messages
-             WHERE recipient_probe_id = :probe_id'
+             WHERE recipient_probe_id = :probe_id' . $statusClause
         );
-        $stmt->execute(['probe_id' => $probeId]);
+        $parameters = ['probe_id' => $probeId];
+        if ($unreadOnly) {
+            $parameters['status'] = ProbeMessage::STATUS_UNREAD;
+        }
+        $stmt->execute($parameters);
 
         return (int) $stmt->fetchColumn();
     }

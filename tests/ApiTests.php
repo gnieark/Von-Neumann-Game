@@ -473,6 +473,8 @@ $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, '<h2>Subsp
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
 $test->assert(is_string($mainTemplate) && str_contains($mainTemplate, 'id="nav-probe-select"'), 'main template exposes the active probe selector');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function probeApiPath'), 'main JS builds selected-probe API endpoints');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'probeApiPath("/messages") + "?status=unread&limit=50&offset=0"'), 'navigation warning polling requests unread messages only');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'probeApiPath("/alerts") + "?status=unread"'), 'navigation warning polling requests unread alerts only');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function routeBaseHref'), 'main JS normalizes selected-probe route links before adding a probe id');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'probeSelectorUnreachableLabel'), 'main JS labels unreachable probes in the active-probe selector');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'renderUnreachableProbeTelemetry'), 'main JS renders limited telemetry for probes outside SCUT reach');
@@ -1636,8 +1638,15 @@ $test->assertEquals(404, $deletedLogbookDetail->status, 'deleted logbook pages a
 $sameScutProbeAlert = $damageWarnings->createMannyReportAlert($sameSectorProbe->id, $sameSectorProbe->currentSector, 'remote-report', 'Remote report', 'Remote report ready.');
 $sameScutProbeAlerts = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeAlerts->status, 'GET /api/probe/{probeId}/alerts lists same-SCUT owned probe alerts');
+$sameScutProbeUnreadAlerts = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts?status=unread', $multiProbeHeaders);
+$test->assertEquals(200, $sameScutProbeUnreadAlerts->status, 'GET /api/probe/{probeId}/alerts accepts the unread status filter');
+$test->assertEquals([$sameScutProbeAlert->id], array_column($sameScutProbeUnreadAlerts->body['alerts'] ?? [], 'id'), 'unread alert filter only returns unread alerts');
 $sameScutProbeReadAlert = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/alerts/' . $sameScutProbeAlert->id, $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeReadAlert->status, 'PATCH /api/probe/{probeId}/alerts/{alertId} marks same-SCUT owned probe alerts read');
+$sameScutProbeUnreadAlertsAfterRead = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts?status=unread', $multiProbeHeaders);
+$test->assertEquals([], $sameScutProbeUnreadAlertsAfterRead->body['alerts'] ?? null, 'unread alert filter excludes alerts after they are marked read');
+$invalidAlertStatus = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts?status=read', $multiProbeHeaders);
+$test->assertEquals(400, $invalidAlertStatus->status, 'GET /api/probe/{probeId}/alerts rejects unsupported status filters');
 $nowForSameScutWarning = gmdate('c');
 $pdo->prepare(
     'INSERT INTO probe_damage_warnings
@@ -5407,6 +5416,19 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assertEquals(56, $defaultMessagePage->body['pagination']['total'] ?? null, 'default message page exposes the total available messages');
     $test->assertEquals(true, $defaultMessagePage->body['pagination']['hasMore'] ?? null, 'default message page reports older messages');
     $test->assertEquals('Archive message 55', $defaultMessagePage->body['messages'][0]['body'] ?? null, 'default message page is sorted newest first');
+
+    $unreadMessagePage = $kernel->handle('GET', '/api/probe/messages?status=unread', $stationaryHeaders);
+    $test->assertEquals(200, $unreadMessagePage->status, 'GET /api/probe/messages accepts the unread status filter');
+    $test->assertEquals(55, $unreadMessagePage->body['pagination']['total'] ?? null, 'unread message filter total excludes read messages');
+    $test->assert(
+        array_reduce($unreadMessagePage->body['messages'] ?? [], static fn(bool $allUnread, array $message): bool => $allUnread && ($message['status'] ?? null) === 'unread', true),
+        'unread message filter only returns unread messages',
+    );
+    $invalidMessageStatus = $kernel->handle('GET', '/api/probe/messages?status=read', $stationaryHeaders);
+    $test->assertEquals(400, $invalidMessageStatus->status, 'GET /api/probe/messages rejects unsupported status filters');
+    $scopedUnreadMessagePage = $kernel->handle('GET', '/api/probe/' . $stationaryNeighborProbe->id . '/messages?status=unread', $stationaryHeaders);
+    $test->assertEquals(200, $scopedUnreadMessagePage->status, 'GET /api/probe/{probeId}/messages accepts the unread status filter');
+    $test->assertEquals(55, $scopedUnreadMessagePage->body['pagination']['total'] ?? null, 'scoped unread message filter reports the filtered total');
 
     $olderMessagePage = $kernel->handle('GET', '/api/probe/messages?limit=10&offset=50', $stationaryHeaders);
     $olderMessageBodies = array_map(static fn(array $message): string => (string) ($message['body'] ?? ''), $olderMessagePage->body['messages'] ?? []);
