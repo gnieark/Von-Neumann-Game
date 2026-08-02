@@ -29,6 +29,7 @@ final class MannyPublicPresenter
         $taskVisibility = $this->taskVisibilityFor($probe, $manny);
         $currentTask = $manny->currentTask;
         $taskProgressPercent = $manny->taskProgressPercent();
+        $taskStartTime = $manny->taskStartedAt;
         $taskEstimatedEndTime = $manny->taskEndsAt;
         $task = $this->publicTaskPayload($manny);
         if ($taskVisibility === MannyService::TASK_VISIBILITY_TOO_FAR) {
@@ -36,6 +37,7 @@ final class MannyPublicPresenter
                 $currentTask = MannyService::PUBLIC_TASK_UNKNOWN_TOO_FAR;
             }
             $taskProgressPercent = 0.0;
+            $taskStartTime = null;
             $taskEstimatedEndTime = null;
             $task = [];
         }
@@ -48,6 +50,7 @@ final class MannyPublicPresenter
                 : ['type' => Manny::LOCATION_SECTOR, 'sector' => ['relative' => $relativeSector]],
             'currentTask' => $currentTask,
             'taskProgressPercent' => $taskProgressPercent,
+            'taskStartTime' => $taskStartTime,
             'taskEstimatedEndTime' => $taskEstimatedEndTime,
             'task' => $task,
             'taskVisibility' => $taskVisibility,

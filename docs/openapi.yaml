@@ -6042,7 +6042,7 @@ components:
           $ref: '#/components/schemas/ArtificialObjectDetection'
     Manny:
       type: object
-      required: [id, name, location, currentTask, taskProgressPercent, taskEstimatedEndTime, task, taskVisibility, cargo, canReceiveOrders]
+      required: [id, name, location, currentTask, taskProgressPercent, taskStartTime, taskEstimatedEndTime, task, taskVisibility, cargo, canReceiveOrders]
       properties:
         id:
           type: string
@@ -6061,6 +6061,11 @@ components:
           type: number
           minimum: 0
           maximum: 100
+        taskStartTime:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO-8601 start time for the current task, or null when idle or outside task telemetry range.
         taskEstimatedEndTime:
           type: string
           format: date-time

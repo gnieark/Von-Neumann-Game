@@ -4192,6 +4192,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals('too_far', $tooFarManny['taskVisibility'] ?? null, 'GET /api/probe/mannies marks remote out-of-SCUT Manny task telemetry as too far');
         $test->assertEquals([], $tooFarManny['task'] ?? null, 'GET /api/probe/mannies hides remote out-of-SCUT Manny task payload');
         $test->assertEquals(0.0, $tooFarManny['taskProgressPercent'] ?? null, 'GET /api/probe/mannies hides remote out-of-SCUT Manny task progress');
+        $test->assertEquals(null, $tooFarManny['taskStartTime'] ?? null, 'GET /api/probe/mannies hides remote out-of-SCUT Manny task start time');
         $test->assertEquals(null, $tooFarManny['taskEstimatedEndTime'] ?? null, 'GET /api/probe/mannies hides remote out-of-SCUT Manny task timing');
         $moveDetachProbe($detachProbe->currentSector);
         $hiddenMineRow = $pdo->prepare('SELECT task_started_at, task_ends_at FROM mannies WHERE uid = :uid');
@@ -5713,6 +5714,7 @@ $thirdMannyId = (string) ($mannyList->body['mannies'][2]['id'] ?? '');
 $fourthMannyId = (string) ($mannyList->body['mannies'][3]['id'] ?? '');
 $test->assert(str_starts_with($firstMannyId, 'mny_'), 'Manny public API id is a stable generated uid');
 $test->assertEquals('manny-1', $mannyList->body['mannies'][0]['name'] ?? null, 'default Manny names are player-facing names');
+$test->assert(array_key_exists('taskStartTime', $mannyList->body['mannies'][0] ?? []) && $mannyList->body['mannies'][0]['taskStartTime'] === null, 'idle Manny exposes a null task start time');
 $test->assert(array_key_exists('taskEstimatedEndTime', $mannyList->body['mannies'][0] ?? []) && $mannyList->body['mannies'][0]['taskEstimatedEndTime'] === null, 'idle Manny exposes a null task estimated end time');
 
 $batchPlayer = $auth->registerPlayerWithPassword('manny-batch-user', 'secret', 'Manny Batch User');
@@ -5945,8 +5947,17 @@ if ($createdProbe !== null) {
     $repairManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 2], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $repairManny->status, 'POST /api/probe/mannies/{id}/repair starts a real-time repair task');
     $test->assertEquals('repair', $repairManny->body['manny']['currentTask'] ?? null, 'repair task is exposed on Manny');
+    $test->assert(is_string($repairManny->body['manny']['taskStartTime'] ?? null), 'active repair exposes a task start time');
     $test->assert(is_string($repairManny->body['manny']['taskEstimatedEndTime'] ?? null), 'active repair exposes a task estimated end time');
     $activeRepairMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
+    $activeRepairManny = array_values(array_filter(
+        $activeRepairMannies->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $firstMannyId,
+    ))[0] ?? null;
+    $test->assertEquals($repairManny->body['manny']['taskStartTime'] ?? null, $activeRepairManny['taskStartTime'] ?? null, 'GET /api/probe/{probeId}/mannies exposes the active task start time');
+    $activeRepairDetail = $kernel->handle('GET', '/api/probe/' . $createdProbe->id . '/mannies/' . rawurlencode($firstMannyId), $headers);
+    $test->assertEquals(200, $activeRepairDetail->status, 'GET /api/probe/{probeId}/mannies/{mannyId} returns active Manny details');
+    $test->assertEquals($repairManny->body['manny']['taskStartTime'] ?? null, $activeRepairDetail->body['manny']['taskStartTime'] ?? null, 'GET /api/probe/{probeId}/mannies/{mannyId} exposes the active task start time');
     $repairRefreshDelay = $activeRepairMannies->body['nextUsefulRefreshDelayMs'] ?? null;
     $repairEndsAt = new DateTimeImmutable((string) ($repairManny->body['manny']['taskEstimatedEndTime'] ?? 'now'));
     $expectedRepairDelay = max(0, ($repairEndsAt->getTimestamp() - (new DateTimeImmutable('now', new DateTimeZone('UTC')))->getTimestamp()) * 1000);
