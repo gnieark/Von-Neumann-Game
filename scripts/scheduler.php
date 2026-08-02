@@ -19,10 +19,11 @@ $scheduler = $factory->schedulerService();
 $stats = $scheduler->processDueEvents($limit);
 
 echo sprintf(
-    "[%s] scheduled events: due=%d processed=%d failed=%d\n",
+    "[%s] scheduled events: due=%d processed=%d deferred=%d failed=%d\n",
     gmdate('c'),
     $stats['due'],
     $stats['processed'],
+    $stats['deferred'],
     $stats['failed'],
 );
 

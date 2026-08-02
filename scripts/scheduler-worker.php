@@ -54,14 +54,15 @@ while ($running) {
     }
     $stats = $scheduler->processDueEvents($limit);
 
-    if ($stats['processed'] > 0 || $stats['failed'] > 0) {
+    if ($stats['processed'] > 0 || $stats['deferred'] > 0 || $stats['failed'] > 0) {
         fwrite(
             $stats['failed'] > 0 ? STDERR : STDOUT,
             sprintf(
-                "[%s] scheduled events: due=%d processed=%d failed=%d\n",
+                "[%s] scheduled events: due=%d processed=%d deferred=%d failed=%d\n",
                 gmdate('c'),
                 $stats['due'],
                 $stats['processed'],
+                $stats['deferred'],
                 $stats['failed'],
             ),
         );

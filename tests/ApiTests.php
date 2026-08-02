@@ -552,6 +552,7 @@ $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'm
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-stats-podium-more'), 'stats view exposes top-nine expansion buttons');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-network-coverage-podium-title'), 'stats view exposes the SCUT network coverage podium');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-furthest-podium-title'), 'stats view exposes the furthest-from-home podium');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'data-stats-podium-extra hidden'), 'stats route renders extra ranking rows as hidden by default');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topVisitedPlayers'), 'stats route reads player-based explorer podium rows');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutRelayActivatorRows'), 'stats route renders SCUT relay activator rows');
@@ -1131,8 +1132,14 @@ $statsDistancePlayerTwo = $statsDistancePlayers->createPlayer('stats-distance-tw
 $statsDistanceProbes->createForPlayer($statsDistancePlayerOne->id, 'Stats Distance One Home', new SectorCoordinates(0, 0, 0));
 $statsDistanceProbes->createForPlayer($statsDistancePlayerOne->id, 'Stats Distance One Nearby', new SectorCoordinates(1, 1, 0));
 $statsDistanceProbes->createForPlayer($statsDistancePlayerTwo->id, 'Stats Distance Two Probe', new SectorCoordinates(4, 0, 0));
+$statsDistanceProbes->createForPlayer($statsDistancePlayerTwo->id, 'Stats Distance Two Far Probe', new SectorCoordinates(14, 0, 0));
 $statsDistanceStats = (new UniverseStatsService($statsDistancePdo, $tmp . DIRECTORY_SEPARATOR . 'stats-distance-universe'))->collect();
 $test->assertEquals(3, $statsDistanceStats['metrics']['closestProbeDistance'] ?? null, 'public stats closest-probe distance ignores probes owned by the same player');
+$topFurthestPlayers = $statsDistanceStats['metrics']['topFurthestPlayersFromHome'] ?? [];
+$test->assertEquals('Stats Distance Two', $topFurthestPlayers[0]['playerName'] ?? null, 'public stats furthest-from-home podium ranks players by their furthest probe');
+$test->assertEquals('Stats Distance Two Far Probe', $topFurthestPlayers[0]['probeName'] ?? null, 'public stats furthest-from-home podium identifies the relevant probe');
+$test->assertEquals(10, $topFurthestPlayers[0]['distance'] ?? null, 'public stats furthest-from-home podium exposes FCC sector distance');
+$test->assertEquals(1, count(array_filter($topFurthestPlayers, static fn(array $row): bool => ($row['playerName'] ?? null) === 'Stats Distance Two')), 'public stats furthest-from-home podium keeps one row per player');
 
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
 $pdo = $dbFactory->create();
@@ -1430,8 +1437,15 @@ $leaseOwnerA = new ScheduledEventRepository($pdo, 'test-worker-a');
 $leaseOwnerB = new ScheduledEventRepository($pdo, 'test-worker-b');
 $leaseEvent = $leaseOwnerA->schedule('test.lease', 'test', 1, gmdate('c', time() - 1));
 $claimedLeaseEvent = $leaseOwnerA->claim($leaseEvent) ?? throw new RuntimeException('Unable to claim lease test event.');
-$leaseOwnerB->markDone($claimedLeaseEvent);
+$foreignLeaseRejected = false;
+try {
+    $leaseOwnerB->markDone($claimedLeaseEvent);
+} catch (\VonNeumannGame\Repository\ScheduledEventLeaseLostException) {
+    $foreignLeaseRejected = true;
+}
+$test->assert($foreignLeaseRejected, 'another worker gets an explicit error when completing a claimed event');
 $test->assertEquals('running', $leaseOwnerA->findById($leaseEvent->id)?->status, 'another worker cannot complete a claimed event');
+$test->assert($leaseOwnerA->renewLease($claimedLeaseEvent), 'renewing a lease twice in the same second remains successful');
 $pdo->prepare('UPDATE scheduled_events SET locked_at = :locked_at WHERE id = :id')->execute([
     'id' => $leaseEvent->id,
     'locked_at' => '2000-01-01T00:00:00+00:00',

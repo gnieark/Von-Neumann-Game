@@ -9,6 +9,7 @@ use VonNeumannGame\Domain\ScheduledEvent;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
+use VonNeumannGame\Repository\ScheduledEventLeaseLostException;
 
 final class SchedulerService
 {
@@ -26,7 +27,7 @@ final class SchedulerService
     ) {}
 
     /**
-     * @return array{due:int, processed:int, failed:int}
+     * @return array{due:int, processed:int, deferred:int, failed:int}
      */
     public function processDueEvents(int $limit = 100): array
     {
@@ -34,6 +35,7 @@ final class SchedulerService
         $stats = [
             'due' => count($due),
             'processed' => 0,
+            'deferred' => 0,
             'failed' => 0,
         ];
 
@@ -44,13 +46,16 @@ final class SchedulerService
             }
 
             try {
-                if (!$this->events->renewLease($claimed)) {
-                    continue;
-                }
                 if ($this->process($claimed)) {
                     $this->events->markDone($claimed);
                     $stats['processed']++;
+                } else {
+                    $stats['deferred']++;
                 }
+            } catch (ScheduledEventLeaseLostException $error) {
+                // Continuing would claim more work while leaving the current event
+                // running. Stop the batch so systemd restarts a visibly failed worker.
+                throw $error;
             } catch (\Throwable $error) {
                 $this->events->markFailed($claimed, $error);
                 $stats['failed']++;

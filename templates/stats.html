@@ -29,6 +29,29 @@
         </div>
         <!-- END visitedPodiumMore -->
     </section>
+    <section class="stats-podium" aria-labelledby="stats-furthest-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-furthest-podium-title">{{t.statsTopFurthestPlayers}}</h2>
+            <p>{{t.statsTopFurthestPlayersHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN furthestPlayer -->
+            <li class="stats-podium-rank"{{furthestPlayer.extraAttributes}}>
+                <span>{{furthestPlayer.rank}}</span>
+                <strong>{{furthestPlayer.name}} — {{furthestPlayer.probeName}}</strong>
+                <b>{{furthestPlayer.distance}} {{furthestPlayer.distanceLabel}}</b>
+            </li>
+            <!-- END furthestPlayer -->
+            <!-- BEGIN emptyFurthestPodium -->
+            <li class="stats-podium-empty">{{t.statsTopFurthestPlayersEmpty}}</li>
+            <!-- END emptyFurthestPodium -->
+        </ol>
+        <!-- BEGIN furthestPodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END furthestPodiumMore -->
+    </section>
     <section class="stats-podium" aria-labelledby="stats-intelligent-life-podium-title">
         <div class="stats-podium-heading">
             <h2 id="stats-intelligent-life-podium-title">{{t.statsTopIntelligentLifeDiscoverers}}</h2>

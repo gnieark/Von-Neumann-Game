@@ -104,6 +104,14 @@ final class ScheduledEventRepository
              WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
         );
         $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'processed_at' => $now, 'updated_at' => $now]);
+        if ($stmt->rowCount() !== 1) {
+            $current = $this->findById($event->id);
+            // Some terminal handlers complete the linked event themselves or
+            // delete it through an entity cascade. Both outcomes are idempotent.
+            if ($current !== null && $current->status !== 'done') {
+                $this->throwLeaseLost($event, 'complete');
+            }
+        }
     }
 
     public function markDoneById(int $id): void
@@ -152,6 +160,7 @@ final class ScheduledEventRepository
             'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'updated_at' => $now,
         ]);
+        $this->assertOwnedTransition($stmt->rowCount(), $event, 'release');
     }
 
     public function markFailed(ScheduledEvent $event, \Throwable $error): void
@@ -169,6 +178,7 @@ final class ScheduledEventRepository
             'last_error' => substr($error->getMessage(), 0, 1000),
             'updated_at' => $now,
         ]);
+        $this->assertOwnedTransition($stmt->rowCount(), $event, 'fail');
     }
 
     public function cancelPending(string $type, string $entityType, int $entityId): int
@@ -207,7 +217,20 @@ final class ScheduledEventRepository
         );
         $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'locked_at' => $now, 'updated_at' => $now]);
 
-        return $stmt->rowCount() === 1;
+        if ($stmt->rowCount() === 1) {
+            return true;
+        }
+
+        // MariaDB reports zero affected rows when locked_at and updated_at already
+        // contain the current second. Verify ownership instead of treating that
+        // harmless no-op as a lost lease.
+        $check = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM scheduled_events
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+        );
+        $check->execute(['id' => $event->id, 'locked_by' => $this->workerId]);
+
+        return (int) $check->fetchColumn() === 1;
     }
 
     public function recoverExpiredLeases(string $expiredBefore): int
@@ -277,5 +300,23 @@ final class ScheduledEventRepository
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );
+    }
+
+    private function assertOwnedTransition(int $affectedRows, ScheduledEvent $event, string $action): void
+    {
+        if ($affectedRows === 1) {
+            return;
+        }
+
+        $this->throwLeaseLost($event, $action);
+    }
+
+    private function throwLeaseLost(ScheduledEvent $event, string $action): never
+    {
+        throw new ScheduledEventLeaseLostException(sprintf(
+            'Cannot %s scheduled event %d: worker lease is no longer owned.',
+            $action,
+            $event->id,
+        ));
     }
 }

@@ -37,6 +37,24 @@ class FrontRouteStats extends FrontRoute{
                 $tpl->addSubBlock(new TplBlock('visitedPodiumMore'));
             }
         }
+        $furthestPodium = $this->topFurthestPlayerRows($stats['metrics'], $translator);
+        if ($furthestPodium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyFurthestPodium'));
+        } else {
+            foreach ($furthestPodium as $index => $player) {
+                $tpl->addSubBlock((new TplBlock('furthestPlayer'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
+                    'rank' => self::e($player['rank']),
+                    'name' => self::e($player['name']),
+                    'probeName' => self::e($player['probeName']),
+                    'distance' => self::e($player['distance']),
+                    'distanceLabel' => self::e($player['distanceLabel']),
+                ]));
+            }
+            if (count($furthestPodium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('furthestPodiumMore'));
+            }
+        }
         $intelligentLifePodium = $this->topIntelligentLifeDiscovererRows($stats['metrics'], $translator);
         if ($intelligentLifePodium === []) {
             $tpl->addSubBlock(new TplBlock('emptyIntelligentLifePodium'));
@@ -164,6 +182,7 @@ class FrontRouteStats extends FrontRoute{
             'successfulMissions' => 0,
             'failedMissions' => 0,
             'topVisitedPlayers' => [],
+            'topFurthestPlayersFromHome' => [],
             'topVisitedProbes' => [],
             'topIntelligentLifeDiscoverers' => [],
             'topWaypointPlayers' => [],
@@ -215,6 +234,28 @@ class FrontRouteStats extends FrontRoute{
                     : (trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownPlayer')),
                 'visitedSectors' => $this->formatNumber($visitedSectors),
                 'visitedSectorsLabel' => $translator->get($visitedSectors > 1 ? 'statsVisitedSectorsPodiumPlural' : 'statsVisitedSectorsPodiumSingular'),
+            ];
+        }
+
+        return $podium;
+    }
+
+    /** @return array<int, array{rank:string,name:string,probeName:string,distance:string,distanceLabel:string}> */
+    private function topFurthestPlayerRows(array $metrics, Translator $translator): array
+    {
+        $rows = is_array($metrics['topFurthestPlayersFromHome'] ?? null) ? $metrics['topFurthestPlayersFromHome'] : [];
+        $podium = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $distance = max(0, (int) ($row['distance'] ?? 0));
+            $podium[] = [
+                'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
+                'name' => trim((string) ($row['playerName'] ?? '')) !== '' ? (string) $row['playerName'] : $translator->get('unknownPlayer'),
+                'probeName' => (string) ($row['probeName'] ?? ''),
+                'distance' => $this->formatNumber($distance),
+                'distanceLabel' => $translator->get($distance > 1 ? 'statsHomeDistancePlural' : 'statsHomeDistanceSingular'),
             ];
         }
 

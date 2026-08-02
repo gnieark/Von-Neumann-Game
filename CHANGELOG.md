@@ -1,5 +1,7 @@
 # Changelog
 
+- Correction du worker de planification : un renouvellement de lease effectué dans la même seconde n'est plus pris pour une perte de verrou MariaDB, les transitions de lease échouent désormais explicitement, et un script permet de récupérer les événements `running` pendant un arrêt contrôlé.
+
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
@@ -11,6 +13,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Performance : chaque placement d'objet ou de ressource calcule désormais une seule fois l'occupation globale et les transferts entrants réservés, puis réutilise cet instantané pour parcourir les containers candidats.
 - Fiabilité/performance : `ensureProbeStorage()` n'effectue plus de réparation opportuniste lors des lectures et placements. Une sonde neuve et vide reste initialisée normalement ; les containers manquants, inventaires orphelins et migrations de stocks passent désormais par l'opération explicite `repairProbeStorage()` du script de maintenance.
 - Fiabilité scheduler : les événements `running` portent désormais l'identifiant de leur worker et un bail renouvelable. Le worker récupère périodiquement les événements dont le bail a expiré, tandis que les transitions `done`, `failed` et `pending` vérifient encore la propriété du verrou.
+- Statistiques publiques : ajout d'un podium des joueurs selon la distance de leur sonde la plus éloignée par rapport à leur secteur de départ, sans exposer de coordonnées absolues.
 
 ## 2026-08-01
 

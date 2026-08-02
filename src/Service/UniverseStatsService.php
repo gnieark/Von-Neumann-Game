@@ -40,6 +40,7 @@ final class UniverseStatsService
         $missionStats = $this->missionTerminalStats();
 
         $topVisitedPlayers = $this->topVisitedPlayers();
+        $topFurthestPlayers = $this->topFurthestPlayersFromHome();
 
         return [
             'generatedAt' => gmdate('c'),
@@ -63,6 +64,7 @@ final class UniverseStatsService
                 'successfulMissions' => $missionStats['successful'],
                 'failedMissions' => $missionStats['failed'],
                 'topVisitedPlayers' => $topVisitedPlayers,
+                'topFurthestPlayersFromHome' => $topFurthestPlayers,
                 'topVisitedProbes' => $this->legacyTopVisitedProbeRows($topVisitedPlayers),
                 'topWaypointPlayers' => $waypointStats['topPlayers'],
                 'topIntelligentLifeDiscoverers' => $intelligentLifeStats['topDiscoverers'],
@@ -184,6 +186,56 @@ final class UniverseStatsService
                 'visitedSectors' => max(0, (int) $row['visited_count']),
             ];
         }, $rows, array_keys($rows));
+    }
+
+    /**
+     * @return array<int, array{rank:int, playerId:int, playerName:string, probeName:string, distance:int}>
+     */
+    private function topFurthestPlayersFromHome(): array
+    {
+        $stmt = $this->pdo->query(
+            'SELECT players.id AS player_id, players.username, players.display_name,
+                    players.home_sector_x, players.home_sector_y, players.home_sector_z,
+                    neumann_probes.id AS probe_id, neumann_probes.name AS probe_name,
+                    neumann_probes.sector_x, neumann_probes.sector_y, neumann_probes.sector_z
+             FROM players
+             INNER JOIN neumann_probes ON neumann_probes.player_id = players.id
+             WHERE neumann_probes.exclude_from_stats = 0
+             ORDER BY players.id ASC, neumann_probes.id ASC'
+        );
+        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $grid = new SectorGrid();
+        $furthestByPlayer = [];
+        foreach ($rows as $row) {
+            $distance = $grid->getDistance(
+                new SectorCoordinates((int) $row['home_sector_x'], (int) $row['home_sector_y'], (int) $row['home_sector_z']),
+                new SectorCoordinates((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z']),
+            );
+            $playerId = (int) $row['player_id'];
+            $current = $furthestByPlayer[$playerId] ?? null;
+            if ($current !== null && $distance <= $current['distance']) {
+                continue;
+            }
+            $displayName = trim((string) ($row['display_name'] ?? ''));
+            $furthestByPlayer[$playerId] = [
+                'playerId' => $playerId,
+                'playerName' => $displayName !== '' ? $displayName : (string) $row['username'],
+                'probeName' => (string) $row['probe_name'],
+                'distance' => $distance,
+            ];
+        }
+
+        usort($furthestByPlayer, static fn(array $a, array $b): int => (
+            ($b['distance'] <=> $a['distance'])
+            ?: strcasecmp($a['playerName'], $b['playerName'])
+            ?: ($a['playerId'] <=> $b['playerId'])
+        ));
+
+        return array_map(
+            static fn(array $row, int $index): array => ['rank' => $index + 1, ...$row],
+            array_slice($furthestByPlayer, 0, self::PUBLIC_RANKING_LIMIT),
+            array_keys(array_slice($furthestByPlayer, 0, self::PUBLIC_RANKING_LIMIT)),
+        );
     }
 
     /**
