@@ -8,6 +8,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-08-02
 
 ### Fixed
+- Interface : le rafraîchissement périodique de `/inventories` ne replie plus le formulaire de déplacement ou de détachement d’un container pendant sa saisie.
 - API/WebUI : les détachements et largages de containers refusent désormais avec `409 storage_container_reserved` tout container dont de l’espace est réservé pour le résultat d’un craft actif ; `/mannies` et l’inventaire affichent un message explicite.
 - Moteur : la finalisation d’un craft dont la réservation de stockage est devenue invalide termine désormais proprement la tâche Manny, libère la réservation et conserve `invalid_cargo_reservation` comme motif d’échec métier.
 

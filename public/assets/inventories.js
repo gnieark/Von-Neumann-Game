@@ -3,6 +3,7 @@
     const MIN_REFRESH_MS = 750;
     const REFRESH_CUSHION_MS = 500;
     const STORAGE_RULES_IDLE_PRESERVE_MS = 60000;
+    const INVENTORY_LINE_FORM_IDLE_PRESERVE_MS = 60000;
 
     const state = {
         currentInventory: null,
@@ -13,6 +14,7 @@
         storageRulesDirty: false,
         storageRulesTouchedAt: 0,
         storageRulesSignature: "",
+        inventoryLineFormTouchedAt: 0,
     };
 
     let i18n = {};
@@ -703,6 +705,9 @@
             node.innerHTML = "";
             return;
         }
+        if (shouldPreserveInventoryLineForm()) {
+            return;
+        }
 
         const stockCards = (Array.isArray(inventory.resourceStocks) ? inventory.resourceStocks : [])
             .map((stock) => {
@@ -821,6 +826,32 @@
         });
     }
 
+    function markInventoryLineFormTouched() {
+        state.inventoryLineFormTouchedAt = Date.now();
+    }
+
+    function inventoryLineFormOpen() {
+        return Boolean(document.querySelector(".inventory-move-form, .inventory-detach-container-form"));
+    }
+
+    function inventoryLineFormActive() {
+        return document.activeElement instanceof Element
+            && Boolean(document.activeElement.closest(".inventory-move-form, .inventory-detach-container-form"));
+    }
+
+    function shouldPreserveInventoryLineForm() {
+        return inventoryLineFormOpen()
+            && (inventoryLineFormActive() || Date.now() - state.inventoryLineFormTouchedAt < INVENTORY_LINE_FORM_IDLE_PRESERVE_MS);
+    }
+
+    function closeSubmittedInventoryLineForm(form) {
+        const slot = form.closest(".inventory-line-form-slot");
+        if (slot) {
+            slot.innerHTML = "";
+        }
+        state.inventoryLineFormTouchedAt = 0;
+    }
+
     async function ensureManniesLoaded() {
         if (!Array.isArray(state.currentMannies) || state.currentMannies.length === 0) {
             await loadMannies();
@@ -834,6 +865,7 @@
         }
         if (slot.querySelector(".inventory-move-form")) {
             slot.innerHTML = "";
+            state.inventoryLineFormTouchedAt = 0;
             return;
         }
         closeInventoryLineForms(slot);
@@ -871,6 +903,7 @@
             + "<button type=\"submit\"" + (hasFormChoices ? "" : " disabled aria-disabled=\"true\"") + ">" + window.VNG.escapeHtml(tr("moveStorageLine", "Move")) + "</button>"
             + (hasFormChoices ? "" : "<p class=\"inventory-muted\">" + window.VNG.escapeHtml(unavailableMessage) + "</p>")
             + "</form>";
+        markInventoryLineFormTouched();
     }
 
     async function renderDetachStorageContainerForm(line) {
@@ -880,6 +913,7 @@
         }
         if (slot.querySelector(".inventory-detach-container-form")) {
             slot.innerHTML = "";
+            state.inventoryLineFormTouchedAt = 0;
             return;
         }
         closeInventoryLineForms(slot);
@@ -926,6 +960,7 @@
             + "<button class=\"detach-storage-button\" type=\"submit\"" + (hasFormChoices ? "" : " disabled aria-disabled=\"true\"") + ">" + window.VNG.escapeHtml(tr("detachStorageContainerShort", "Detach")) + "</button>"
             + (hasFormChoices ? "" : "<p class=\"inventory-muted\">" + window.VNG.escapeHtml(unavailableMessage) + "</p>")
             + "</form>";
+        markInventoryLineFormTouched();
         updateDetachStorageContainerForm(slot.querySelector(".inventory-detach-container-form"));
     }
 
@@ -1311,6 +1346,7 @@
 
         if (event.target.classList.contains("inventory-detach-container-form")) {
             event.preventDefault();
+            const submittedForm = event.target;
             const order = detachStorageContainerPayloadFromForm(event.target);
             if (!order) {
                 setText("inventory-status", tr("invalidDetachStorageOrder", "Invalid container detachment order."));
@@ -1326,6 +1362,7 @@
                 }),
                 async () => {
                     setText("inventory-status", tr("detachStorageAccepted", "Container detachment assigned."));
+                    closeSubmittedInventoryLineForm(submittedForm);
                     await refreshInventoryPage();
                 }
             );
@@ -1334,6 +1371,7 @@
 
         if (event.target.classList.contains("inventory-move-form")) {
             event.preventDefault();
+            const submittedForm = event.target;
             const payload = storageMovePayloadFromForm(event.target);
             if (!payload) {
                 setText("inventory-status", tr("invalidStorageMove", "Invalid storage move order."));
@@ -1349,6 +1387,7 @@
                 }),
                 async (data) => {
                     setText("inventory-status", tr("storageMoveAccepted", "Storage move assigned."));
+                    closeSubmittedInventoryLineForm(submittedForm);
                     if (data.inventory) {
                         renderInventory(data.inventory);
                     }
@@ -1362,9 +1401,19 @@
         const panel = document.getElementById("systems-panel");
         panel?.addEventListener("click", handleInventoryClick);
         panel?.addEventListener("submit", handleInventorySubmit);
+        ["focusin", "pointerdown", "input"].forEach((eventName) => {
+            panel?.addEventListener(eventName, (event) => {
+                if (event.target instanceof Element && event.target.closest(".inventory-move-form, .inventory-detach-container-form")) {
+                    markInventoryLineFormTouched();
+                }
+            });
+        });
         panel?.addEventListener("change", (event) => {
             if (!(event.target instanceof Element)) {
                 return;
+            }
+            if (event.target.closest(".inventory-move-form, .inventory-detach-container-form")) {
+                markInventoryLineFormTouched();
             }
             const form = event.target.closest(".inventory-detach-container-form");
             if (form && panel.contains(form)) {

@@ -610,6 +610,8 @@ $test->assert(
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'function storageRulesDetailsOpen()'), 'inventories JS detects an opened storage-rules accordion');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'storageRulesSignature'), 'inventories JS detects externally changed storage rules');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"<details class=\"storage-rules\"" + (keepOpen ? " open" : "")'), 'inventories refresh preserves an opened storage-rules accordion');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'function shouldPreserveInventoryLineForm()'), 'inventories JS detects an active inline inventory action form');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'if (shouldPreserveInventoryLineForm())'), 'inventories refresh preserves an actively edited move or detach form');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'const excludedStorageRuleTypes = new Set'), 'inventories JS declares storage-rule filter exclusions');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '"atomic_3d_printer",') && str_contains($inventoriesScript, '"additional_container",'), 'inventories JS excludes atomic printers and additional containers from storage-rule filters');
 $test->assert(
@@ -804,7 +806,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260802-reserved-container-detach"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260802-inventory-line-form-preserve"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
