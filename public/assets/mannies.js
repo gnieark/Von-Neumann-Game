@@ -182,6 +182,13 @@
         if (isCraftForm && error && error.errorCode === "insufficient_cargo_capacity") {
             return tr("insufficientCraftStorage", "Insufficient storage for the crafted output.");
         }
+        const isContainerDetachForm = form && (
+            form.classList.contains("manny-detach-storage-container-form")
+            || form.classList.contains("manny-drop-storage-container-form")
+        );
+        if (isContainerDetachForm && error && error.errorCode === "storage_container_reserved") {
+            return tr("reservedStorageContainerDetach", "This container is reserved for an active craft and cannot be detached.");
+        }
 
         return (error && error.message) || tr("requestDenied", "Request denied");
     }

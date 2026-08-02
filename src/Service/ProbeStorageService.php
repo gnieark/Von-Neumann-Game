@@ -772,6 +772,19 @@ final class ProbeStorageService
             throw new MannyActionException(422, 'storage_container_not_detachable', 'Only additional storage containers can be detached.');
         }
 
+        foreach ($this->mannies->findCargoReservationsByProbeId($probe->id) as $reservation) {
+            if (
+                $reservation['containerId'] === $container->id
+                && $reservation['space'] > self::EPSILON
+            ) {
+                throw new MannyActionException(
+                    409,
+                    'storage_container_reserved',
+                    'This storage container has space reserved for an active crafting output and cannot be detached.',
+                );
+            }
+        }
+
         $containerItemUid = substr($container->uid, strlen('container-'));
         $containerItem = $this->items->findByUidForProbe($probe->id, $containerItemUid)
             ?? throw new MannyActionException(422, 'storage_container_not_detachable', 'The backing additional container item is missing.');

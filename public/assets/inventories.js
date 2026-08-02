@@ -49,7 +49,10 @@
                 return data;
             })
             .catch((error) => {
-                setText(statusId, error.message || tr("requestDenied", "Request denied"));
+                const message = error && error.errorCode === "storage_container_reserved"
+                    ? tr("reservedStorageContainerDetach", "This container is reserved for an active craft and cannot be detached.")
+                    : ((error && error.message) || tr("requestDenied", "Request denied"));
+                setText(statusId, message);
             });
     }
 

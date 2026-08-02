@@ -3036,6 +3036,8 @@ paths:
       description: >
         Starts a detaching_storage_container task on an idle onboard Manny.
         The target must be an additional storage container, never probe-core.
+        A container with space reserved for an active crafting output cannot
+        be detached; the API returns `409 storage_container_reserved`.
         The container, its stored resources/items, and routing rules are
         removed from the probe inventory when the order is accepted. On
         completion it becomes either a visible drifting detached container, a
@@ -3084,7 +3086,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Manny unavailable, probe moving, or probe no longer operational
+          description: Manny unavailable, probe moving, probe no longer operational, or container space reserved by an active craft (`storage_container_reserved`)
           content:
             application/json:
               schema:
@@ -3101,7 +3103,9 @@ paths:
       description: >
         Starts a dropping_storage_container task on an idle onboard Manny. The
         target must be a planet in the current sector and the probe inventory
-        must contain one atmospheric_drop_kit. The container, its stored
+        must contain one atmospheric_drop_kit. A container with space reserved
+        for an active crafting output cannot be dropped; the API returns
+        `409 storage_container_reserved`. The container, its stored
         resources/items, and routing rules are removed from the probe inventory
         when the order is accepted, and the drop kit is consumed. On completion
         the detached container is stored in sector JSON as attached to the
@@ -3144,7 +3148,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Manny unavailable, probe moving, or probe no longer operational
+          description: Manny unavailable, probe moving, probe no longer operational, or container space reserved by an active craft (`storage_container_reserved`)
           content:
             application/json:
               schema:

@@ -747,6 +747,10 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyAc
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupContainers'), 'mannies JS renders the containers action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupCraft'), 'mannies JS renders the craft action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'insufficientCraftStorage'), 'mannies JS translates cargo-capacity craft errors');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'storage_container_reserved'), 'mannies JS translates reserved-container detach errors');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'storage_container_reserved'), 'inventories JS translates reserved-container detach errors');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'Ce container est réservé"), 'French translations explain reserved-container detach conflicts');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'This container is reserved"), 'English translations explain reserved-container detach conflicts');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeApiPath("/probe-improvements-available")'), 'mannies JS loads selected-probe available probe improvements');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-improve-probe-form'), 'mannies JS renders the probe improvement form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/improve-probe'), 'mannies JS posts probe improvement orders');
@@ -3759,6 +3763,28 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(404, $detachMissing->status, 'detaching an unknown container is rejected');
         $test->assertEquals('invalid_storage_container', $detachMissing->body['error']['code'] ?? null, 'missing container detach returns a specific error');
 
+        $detachReservationOwner = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
+        if ($detachReservationOwner !== null) {
+            $detachReservationOwner->reservedCargoType = 'manny';
+            $detachReservationOwner->reservedCargoSpace = 0.05;
+            $detachReservationOwner->reservedStorageContainerId = $detachContainer->id;
+            $mannies->save($detachReservationOwner);
+        }
+        $detachReserved = $kernel->handle('POST', '/api/probe/' . $detachProbe->id . '/mannies/' . rawurlencode($detachMannyId) . '/detach-storage-container', $detachHeaders, json_encode([
+            'containerId' => $detachContainerId,
+            'mode' => 'drifting',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(409, $detachReserved->status, 'detaching a container reserved for a crafting output is rejected');
+        $test->assertEquals('storage_container_reserved', $detachReserved->body['error']['code'] ?? null, 'reserved container detach returns a stable error code');
+        $test->assertEquals('This storage container has space reserved for an active crafting output and cannot be detached.', $detachReserved->body['error']['message'] ?? null, 'reserved container detach explains the conflict');
+        $test->assert($storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId) !== null, 'rejected reserved container detach keeps the container attached');
+        if ($detachReservationOwner !== null) {
+            $detachReservationOwner->reservedCargoType = null;
+            $detachReservationOwner->reservedCargoSpace = 0.0;
+            $detachReservationOwner->reservedStorageContainerId = null;
+            $mannies->save($detachReservationOwner);
+        }
+
         $detachDrifting = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/detach-storage-container', $detachHeaders, json_encode([
             'containerId' => $detachContainerId,
             'mode' => 'drifting',
@@ -4421,6 +4447,26 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals('missing_atmospheric_drop_kit', $dropWithoutKit->body['error']['code'] ?? null, 'missing drop kit returns a specific error');
 
         $dropKit = $storage->addItem($detachProbe, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT, ProbeItem::ATMOSPHERIC_DROP_KIT_NAME, 0.08);
+        $dropReservedContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
+        if ($detachReservationOwner !== null && $dropReservedContainer !== null) {
+            $detachReservationOwner->reservedCargoType = 'manny';
+            $detachReservationOwner->reservedCargoSpace = 0.05;
+            $detachReservationOwner->reservedStorageContainerId = $dropReservedContainer->id;
+            $mannies->save($detachReservationOwner);
+        }
+        $dropReserved = $kernel->handle('POST', '/api/probe/' . $detachProbe->id . '/mannies/' . rawurlencode($detachMannyId) . '/drop-storage-container', $detachHeaders, json_encode([
+            'containerId' => $detachContainerId,
+            'planetId' => 'drop-target-planet',
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(409, $dropReserved->status, 'dropping a container reserved for a crafting output is rejected');
+        $test->assertEquals('storage_container_reserved', $dropReserved->body['error']['code'] ?? null, 'reserved container drop returns the same stable error code');
+        $test->assert($items->findByUidForProbe($detachProbe->id, $dropKit->uid) !== null, 'rejected reserved container drop does not consume the atmospheric drop kit');
+        if ($detachReservationOwner !== null) {
+            $detachReservationOwner->reservedCargoType = null;
+            $detachReservationOwner->reservedCargoSpace = 0.0;
+            $detachReservationOwner->reservedStorageContainerId = null;
+            $mannies->save($detachReservationOwner);
+        }
         $dropAccepted = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/drop-storage-container', $detachHeaders, json_encode([
             'containerId' => $detachContainerId,
             'planetId' => 'drop-target-planet',

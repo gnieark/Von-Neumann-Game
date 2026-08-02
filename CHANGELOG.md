@@ -1,5 +1,7 @@
 # Changelog
 
+- API/WebUI : les détachements et largages de containers refusent désormais avec `409 storage_container_reserved` tout container dont de l’espace est réservé pour le résultat d’un craft actif ; `/mannies` et l’inventaire affichent un message explicite.
+
 - Correction du worker de planification : un renouvellement de lease effectué dans la même seconde n'est plus pris pour une perte de verrou MariaDB, les transitions de lease échouent désormais explicitement, et un script permet de récupérer les événements `running` pendant un arrêt contrôlé.
 
 
