@@ -8,6 +8,7 @@ use PDO;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use VonNeumannGame\Domain\Mission;
+use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -193,7 +194,7 @@ final class UniverseStatsService
      */
     private function topFurthestPlayersFromHome(): array
     {
-        $stmt = $this->pdo->query(
+        $stmt = $this->pdo->prepare(
             'SELECT players.id AS player_id, players.username, players.display_name,
                     players.home_sector_x, players.home_sector_y, players.home_sector_z,
                     neumann_probes.id AS probe_id, neumann_probes.name AS probe_name,
@@ -201,9 +202,11 @@ final class UniverseStatsService
              FROM players
              INNER JOIN neumann_probes ON neumann_probes.player_id = players.id
              WHERE neumann_probes.exclude_from_stats = 0
+               AND neumann_probes.status <> :dead_status
              ORDER BY players.id ASC, neumann_probes.id ASC'
         );
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->execute(['dead_status' => ProbeStatus::Dead->value]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $grid = new SectorGrid();
         $furthestByPlayer = [];
         foreach ($rows as $row) {

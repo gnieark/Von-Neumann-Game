@@ -1137,6 +1137,9 @@ $statsDistancePlayerOne = $statsDistancePlayers->createPlayer('stats-distance-on
 $statsDistancePlayerTwo = $statsDistancePlayers->createPlayer('stats-distance-two', 'Stats Distance Two', null, new SectorCoordinates(4, 0, 0));
 $statsDistanceProbes->createForPlayer($statsDistancePlayerOne->id, 'Stats Distance One Home', new SectorCoordinates(0, 0, 0));
 $statsDistanceProbes->createForPlayer($statsDistancePlayerOne->id, 'Stats Distance One Nearby', new SectorCoordinates(1, 1, 0));
+$statsDistanceDeadProbe = $statsDistanceProbes->createForPlayer($statsDistancePlayerOne->id, 'Stats Distance One Dead', new SectorCoordinates(100, 0, 0));
+$statsDistanceDeadProbe->status = ProbeStatus::Dead;
+$statsDistanceProbes->save($statsDistanceDeadProbe);
 $statsDistanceProbes->createForPlayer($statsDistancePlayerTwo->id, 'Stats Distance Two Probe', new SectorCoordinates(4, 0, 0));
 $statsDistanceProbes->createForPlayer($statsDistancePlayerTwo->id, 'Stats Distance Two Far Probe', new SectorCoordinates(14, 0, 0));
 $statsDistanceStats = (new UniverseStatsService($statsDistancePdo, $tmp . DIRECTORY_SEPARATOR . 'stats-distance-universe'))->collect();
@@ -1145,6 +1148,7 @@ $topFurthestPlayers = $statsDistanceStats['metrics']['topFurthestPlayersFromHome
 $test->assertEquals('Stats Distance Two', $topFurthestPlayers[0]['playerName'] ?? null, 'public stats furthest-from-home podium ranks players by their furthest probe');
 $test->assertEquals('Stats Distance Two Far Probe', $topFurthestPlayers[0]['probeName'] ?? null, 'public stats furthest-from-home podium identifies the relevant probe');
 $test->assertEquals(10, $topFurthestPlayers[0]['distance'] ?? null, 'public stats furthest-from-home podium exposes FCC sector distance');
+$test->assert(!in_array('Stats Distance One Dead', array_column($topFurthestPlayers, 'probeName'), true), 'public stats furthest-from-home podium excludes dead probes');
 $test->assertEquals(1, count(array_filter($topFurthestPlayers, static fn(array $row): bool => ($row['playerName'] ?? null) === 'Stats Distance Two')), 'public stats furthest-from-home podium keeps one row per player');
 
 $dbFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $dbPath), $root);
