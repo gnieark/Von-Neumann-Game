@@ -1757,18 +1757,29 @@ final class MannyService implements MannyTaskRuntime
         try {
             $this->crafting->createCraftingOutput($probe, $manny, $now);
         } catch (MannyActionException $e) {
-            if ($e->errorCode !== 'insufficient_cargo_capacity') {
-                throw $e;
+            if ($e->errorCode === 'invalid_cargo_reservation') {
+                $failedTask = $manny->currentTask;
+                $this->clearTask($manny, array_merge($manny->taskPayload, [
+                    'lastTask' => $failedTask,
+                    'result' => 'failed',
+                    'failureReason' => $e->errorCode,
+                ]));
+                $this->mannies->save($manny);
+
+                return $this->mannies->findById($manny->id) ?? $manny;
+            }
+            if ($e->errorCode === 'insufficient_cargo_capacity') {
+                $manny->taskPayload = array_merge($manny->taskPayload, [
+                    'waitingFor' => 'storage_space',
+                    'reason' => 'crafting_output',
+                    'failureReason' => $e->errorCode,
+                ]);
+                $this->mannies->save($manny);
+
+                return $this->mannies->findById($manny->id) ?? $manny;
             }
 
-            $manny->taskPayload = array_merge($manny->taskPayload, [
-                'waitingFor' => 'storage_space',
-                'reason' => 'crafting_output',
-                'failureReason' => $e->errorCode,
-            ]);
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
+            throw $e;
         }
 
         $this->clearTask($manny);

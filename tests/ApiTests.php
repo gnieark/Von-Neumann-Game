@@ -804,7 +804,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260801-movement-cancel"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260802-reserved-container-detach"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -3416,6 +3416,55 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         static fn(Manny $candidate): bool => !in_array($candidate->id, $mannyIdsBeforeCraft, true),
     ));
     $test->assertEquals($mannyCraftReservation, $craftedMannies[0]->storageContainerId ?? null, 'completed Manny craft deposits directly into its reserved container');
+
+    $invalidReservationContainerItem = $storage->addItem(
+        $craftProbeEntity,
+        ProbeItem::TYPE_ADDITIONAL_CONTAINER,
+        ProbeItem::ADDITIONAL_CONTAINER_NAME,
+        0.0,
+        ['capacityBonus' => 1.0],
+    );
+    $invalidReservationContainer = $storageContainers->findByUidForProbe(
+        $craftProbeEntity->id,
+        'container-' . $invalidReservationContainerItem->uid,
+    );
+    $invalidReservationManny = $mannies->findById($craftMannyDbId);
+    if ($invalidReservationContainer !== null && $invalidReservationManny !== null) {
+        $invalidReservationManny->currentTask = Manny::TASK_CRAFTING;
+        $invalidReservationManny->taskStartedAt = gmdate('c', time() - 120);
+        $invalidReservationManny->taskEndsAt = gmdate('c', time() - 60);
+        $invalidReservationManny->taskPayload = [
+            'craftingRunId' => 'craft_missing_reserved_container',
+            'recipe' => 'steel_bar',
+            'output' => [
+                'type' => ProbeItem::TYPE_STEEL_BAR,
+                'name' => ProbeItem::STEEL_BAR_NAME,
+                'containerSpace' => 0.01,
+            ],
+        ];
+        $invalidReservationManny->reservedCargoType = ProbeItem::TYPE_STEEL_BAR;
+        $invalidReservationManny->reservedCargoSpace = 0.01;
+        $invalidReservationManny->reservedStorageContainerId = $invalidReservationContainer->id;
+        $mannies->save($invalidReservationManny);
+        $invalidReservationEventId = $invalidReservationManny->taskScheduledEventId;
+        $storageContainers->delete($invalidReservationContainer);
+        $items->delete($invalidReservationContainerItem);
+
+        $mannyService->refreshMannyState($invalidReservationManny, $craftProbeEntity);
+        $failedReservationManny = $mannies->findById($craftMannyDbId);
+        $test->assertEquals(null, $failedReservationManny?->currentTask, 'craft completion clears a task whose reserved container disappeared');
+        $test->assertEquals(null, $failedReservationManny?->taskScheduledEventId, 'failed reserved-container craft unlinks its scheduled event');
+        $test->assertEquals(null, $failedReservationManny?->reservedCargoType, 'failed reserved-container craft clears its reserved cargo type');
+        $test->assertEquals(0.0, $failedReservationManny?->reservedCargoSpace, 'failed reserved-container craft releases its reserved cargo space');
+        $test->assertEquals(null, $failedReservationManny?->reservedStorageContainerId, 'failed reserved-container craft clears its missing target container');
+        $test->assertEquals('failed', $failedReservationManny?->taskPayload['result'] ?? null, 'failed reserved-container craft records a terminal business failure');
+        $test->assertEquals('invalid_cargo_reservation', $failedReservationManny?->taskPayload['failureReason'] ?? null, 'failed reserved-container craft records the reservation failure reason');
+        if ($invalidReservationEventId !== null) {
+            $invalidReservationEventStatus = $pdo->prepare('SELECT status FROM scheduled_events WHERE id = :id');
+            $invalidReservationEventStatus->execute(['id' => $invalidReservationEventId]);
+            $test->assertEquals('done', $invalidReservationEventStatus->fetchColumn(), 'handled invalid cargo reservation completes rather than fails its scheduled event');
+        }
+    }
 
     $probeImprovements->markDone($craftProbeEntity->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
