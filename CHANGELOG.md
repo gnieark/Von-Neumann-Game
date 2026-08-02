@@ -1,13 +1,17 @@
 # Changelog
 
-- API/WebUI : les détachements et largages de containers refusent désormais avec `409 storage_container_reserved` tout container dont de l’espace est réservé pour le résultat d’un craft actif ; `/mannies` et l’inventaire affichent un message explicite.
-
-- Correction du worker de planification : un renouvellement de lease effectué dans la même seconde n'est plus pris pour une perte de verrou MariaDB, les transitions de lease échouent désormais explicitement, et un script permet de récupérer les événements `running` pendant un arrêt contrôlé.
 
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-08-02
+
+### Fixed
+- API/WebUI : les détachements et largages de containers refusent désormais avec `409 storage_container_reserved` tout container dont de l’espace est réservé pour le résultat d’un craft actif ; `/mannies` et l’inventaire affichent un message explicite.
+
+- Correction du worker de planification : un renouvellement de lease effectué dans la même seconde n'est plus pris pour une perte de verrou MariaDB, les transitions de lease échouent désormais explicitement, et un script permet de récupérer les événements `running` pendant un arrêt contrôlé.
+
+
 
 ### Changed
 - Performance/fiabilité : la sortie d'une fabrication Manny ou imprimante est désormais déposée directement dans le container réservé au lancement ; la réservation n'est libérée qu'après la création réussie, sans recalcul global de placement à l'échéance.
