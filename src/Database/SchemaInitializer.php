@@ -108,7 +108,6 @@ final class SchemaInitializer
                 task_started_at $nullableText,
                 task_ends_at $nullableText,
                 task_scheduled_event_id INTEGER NULL,
-                task_payload_json TEXT NOT NULL,
                 reserved_cargo_type $nullableText,
                 reserved_cargo_space $decimal NOT NULL DEFAULT 0,
                 reserved_storage_container_id INTEGER NULL,
@@ -402,6 +401,47 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_events_due ON scheduled_events(status, run_at)",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_events_entity ON scheduled_events(entity_type, entity_id)",
+            "CREATE TABLE IF NOT EXISTS manny_tasks (
+                id $id,
+                manny_id INTEGER NOT NULL UNIQUE,
+                scheduled_event_id INTEGER NOT NULL UNIQUE,
+                task_type $text NOT NULL,
+                recipe $nullableText,
+                crafting_run_id $nullableText,
+                resource_type $nullableText,
+                target_amount $decimal NULL,
+                extracted_amount $decimal NULL,
+                object_id $nullableText,
+                target_object_id $nullableText,
+                target_container_id $nullableText,
+                source_container_id $nullableText,
+                destination_container_id $nullableText,
+                target_probe_id INTEGER NULL,
+                relay_id INTEGER NULL,
+                improvement $nullableText,
+                result $nullableText,
+                failure_reason $nullableText,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                FOREIGN KEY(manny_id) REFERENCES mannies(id) ON DELETE CASCADE,
+                FOREIGN KEY(scheduled_event_id) REFERENCES scheduled_events(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_manny_tasks_type ON manny_tasks(task_type)",
+            "CREATE INDEX IF NOT EXISTS idx_manny_tasks_object ON manny_tasks(object_id)",
+            "CREATE TABLE IF NOT EXISTS manny_task_consumed_items (
+                id $id,
+                manny_task_id INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                uid $text NOT NULL,
+                type $text NOT NULL,
+                name $text NOT NULL,
+                container_space $decimal NOT NULL,
+                storage_container_id INTEGER NULL,
+                metadata_json TEXT NOT NULL,
+                UNIQUE(manny_task_id, sort_order),
+                FOREIGN KEY(manny_task_id) REFERENCES manny_tasks(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_manny_task_consumed_items_task ON manny_task_consumed_items(manny_task_id)",
             "CREATE TABLE IF NOT EXISTS scut_networks (
                 id $id,
                 name $text NOT NULL,
@@ -560,8 +600,6 @@ final class SchemaInitializer
             $this->ensureSqliteColumn($pdo, 'mannies', 'reserved_storage_container_id', 'INTEGER NULL');
             $this->ensureSqliteColumn($pdo, 'scheduled_events', 'locked_by', 'TEXT NULL');
             $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
-            $this->backfillMannyCraftingReservations($pdo);
-            $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
             if (!in_array('entered_current_sector_at', $names, true)) {
@@ -601,15 +639,13 @@ final class SchemaInitializer
             $this->ensureMysqlMannyProbeIdNullable($pdo);
             $this->ensureMysqlMannyCargoColumns($pdo);
             $this->ensureMysqlColumn($pdo, 'mannies', 'task_scheduled_event_id', 'INTEGER NULL AFTER task_ends_at');
-            $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_cargo_type', 'VARCHAR(255) NULL AFTER task_payload_json');
+            $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_cargo_type', 'VARCHAR(255) NULL AFTER task_scheduled_event_id');
             $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_cargo_space', 'DOUBLE NOT NULL DEFAULT 0 AFTER reserved_cargo_type');
             $this->ensureMysqlColumn($pdo, 'mannies', 'reserved_storage_container_id', 'INTEGER NULL AFTER reserved_cargo_space');
             $this->ensureMysqlColumn($pdo, 'scheduled_events', 'locked_by', 'VARCHAR(255) NULL AFTER locked_at');
             if (!$this->mysqlIndexExists($pdo, 'mannies', 'idx_mannies_task_scheduled_event_id')) {
                 $pdo->exec('CREATE INDEX idx_mannies_task_scheduled_event_id ON mannies(task_scheduled_event_id)');
             }
-            $this->backfillMannyCraftingReservations($pdo);
-            $this->migrateRepairTaskPayloads($pdo);
             $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
             $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
             if (!in_array('deuterium_stock', $names, true)) {

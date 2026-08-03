@@ -345,6 +345,7 @@ final class MannyCraftingService
 
     public function refundCraftingCommitment(NeumannProbe $probe, Manny $manny): void
     {
+        $this->mannies->loadConsumedItems($manny);
         $consumedItems = is_array($manny->taskPayload['consumedItems'] ?? null) ? $manny->taskPayload['consumedItems'] : [];
         foreach ($consumedItems as $item) {
             if (is_array($item)) {

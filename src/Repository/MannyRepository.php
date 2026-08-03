@@ -48,8 +48,8 @@ final class MannyRepository
         }
         $stmt = $this->pdo->prepare(
             'INSERT INTO mannies
-             (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_scheduled_event_id, task_payload_json, reserved_cargo_type, reserved_cargo_space, reserved_storage_container_id, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
-             VALUES (:uid, :probe_id, :storage_container_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :task_payload_json, NULL, 0, NULL, 0, 0, 0, 0, :created_at, :updated_at)'
+             (uid, probe_id, storage_container_id, name, location_type, sector_x, sector_y, sector_z, current_task, task_started_at, task_ends_at, task_scheduled_event_id, reserved_cargo_type, reserved_cargo_space, reserved_storage_container_id, cargo_deuterium, cargo_metals, cargo_ice, cargo_organic_compounds, created_at, updated_at)
+             VALUES (:uid, :probe_id, :storage_container_id, :name, :location_type, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, 0, 0, 0, 0, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
@@ -57,7 +57,6 @@ final class MannyRepository
             'storage_container_id' => $storageContainerId,
             'name' => $name,
             'location_type' => Manny::LOCATION_PROBE,
-            'task_payload_json' => '{}',
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -80,7 +79,7 @@ final class MannyRepository
      */
     public function findByProbeId(int $probeId): array
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM mannies WHERE probe_id = :probe_id ORDER BY name ASC, id ASC');
+        $stmt = $this->pdo->prepare($this->taskJoinSql('m.probe_id = :probe_id') . ' ORDER BY m.name ASC, m.id ASC');
         $stmt->execute(['probe_id' => $probeId]);
 
         return array_map(fn(array $row): Manny => $this->hydrate($row), $stmt->fetchAll());
@@ -145,11 +144,8 @@ final class MannyRepository
     public function findAtomicPrinterAssistantByProbeId(int $probeId): ?Manny
     {
         $stmt = $this->pdo->prepare(
-            'SELECT *
-             FROM mannies
-             WHERE probe_id = :probe_id AND current_task = :current_task
-             ORDER BY id ASC
-             LIMIT 1'
+            $this->taskJoinSql('m.probe_id = :probe_id AND m.current_task = :current_task') .
+            ' ORDER BY m.id ASC LIMIT 1'
         );
         $stmt->execute([
             'probe_id' => $probeId,
@@ -162,7 +158,7 @@ final class MannyRepository
 
     public function findByUidForProbe(int $probeId, string $uid): ?Manny
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM mannies WHERE probe_id = :probe_id AND uid = :uid');
+        $stmt = $this->pdo->prepare($this->taskJoinSql('m.probe_id = :probe_id AND m.uid = :uid'));
         $stmt->execute(['probe_id' => $probeId, 'uid' => $uid]);
         $row = $stmt->fetch();
 
@@ -171,7 +167,7 @@ final class MannyRepository
 
     public function findByUid(string $uid): ?Manny
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM mannies WHERE uid = :uid');
+        $stmt = $this->pdo->prepare($this->taskJoinSql('m.uid = :uid'));
         $stmt->execute(['uid' => $uid]);
         $row = $stmt->fetch();
 
@@ -194,7 +190,7 @@ final class MannyRepository
 
     public function findById(int $id): ?Manny
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM mannies WHERE id = :id');
+        $stmt = $this->pdo->prepare($this->taskJoinSql('m.id = :id'));
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch();
 
@@ -214,7 +210,7 @@ final class MannyRepository
         }
 
         try {
-            $sql = 'SELECT * FROM mannies WHERE id = :id';
+            $sql = $this->taskJoinSql('m.id = :id');
             if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
                 $sql .= ' FOR UPDATE';
             }
@@ -258,7 +254,6 @@ final class MannyRepository
     public function save(Manny $manny): void
     {
         $manny->updatedAt = gmdate('c');
-        $taskPayloadForMannyRow = $manny->taskPayload;
         if ($this->scheduledEvents !== null) {
             if ($manny->currentTask !== null) {
                 $runAt = is_string($manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null)
@@ -270,16 +265,21 @@ final class MannyRepository
                         'manny',
                         $manny->id,
                         $runAt,
-                        $manny->taskPayload,
+                        $this->eventPayload($manny->taskPayload),
                     );
                     $manny->taskScheduledEventId = $event->id;
                 } else {
-                    $this->scheduledEvents->updateRunAtAndPayload($manny->taskScheduledEventId, $runAt, $manny->taskPayload);
+                    $this->scheduledEvents->updateRunAtAndPayload($manny->taskScheduledEventId, $runAt, $this->eventPayload($manny->taskPayload));
                 }
-                $taskPayloadForMannyRow = [];
+                $this->saveTaskProjection($manny);
             } elseif ($manny->taskScheduledEventId !== null) {
+                $this->scheduledEvents->updateRunAtAndPayload(
+                    $manny->taskScheduledEventId,
+                    $manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT,
+                    $this->eventPayload($manny->taskPayload),
+                );
+                $this->saveTaskProjection($manny);
                 $this->scheduledEvents->markDoneById($manny->taskScheduledEventId);
-                $manny->taskScheduledEventId = null;
             }
         }
 
@@ -296,7 +296,6 @@ final class MannyRepository
                 task_started_at = :task_started_at,
                 task_ends_at = :task_ends_at,
                 task_scheduled_event_id = :task_scheduled_event_id,
-                task_payload_json = :task_payload_json,
                 reserved_cargo_type = :reserved_cargo_type,
                 reserved_cargo_space = :reserved_cargo_space,
                 reserved_storage_container_id = :reserved_storage_container_id,
@@ -320,7 +319,6 @@ final class MannyRepository
             'task_started_at' => $manny->taskStartedAt,
             'task_ends_at' => $manny->taskEndsAt,
             'task_scheduled_event_id' => $manny->taskScheduledEventId,
-            'task_payload_json' => $this->encodePayload($taskPayloadForMannyRow),
             'reserved_cargo_type' => $manny->reservedCargoType,
             'reserved_cargo_space' => $manny->reservedCargoSpace,
             'reserved_storage_container_id' => $manny->reservedStorageContainerId,
@@ -334,19 +332,14 @@ final class MannyRepository
 
     private function hydrate(array $row): Manny
     {
-        $payload = json_decode((string) ($row['task_payload_json'] ?? '{}'), true);
+        $payload = json_decode((string) ($row['active_task_payload_json'] ?? '{}'), true);
         if (!is_array($payload)) {
             $payload = [];
         }
         $taskScheduledEventId = isset($row['task_scheduled_event_id']) && $row['task_scheduled_event_id'] !== null
             ? (int) $row['task_scheduled_event_id']
             : null;
-        if ($taskScheduledEventId !== null && ($row['current_task'] ?? null) !== null) {
-            $scheduledPayload = $this->scheduledTaskPayload($taskScheduledEventId);
-            if ($scheduledPayload !== null) {
-                $payload = $scheduledPayload;
-            }
-        }
+        $payload = array_merge($payload, $this->operationalPayload($row));
 
         $sector = $row['sector_x'] === null || $row['sector_y'] === null || $row['sector_z'] === null
             ? null
@@ -363,7 +356,7 @@ final class MannyRepository
             $row['current_task'] !== null ? (string) $row['current_task'] : null,
             $row['task_started_at'] !== null ? (string) $row['task_started_at'] : null,
             $row['task_ends_at'] !== null ? (string) $row['task_ends_at'] : null,
-            $taskScheduledEventId,
+            ($row['current_task'] ?? null) !== null ? $taskScheduledEventId : null,
             $payload,
             isset($row['reserved_cargo_type']) && $row['reserved_cargo_type'] !== null ? (string) $row['reserved_cargo_type'] : null,
             (float) ($row['reserved_cargo_space'] ?? 0),
@@ -377,16 +370,132 @@ final class MannyRepository
         );
     }
 
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function scheduledTaskPayload(int $scheduledEventId): ?array
+    public function loadConsumedItems(Manny $manny): Manny
     {
-        $stmt = $this->pdo->prepare('SELECT payload_json FROM scheduled_events WHERE id = :id');
-        $stmt->execute(['id' => $scheduledEventId]);
-        $payload = json_decode((string) $stmt->fetchColumn(), true);
+        if ($manny->taskScheduledEventId === null || array_key_exists('consumedItems', $manny->taskPayload)) {
+            return $manny;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT i.uid, i.type, i.name, i.container_space, i.storage_container_id, i.metadata_json
+             FROM manny_task_consumed_items i
+             INNER JOIN manny_tasks t ON t.id = i.manny_task_id
+             WHERE t.scheduled_event_id = :event_id
+             ORDER BY i.sort_order ASC'
+        );
+        $stmt->execute(['event_id' => $manny->taskScheduledEventId]);
+        $items = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $metadata = json_decode((string) $row['metadata_json'], true);
+            $items[] = [
+                'uid' => (string) $row['uid'],
+                'type' => (string) $row['type'],
+                'name' => (string) $row['name'],
+                'containerSpace' => (float) $row['container_space'],
+                'storageContainerId' => $row['storage_container_id'] !== null ? (int) $row['storage_container_id'] : null,
+                'metadata' => is_array($metadata) ? $metadata : [],
+            ];
+        }
+        $manny->taskPayload['consumedItems'] = $items;
 
-        return is_array($payload) ? $payload : null;
+        return $manny;
+    }
+
+    private function taskJoinSql(string $where): string
+    {
+        return 'SELECT m.*, se.payload_json AS active_task_payload_json,
+                       mt.task_type AS projected_task_type, mt.recipe AS projected_recipe,
+                       mt.crafting_run_id AS projected_crafting_run_id,
+                       mt.resource_type AS projected_resource_type, mt.target_amount AS projected_target_amount,
+                       mt.extracted_amount AS projected_extracted_amount, mt.object_id AS projected_object_id,
+                       mt.target_object_id AS projected_target_object_id,
+                       mt.target_container_id AS projected_target_container_id,
+                       mt.source_container_id AS projected_source_container_id,
+                       mt.destination_container_id AS projected_destination_container_id,
+                       mt.target_probe_id AS projected_target_probe_id, mt.relay_id AS projected_relay_id,
+                       mt.improvement AS projected_improvement
+                FROM mannies m
+                LEFT JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
+                LEFT JOIN manny_tasks mt ON mt.scheduled_event_id = se.id
+                WHERE ' . $where;
+    }
+
+    /** @return array<string, mixed> */
+    private function eventPayload(array $payload): array
+    {
+        unset(
+            $payload['recipe'], $payload['craftingRunId'], $payload['resourceType'],
+            $payload['targetAmount'], $payload['extractedAmount'], $payload['objectId'],
+            $payload['targetObjectId'], $payload['targetContainerId'], $payload['fromContainerId'],
+            $payload['toContainerId'], $payload['targetProbeId'], $payload['relayId'],
+            $payload['improvement'], $payload['consumedItems']
+        );
+        return $payload;
+    }
+
+    /** @return array<string, mixed> */
+    private function operationalPayload(array $row): array
+    {
+        $map = [
+            'projected_recipe' => 'recipe', 'projected_crafting_run_id' => 'craftingRunId',
+            'projected_resource_type' => 'resourceType', 'projected_target_amount' => 'targetAmount',
+            'projected_extracted_amount' => 'extractedAmount', 'projected_object_id' => 'objectId',
+            'projected_target_object_id' => 'targetObjectId', 'projected_target_container_id' => 'targetContainerId',
+            'projected_source_container_id' => 'fromContainerId', 'projected_destination_container_id' => 'toContainerId',
+            'projected_target_probe_id' => 'targetProbeId', 'projected_relay_id' => 'relayId',
+            'projected_improvement' => 'improvement',
+        ];
+        $payload = [];
+        foreach ($map as $column => $key) {
+            if (array_key_exists($column, $row) && $row[$column] !== null) {
+                $payload[$key] = in_array($key, ['targetAmount', 'extractedAmount'], true) ? (float) $row[$column] : $row[$column];
+            }
+        }
+        return $payload;
+    }
+
+    private function saveTaskProjection(Manny $manny): void
+    {
+        if ($manny->taskScheduledEventId === null) {
+            return;
+        }
+        $taskType = $manny->currentTask;
+        if ($taskType === null) {
+            $existing = $this->pdo->prepare('SELECT task_type FROM manny_tasks WHERE manny_id = :manny_id');
+            $existing->execute(['manny_id' => $manny->id]);
+            $value = $existing->fetchColumn();
+            $taskType = $value !== false ? (string) $value : (string) ($manny->taskPayload['lastTask'] ?? 'completed');
+        }
+        $now = gmdate('c');
+        $values = [
+            'manny_id' => $manny->id, 'event_id' => $manny->taskScheduledEventId,
+            'task_type' => $taskType, 'recipe' => $manny->taskPayload['recipe'] ?? null,
+            'run_id' => $manny->taskPayload['craftingRunId'] ?? null, 'resource_type' => $manny->taskPayload['resourceType'] ?? null,
+            'target_amount' => $manny->taskPayload['targetAmount'] ?? null, 'extracted_amount' => $manny->taskPayload['extractedAmount'] ?? null,
+            'object_id' => $manny->taskPayload['objectId'] ?? null, 'target_object_id' => $manny->taskPayload['targetObjectId'] ?? null,
+            'target_container_id' => $manny->taskPayload['targetContainerId'] ?? null, 'source_container_id' => $manny->taskPayload['fromContainerId'] ?? null,
+            'destination_container_id' => $manny->taskPayload['toContainerId'] ?? null, 'target_probe_id' => $manny->taskPayload['targetProbeId'] ?? null,
+            'relay_id' => $manny->taskPayload['relayId'] ?? null, 'improvement' => $manny->taskPayload['improvement'] ?? null,
+            'created_at' => $now, 'updated_at' => $now,
+        ];
+        $columns = 'manny_id, scheduled_event_id, task_type, recipe, crafting_run_id, resource_type, target_amount, extracted_amount, object_id, target_object_id, target_container_id, source_container_id, destination_container_id, target_probe_id, relay_id, improvement, created_at, updated_at';
+        $params = ':manny_id, :event_id, :task_type, :recipe, :run_id, :resource_type, :target_amount, :extracted_amount, :object_id, :target_object_id, :target_container_id, :source_container_id, :destination_container_id, :target_probe_id, :relay_id, :improvement, :created_at, :updated_at';
+        $updates = 'task_type = :task_type, recipe = :recipe, crafting_run_id = :run_id, resource_type = :resource_type, target_amount = :target_amount, extracted_amount = :extracted_amount, object_id = :object_id, target_object_id = :target_object_id, target_container_id = :target_container_id, source_container_id = :source_container_id, destination_container_id = :destination_container_id, target_probe_id = :target_probe_id, relay_id = :relay_id, improvement = :improvement, updated_at = :updated_at';
+        $sql = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? "INSERT INTO manny_tasks ($columns) VALUES ($params) ON CONFLICT(manny_id) DO UPDATE SET scheduled_event_id = :event_id, $updates"
+            : "INSERT INTO manny_tasks ($columns) VALUES ($params) ON DUPLICATE KEY UPDATE scheduled_event_id = :event_id, $updates";
+        $this->pdo->prepare($sql)->execute($values);
+
+        if (array_key_exists('consumedItems', $manny->taskPayload)) {
+            $taskIdStmt = $this->pdo->prepare('SELECT id FROM manny_tasks WHERE manny_id = :manny_id');
+            $taskIdStmt->execute(['manny_id' => $manny->id]);
+            $taskId = (int) $taskIdStmt->fetchColumn();
+            $this->pdo->prepare('DELETE FROM manny_task_consumed_items WHERE manny_task_id = :task_id')->execute(['task_id' => $taskId]);
+            $insert = $this->pdo->prepare('INSERT INTO manny_task_consumed_items (manny_task_id, sort_order, uid, type, name, container_space, storage_container_id, metadata_json) VALUES (:task_id, :sort_order, :uid, :type, :name, :space, :container_id, :metadata)');
+            foreach (array_values(is_array($manny->taskPayload['consumedItems']) ? $manny->taskPayload['consumedItems'] : []) as $order => $item) {
+                if (!is_array($item)) continue;
+                $insert->execute(['task_id'=>$taskId,'sort_order'=>$order,'uid'=>(string)($item['uid']??''),'type'=>(string)($item['type']??''),'name'=>(string)($item['name']??''),'space'=>(float)($item['containerSpace']??0),'container_id'=>$item['storageContainerId']??null,'metadata'=>json_encode(is_array($item['metadata']??null)?$item['metadata']:[], JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)]);
+            }
+        }
     }
 
     private function uniqueUid(): string

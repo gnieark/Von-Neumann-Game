@@ -635,3 +635,5 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Breaking Changes
 
 - Les clients typés doivent accepter `apiVersion: 14`, le champ `inventory.containers`, les placements de stock par container et la nouvelle tâche Manny `moving_stockage`.
+- Stockage Manny : suppression de `mannies.task_payload_json`; les payloads canoniques sont joints depuis `scheduled_events`, les champs opérationnels sont projetés dans `manny_tasks` et les items consommés sont stockés dans `manny_task_consumed_items`. Exécuter `php scripts/one-shot-scripts/migrate-manny-task-storage.php --database-config=var/database-prod.json` avant de déployer le nouveau code.
+- Scheduler : le claim d’un événement réutilise désormais l’objet déjà hydraté et ne relit plus la ligne ni son JSON après l’acquisition du verrou.

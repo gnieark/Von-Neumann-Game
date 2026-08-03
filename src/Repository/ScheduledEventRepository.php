@@ -37,7 +37,7 @@ final class ScheduledEventRepository
             'entity_id' => $entityId,
             'run_at' => $runAt,
             'status' => 'pending',
-            'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'payload_json' => json_encode($this->persistedPayload($type, $payload), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -91,8 +91,13 @@ final class ScheduledEventRepository
         if ($stmt->rowCount() !== 1) {
             return null;
         }
+        $event->status = 'running';
+        $event->lockedAt = $now;
+        $event->lockedBy = $this->workerId;
+        $event->attempts++;
+        $event->updatedAt = $now;
 
-        return $this->findById($event->id);
+        return $event;
     }
 
     public function markDone(ScheduledEvent $event): void
@@ -140,7 +145,7 @@ final class ScheduledEventRepository
         $stmt->execute([
             'id' => $id,
             'run_at' => $runAt,
-            'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'payload_json' => json_encode($this->persistedPayload('manny.task', $payload), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'updated_at' => $now,
         ]);
     }
@@ -157,7 +162,7 @@ final class ScheduledEventRepository
             'id' => $event->id,
             'locked_by' => $this->workerId,
             'run_at' => $runAt,
-            'payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'payload_json' => json_encode($this->persistedPayload($event->type, $payload), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'updated_at' => $now,
         ]);
         $this->assertOwnedTransition($stmt->rowCount(), $event, 'release');
@@ -300,6 +305,18 @@ final class ScheduledEventRepository
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );
+    }
+
+    /** @return array<string, mixed> */
+    private function persistedPayload(string $type, array $payload): array
+    {
+        if ($type !== 'manny.task') {
+            return $payload;
+        }
+        foreach (['recipe','craftingRunId','resourceType','targetAmount','extractedAmount','objectId','targetObjectId','targetContainerId','fromContainerId','toContainerId','targetProbeId','relayId','improvement','consumedItems'] as $key) {
+            unset($payload[$key]);
+        }
+        return $payload;
     }
 
     private function assertOwnedTransition(int $affectedRows, ScheduledEvent $event, string $action): void
