@@ -375,13 +375,11 @@ final class ProbeReinstantiationService
                  task_started_at = NULL,
                  task_ends_at = NULL,
                  task_scheduled_event_id = NULL,
-                 task_payload_json = :task_payload_json,
                  updated_at = :updated_at
              WHERE id = :id',
             [
                 'id' => $manny->id,
                 'location_type' => Manny::LOCATION_SECTOR,
-                'task_payload_json' => '{}',
                 'updated_at' => gmdate('c'),
             ],
         );

@@ -136,6 +136,18 @@ final class TestRunner
     }
 }
 
+function mannyTaskConsumedItemCount(PDO $pdo, string $mannyUid): int
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM manny_task_consumed_items i
+         INNER JOIN manny_tasks t ON t.id = i.manny_task_id
+         INNER JOIN mannies m ON m.id = t.manny_id
+         WHERE m.uid = :uid'
+    );
+    $stmt->execute(['uid' => $mannyUid]);
+    return (int) $stmt->fetchColumn();
+}
+
 final class RecordingRedisScriptExecutor implements RedisScriptExecutor
 {
     public string $script = '';
@@ -3537,20 +3549,18 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $reservedMoveItemA->uid)?->storageContainerId, 'completed reserved storage move uses the last free destination capacity');
         $test->assertEquals($coreStorageContainer->id, $items->findByUidForProbe($craftProbeEntity->id, $reservedMoveItemB->uid)?->storageContainerId, 'rejected reserved storage move leaves the second item in its source container');
 
-        $pdo->prepare('UPDATE mannies SET current_task = :task, task_started_at = :started, task_ends_at = :ended, task_payload_json = :payload WHERE uid = :uid')->execute([
-            'uid' => $craftMannyId,
-            'task' => 'moving_stockage',
-            'started' => gmdate('c', time() - 120),
-            'ended' => gmdate('c', time() - 60),
-            'payload' => json_encode([
-                'kind' => 'resource',
-                'fromContainerId' => 'probe-core',
+        $failedMoveSetup = $mannies->findByUidForProbe($craftProbeEntity->id, $craftMannyId);
+        if ($failedMoveSetup !== null) {
+            $failedMoveSetup->currentTask = 'moving_stockage';
+            $failedMoveSetup->taskStartedAt = gmdate('c', time() - 120);
+            $failedMoveSetup->taskEndsAt = gmdate('c', time() - 60);
+            $failedMoveSetup->taskPayload = [
+                'kind' => 'resource', 'fromContainerId' => 'probe-core',
                 'toContainerId' => $additionalStorageContainer['id'] ?? '',
-                'resourceType' => 'ice',
-                'amount' => 0.3,
-                'durationSeconds' => 60,
-            ], JSON_THROW_ON_ERROR),
-        ]);
+                'resourceType' => 'ice', 'amount' => 0.3, 'durationSeconds' => 60,
+            ];
+            $mannies->save($failedMoveSetup);
+        }
         $failedStorageMoveRefresh = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals(200, $failedStorageMoveRefresh->status, 'expired impossible storage moves do not break Manny refresh');
         $failedStorageMoveManny = $mannies->findByUidForProbe($craftProbeEntity->id, $craftMannyId);
@@ -5814,7 +5824,7 @@ if ($createdProbe !== null) {
     $repairRow->execute(['uid' => $firstMannyId]);
     $repairMannyDbId = (int) $repairRow->fetchColumn();
     $repairEventRow = $pdo->prepare(
-        'SELECT m.task_scheduled_event_id, m.task_payload_json, se.type, se.entity_type, se.entity_id, se.status, se.payload_json
+        'SELECT m.task_scheduled_event_id, se.type, se.entity_type, se.entity_id, se.status, se.payload_json
          FROM mannies m
          LEFT JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
          WHERE m.id = :id'
@@ -5824,7 +5834,8 @@ if ($createdProbe !== null) {
     $repairEventId = (int) ($repairEvent['task_scheduled_event_id'] ?? 0);
     $repairEventPayload = json_decode((string) ($repairEvent['payload_json'] ?? '{}'), true);
     $test->assert($repairEventId > 0, 'started Manny task stores a scheduled event id');
-    $test->assertEquals('{}', $repairEvent['task_payload_json'] ?? null, 'active Manny task payload is moved out of the mannies row');
+    $mannyColumns = array_column($pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+    $test->assert(!in_array('task_payload_json', $mannyColumns, true), 'Manny rows no longer contain task payload JSON');
     $test->assertEquals(SchedulerService::MANNY_TASK, $repairEvent['type'] ?? null, 'started Manny task creates a manny.task scheduled event');
     $test->assertEquals('manny', $repairEvent['entity_type'] ?? null, 'Manny scheduled event targets the Manny entity');
     $test->assertEquals($repairMannyDbId, (int) ($repairEvent['entity_id'] ?? 0), 'Manny scheduled event stores the Manny database id');
@@ -6067,7 +6078,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $improveManny->status, 'POST /api/probe/mannies/{id}/improve-probe starts a probe improvement task');
     $test->assertEquals('improving_probe', $improveManny->body['manny']['currentTask'] ?? null, 'probe improvement task is exposed on Manny');
     $test->assertEquals(300, $improveManny->body['manny']['task']['durationSeconds'] ?? null, 'deuterium compression takes five minutes');
-    $test->assertEquals(3, count($improveManny->body['manny']['task']['consumedItems'] ?? []), 'probe improvement task exposes the consumed components');
+    $test->assertEquals(3, mannyTaskConsumedItemCount($pdo, $improvementMannyId), 'probe improvement stores consumed components relationally');
     $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementMotor->uid), 'probe improvement consumes its electric motor');
     $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementBarA->uid), 'probe improvement consumes its first steel bar');
     $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $improvementBarB->uid), 'probe improvement consumes its second steel bar');
@@ -6195,7 +6206,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('sector', $assembleProbe->body['manny']['location']['type'] ?? null, 'probe assembly moves the Manny outside the probe');
     $test->assertEquals(10800, $assembleProbe->body['manny']['task']['durationSeconds'] ?? null, 'probe assembly lasts three hours');
     $test->assertEquals(ProbeModel::GENERIC, $assembleProbe->body['manny']['task']['model'] ?? null, 'omitting the assembly model selects the generic probe model');
-    $test->assertEquals(13, count($assembleProbe->body['manny']['task']['consumedItems'] ?? []), 'probe assembly consumes all required components');
+    $test->assertEquals(13, mannyTaskConsumedItemCount($pdo, $assemblyMannyId), 'probe assembly stores all consumed components relationally');
     $test->assertEquals(2, count($assembleProbe->body['manny']['task']['consumedContainers'] ?? []), 'probe assembly consumes the two selected containers');
     $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdA) === null, 'accepted probe assembly removes the first ingredient container immediately');
     $test->assert($storageContainers->findByUidForProbe($assemblyProbe->id, $assemblyContainerIdB) === null, 'accepted probe assembly removes the second ingredient container immediately');
@@ -6250,7 +6261,7 @@ if ($createdProbe !== null) {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $assembleTanker->status, 'probe assembly accepts the deuterium tanker model');
     $test->assertEquals(ProbeModel::DEUTERIUM_TANKER, $assembleTanker->body['manny']['task']['model'] ?? null, 'tanker model is persisted in the assembly task');
-    $test->assertEquals(26, count($assembleTanker->body['manny']['task']['consumedItems'] ?? []), 'tanker assembly consumes the generic recipe plus thirteen specialized components');
+    $test->assertEquals(13, mannyTaskConsumedItemCount($pdo, $assemblyMannyId), 'tanker assembly stores its consumed specialized components relationally');
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $tankerMannyDbId,
         'ended' => gmdate('c', time() - 1),
@@ -6767,7 +6778,6 @@ if ($createdProbe !== null) {
              current_task = :current_task,
              task_started_at = :started,
              task_ends_at = :ended,
-             task_payload_json = :payload,
              cargo_deuterium = 0,
              cargo_metals = 0.45,
              cargo_ice = 0,
@@ -6782,7 +6792,6 @@ if ($createdProbe !== null) {
         'current_task' => 'returning',
         'started' => gmdate('c', time() - 1800),
         'ended' => gmdate('c', time() - 1),
-        'payload' => json_encode(['reason' => 'test_return'], JSON_THROW_ON_ERROR),
     ]);
     $waitingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $waitingFourth = array_values(array_filter(
@@ -6815,7 +6824,6 @@ if ($createdProbe !== null) {
              current_task = :current_task,
              task_started_at = :started,
              task_ends_at = :ended,
-             task_payload_json = :payload,
              cargo_deuterium = 0,
              cargo_metals = 0,
              cargo_ice = 0,
@@ -6830,7 +6838,6 @@ if ($createdProbe !== null) {
         'current_task' => 'returning',
         'started' => gmdate('c', time() - 1800),
         'ended' => gmdate('c', time() - 1),
-        'payload' => json_encode(['reason' => 'test_return'], JSON_THROW_ON_ERROR),
     ]);
     $waitingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $waitingFourth = array_values(array_filter(
@@ -7015,7 +7022,6 @@ if ($createdProbe !== null) {
              current_task = :current_task,
              task_started_at = :started,
              task_ends_at = NULL,
-             task_payload_json = :payload,
              cargo_deuterium = 0,
              cargo_metals = 0,
              cargo_ice = 0,
@@ -7029,7 +7035,10 @@ if ($createdProbe !== null) {
         'sector_z' => $createdProbe->currentSector->getZ(),
         'current_task' => 'waiting_for_space',
         'started' => gmdate('c'),
-        'payload' => json_encode([
+    ]);
+    $waitingSalvageSetup = $mannies->findByUidForProbe($createdProbe->id, $firstMannyId);
+    if ($waitingSalvageSetup !== null) {
+        $waitingSalvageSetup->taskPayload = [
             'reason' => 'salvage_return',
             'waitingFor' => 'storage_space',
             'salvaged' => [
@@ -7037,8 +7046,9 @@ if ($createdProbe !== null) {
                 'id' => $fourthMannyId,
                 'name' => $recoveredManny?->name,
             ],
-        ], JSON_THROW_ON_ERROR),
-    ]);
+        ];
+        $mannies->save($waitingSalvageSetup);
+    }
     $dropSalvagedMannyCargo = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/drop-manny-cargo', $headers, json_encode([], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $dropSalvagedMannyCargo->status, 'dropping a salvaged Manny cargo is accepted');
     $test->assertEquals('probe', $dropSalvagedMannyCargo->body['manny']['location']['type'] ?? null, 'salvage actor retries docking after dropping Manny cargo');
@@ -7178,8 +7188,7 @@ if ($moveProbe !== null) {
              sector_z = :sector_z,
              current_task = NULL,
              task_started_at = NULL,
-             task_ends_at = NULL,
-             task_payload_json = :payload
+             task_ends_at = NULL
          WHERE uid = :uid'
     )->execute([
         'uid' => $firstMannyId,
@@ -7187,7 +7196,6 @@ if ($moveProbe !== null) {
         'sector_x' => $originBeforeMove->getX(),
         'sector_y' => $originBeforeMove->getY(),
         'sector_z' => $originBeforeMove->getZ(),
-        'payload' => '{}',
     ]);
     $startMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $startMove->status, 'POST /api/probe/move starts movement with 202');
@@ -7631,8 +7639,7 @@ if ($secondaryLossDefaultProbe !== null) {
              sector_z = :sector_z,
              current_task = :current_task,
              task_started_at = :task_started_at,
-             task_ends_at = :task_ends_at,
-             task_payload_json = :task_payload_json
+             task_ends_at = :task_ends_at
          WHERE id = :id'
     )->execute([
         'id' => $secondaryLossOutsideManny->id,
@@ -7643,7 +7650,6 @@ if ($secondaryLossDefaultProbe !== null) {
         'current_task' => Manny::TASK_MINING,
         'task_started_at' => gmdate('c', time() - 60),
         'task_ends_at' => gmdate('c', time() + 600),
-        'task_payload_json' => '{}',
     ]);
     $visitedBeforeSecondaryLoss = count($visitedSectors->listVisited($secondaryLossPlayer));
 

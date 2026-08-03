@@ -754,7 +754,7 @@ function userinfosMannySummary(array $manny): array
         'taskStartedAt' => $manny['task_started_at'],
         'taskEndsAt' => $manny['task_ends_at'],
         'taskScheduledEventId' => $manny['task_scheduled_event_id'] !== null ? (int) $manny['task_scheduled_event_id'] : null,
-        'taskPayload' => userinfosJsonObject($manny['active_task_payload_json'] ?? $manny['task_payload_json'] ?? '{}'),
+        'taskPayload' => userinfosJsonObject($manny['active_task_payload_json'] ?? '{}'),
         'cargo' => [
             'deuterium' => round((float) ($manny['cargo_deuterium'] ?? 0.0), 4),
             'metals' => round((float) ($manny['cargo_metals'] ?? 0.0), 4),

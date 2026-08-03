@@ -236,6 +236,7 @@ final class MannyCargoService
      */
     public function restoreProbeAssemblyIngredientsAsDrifting(Manny $manny): array
     {
+        $this->mannies->loadConsumedItems($manny);
         if ($manny->sector === null) {
             return [];
         }
