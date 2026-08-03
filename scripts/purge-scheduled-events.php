@@ -7,7 +7,7 @@ use VonNeumannGame\AppFactory;
 require_once __DIR__ . '/../vendor/autoload.php';
 
 $databaseConfig = null;
-$retentionDays = 30;
+$retentionDays = 5;
 $batchSize = 1000;
 $dryRun = false;
 
