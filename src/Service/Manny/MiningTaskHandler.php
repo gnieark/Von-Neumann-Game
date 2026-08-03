@@ -218,15 +218,14 @@ final class MiningTaskHandler implements TaskHandlerInterface
         $targetAmount = (float) ($manny->taskPayload['targetAmount'] ?? 0);
         $resourceProfile = ($this->miningResourceProfile)($manny);
         $targetContainerId = ($this->miningTaskTargetContainerId)($manny);
+        $completionAmount = $targetAmount;
         if ($targetContainerId !== null) {
             $sector = ($this->getOrCreateSector)($manny->sector ?? $probe->currentSector);
             $targetContainer = ($this->miningTargetContainer)($sector, $targetContainerId, (string) ($manny->taskPayload['objectId'] ?? ''));
-            if (($this->detachedContainerFreeCapacity)($targetContainer['container']) + 0.00001 < $targetAmount) {
-                $manny->taskPayload['waitingFor'] = 'storage_space';
-                $manny->taskPayload['reason'] = 'mining_output';
-                ($this->saveManny)($manny);
-                return ($this->findMannyById)($manny->id) ?? $manny;
-            }
+            $completionAmount = round(min(
+                $targetAmount,
+                ($this->detachedContainerFreeCapacity)($targetContainer['container']),
+            ), 4);
         } elseif (!($this->canAcceptMiningDelivery)($probe, $resourceProfile, $targetAmount, true)) {
             $manny->taskPayload['waitingFor'] = 'storage_space';
             $manny->taskPayload['reason'] = 'mining_output';
@@ -235,7 +234,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
         }
 
         unset($manny->taskPayload['waitingFor'], $manny->taskPayload['reason'], $manny->taskPayload['failureReason']);
-        $extracted = ($this->depleteMiningTarget)($manny, $resourceProfile, $targetAmount);
+        $extracted = ($this->depleteMiningTarget)($manny, $resourceProfile, $completionAmount);
         $manny->taskPayload['extractedAmount'] = $extracted;
         $manny->taskPayload['extractedResources'] = ($this->resourceAmountsForTotal)($extracted, $resourceProfile);
         if ($extracted + 0.00001 < $targetAmount) {

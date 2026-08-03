@@ -1,5 +1,6 @@
 # Changelog
 
+- Moteur : lorsqu'un container détaché ciblé par un minage Manny s'est rempli entre l'ordre et son échéance, la Manny dépose seulement la quantité encore admissible, laisse le reliquat dans l'astéroïde et termine son retour au lieu d'être différée indéfiniment par le scheduler.
 - Maintenance : ajout de `scripts/purge-scheduled-events.php` pour supprimer quotidiennement, par lots, les événements terminés depuis plus de 30 jours sans toucher aux événements actifs.
 
 

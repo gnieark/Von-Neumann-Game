@@ -3782,6 +3782,23 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals($detachedObjectId, $activeDriftingTargetContainerTask['targetContainer']['id'] ?? null, 'GET /api/probe/mannies exposes the drifting mining target container id');
         $test->assertEquals('drifting', $activeDriftingTargetContainerTask['targetContainer']['mode'] ?? null, 'GET /api/probe/mannies exposes the drifting mining target container mode');
         $test->assertEquals(false, $activeDriftingTargetContainerTask['targetContainer']['travelDeducted'] ?? null, 'GET /api/probe/mannies exposes normal travel for drifting target containers');
+        $driftingMineSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
+        $driftingMineRockBeforeCompletion = $driftingMineSector->findObjectById('drifting-mine-rock');
+        $driftingMineMetalsBeforeCompletion = $driftingMineRockBeforeCompletion instanceof Asteroid
+            ? (float) ($driftingMineRockBeforeCompletion->getResourceAmounts()['metals'] ?? 0.0)
+            : 0.0;
+        $competingDriftingContainer = $driftingMineSector->findDetachedContainerById($detachedObjectId);
+        if ($competingDriftingContainer !== null) {
+            $competingPayload = $competingDriftingContainer->getPayload();
+            $competingItems = is_array($competingPayload['items'] ?? null) ? $competingPayload['items'] : [];
+            $competingItemsSpace = array_sum(array_map(
+                static fn(mixed $item): float => is_array($item) ? max(0.0, (float) ($item['containerSpace'] ?? 0.0)) : 0.0,
+                $competingItems,
+            ));
+            $competingPayload['resources'] = ['metals' => round($competingDriftingContainer->getCapacity() - $competingItemsSpace - 0.005, 4)];
+            $driftingMineSector->replaceDetachedContainer($competingDriftingContainer->withPayload($competingPayload));
+            $sectorService->saveSector($driftingMineSector);
+        }
         $detachSecondRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
         $detachSecondRow->execute(['uid' => $detachSecondMannyId]);
         $detachSecondMannyDbId = (int) $detachSecondRow->fetchColumn();
@@ -3791,10 +3808,27 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'ended' => gmdate('c', time() - 1),
         ]);
         $processScheduledMannyNow($detachSecondMannyDbId);
-        $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
-        $driftingMinedContainer = $sectorService->getOrCreateSector($detachProbe->currentSector)->findObjectById($detachedObjectId);
-        $test->assertEquals(0.21, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a drifting detached container updates its stored resources');
+        $completedDriftingMannies = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
+        $completedDriftingManny = array_values(array_filter(
+            $completedDriftingMannies->body['mannies'] ?? [],
+            static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
+        ))[0] ?? null;
+        $driftingMinedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
+        $driftingMinedContainer = $driftingMinedSector->findObjectById($detachedObjectId);
+        $driftingMineRockAfterCompletion = $driftingMinedSector->findObjectById('drifting-mine-rock');
+        $driftingMineMetalsAfterCompletion = $driftingMineRockAfterCompletion instanceof Asteroid
+            ? (float) ($driftingMineRockAfterCompletion->getResourceAmounts()['metals'] ?? 0.0)
+            : 0.0;
+        $test->assertEquals(0.99, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining fills only the remaining capacity of a drifting detached container');
+        $test->assertEquals(0.005, round($driftingMineMetalsBeforeCompletion - $driftingMineMetalsAfterCompletion, 4), 'drifting-container overflow remains in the asteroid stock');
+        $test->assertEquals(null, $completedDriftingManny['currentTask'] ?? null, 'Manny returns after partially filling a drifting detached container');
         $test->assertEquals(0.0, $probes->findByPlayerId($detachPlayer->id)?->metalsStock, 'mining into a detached container does not add mined resources to the probe inventory');
+        if ($driftingMinedContainer instanceof SectorDetachedContainer) {
+            $restoredDriftingPayload = $driftingMinedContainer->getPayload();
+            $restoredDriftingPayload['resources'] = ['metals' => 0.21];
+            $driftingMinedSector->replaceDetachedContainer($driftingMinedContainer->withPayload($restoredDriftingPayload));
+            $sectorService->saveSector($driftingMinedSector);
+        }
 
         $inspectDriftingContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/inspect-sector-object', $detachHeaders, json_encode([
             'objectId' => $detachedObjectId,
@@ -4089,6 +4123,25 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $hiddenMineDuration = (new DateTimeImmutable((string) ($hiddenMineTiming['task_ends_at'] ?? 'now')))->getTimestamp()
             - (new DateTimeImmutable((string) ($hiddenMineTiming['task_started_at'] ?? 'now')))->getTimestamp();
         $test->assertEquals(300, $hiddenMineDuration, 'hidden same-asteroid target container mining only takes extraction time');
+        $hiddenMineSectorBeforeCompletion = $sectorService->getOrCreateSector($detachProbe->currentSector);
+        $hiddenMineRockBeforeCompletion = $hiddenMineSectorBeforeCompletion->findObjectById('cache-rock');
+        $hiddenMineMetalsBeforeCompletion = $hiddenMineRockBeforeCompletion instanceof Asteroid
+            ? (float) ($hiddenMineRockBeforeCompletion->getResourceAmounts()['metals'] ?? 0.0)
+            : 0.0;
+        $competingHiddenContainer = $hiddenMineSectorBeforeCompletion->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $hiddenContainerExpectedMetals = null;
+        if ($competingHiddenContainer !== null) {
+            $competingHiddenPayload = $competingHiddenContainer->getPayload();
+            $competingHiddenItems = is_array($competingHiddenPayload['items'] ?? null) ? $competingHiddenPayload['items'] : [];
+            $competingHiddenItemsSpace = array_sum(array_map(
+                static fn(mixed $item): float => is_array($item) ? max(0.0, (float) ($item['containerSpace'] ?? 0.0)) : 0.0,
+                $competingHiddenItems,
+            ));
+            $hiddenContainerExpectedMetals = round($competingHiddenContainer->getCapacity() - $competingHiddenItemsSpace, 4);
+            $competingHiddenPayload['resources'] = ['metals' => round($hiddenContainerExpectedMetals - 0.0005, 4)];
+            $hiddenMineSectorBeforeCompletion->replaceDetachedContainer($competingHiddenContainer->withPayload($competingHiddenPayload));
+            $sectorService->saveSector($hiddenMineSectorBeforeCompletion);
+        }
         $pdo->prepare('UPDATE mannies SET task_started_at = :started, task_ends_at = :ended WHERE uid = :uid')->execute([
             'uid' => $detachSecondMannyId,
             'started' => gmdate('c', time() - 400),
@@ -4098,8 +4151,19 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $hiddenMinedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $hiddenMinedContainer = $hiddenMinedSector->findHiddenDetachedContainerById($hiddenDetachedObjectId);
+        $hiddenMineRockAfterCompletion = $hiddenMinedSector->findObjectById('cache-rock');
+        $hiddenMineMetalsAfterCompletion = $hiddenMineRockAfterCompletion instanceof Asteroid
+            ? (float) ($hiddenMineRockAfterCompletion->getResourceAmounts()['metals'] ?? 0.0)
+            : 0.0;
         $test->assertEquals(1, count($hiddenMinedSector->hiddenDetachedContainersForObject('cache-rock')), 'mining into a hidden target container keeps a single persisted container entry');
-        $test->assertEquals(0.211, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining into a hidden same-asteroid container updates its stored resources');
+        $test->assertEquals($hiddenContainerExpectedMetals, $hiddenMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining fills only the remaining capacity of a hidden detached container');
+        $test->assertEquals(0.0005, round($hiddenMineMetalsBeforeCompletion - $hiddenMineMetalsAfterCompletion, 4), 'hidden-container overflow remains in the asteroid stock');
+        if ($hiddenMinedContainer !== null) {
+            $restoredHiddenPayload = $hiddenMinedContainer->getPayload();
+            $restoredHiddenPayload['resources'] = ['metals' => 0.211];
+            $hiddenMinedSector->replaceDetachedContainer($hiddenMinedContainer->withPayload($restoredHiddenPayload));
+            $sectorService->saveSector($hiddenMinedSector);
+        }
 
         $staleHiddenMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
             'objectId' => 'cache-rock',
