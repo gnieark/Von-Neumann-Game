@@ -921,6 +921,9 @@ final class ProbeStorageService
      */
     private function detachedContainerSnapshotAlreadyRestored(NeumannProbe $probe, string $sourceContainerUid, array $containerData): bool
     {
+        if ($this->items->existsRestoredDetachedContainerSource($probe->id, $sourceContainerUid)) {
+            return true;
+        }
         $expectedLabel = isset($containerData['label']) ? (string) $containerData['label'] : null;
         foreach ($this->items->findByProbeId($probe->id) as $item) {
             if ($item->type !== ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
@@ -932,9 +935,6 @@ final class ProbeStorageService
                 continue;
             }
 
-            if (($item->metadata['restoredDetachedContainerSourceUid'] ?? null) === $sourceContainerUid) {
-                return true;
-            }
             if ('container-' . $item->uid === $sourceContainerUid && $expectedLabel !== null && $container->label === $expectedLabel) {
                 return true;
             }

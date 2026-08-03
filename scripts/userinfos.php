@@ -730,7 +730,7 @@ function userinfosItemSummary(array $item): array
         'name' => $item['name'],
         'storageContainerId' => $item['storage_container_id'] !== null ? (int) $item['storage_container_id'] : null,
         'containerSpace' => round((float) $item['container_space'], 4),
-        'metadata' => userinfosJsonObject($item['metadata_json'] ?? '{}'),
+        'metadata' => VonNeumannGame\Repository\ItemMetadataColumns::metadata($item),
         'createdAt' => $item['created_at'],
         'updatedAt' => $item['updated_at'],
     ];

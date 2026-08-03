@@ -91,8 +91,8 @@ try {
         $updateEvent->execute(['id'=>(int)$row['task_scheduled_event_id'], 'payload'=>json_encode($payload, JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)]);
         $migrated++;
     }
-    $pdo->exec('ALTER TABLE mannies DROP COLUMN task_payload_json');
     $pdo->commit();
+    $pdo->exec('ALTER TABLE mannies DROP COLUMN task_payload_json');
     echo "Migrated Manny tasks: {$migrated}; consumed items: {$consumed}; dropped mannies.task_payload_json.\n";
 } catch (Throwable $error) {
     if ($pdo->inTransaction()) $pdo->rollBack();

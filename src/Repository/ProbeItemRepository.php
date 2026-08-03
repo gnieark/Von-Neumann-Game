@@ -23,8 +23,12 @@ final class ProbeItemRepository
         }
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_items
-             (uid, probe_id, storage_container_id, type, name, container_space, metadata_json, created_at, updated_at)
-             VALUES (:uid, :probe_id, :storage_container_id, :type, :name, :container_space, :metadata_json, :created_at, :updated_at)'
+             (uid, probe_id, storage_container_id, type, name, container_space, recipe, crafting_run_id,
+              crafted_by_manny_id, crafted_by_manny_name, crafted_at, fabricator, capacity_bonus,
+              restored_detached_container_source_uid, audit_metadata_json, created_at, updated_at)
+             VALUES (:uid, :probe_id, :storage_container_id, :type, :name, :container_space, :recipe, :crafting_run_id,
+              :crafted_by_manny_id, :crafted_by_manny_name, :crafted_at, :fabricator, :capacity_bonus,
+              :restored_detached_container_source_uid, :audit_metadata_json, :created_at, :updated_at)'
         );
         $stmt->execute([
             'uid' => $uid,
@@ -33,10 +37,9 @@ final class ProbeItemRepository
             'type' => $type,
             'name' => $name,
             'container_space' => $containerSpace,
-            'metadata_json' => json_encode($metadata, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'created_at' => $now,
             'updated_at' => $now,
-        ]);
+        ] + ItemMetadataColumns::parameters($metadata));
 
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe item creation failed.');
     }
@@ -75,6 +78,18 @@ final class ProbeItemRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    public function existsRestoredDetachedContainerSource(int $probeId, string $sourceContainerUid): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT 1 FROM probe_items
+             WHERE probe_id = :probe_id
+               AND restored_detached_container_source_uid = :source_uid
+             LIMIT 1'
+        );
+        $stmt->execute(['probe_id' => $probeId, 'source_uid' => $sourceContainerUid]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function delete(ProbeItem $item): void
     {
         $stmt = $this->pdo->prepare('DELETE FROM probe_items WHERE id = :id');
@@ -92,10 +107,7 @@ final class ProbeItemRepository
 
     private function hydrate(array $row): ProbeItem
     {
-        $metadata = json_decode((string) ($row['metadata_json'] ?? '{}'), true);
-        if (!is_array($metadata)) {
-            $metadata = [];
-        }
+        $metadata = ItemMetadataColumns::metadata($row);
 
         return new ProbeItem(
             (int) $row['id'],
@@ -106,6 +118,9 @@ final class ProbeItemRepository
             (string) $row['name'],
             (float) $row['container_space'],
             $metadata,
+            (float) ($row['capacity_bonus'] ?? 0.0),
+            isset($row['restored_detached_container_source_uid']) && $row['restored_detached_container_source_uid'] !== null
+                ? (string) $row['restored_detached_container_source_uid'] : null,
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );

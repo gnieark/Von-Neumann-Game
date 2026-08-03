@@ -96,6 +96,8 @@ final class ProbeItem
         public string $name,
         public float $containerSpace,
         public array $metadata,
+        public readonly float $capacityBonus,
+        public readonly ?string $restoredDetachedContainerSourceUid,
         public readonly string $createdAt,
         public string $updatedAt,
     ) {}
