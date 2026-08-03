@@ -454,7 +454,6 @@ $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
-$asteroidNamesScript = file_get_contents($root . '/scripts/name-generated-asteroids.php');
 $sectorPointCloudScript = file_get_contents($root . '/scripts/generate-threejs-point-cloud-sectors.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
@@ -589,7 +588,6 @@ $test->assert(str_contains($openApi, 'Generated asteroids have a short content-b
 $test->assert(str_contains($openApi, 'nextUsefulRefreshDelayMs'), 'OpenAPI documents Manny list useful refresh delay hints');
 $test->assert(str_contains($openApi, 'enum: [covered, uncovered, unknown]'), 'OpenAPI documents SCUT coverage knowledge states');
 $test->assert(str_contains($openApi, 'scutCoverageStatus: unknown'), 'OpenAPI includes an unknown SCUT coverage example');
-$test->assert(is_string($asteroidNamesScript) && str_contains($asteroidNamesScript, 'Asteroid::generatedName'), 'asteroid naming CLI uses the canonical asteroid name generator');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'data-forum-jump-last'), 'forum JS exposes a jump-to-last-post button for long threads');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'forumJumpLastPost' => 'atteindre le dernier post'"), 'French translations include the forum last-post jump label');
@@ -1172,121 +1170,6 @@ $test->assert(in_array('cargo_organic_compounds', $mannySchemaColumns, true), 'M
 $test->assert(in_array('storage_container_id', $mannySchemaColumns, true), 'Manny table stores its storage container');
 $test->assert(in_array('task_scheduled_event_id', $mannySchemaColumns, true), 'Manny table links active tasks to scheduled events');
 $test->assert(!in_array('cargo_other', $mannySchemaColumns, true), 'Manny table no longer stores generic cargo_other');
-$mannyTaskMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'manny-task-migration.sqlite';
-$mannyTaskMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'manny-task-migration-database.json';
-file_put_contents($mannyTaskMigrationConfig, json_encode([
-    'driver' => 'sqlite',
-    'path' => $mannyTaskMigrationDbPath,
-], JSON_THROW_ON_ERROR));
-$mannyTaskMigrationFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $mannyTaskMigrationDbPath), $root);
-$mannyTaskMigrationPdo = $mannyTaskMigrationFactory->create();
-$mannyTaskMigrationFactory->initializeSchema($mannyTaskMigrationPdo);
-$mannyTaskMigrationPlayers = new PlayerRepository($mannyTaskMigrationPdo);
-$mannyTaskMigrationProbes = new NeumannProbeRepository($mannyTaskMigrationPdo);
-$mannyTaskMigrationMannies = new MannyRepository($mannyTaskMigrationPdo);
-$mannyTaskMigrationPlayer = $mannyTaskMigrationPlayers->createPlayer('manny-task-migration', 'Manny Task Migration', null, SectorCoordinates::origin());
-$mannyTaskMigrationProbe = $mannyTaskMigrationProbes->createForPlayer($mannyTaskMigrationPlayer->id, 'Manny Task Migration Probe');
-$mannyTaskMigrationManny = $mannyTaskMigrationMannies->createForProbe($mannyTaskMigrationProbe->id, 'migration-manny', uid: 'mny_migration_task');
-$mannyTaskMigrationRunAt = '2026-01-01T00:05:00+00:00';
-$mannyTaskMigrationPdo->prepare(
-    'UPDATE mannies
-     SET current_task = :task,
-         task_started_at = :started_at,
-         task_ends_at = :ends_at,
-         task_payload_json = :payload
-     WHERE id = :id'
-)->execute([
-    'id' => $mannyTaskMigrationManny->id,
-    'task' => Manny::TASK_REPAIR,
-    'started_at' => '2026-01-01T00:00:00+00:00',
-    'ends_at' => $mannyTaskMigrationRunAt,
-    'payload' => json_encode(['integrityPercent' => 4.5], JSON_THROW_ON_ERROR),
-]);
-$mannyTaskMigrationCommand = escapeshellarg(PHP_BINARY)
-    . ' ' . escapeshellarg($root . '/scripts/migrate-manny-tasks-to-scheduled-events.php')
-    . ' --database-config=' . escapeshellarg($mannyTaskMigrationConfig);
-exec($mannyTaskMigrationCommand . ' 2>&1', $mannyTaskMigrationOutput, $mannyTaskMigrationStatus);
-$test->assertEquals(0, $mannyTaskMigrationStatus, 'migrate-manny-tasks-to-scheduled-events CLI exits successfully');
-$mannyTaskMigrationRow = $mannyTaskMigrationPdo->query(
-    "SELECT m.task_scheduled_event_id, m.task_payload_json, se.type, se.entity_type, se.entity_id, se.run_at, se.status, se.payload_json
-     FROM mannies m
-     LEFT JOIN scheduled_events se ON se.id = m.task_scheduled_event_id
-     WHERE m.uid = 'mny_migration_task'"
-)->fetch(PDO::FETCH_ASSOC);
-$mannyTaskMigrationPayload = json_decode((string) ($mannyTaskMigrationRow['payload_json'] ?? '{}'), true);
-$test->assert((int) ($mannyTaskMigrationRow['task_scheduled_event_id'] ?? 0) > 0, 'Manny task migration stores the scheduled event id');
-$test->assertEquals('{}', $mannyTaskMigrationRow['task_payload_json'] ?? null, 'Manny task migration clears the active payload from the Manny row');
-$test->assertEquals(SchedulerService::MANNY_TASK, $mannyTaskMigrationRow['type'] ?? null, 'Manny task migration creates manny.task events');
-$test->assertEquals('manny', $mannyTaskMigrationRow['entity_type'] ?? null, 'Manny task migration targets Manny entities');
-$test->assertEquals($mannyTaskMigrationManny->id, (int) ($mannyTaskMigrationRow['entity_id'] ?? 0), 'Manny task migration keeps the Manny database id');
-$test->assertEquals($mannyTaskMigrationRunAt, $mannyTaskMigrationRow['run_at'] ?? null, 'Manny task migration preserves task end time');
-$test->assertEquals('pending', $mannyTaskMigrationRow['status'] ?? null, 'Manny task migration creates pending events');
-$test->assertEquals(4.5, (float) ($mannyTaskMigrationPayload['integrityPercent'] ?? 0), 'Manny task migration moves the task payload into scheduled_events');
-$terminalMiningPayload = [
-    'objectId' => 'ast_migration',
-    'resourceType' => 'metals',
-    'resourceTypes' => ['metals'],
-    'resourceProfile' => ['metals' => 1.0],
-    'targetAmount' => 0.1,
-    'extractedAmount' => 0.05,
-    'depositedAmount' => 0.04,
-    'phase' => 'returning',
-    'tripIndex' => 1,
-    'miningTravelSeconds' => 900,
-];
-$mannyTaskMigrationPdo->prepare(
-    "UPDATE mannies SET current_task = 'mining', cargo_metals = 0.01 WHERE id = :id"
-)->execute(['id' => $mannyTaskMigrationManny->id]);
-$mannyTaskMigrationPdo->prepare(
-    'UPDATE scheduled_events SET status = :status, payload_json = :payload WHERE id = :id'
-)->execute([
-    'id' => (int) $mannyTaskMigrationRow['task_scheduled_event_id'],
-    'status' => 'running',
-    'payload' => json_encode($terminalMiningPayload, JSON_THROW_ON_ERROR),
-]);
-$miningTransitionMigrationCommand = escapeshellarg(PHP_BINARY)
-    . ' ' . escapeshellarg($root . '/scripts/migrate-mining-to-terminal-events.php')
-    . ' --database-config=' . escapeshellarg($mannyTaskMigrationConfig);
-exec($miningTransitionMigrationCommand . ' 2>&1', $miningTransitionMigrationOutput, $miningTransitionMigrationStatus);
-$test->assertEquals(0, $miningTransitionMigrationStatus, 'terminal-mining migration exits successfully');
-$migratedMiningEvent = $mannyTaskMigrationPdo->query(
-    "SELECT se.run_at, se.status, se.payload_json, m.task_started_at, m.task_ends_at, m.cargo_metals
-     FROM scheduled_events se
-     INNER JOIN mannies m ON m.task_scheduled_event_id = se.id
-     WHERE se.entity_type = 'manny' AND se.entity_id = " . $mannyTaskMigrationManny->id
-)->fetch(PDO::FETCH_ASSOC);
-$migratedMiningPayload = json_decode((string) ($migratedMiningEvent['payload_json'] ?? '{}'), true);
-$test->assertEquals('pending', $migratedMiningEvent['status'] ?? null, 'terminal-mining migration releases a formerly running event');
-$test->assert((new DateTimeImmutable((string) ($migratedMiningEvent['run_at'] ?? '1970-01-01')))->getTimestamp() > time(), 'terminal-mining migration schedules a future final deadline');
-$test->assertEquals($migratedMiningEvent['task_ends_at'] ?? null, $migratedMiningEvent['run_at'] ?? null, 'terminal-mining migration aligns the event and task deadlines');
-$test->assertEquals($migratedMiningEvent['run_at'] ?? null, $migratedMiningPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? null, 'terminal-mining migration stores the final scheduler deadline');
-$test->assertEquals(0.06, (float) ($migratedMiningPayload['targetAmount'] ?? 0), 'terminal-mining migration keeps only the amount not already delivered');
-$test->assertEquals(0.0, (float) ($migratedMiningPayload['extractedAmount'] ?? -1), 'terminal-mining migration resets intermediate extraction progress');
-$test->assertEquals(0.0, (float) ($migratedMiningEvent['cargo_metals'] ?? -1), 'terminal-mining migration clears intermediate Manny cargo');
-$test->assert(!array_key_exists('phase', $migratedMiningPayload) && !array_key_exists('tripIndex', $migratedMiningPayload), 'terminal-mining migration removes intermediate transition state');
-$visitedMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration.sqlite';
-$visitedMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'visited-sector-migration-database.json';
-file_put_contents($visitedMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $visitedMigrationDbPath], JSON_THROW_ON_ERROR));
-$visitedMigrationPdo = (new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $visitedMigrationDbPath), $root))->create();
-$visitedMigrationPdo->exec('CREATE TABLE players (id INTEGER PRIMARY KEY)');
-$visitedMigrationPdo->exec('CREATE TABLE neumann_probes (id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL, sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL, entered_current_sector_at TEXT NOT NULL)');
-$visitedMigrationPdo->exec('CREATE TABLE probe_movements (id INTEGER PRIMARY KEY, probe_id INTEGER NOT NULL, origin_x INTEGER NOT NULL, origin_y INTEGER NOT NULL, origin_z INTEGER NOT NULL, target_x INTEGER NOT NULL, target_y INTEGER NOT NULL, target_z INTEGER NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, arrival_at TEXT NOT NULL)');
-$visitedMigrationPdo->exec('CREATE TABLE visited_sectors (id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL, sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL, first_visited_at TEXT NOT NULL, last_visited_at TEXT NOT NULL, visit_count INTEGER NOT NULL)');
-$visitedMigrationPdo->exec("INSERT INTO players (id) VALUES (1)");
-$visitedMigrationPdo->exec("INSERT INTO neumann_probes (id, player_id, sector_x, sector_y, sector_z, entered_current_sector_at) VALUES (10, 1, 4, 0, 0, '2026-01-03T00:00:00+00:00'), (11, 1, 8, 0, 0, '2026-01-04T00:00:00+00:00')");
-$visitedMigrationPdo->exec("INSERT INTO probe_movements (id, probe_id, origin_x, origin_y, origin_z, target_x, target_y, target_z, status, started_at, arrival_at) VALUES (1, 10, 0, 0, 0, 2, 0, 0, 'arrived', '2026-01-01T00:00:00+00:00', '2026-01-01T01:00:00+00:00'), (2, 10, 2, 0, 0, 4, 0, 0, 'arrived', '2026-01-02T00:00:00+00:00', '2026-01-02T01:00:00+00:00')");
-$visitedMigrationPdo = null;
-$visitedMigrationCommand = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/migrate-visited-sectors-to-probes.php') . ' --database-config=' . escapeshellarg($visitedMigrationConfig);
-exec($visitedMigrationCommand . ' 2>&1', $visitedMigrationOutput, $visitedMigrationStatus);
-$test->assertEquals(0, $visitedMigrationStatus, 'visited-sector migration CLI exits successfully');
-$visitedMigrationPdo = (new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $visitedMigrationDbPath), $root))->create();
-$visitedMigrationColumns = array_column($visitedMigrationPdo->query('PRAGMA table_info(visited_sectors)')->fetchAll(PDO::FETCH_ASSOC), 'name');
-$test->assert(in_array('probe_id', $visitedMigrationColumns, true), 'visited-sector migration adds probe ownership');
-$visitedMigrationRows = $visitedMigrationPdo->query('SELECT probe_id, sector_x, visit_count FROM visited_sectors ORDER BY probe_id, sector_x')->fetchAll(PDO::FETCH_ASSOC);
-$test->assertEquals(4, count($visitedMigrationRows), 'visited-sector migration reconstructs movement history and stationary origins');
-$test->assertEquals(10, (int) ($visitedMigrationRows[0]['probe_id'] ?? 0), 'visited-sector migration keeps the first movement origin');
-$test->assertEquals(0, (int) ($visitedMigrationRows[0]['sector_x'] ?? -1), 'visited-sector migration keeps the first movement origin coordinates');
-$test->assertEquals(11, (int) ($visitedMigrationRows[3]['probe_id'] ?? 0), 'visited-sector migration initializes probes without movements');
 $itemSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(probe_items)')->fetchAll(PDO::FETCH_ASSOC),
@@ -2167,71 +2050,6 @@ if ($createdProbe !== null) {
     $test->assertEquals(0, $sectorJsonPathStatus, 'sector-json CLI path-only exits successfully');
     $test->assertEquals($cliSectorRepository->getPath($cliSectorCoordinates), $sectorJsonPathOutput[0] ?? null, 'sector-json CLI path-only prints the resolved sector path');
 
-    $asteroidNamesCoordinates = new SectorCoordinates(8, 0, 0);
-    $directAsteroid = new Asteroid(
-        'legacy-ice-asteroid',
-        null,
-        'ice',
-        ['water_ice', 'deuterium_trace'],
-        'small',
-        0.01,
-        0.1,
-        resourceAmounts: [
-            ResourceComposition::DEUTERIUM => 1.0,
-            ResourceComposition::METALS => 0.0,
-            ResourceComposition::ICE => 2.0,
-            ResourceComposition::CARBON_COMPOUNDS => 0.0,
-        ],
-    );
-    $nestedAsteroid = new Asteroid(
-        'legacy-carbon-asteroid',
-        'Old custom name',
-        'carbonaceous',
-        ['carbon', 'organics', 'ice_trace'],
-        'small',
-        0.01,
-        0.1,
-        resourceAmounts: [
-            ResourceComposition::DEUTERIUM => 0.0,
-            ResourceComposition::METALS => 0.0,
-            ResourceComposition::ICE => 1.0,
-            ResourceComposition::CARBON_COMPOUNDS => 2.0,
-        ],
-    );
-    $cliSectorRepository->save(new SectorContent($asteroidNamesCoordinates, [
-        $directAsteroid,
-        new SolarSystem(
-            'legacy-system',
-            'System legacy',
-            new Star('legacy-star', null, 'G', 1.0, 5778, 1.0, 1.0),
-            null,
-            [new OrbitingBody($nestedAsteroid, new OrbitDescriptor(2.0, 0.01, 0.0))],
-            1.0,
-            2.0,
-        ),
-    ], source: 'cli-test'));
-    $asteroidNamesCommand = escapeshellarg(PHP_BINARY)
-        . ' ' . escapeshellarg($root . '/scripts/name-generated-asteroids.php')
-        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
-        . ' --world-seed=migration-seed';
-    exec($asteroidNamesCommand . ' --dry-run 2>&1', $asteroidNamesDryRunOutput, $asteroidNamesDryRunStatus);
-    $test->assertEquals(0, $asteroidNamesDryRunStatus, 'name-generated-asteroids CLI dry-run exits successfully');
-    $test->assert(str_contains(implode("\n", $asteroidNamesDryRunOutput), '2 asteroid(s) would be named'), 'name-generated-asteroids CLI dry-run reports direct and nested asteroids');
-    $test->assertEquals(null, $cliSectorRepository->load($asteroidNamesCoordinates)->findObjectById('legacy-ice-asteroid')?->getName(), 'name-generated-asteroids dry-run leaves sector JSON unchanged');
-    exec($asteroidNamesCommand . ' 2>&1', $asteroidNamesOutput, $asteroidNamesStatus);
-    $test->assertEquals(0, $asteroidNamesStatus, 'name-generated-asteroids CLI exits successfully');
-    $namedAsteroidSector = $cliSectorRepository->load($asteroidNamesCoordinates);
-    $test->assertEquals(
-        Asteroid::generatedName($directAsteroid->getResourceAmounts(), 'migration-seed:sector-content:8:0:0:legacy-ice-asteroid'),
-        $namedAsteroidSector->findObjectById('legacy-ice-asteroid')?->getName(),
-        'name-generated-asteroids names top-level asteroids by descending content quantity',
-    );
-    $test->assertEquals(
-        Asteroid::generatedName($nestedAsteroid->getResourceAmounts(), 'migration-seed:sector-content:8:0:0:legacy-carbon-asteroid'),
-        $namedAsteroidSector->findObjectById('legacy-carbon-asteroid')?->getName(),
-        'name-generated-asteroids names nested solar-system asteroids and replaces legacy names',
-    );
-
     $addConstructCoordinates = new SectorCoordinates(6, 0, 0);
     $addConstructCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
@@ -2287,39 +2105,6 @@ if ($createdProbe !== null) {
         ));
         $test->assertEquals(1, count($cliAuxConductors), 'add-inventory-item CLI creates items on the explicit probe');
         $test->assertEquals(0, count($cliDefaultConductors), 'add-inventory-item CLI does not add explicit probe items to the default probe');
-
-        $legacyItemUid = 'legacy-french-steel-plate';
-        $legacyItemCreatedAt = gmdate('c');
-        $pdo->prepare(
-            'INSERT INTO probe_items
-             (uid, probe_id, storage_container_id, type, name, container_space, metadata_json, created_at, updated_at)
-             VALUES (:uid, :probe_id, NULL, :type, :name, :container_space, :metadata_json, :created_at, :updated_at)'
-        )->execute([
-            'uid' => $legacyItemUid,
-            'probe_id' => $cliInventoryProbe->id,
-            'type' => ProbeItem::TYPE_STEEL_PLATE,
-            'name' => 'Plaque d’acier',
-            'container_space' => 0.01,
-            'metadata_json' => '{}',
-            'created_at' => $legacyItemCreatedAt,
-            'updated_at' => $legacyItemCreatedAt,
-        ]);
-        $migrateItemNamesDryRunCommand = escapeshellarg(PHP_BINARY)
-            . ' ' . escapeshellarg($root . '/scripts/migrate-probe-item-names.php')
-            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
-            . ' --dry-run';
-        exec($migrateItemNamesDryRunCommand . ' 2>&1', $migrateItemNamesDryRunOutput, $migrateItemNamesDryRunStatus);
-        $test->assertEquals(0, $migrateItemNamesDryRunStatus, 'migrate-probe-item-names CLI dry-run exits successfully');
-        $test->assert(str_contains(implode("\n", $migrateItemNamesDryRunOutput), 'Dry-run: 1 probe item row(s) would be renamed'), 'migrate-probe-item-names CLI dry-run reports legacy rows');
-        $test->assertEquals('Plaque d’acier', $items->findByUidForProbe($cliInventoryProbe->id, $legacyItemUid)?->name, 'migrate-probe-item-names dry-run leaves legacy names unchanged');
-
-        $migrateItemNamesCommand = escapeshellarg(PHP_BINARY)
-            . ' ' . escapeshellarg($root . '/scripts/migrate-probe-item-names.php')
-            . ' --database-config=' . escapeshellarg($userinfosDbConfig);
-        exec($migrateItemNamesCommand . ' 2>&1', $migrateItemNamesOutput, $migrateItemNamesStatus);
-        $test->assertEquals(0, $migrateItemNamesStatus, 'migrate-probe-item-names CLI exits successfully');
-        $test->assert(str_contains(implode("\n", $migrateItemNamesOutput), '1 probe item row(s) renamed'), 'migrate-probe-item-names CLI reports renamed rows');
-        $test->assertEquals(ProbeItem::STEEL_PLATE_NAME, $items->findByUidForProbe($cliInventoryProbe->id, $legacyItemUid)?->name, 'migrate-probe-item-names rewrites known item names to canonical English');
 
         $beforeDryRunCount = count($items->findByProbeId($cliInventoryProbe->id));
         $dryRunInventoryItemCommand = escapeshellarg(PHP_BINARY)
