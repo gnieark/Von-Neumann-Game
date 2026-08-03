@@ -1187,6 +1187,15 @@ $itemSchemaColumns = array_map(
     $pdo->query('PRAGMA table_info(probe_items)')->fetchAll(PDO::FETCH_ASSOC),
 );
 $test->assert(in_array('storage_container_id', $itemSchemaColumns, true), 'Probe item table stores its storage container');
+$test->assert(!in_array('metadata_json', $itemSchemaColumns, true), 'Probe item table no longer stores mixed metadata JSON');
+foreach (['recipe', 'crafting_run_id', 'crafted_by_manny_id', 'crafted_by_manny_name', 'crafted_at', 'fabricator', 'capacity_bonus', 'restored_detached_container_source_uid', 'audit_metadata_json'] as $column) {
+    $test->assert(in_array($column, $itemSchemaColumns, true), "Probe item table stores {$column}");
+}
+$detachedItemSchemaColumns = array_column($pdo->query('PRAGMA table_info(detached_storage_container_items)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assert(!in_array('metadata_json', $detachedItemSchemaColumns, true), 'Detached item table no longer stores mixed metadata JSON');
+foreach (['recipe', 'crafting_run_id', 'crafted_by_manny_id', 'crafted_by_manny_name', 'crafted_at', 'fabricator', 'capacity_bonus', 'restored_detached_container_source_uid', 'audit_metadata_json'] as $column) {
+    $test->assert(in_array($column, $detachedItemSchemaColumns, true), "Detached item table stores {$column}");
+}
 $mannySchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC),
@@ -1414,6 +1423,29 @@ $test->assert(str_contains(implode("\n", $purgeOutput), 'Purged scheduled events
 $remainingPurgeStatuses = $pdo->query("SELECT status FROM scheduled_events WHERE type LIKE 'test.purge.%' ORDER BY status")->fetchAll(PDO::FETCH_COLUMN);
 $test->assertEquals(['done', 'pending', 'running'], $remainingPurgeStatuses, 'scheduled-event purge keeps recent and active events');
 $pdo->exec("DELETE FROM scheduled_events WHERE type LIKE 'test.purge.%'");
+
+$itemMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'item-metadata-migration.sqlite';
+$itemMigrationPdo = new PDO('sqlite:' . $itemMigrationDbPath);
+$itemMigrationPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$itemMigrationPdo->exec('CREATE TABLE probe_items (id INTEGER PRIMARY KEY, probe_id INTEGER NOT NULL, metadata_json TEXT NOT NULL)');
+$itemMigrationPdo->exec('CREATE TABLE detached_storage_container_items (id INTEGER PRIMARY KEY, metadata_json TEXT NOT NULL)');
+$legacyMetadata = json_encode(['recipe'=>'steel_bar','craftingRunId'=>'run-1','craftedByMannyId'=>'mny-1','craftedByMannyName'=>'Manny One','craftedAt'=>'2026-01-01T00:00:00+00:00','capacityBonus'=>1.0,'capacityBonusUnit'=>'earth_container_equivalent','restoredDetachedContainerSourceUid'=>'source-1','administrativeRepairReason'=>'test'], JSON_THROW_ON_ERROR);
+$insertLegacyMetadata = $itemMigrationPdo->prepare('INSERT INTO probe_items (id, probe_id, metadata_json) VALUES (1, 1, :metadata)');
+$insertLegacyMetadata->execute(['metadata' => $legacyMetadata]);
+$insertLegacyMetadata = $itemMigrationPdo->prepare('INSERT INTO detached_storage_container_items (id, metadata_json) VALUES (1, :metadata)');
+$insertLegacyMetadata->execute(['metadata' => $legacyMetadata]);
+$itemMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'item-metadata-migration.json';
+file_put_contents($itemMigrationConfig, json_encode(['driver'=>'sqlite','path'=>$itemMigrationDbPath], JSON_THROW_ON_ERROR));
+$itemMigrationCommand = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-item-metadata-storage.php') . ' --database-config=' . escapeshellarg($itemMigrationConfig);
+exec($itemMigrationCommand . ' 2>&1', $itemMigrationOutput, $itemMigrationStatus);
+$test->assertEquals(0, $itemMigrationStatus, 'item metadata migration exits successfully');
+$migratedItemColumns = array_column($itemMigrationPdo->query('PRAGMA table_info(probe_items)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assert(!in_array('metadata_json', $migratedItemColumns, true), 'item metadata migration drops the legacy JSON column');
+$migratedMetadata = $itemMigrationPdo->query('SELECT * FROM probe_items WHERE id=1')->fetch(PDO::FETCH_ASSOC) ?: [];
+$test->assertEquals('steel_bar', $migratedMetadata['recipe'] ?? null, 'item metadata migration extracts recipe');
+$test->assertEquals(1.0, (float)($migratedMetadata['capacity_bonus'] ?? 0), 'item metadata migration extracts capacity bonus');
+$test->assertEquals('source-1', $migratedMetadata['restored_detached_container_source_uid'] ?? null, 'item metadata migration extracts restored source uid');
+$test->assertEquals(['administrativeRepairReason'=>'test'], json_decode((string)($migratedMetadata['audit_metadata_json'] ?? '{}'), true), 'item metadata migration keeps rare audit metadata');
 
 $mannies = new MannyRepository($pdo, scheduledEvents: $scheduledEvents);
 $items = new ProbeItemRepository($pdo);

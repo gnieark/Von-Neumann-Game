@@ -118,7 +118,7 @@ final class ProbeInventory
 
     private static function capacityBonusForItem(ProbeInventoryItem $item): float
     {
-        $capacityBonus = $item->metadata['capacityBonus'] ?? 0.0;
+        $capacityBonus = $item->capacityBonus;
         if (!is_numeric($capacityBonus)) {
             return 0.0;
         }

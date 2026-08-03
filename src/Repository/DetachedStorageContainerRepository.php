@@ -165,7 +165,9 @@ final class DetachedStorageContainerRepository
             $ids,
         );
         $items = $this->childrenByContainer(
-            'SELECT container_object_id, uid, type, name, container_space, metadata_json, is_backing_item
+            'SELECT container_object_id, uid, type, name, container_space, recipe, crafting_run_id,
+                    crafted_by_manny_id, crafted_by_manny_name, crafted_at, fabricator, capacity_bonus,
+                    restored_detached_container_source_uid, audit_metadata_json, is_backing_item
              FROM detached_storage_container_items
              WHERE container_object_id IN (' . $this->placeholders($ids) . ')
              ORDER BY is_backing_item DESC, id ASC',
@@ -208,7 +210,7 @@ final class DetachedStorageContainerRepository
                     'type' => (string) $item['type'],
                     'name' => (string) $item['name'],
                     'containerSpace' => round(max(0.0, (float) $item['container_space']), 4),
-                    'metadata' => $this->decodeObject((string) $item['metadata_json']),
+                    'metadata' => ItemMetadataColumns::metadata($item),
                 ];
                 if ((int) $item['is_backing_item'] === 1) {
                     $backingItem = $itemPayload;
@@ -375,8 +377,12 @@ final class DetachedStorageContainerRepository
 
         $itemInsert = $this->pdo->prepare(
             'INSERT INTO detached_storage_container_items
-             (container_object_id, uid, type, name, container_space, metadata_json, is_backing_item)
-             VALUES (:container_object_id, :uid, :type, :name, :container_space, :metadata_json, :is_backing_item)'
+             (container_object_id, uid, type, name, container_space, recipe, crafting_run_id,
+              crafted_by_manny_id, crafted_by_manny_name, crafted_at, fabricator, capacity_bonus,
+              restored_detached_container_source_uid, audit_metadata_json, is_backing_item)
+             VALUES (:container_object_id, :uid, :type, :name, :container_space, :recipe, :crafting_run_id,
+              :crafted_by_manny_id, :crafted_by_manny_name, :crafted_at, :fabricator, :capacity_bonus,
+              :restored_detached_container_source_uid, :audit_metadata_json, :is_backing_item)'
         );
         $backing = is_array($payload['containerItem'] ?? null) ? $payload['containerItem'] : null;
         if ($backing !== null) {
@@ -447,18 +453,15 @@ final class DetachedStorageContainerRepository
         if ($uid === '') {
             throw new \RuntimeException("Detached container '{$containerId}' contains an item without uid.");
         }
+        $metadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
         $stmt->execute([
             'container_object_id' => $containerId,
             'uid' => $uid,
             'type' => (string) ($item['type'] ?? ''),
             'name' => (string) ($item['name'] ?? $item['type'] ?? ''),
             'container_space' => round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4),
-            'metadata_json' => json_encode(
-                is_array($item['metadata'] ?? null) ? $item['metadata'] : [],
-                JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-            ),
             'is_backing_item' => $backing ? 1 : 0,
-        ]);
+        ] + ItemMetadataColumns::parameters($metadata));
     }
 
     /**
