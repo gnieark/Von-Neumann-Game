@@ -1,5 +1,7 @@
 # Changelog
 
+- Maintenance : ajout de `scripts/purge-scheduled-events.php` pour supprimer quotidiennement, par lots, les événements terminés depuis plus de 30 jours sans toucher aux événements actifs.
+
 
 
 

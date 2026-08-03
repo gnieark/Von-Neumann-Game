@@ -1348,6 +1348,61 @@ $recoveredLeaseEvent = $leaseOwnerA->findById($leaseEvent->id);
 $test->assertEquals('pending', $recoveredLeaseEvent?->status, 'recovered scheduler events return to pending');
 $test->assertEquals(null, $recoveredLeaseEvent?->lockedBy, 'recovered scheduler events release their owner');
 $pdo->prepare('DELETE FROM scheduled_events WHERE id = :id')->execute(['id' => $leaseEvent->id]);
+
+$purgeEventIds = [];
+foreach (['done', 'failed', 'cancelled', 'recent-done', 'pending', 'running'] as $purgeStatus) {
+    $purgeEventIds[$purgeStatus] = $scheduledEvents->schedule(
+        'test.purge.' . $purgeStatus,
+        'test',
+        1,
+        '2000-01-01T00:00:00+00:00',
+    )->id;
+}
+$oldTerminalEvent = $pdo->prepare(
+    "UPDATE scheduled_events
+     SET status = :status, processed_at = :processed_at, updated_at = :updated_at
+     WHERE id = :id"
+);
+foreach (['done', 'failed', 'cancelled'] as $purgeStatus) {
+    $oldTerminalEvent->execute([
+        'id' => $purgeEventIds[$purgeStatus],
+        'status' => $purgeStatus,
+        'processed_at' => $purgeStatus === 'cancelled' ? null : '2000-01-01T00:00:00+00:00',
+        'updated_at' => '2000-01-01T00:00:00+00:00',
+    ]);
+}
+$oldTerminalEvent->execute([
+    'id' => $purgeEventIds['recent-done'],
+    'status' => 'done',
+    'processed_at' => gmdate('c'),
+    'updated_at' => gmdate('c'),
+]);
+$pdo->prepare('UPDATE scheduled_events SET status = :status, updated_at = :updated_at WHERE id = :id')->execute([
+    'id' => $purgeEventIds['running'],
+    'status' => 'running',
+    'updated_at' => '2000-01-01T00:00:00+00:00',
+]);
+$pdo->prepare('UPDATE scheduled_events SET updated_at = :updated_at WHERE id = :id')->execute([
+    'id' => $purgeEventIds['pending'],
+    'updated_at' => '2000-01-01T00:00:00+00:00',
+]);
+$purgeDatabaseConfig = $tmp . DIRECTORY_SEPARATOR . 'purge-scheduled-events-database.json';
+file_put_contents($purgeDatabaseConfig, json_encode(['driver' => 'sqlite', 'path' => $dbPath], JSON_THROW_ON_ERROR));
+$purgeCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/purge-scheduled-events.php')
+    . ' --database-config=' . escapeshellarg($purgeDatabaseConfig)
+    . ' --retention-days=30 --batch-size=2';
+exec($purgeCommand . ' --dry-run 2>&1', $purgeDryRunOutput, $purgeDryRunStatus);
+$test->assertEquals(0, $purgeDryRunStatus, 'scheduled-event purge dry-run exits successfully');
+$test->assert(str_contains(implode("\n", $purgeDryRunOutput), 'Scheduled events eligible') && str_contains(implode("\n", $purgeDryRunOutput), ': 3 '), 'scheduled-event purge dry-run reports old terminal events');
+$test->assertEquals(6, (int) $pdo->query("SELECT COUNT(*) FROM scheduled_events WHERE type LIKE 'test.purge.%'")->fetchColumn(), 'scheduled-event purge dry-run keeps every event');
+exec($purgeCommand . ' 2>&1', $purgeOutput, $purgeStatus);
+$test->assertEquals(0, $purgeStatus, 'scheduled-event purge exits successfully');
+$test->assert(str_contains(implode("\n", $purgeOutput), 'Purged scheduled events: 3'), 'scheduled-event purge reports deleted events across batches');
+$remainingPurgeStatuses = $pdo->query("SELECT status FROM scheduled_events WHERE type LIKE 'test.purge.%' ORDER BY status")->fetchAll(PDO::FETCH_COLUMN);
+$test->assertEquals(['done', 'pending', 'running'], $remainingPurgeStatuses, 'scheduled-event purge keeps recent and active events');
+$pdo->exec("DELETE FROM scheduled_events WHERE type LIKE 'test.purge.%'");
+
 $mannies = new MannyRepository($pdo, scheduledEvents: $scheduledEvents);
 $items = new ProbeItemRepository($pdo);
 $probeImprovements = new ProbeImprovementRepository($pdo);
