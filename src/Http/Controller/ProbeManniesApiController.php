@@ -202,7 +202,10 @@ final class ProbeManniesApiController
                 'code' => 'bad_request',
                 'message' => 'Manny task rejected.',
             ];
-            $error['details'] = array_merge($error['details'] ?? [], ['taskIndex' => $rejected->taskIndex]);
+            $error['details'] = array_merge($error['details'] ?? [], [
+                'taskIndex' => $rejected->taskIndex,
+                'mannyId' => $normalizedTasks[$rejected->taskIndex]['mannyId'],
+            ]);
 
             return new ApiResponse($rejected->response->status, ['error' => $error]);
         }

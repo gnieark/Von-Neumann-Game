@@ -1366,8 +1366,8 @@ paths:
         payload contract as each corresponding
         `/api/probe/{probeId}/mannies/{mannyId}/{task}` endpoint. The whole
         batch is atomic: if one task is rejected, none of its tasks are
-        retained. An error identifies the rejected zero-based `taskIndex`.
-        A Manny may occur only once in a batch.
+        retained. An error identifies the rejected zero-based `taskIndex` and
+        its `mannyId`. A Manny may occur only once in a batch.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       requestBody:

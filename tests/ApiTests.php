@@ -5758,6 +5758,7 @@ $batchRollback = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/man
 ], JSON_THROW_ON_ERROR));
 $test->assertEquals(400, $batchRollback->status, 'Manny task batch reports an invalid task payload');
 $test->assertEquals(1, $batchRollback->body['error']['details']['taskIndex'] ?? null, 'Manny task batch identifies the rejected zero-based task index');
+$test->assertEquals($batchMannyIds[3] ?? null, $batchRollback->body['error']['details']['mannyId'] ?? null, 'Manny task batch identifies the rejected Manny');
 $test->assertEquals(null, $mannies->findByUidForProbe($batchProbe->id, (string) ($batchMannyIds[2] ?? ''))?->currentTask, 'Manny task batch rolls back earlier accepted tasks when a later task fails');
 
 $duplicateBatchManny = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
