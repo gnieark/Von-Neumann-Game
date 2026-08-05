@@ -520,6 +520,8 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-l
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'step=\"0.0001\" required></label>'), 'Manny deuterium transfer amount starts empty instead of prefilled');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'amountInput.value.trim() === "" ? null'), 'Manny deuterium transfer amount remains empty while the user edits it');
 $test->assert(is_string($movementTemplate) && str_contains($movementTemplate, 'id="movement-cancel"'), 'movement view exposes movement cancellation during preparation');
 $test->assert(is_string($movementScript) && str_contains($movementScript, '(movement.phase || movement.status) === "preparing"'), 'movement JS only offers cancellation during the preparing phase');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'preparationEndsAt - Date.now()'), 'movement JS hides cancellation at the locally computed preparation deadline');

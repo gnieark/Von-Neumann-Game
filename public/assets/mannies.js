@@ -2703,7 +2703,7 @@
 
         return "<form class=\"manny-transfer-deuterium-form manny-form\">"
             + "<label>" + escaped(tr("deuteriumTransferTargetProbe", "Target probe or drone")) + "<select class=\"manny-transfer-deuterium-target\" name=\"targetProbeId\" required>" + probeTransferTargetOptions("") + "</select></label>"
-            + "<label>" + escaped(tr("deuteriumTransferAmount", "Deuterium amount")) + "<input class=\"manny-transfer-deuterium-amount\" name=\"amount\" type=\"number\" min=\"0.0001\" max=\"" + escaped(String(available)) + "\" step=\"0.0001\" value=\"" + escaped(available > 0.0001 ? String(Math.min(1, available / 2)) : "0") + "\" required></label>"
+            + "<label>" + escaped(tr("deuteriumTransferAmount", "Deuterium amount")) + "<input class=\"manny-transfer-deuterium-amount\" name=\"amount\" type=\"number\" min=\"0.0001\" max=\"" + escaped(String(available)) + "\" step=\"0.0001\" required></label>"
             + "<button class=\"manny-transfer-deuterium-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("transferDeuteriumToProbe", "Transfer deuterium")) + "</button>"
             + "<p class=\"manny-transfer-deuterium-hint\">" + escaped(deuteriumTransferHint(hasTarget, available)) + "</p>"
             + "</form>";
@@ -3580,10 +3580,8 @@
             }
             if (amountInput) {
                 amountInput.max = String(available);
-                const currentAmount = Number(amountInput.value);
-                if (!Number.isFinite(currentAmount) || currentAmount <= 0) {
-                    amountInput.value = available > 0.0001 ? String(Math.min(1, available / 2)) : "0";
-                } else if (currentAmount >= available && available > 0.0001) {
+                const currentAmount = amountInput.value.trim() === "" ? null : Number(amountInput.value);
+                if (currentAmount !== null && Number.isFinite(currentAmount) && currentAmount >= available && available > 0.0001) {
                     amountInput.value = String(Math.max(0.0001, Math.floor((available - 0.0001) * 10000) / 10000));
                 }
             }
