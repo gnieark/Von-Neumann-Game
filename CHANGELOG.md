@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Fixed
 
 - Interface : le champ de quantité du transfert de deutérium dans `/mannies` n'est plus prérempli et peut rester vide pendant la saisie.
+- Interface : dans le détail d’une recette, un astérisque et une note signalent désormais les quantités disponibles déjà diminuées par la préparation d’ingrédients intermédiaires précédents.
 
 ## 2026-08-04
 

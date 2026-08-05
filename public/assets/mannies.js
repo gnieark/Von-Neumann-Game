@@ -1317,7 +1317,8 @@
 
         const ingredients = Array.isArray(recipe.ingredients) ? recipe.ingredients : [];
         const resourceCosts = {};
-        const itemCounts = inventoryItemCounts();
+        const initialItemCounts = inventoryItemCounts();
+        const itemCounts = {...initialItemCounts};
         let canCraft = true;
         let durationSeconds = Math.max(0, Number(recipe.durationSeconds) || 0);
         ingredients.forEach((ingredient) => {
@@ -1352,6 +1353,7 @@
                 type,
                 required,
                 available,
+                "availableAfterIntermediateComponents": available < Math.max(0, initialItemCounts[type] || 0),
                 missing,
                 craftedFromResources,
                 "components": Object.values(componentItems).filter((component) => component.required > 0),
@@ -1412,6 +1414,8 @@
                 + "<p>" + escaped(tr("noCraftIngredients", "No ingredients required.")) + "</p>";
         }
 
+        const hasAdjustedItemAvailability = availability.itemStatuses.some((status) => status.availableAfterIntermediateComponents);
+
         return "<span class=\"manny-craft-ingredients-title\">" + escaped(tr("craftIngredientsRequired", "Required ingredients")) + "</span>"
             + "<ul>"
             + availability.itemStatuses.map((status) => {
@@ -1429,7 +1433,7 @@
 
                 return "<li class=\"" + (status.canResolve ? "available" : "missing") + "\">"
                     + "<span>" + escaped(inventoryItemTypeLabel(status.type, status.type)) + "</span>"
-                    + "<b>" + escaped(detail) + "</b>"
+                    + "<b>" + escaped(detail) + (status.availableAfterIntermediateComponents ? "*" : "") + "</b>"
                     + (componentSummary ? "<small>" + escaped(componentSummary) + "</small>" : "")
                     + "</li>";
             }).join("")
@@ -1445,6 +1449,9 @@
                     + "</li>";
             }).join("")
             + "</ul>"
+            + (hasAdjustedItemAvailability
+                ? "<small class=\"manny-craft-availability-note\">* " + escaped(tr("ingredientAvailabilityAfterIntermediateComponents", "Available after components allocated to preceding intermediate ingredients.")) + "</small>"
+                : "")
             + "<p class=\"manny-craft-duration\">" + escaped(tr("craftingDuration", "Duration") + " " + window.VNG.duration(availability.durationSeconds, tr)) + "</p>";
     }
 
