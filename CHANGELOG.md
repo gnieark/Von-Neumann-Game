@@ -1,14 +1,23 @@
 # Changelog
 
-- Interface : le champ de quantité du transfert de deutérium dans `/mannies` n'est plus prérempli et peut rester vide pendant la saisie.
-- API : les erreurs de `POST /api/probe/{probeId}/mannies/tasks` indiquent désormais le `mannyId` rejeté en plus de son `taskIndex`.
-- Moteur : lorsqu'un container détaché ciblé par un minage Manny s'est rempli entre l'ordre et son échéance, la Manny dépose seulement la quantité encore admissible, laisse le reliquat dans l'astéroïde et termine son retour au lieu d'être différée indéfiniment par le scheduler.
-- Maintenance : ajout de `scripts/purge-scheduled-events.php` pour supprimer quotidiennement, par lots, les événements terminés depuis plus de 30 jours sans toucher aux événements actifs.
-
-
-
-
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
+
+## 2026-08-05
+
+### Fixed
+
+- Interface : le champ de quantité du transfert de deutérium dans `/mannies` n'est plus prérempli et peut rester vide pendant la saisie.
+
+## 2026-08-04
+
+### Fixed
+
+- Moteur : lorsqu'un container détaché ciblé par un minage Manny s'est rempli entre l'ordre et son échéance, la Manny dépose seulement la quantité encore admissible, laisse le reliquat dans l'astéroïde et termine son retour au lieu d'être différée indéfiniment par le scheduler.
+
+### Changed
+
+- API : les erreurs de `POST /api/probe/{probeId}/mannies/tasks` indiquent désormais le `mannyId` rejeté en plus de son `taskIndex`.
+- Maintenance : ajout de `scripts/purge-scheduled-events.php` pour supprimer quotidiennement, par lots, les événements terminés depuis plus de 30 jours sans toucher aux événements actifs.
 
 ## 2026-08-02
 
