@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-07
+
+### Fixed
+
+- Moteur : l’inspection Manny d’un astéroïde découvre désormais tous les containers qui y sont cachés, au lieu de ne révéler que le premier.
+
 ## 2026-08-05
 
 ### Fixed

@@ -2080,14 +2080,23 @@ final class MannyService implements MannyTaskRuntime
             return null;
         }
 
-        $container = $hidden[0];
-        if ($discoveringPlayerId !== null && !$container->isDiscoveredByPlayer($discoveringPlayerId)) {
-            $container = $container->withDiscoveredByPlayer($discoveringPlayerId);
-            $sector->replaceDetachedContainer($container);
+        $detectedContainer = $hidden[0];
+        $changed = false;
+        if ($discoveringPlayerId !== null) {
+            foreach ($hidden as $container) {
+                if ($container->isDiscoveredByPlayer($discoveringPlayerId)) {
+                    continue;
+                }
+
+                $sector->replaceDetachedContainer($container->withDiscoveredByPlayer($discoveringPlayerId));
+                $changed = true;
+            }
+        }
+        if ($changed) {
             $this->sectors->saveSector($sector);
         }
 
-        return $this->hiddenDetachedContainerDetectionPayload($container->getId(), $objectId);
+        return $this->hiddenDetachedContainerDetectionPayload($detectedContainer->getId(), $objectId);
     }
 
     /**

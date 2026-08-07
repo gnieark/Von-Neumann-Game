@@ -3967,6 +3967,22 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals('cache-rock', $visibleHiddenContainers[0]['targetObjectId'] ?? null, 'visible hidden detached container exposes its asteroid target');
         $test->assertEquals(false, $visibleHiddenContainers[0]['salvageable'] ?? null, 'visible hidden detached containers are not generic salvage targets');
         $test->assert(!array_key_exists('payload', $visibleHiddenContainers[0] ?? []), 'visible hidden detached container observation does not expose contents');
+
+        $secondHiddenDetachedObjectId = $hiddenDetachedObjectId . '-second';
+        if ($hiddenStoredContainer !== null) {
+            $secondHiddenData = $hiddenStoredContainer->toArray();
+            $secondHiddenData['id'] = $secondHiddenDetachedObjectId;
+            $secondHiddenData['name'] = 'Second hidden container';
+            $secondHiddenData['payload']['sourceContainerId'] = 'container-second-hidden';
+            $secondHiddenData['payload']['container']['id'] = 'container-second-hidden';
+            $secondHiddenData['payload']['containerItem']['uid'] = 'item-second-hidden';
+            $secondHiddenData['discoveredByPlayerIds'] = [$detachPlayer->id];
+            $secondHiddenContainer = SectorDetachedContainer::fromArray($secondHiddenData);
+            $sectorWithSecondHidden = $sectorService->getOrCreateSector($detachProbe->currentSector);
+            $sectorWithSecondHidden->addHiddenDetachedContainer($secondHiddenContainer);
+            $sectorService->saveSector($sectorWithSecondHidden);
+        }
+
         $hiddenSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachThirdMannyId) . '/salvage', $detachHeaders, json_encode([
             'objectId' => $hiddenDetachedObjectId,
         ], JSON_THROW_ON_ERROR));
@@ -4001,12 +4017,18 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $test->assertEquals($hiddenDetachedObjectId, $scoutInspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection by another player detects the hidden container');
             $scoutDiscoveredContainer = $sectorService->getOrCreateSector($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
             $test->assert($scoutDiscoveredContainer !== null && in_array($scoutPlayer->id, $scoutDiscoveredContainer->getDiscoveredByPlayerIds(), true), 'asteroid inspection records the discovering player');
+            $scoutDiscoveredSecondContainer = $sectorService->getOrCreateSector($detachProbe->currentSector)->findHiddenDetachedContainerById($secondHiddenDetachedObjectId);
+            $test->assert($scoutDiscoveredSecondContainer !== null && in_array($scoutPlayer->id, $scoutDiscoveredSecondContainer->getDiscoveredByPlayerIds(), true), 'one asteroid inspection discovers every hidden container on that asteroid');
             $scoutObservationAfter = $kernel->handle('GET', '/api/probe/sector', $scoutHeaders);
             $scoutHiddenAfter = array_values(array_filter(
                 $scoutObservationAfter->body['sector']['objects'] ?? [],
-                static fn(array $object): bool => ($object['id'] ?? null) === $hiddenDetachedObjectId,
+                static fn(array $object): bool => in_array($object['id'] ?? null, [$hiddenDetachedObjectId, $secondHiddenDetachedObjectId], true),
             ));
-            $test->assertEquals(1, count($scoutHiddenAfter), 'discovered hidden detached containers appear in sector observation for the discovering player');
+            $test->assertEquals(2, count($scoutHiddenAfter), 'all discovered hidden detached containers appear in sector observation for the discovering player');
+
+            $sectorAfterMultiContainerDiscovery = $sectorService->getOrCreateSector($detachProbe->currentSector);
+            $sectorAfterMultiContainerDiscovery->removeHiddenDetachedContainerById($secondHiddenDetachedObjectId);
+            $sectorService->saveSector($sectorAfterMultiContainerDiscovery);
         }
 
         $attachTargetProbe = $probes->createForPlayer($detachPlayer->id, 'Container receiver drone', $detachProbe->currentSector);
