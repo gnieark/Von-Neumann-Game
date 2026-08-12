@@ -22,6 +22,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Service\Manny\DetachStorageContainerTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTankRefillTaskHandler;
@@ -122,6 +123,7 @@ final class MannyService implements MannyTaskRuntime
         private readonly ?ScheduledEventRepository $scheduledEvents = null,
         ?MannyCraftingService $crafting = null,
         ?MannyCargoService $cargo = null,
+        private readonly ?ProbeMovementRepository $movements = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
         $this->crafting = $crafting ?? new MannyCraftingService($mannies, $probes, $items, $storage, $config);
@@ -1079,6 +1081,14 @@ final class MannyService implements MannyTaskRuntime
 
     private function startDetachStorageContainerLocked(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $mode, ?string $objectId = null): Manny
     {
+        if (strtolower(trim($mode)) === SectorDetachedContainer::MODE_ATTACH_TO_PROBE) {
+            $this->ensureProbeNotMoving($probe);
+            $targetProbeId = filter_var($objectId, FILTER_VALIDATE_INT);
+            if ($targetProbeId !== false && $targetProbeId > 0) {
+                $this->ensureProbeIdNotMoving((int) $targetProbeId);
+            }
+        }
+
         return $this->detachStorageContainerTaskHandler->start($probe, $ownerPlayerId, $uid, $containerId, $mode, $objectId);
     }
 
@@ -1222,6 +1232,9 @@ final class MannyService implements MannyTaskRuntime
 
     private function startDeuteriumTransferToProbeLocked(NeumannProbe $probe, string $uid, int $targetProbeId, float $amount): Manny
     {
+        $this->ensureProbeNotMoving($probe);
+        $this->ensureProbeIdNotMoving($targetProbeId);
+
         return $this->deuteriumTransferTaskHandler->start($probe, $uid, $targetProbeId, $amount);
     }
 
@@ -1235,6 +1248,8 @@ final class MannyService implements MannyTaskRuntime
 
     private function startMannyTransferToProbeLocked(NeumannProbe $probe, string $uid, int $targetProbeId): Manny
     {
+        $this->ensureProbeNotMoving($probe);
+        $this->ensureProbeIdNotMoving($targetProbeId);
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->requiredManny($probe, $uid);
         if ($manny->isInSameSectorAs($probe)) {
@@ -1924,6 +1939,18 @@ final class MannyService implements MannyTaskRuntime
         }
         if ($probe->status === ProbeStatus::TrappedByBlackHole) {
             throw new MannyActionException(409, 'probe_trapped_by_black_hole', 'The probe is trapped beyond a black hole escape threshold.');
+        }
+    }
+
+    private function ensureProbeNotMoving(NeumannProbe $probe): void
+    {
+        $this->ensureProbeIdNotMoving($probe->id);
+    }
+
+    private function ensureProbeIdNotMoving(int $probeId): void
+    {
+        if ($probeId > 0 && $this->movements?->findActiveByProbeId($probeId) !== null) {
+            throw new MannyActionException(409, 'probe_already_moving', 'Transfers are unavailable while the source or target probe is moving between sectors.');
         }
     }
 

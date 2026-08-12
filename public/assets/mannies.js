@@ -177,6 +177,14 @@
     }
 
     function mannyActionErrorMessage(form, error) {
+        const isProbeTransferForm = form && (
+            form.classList.contains("manny-transfer-probe-form")
+            || form.classList.contains("manny-transfer-deuterium-form")
+            || form.classList.contains("manny-detach-storage-container-form")
+        );
+        if (isProbeTransferForm && error && error.errorCode === "probe_already_moving") {
+            return tr("probeTransferUnavailableWhileMoving", "Transfer is unavailable while the source or target probe is moving.");
+        }
         const isCraftForm = form
             && (form.classList.contains("manny-craft-form") || form.classList.contains("printer-craft-form"));
         if (isCraftForm && error && error.errorCode === "insufficient_cargo_capacity") {

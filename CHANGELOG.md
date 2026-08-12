@@ -1,5 +1,8 @@
 # Changelog
 
+- API : les transferts de Manny, de deutérium et de containers entre sondes sont désormais refusés avec `probe_already_moving` si la sonde source ou cible est en mouvement, afin d’éviter qu’une arrivée dans un autre secteur fasse échouer le transfert et laisse la Manny ou le container hors de portée.
+- Interface : le refus `probe_already_moving` d’un transfert inter-sondes affiche désormais un message explicite et traduit, sans requête ni polling supplémentaire.
+
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-08-07

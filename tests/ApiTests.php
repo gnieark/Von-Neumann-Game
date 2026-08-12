@@ -765,6 +765,10 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'storage
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'storage_container_reserved'), 'inventories JS translates reserved-container detach errors');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'Ce container est réservé"), 'French translations explain reserved-container detach conflicts');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'This container is reserved"), 'English translations explain reserved-container detach conflicts');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeTransferUnavailableWhileMoving'), 'mannies JS translates moving-probe transfer errors');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'probeTransferUnavailableWhileMoving'), 'inventories JS translates moving-probe container transfer errors');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeTransferUnavailableWhileMoving' => 'Le transfert est indisponible"), 'French translations explain moving-probe transfer conflicts');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeTransferUnavailableWhileMoving' => 'Transfer is unavailable"), 'English translations explain moving-probe transfer conflicts');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeApiPath("/probe-improvements-available")'), 'mannies JS loads selected-probe available probe improvements');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-improve-probe-form'), 'mannies JS renders the probe improvement form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/improve-probe'), 'mannies JS posts probe improvement orders');
@@ -820,7 +824,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260805-intermediate-craft-availability"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260812-moving-probe-transfer-error"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1476,7 +1480,7 @@ $missionService = new MissionService($missions, $messages, [], 'api-test-world',
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents, movements: $movements);
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
 $processScheduledMannyNow = static function (int $mannyId) use ($pdo, $scheduler): array {
     $pdo->prepare(
@@ -1824,7 +1828,7 @@ $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMess
 $multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanSectorService, $multiScanWarnings);
 $multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, scut: $multiScanScut, worldSeed: 'multi-scan-world');
 $multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
-$multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents);
+$multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents, movements: $multiScanMovements);
 $multiScanKernel = new ApiKernel($multiScanAuth, $multiScanPlayers, $multiScanProbes, new SectorObservationService($multiScanSectorService, $multiScanVisited, mannies: $multiScanMannies), $multiScanMovementService, $multiScanVisited, $multiScanMannyService, $multiScanItems, $multiScanStorage, $multiScanMessages, $multiScanLogbook, $multiScanWarnings, $multiScanForum, $multiScanMissionService, $multiScanReinstantiation, $multiScanScut, improvements: $multiScanProbeImprovements);
 $multiScanPlayer = $multiScanAuth->registerPlayerWithPassword('multi-scan-observer', 'secret', 'Multi Scan Observer', 'Multi scan default');
 $multiScanDefaultProbe = $multiScanProbes->findByPlayerId($multiScanPlayer->id);
@@ -6091,7 +6095,26 @@ if ($createdProbe !== null) {
     $test->assertEquals(93.0, $probes->findById($transferTargetProbe->id)?->deuteriumStock, 'atomic deuterium adjustments compose without a lost update');
     $test->assertEquals(100.0, $staleTransferTarget?->deuteriumStock, 'atomic deuterium adjustments do not rely on a stale probe snapshot');
 
-    $probeTransferManny = $mannies->createForProbe($createdProbe->id, 'probe-transfer-manny');
+    $movingTransferTarget = $probes->createForPlayer($player->id, 'Moving transfer target', $createdProbe->currentSector);
+    $movingTimeline = (new MovementDurationCalculator())->timeline(new DateTimeImmutable('now', new DateTimeZone('UTC')), 1);
+    $movements->create(
+        $movingTransferTarget->id,
+        $movingTransferTarget->currentSector,
+        new SectorCoordinates(994, 0, 0),
+        1,
+        $movingTimeline,
+        1.0,
+    );
+    $movingTargetTransferManny = $mannies->createForProbe($createdProbe->id, 'moving-target-transfer-manny');
+    $transferToMovingTarget = $kernel->handle('POST', '/api/probe/' . $createdProbe->id . '/mannies/' . rawurlencode($movingTargetTransferManny->uid) . '/transfer-to-probe', $headers, json_encode([
+        'targetProbeId' => $movingTransferTarget->id,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(409, $transferToMovingTarget->status, 'Manny transfer rejects a target probe with an active movement');
+    $test->assertEquals('probe_already_moving', $transferToMovingTarget->body['error']['code'] ?? null, 'moving target Manny transfer returns probe_already_moving');
+    $test->assertEquals($createdProbe->id, $mannies->findByUid($movingTargetTransferManny->uid)?->probeId, 'rejected moving-target transfer keeps the Manny on its source probe');
+    $test->assertEquals('probe', $mannies->findByUid($movingTargetTransferManny->uid)?->locationType, 'rejected moving-target transfer does not put the Manny into the sector');
+
+    $probeTransferManny = $movingTargetTransferManny;
     $mannyProbeTransfer = $kernel->handle('POST', '/api/probe/' . $createdProbe->id . '/mannies/' . rawurlencode($probeTransferManny->uid) . '/transfer-to-probe', $headers, json_encode([
         'targetProbeId' => $transferTargetProbe->id,
     ], JSON_THROW_ON_ERROR));

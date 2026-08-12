@@ -51,9 +51,12 @@
                 return data;
             })
             .catch((error) => {
-                const message = error && error.errorCode === "storage_container_reserved"
-                    ? tr("reservedStorageContainerDetach", "This container is reserved for an active craft and cannot be detached.")
-                    : ((error && error.message) || tr("requestDenied", "Request denied"));
+                let message = (error && error.message) || tr("requestDenied", "Request denied");
+                if (error && error.errorCode === "storage_container_reserved") {
+                    message = tr("reservedStorageContainerDetach", "This container is reserved for an active craft and cannot be detached.");
+                } else if (error && error.errorCode === "probe_already_moving") {
+                    message = tr("probeTransferUnavailableWhileMoving", "Transfer is unavailable while the source or target probe is moving.");
+                }
                 setText(statusId, message);
             });
     }

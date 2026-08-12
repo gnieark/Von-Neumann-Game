@@ -3474,7 +3474,7 @@ paths:
       description: >
         Starts a five-minute Manny task that transfers a reserved deuterium
         amount from the current probe to another probe in the same
-        sector. The requested amount must be strictly lower than the source
+        sector. Neither probe may have an active movement. The requested amount must be strictly lower than the source
         probe current deuterium reserve. When the task completes, the target
         probe is filled only up to its maximum deuterium capacity and any
         surplus is returned to the source probe.
@@ -3507,7 +3507,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Manny is busy, unavailable, not onboard, or the target tank is already full
+          description: Manny is busy or unavailable, a probe is moving, Manny is not onboard, or the target tank is already full
           content:
             application/json:
               schema:
@@ -3528,7 +3528,8 @@ paths:
         probe, and Manny are all in the same sector, or when the Manny is in a
         remote SCUT-reachable sector with the target probe. If the Manny was
         already executing a task, the task is cancelled with the same cleanup
-        rules as recall, then the Manny returns toward the target probe.
+        rules as recall, then the Manny returns toward the target probe. Neither
+        the source nor target probe may have an active movement.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -3557,7 +3558,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Manny or source probe cannot accept the transfer order
+          description: Manny or source probe cannot accept the transfer order, or either probe is moving
           content:
             application/json:
               schema:
