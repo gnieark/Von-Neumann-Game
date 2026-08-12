@@ -4809,7 +4809,7 @@ components:
       properties:
         id:
           type: string
-          enum: [deuterium_compression, reinforced_container_couplings]
+          enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
         name:
           type: string
         description:

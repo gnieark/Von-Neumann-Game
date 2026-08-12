@@ -451,6 +451,7 @@ $constructObjects = array_values(array_filter(
 ));
 $test->assertCount(1, $constructObjects, 'configured sector generation can add one dormant construct');
 $test->assertEquals('dormant_construct', $constructObjects[0]->getType()->value, 'dormant construct uses the public object type');
+$test->assert(in_array($constructObjects[0]->getInspectionScenario(), DormantConstruct::inspectionScenarios(), true), 'generated dormant construct stores a deterministic inspection scenario');
 
 $blackHoleSector = findGeneratedSector(
     $contentGenerator,

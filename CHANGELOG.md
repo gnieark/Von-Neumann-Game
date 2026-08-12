@@ -1,5 +1,6 @@
 # Changelog
 
+- Univers : ajout d'une structure dormante prenant la forme d'un astéroïde équipé d'un moteur au deutérium hors service; son inspection par une Manny débloque le blueprint `Distributed Thrust Anchoring`, sans effet de gameplay pour le moment.
 - API : les transferts de Manny, de deutérium et de containers entre sondes sont désormais refusés avec `probe_already_moving` si la sonde source ou cible est en mouvement, afin d’éviter qu’une arrivée dans un autre secteur fasse échouer le transfert et laisse la Manny ou le container hors de portée.
 - Interface : le refus `probe_already_moving` d’un transfert inter-sondes affiche désormais un message explicite et traduit, sans requête ni polling supplémentaire.
 

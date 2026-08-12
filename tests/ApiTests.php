@@ -5360,6 +5360,12 @@ if ($dormantInspectionProbe !== null) {
         'dormant-report-couplings',
         inspectionScenario: ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
     ));
+    $dormantInspectionSector->addObject(new DormantConstruct(
+        'dormant-report-thrust-anchoring',
+        DormantConstruct::THRUST_ANCHORED_ASTEROID_NAME,
+        description: DormantConstruct::THRUST_ANCHORED_ASTEROID_DESCRIPTION,
+        inspectionScenario: ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING,
+    ));
     $dormantInspectionSector->addObject(new DormantConstruct('dormant-report-random'));
     $sectorRepository->save($dormantInspectionSector);
 
@@ -5367,9 +5373,9 @@ if ($dormantInspectionProbe !== null) {
     $dormantInspectionObjects = array_values(array_filter(
         $dormantInspectionScan->body['sector']['objects'] ?? [],
         static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct'
-            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-random'], true),
+            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-thrust-anchoring', 'dormant-report-random'], true),
     ));
-    $test->assertEquals(3, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
+    $test->assertEquals(4, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
     foreach ($dormantInspectionObjects as $dormantInspectionObject) {
         $test->assert(!array_key_exists('inspectionScenario', $dormantInspectionObject), 'dormant construct inspection scenario is not exposed through sector scans');
     }
@@ -5418,6 +5424,26 @@ if ($dormantInspectionProbe !== null) {
     $test->assertEquals(1, count($dormantCouplingsReports), 'completed dormant construct coupling inspection creates a Manny report alert');
     $test->assert(str_contains((string) ($dormantCouplingsReports[0]['message'] ?? ''), 'Recovered data: reinforced container coupling design.'), 'dormant construct report describes recovered container-coupling data');
     $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS)?->available, 'dormant construct coupling report unlocks reinforced container couplings');
+
+    $inspectDormantThrustAnchoring = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-thrust-anchoring',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantThrustAnchoring->status, 'Manny can inspect a thrust-anchored asteroid dormant construct');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantThrustAnchoringAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
+    $dormantThrustAnchoringReports = array_values(array_filter(
+        $dormantThrustAnchoringAlerts->body['alerts'] ?? [],
+        static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+            && ($alert['report']['objectId'] ?? null) === 'dormant-report-thrust-anchoring'
+    ));
+    $test->assertEquals(1, count($dormantThrustAnchoringReports), 'completed thrust-anchored asteroid inspection creates a Manny report alert');
+    $test->assert(str_contains((string) ($dormantThrustAnchoringReports[0]['message'] ?? ''), 'Recovered blueprint: Distributed Thrust Anchoring.'), 'thrust-anchored asteroid report identifies the recovered blueprint');
+    $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING)?->available, 'thrust-anchored asteroid report unlocks distributed thrust anchoring');
+    $test->assertEquals(null, ProbeImprovementCatalog::find(ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING), 'distributed thrust anchoring remains outside the installable improvement catalog');
 
     $inspectDormantRandom = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
         'objectId' => 'dormant-report-random',

@@ -10,6 +10,7 @@ final class ProbeImprovementCatalog
 {
     public const DEUTERIUM_COMPRESSION = 'deuterium_compression';
     public const REINFORCED_CONTAINER_COUPLINGS = 'reinforced_container_couplings';
+    public const DISTRIBUTED_THRUST_ANCHORING = 'distributed_thrust_anchoring';
 
     public const DEUTERIUM_COMPRESSION_DURATION_SECONDS = 300;
     public const DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT = 200.0;
