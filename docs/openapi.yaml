@@ -1275,10 +1275,12 @@ paths:
       description: >
         Returns persistent warnings produced when a fragile chain of additional
         storage containers may lose one container during a sector movement.
-        This rule starts at 5 additional containers with a 10% risk, then adds
-        10 percentage points per extra container up to 100%. Completed probe
-        improvements can raise the effective starting threshold returned in
-        `rule.startsAtAdditionalContainers`.
+        The starting threshold depends on probe model and completed
+        improvements: 5 additional containers for a generic probe, 10 with
+        reinforced couplings, 2 for a deuterium tanker, and 4 for a reinforced
+        tanker. Risk starts at 10%, then adds 10 percentage points per extra
+        container up to 100%. The warning exposes its effective threshold in
+        `risk.ruleStartsAtAdditionalContainers`.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       responses:
@@ -2238,10 +2240,12 @@ paths:
       description: >
         Returns persistent warnings produced when a fragile chain of additional
         storage containers may lose one container during a sector movement.
-        This rule starts at 5 additional containers with a 10% risk, then adds
-        10 percentage points per extra container up to 100%. Completed probe
-        improvements can raise the effective starting threshold returned in
-        `rule.startsAtAdditionalContainers`.
+        The starting threshold depends on probe model and completed
+        improvements: 5 additional containers for a generic probe, 10 with
+        reinforced couplings, 2 for a deuterium tanker, and 4 for a reinforced
+        tanker. Risk starts at 10%, then adds 10 percentage points per extra
+        container up to 100%. The warning exposes its effective threshold in
+        `risk.ruleStartsAtAdditionalContainers`.
       responses:
         '200':
           description: Current and past damage warnings for the authenticated probe

@@ -768,6 +768,10 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/crafti
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '/crafting-reservations/reassign'), 'inventories JS offers crafting reservation reassignment after reserved-container jettison errors');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'crafting_reservations_cannot_be_reassigned'), 'mannies JS explains impossible crafting reservation reassignment');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'crafting_reservations_cannot_be_reassigned'), 'inventories JS explains impossible crafting reservation reassignment');
+$alertsScript = file_get_contents(__DIR__ . '/../public/assets/alerts.js');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, 'warning.risk.ruleStartsAtAdditionalContainers'), 'alerts JS reads the effective fragile-container threshold from each warning');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'à partir de {threshold} containers supplémentaires'), 'French fragile-storage warning interpolates the effective probe threshold');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'from {threshold} additional containers onward'), 'English fragile-storage warning interpolates the effective probe threshold');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'Ce container est réservé"), 'French translations explain reserved-container detach conflicts');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'This container is reserved"), 'English translations explain reserved-container detach conflicts');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeTransferUnavailableWhileMoving'), 'mannies JS translates moving-probe transfer errors');
