@@ -31,6 +31,7 @@ final class Asteroid extends UniverseObject
         ?array $resourceAmounts = null,
         array $waypointBookmarks = [],
         ?float $resourceContainersPerEarthMass = null,
+        private readonly bool $motorized = false,
     ) {
         parent::__construct($id, $name, UniverseObjectType::Asteroid, $mass, $radius, $description, $waypointBookmarks);
         $this->resourceAmounts = $resourceAmounts === null
@@ -59,6 +60,7 @@ final class Asteroid extends UniverseObject
             $this->getDescription(),
             $this->resourceAmounts,
             $this->getWaypointBookmarks(),
+            motorized: $this->motorized,
         );
     }
 
@@ -75,6 +77,29 @@ final class Asteroid extends UniverseObject
             $this->getDescription(),
             $resourceAmounts,
             $this->getWaypointBookmarks(),
+            motorized: $this->motorized,
+        );
+    }
+
+    public function isMotorized(): bool
+    {
+        return $this->motorized;
+    }
+
+    public function withDeuteriumEngine(): self
+    {
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->composition,
+            $this->estimatedResources,
+            $this->sizeCategory,
+            $this->getMass(),
+            $this->getRadius(),
+            $this->getDescription(),
+            $this->resourceAmounts,
+            $this->getWaypointBookmarks(),
+            motorized: true,
         );
     }
 
@@ -85,6 +110,7 @@ final class Asteroid extends UniverseObject
             'estimatedResources' => $this->estimatedResources,
             'sizeCategory' => $this->sizeCategory,
             'resourceAmounts' => $this->resourceAmounts,
+            'motorized' => $this->motorized,
         ];
     }
 
@@ -138,6 +164,7 @@ final class Asteroid extends UniverseObject
                 ? $data['resourceAmounts']
                 : null,
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
+            motorized: (bool) ($data['motorized'] ?? false),
         );
     }
 

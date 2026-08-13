@@ -228,6 +228,7 @@ final class SectorObservationService
             if ($object instanceof Asteroid) {
                 $data['composition'] = $object->toArray()['composition'] ?? null;
                 $data['resourceAmounts'] = $object->getResourceAmounts();
+                $data['motorized'] = $object->isMotorized();
             }
             if ($object instanceof Planet) {
                 $data['category'] = $object->getCategory();
@@ -385,6 +386,7 @@ final class SectorObservationService
             }
             if ($object instanceof Asteroid) {
                 $target['resourceAmounts'] = $object->getResourceAmounts();
+                $target['motorized'] = $object->isMotorized();
             }
             if ($object instanceof Planet) {
                 $target['category'] = $object->getCategory();

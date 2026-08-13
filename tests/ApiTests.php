@@ -1799,7 +1799,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(107, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(108, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5501,6 +5501,87 @@ if ($dormantInspectionProbe !== null) {
         static fn(array $object): bool => ($object['id'] ?? null) === 'dormant-report-random',
     ))[0] ?? [];
     $test->assert(!array_key_exists('inspectionScenario', $storedRandomPublicObject), 'stored dormant construct inspection scenario remains hidden from sector scans');
+}
+
+$motorizePlayer = $auth->registerPlayerWithPassword('motorize-asteroid-user', 'secret', 'Motorize Asteroid User');
+$motorizeProbe = $probes->findByPlayerId($motorizePlayer->id);
+$motorizeHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($motorizePlayer)['token']];
+if ($motorizeProbe !== null) {
+    $motorizeSector = $sectorRepository->load($motorizeProbe->currentSector);
+    $motorizeSector->addObject(new Asteroid(
+        'motorize-rock',
+        'Metal rock',
+        'iron',
+        ['iron', 'nickel'],
+        'small',
+        0.000001,
+        0.001,
+        resourceAmounts: ['metals' => 1.0],
+    ));
+    $sectorRepository->save($motorizeSector);
+    $motorizeMannies = $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
+    $motorizeMannyId = (string) ($motorizeMannies->body['mannies'][0]['id'] ?? '');
+    $motorizeMiningMannyId = (string) ($motorizeMannies->body['mannies'][1]['id'] ?? '');
+
+    $lockedMotorization = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
+        'objectId' => 'motorize-rock',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $lockedMotorization->status, 'asteroid motorization requires its unlocked blueprint');
+    $test->assertEquals('distributed_thrust_anchoring_unavailable', $lockedMotorization->body['error']['code'] ?? null, 'locked asteroid motorization returns a stable blueprint error');
+
+    $probeImprovements->markAvailable($motorizeProbe->id, ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING);
+    $missingMotorizationComponents = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
+        'objectId' => 'motorize-rock',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingMotorizationComponents->status, 'asteroid motorization requires one engine and four steel bars');
+    $test->assertEquals('insufficient_asteroid_motorization_components', $missingMotorizationComponents->body['error']['code'] ?? null, 'missing asteroid motorization components return a stable error');
+    $storage->addItem($motorizeProbe, ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::DEUTERIUM_ENGINE_NAME, 0.05);
+    for ($index = 0; $index < 4; $index++) {
+        $storage->addItem($motorizeProbe, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01);
+    }
+    $acceptedMotorization = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
+        'objectId' => 'motorize-rock',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $acceptedMotorization->status, 'an onboard Manny can start motorizing a same-sector asteroid');
+    $test->assertEquals(Manny::TASK_MOTORIZING_ASTEROID, $acceptedMotorization->body['manny']['currentTask'] ?? null, 'asteroid motorization exposes its Manny task type');
+    $test->assertEquals(1200, $acceptedMotorization->body['manny']['task']['durationSeconds'] ?? null, 'asteroid motorization lasts one mining trip plus five minutes');
+    $remainingMotorizationComponents = array_values(array_filter(
+        $items->findByProbeId($motorizeProbe->id),
+        static fn(ProbeItem $item): bool => in_array($item->type, [ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::TYPE_STEEL_BAR], true),
+    ));
+    $test->assertEquals(0, count($remainingMotorizationComponents), 'asteroid motorization consumes one deuterium engine and four steel bars');
+
+    $motorizeMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $motorizeMannyRow->execute(['uid' => $motorizeMannyId]);
+    $motorizeMannyDbId = (int) $motorizeMannyRow->fetchColumn();
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $motorizeMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $completedMotorization = $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
+    $returningMotorizationManny = array_values(array_filter(
+        $completedMotorization->body['mannies'] ?? [],
+        static fn(array $manny): bool => ($manny['id'] ?? null) === $motorizeMannyId,
+    ))[0] ?? [];
+    $test->assertEquals(Manny::TASK_RETURNING, $returningMotorizationManny['currentTask'] ?? null, 'Manny automatically starts returning after installing the asteroid engine');
+    $test->assertEquals('asteroid_motorization_completed', $returningMotorizationManny['task']['reason'] ?? null, 'automatic motorization recall exposes a stable reason');
+    $test->assertEquals(900, $returningMotorizationManny['task']['durationSeconds'] ?? null, 'automatic motorization recall uses the configured Manny travel duration');
+    $storedMotorizedAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById('motorize-rock');
+    $test->assert($storedMotorizedAsteroid instanceof Asteroid && $storedMotorizedAsteroid->isMotorized(), 'completed motorization persists the asteroid motorized state');
+    $test->assertEquals(1.0, $storedMotorizedAsteroid instanceof Asteroid ? ($storedMotorizedAsteroid->getResourceAmounts()['metals'] ?? null) : null, 'motorization preserves asteroid resources');
+    $motorizedSectorScan = $kernel->handle('GET', '/api/probe/' . $motorizeProbe->id . '/sector', $motorizeHeaders);
+    $publicMotorizedAsteroid = array_values(array_filter(
+        $motorizedSectorScan->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['id'] ?? null) === 'motorize-rock',
+    ))[0] ?? [];
+    $test->assertEquals(true, $publicMotorizedAsteroid['motorized'] ?? null, 'sector scans expose the persisted motorized asteroid state');
+
+    $mineMotorizedAsteroid = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMiningMannyId) . '/mine', $motorizeHeaders, json_encode([
+        'objectId' => 'motorize-rock',
+        'resources' => ['metals'],
+        'targetAmount' => 0.01,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $mineMotorizedAsteroid->status, 'a motorized asteroid remains mineable');
 }
 
 $stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');

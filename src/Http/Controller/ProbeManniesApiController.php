@@ -24,6 +24,7 @@ final class ProbeManniesApiController
     private const BATCH_ACTIONS = [
         'repair',
         'mine',
+        'motorize-asteroid',
         'craft',
         'salvage',
         'install-bookmark',
@@ -255,6 +256,20 @@ final class ProbeManniesApiController
             $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
+        }
+
+        if ($action === 'motorize-asteroid') {
+            if (!isset($data['objectId']) || !is_string($data['objectId']) || trim($data['objectId']) === '') {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
+            }
+
+            $manny = $this->mannies->startMotorizingAsteroid($probe, $uid, $data['objectId']);
+            $probe = $this->freshProbe($probe);
+
+            return new ApiResponse(202, [
+                'manny' => $this->presenter->manny($player, $probe, $manny),
+                'inventory' => $this->inventoryForProbe($probe)->toArray(),
+            ]);
         }
 
         if ($action === 'craft') {

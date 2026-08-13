@@ -1,5 +1,6 @@
 # Changelog
 
+- API v108 : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid`. Après déblocage du blueprint Distributed Thrust Anchoring, une Manny peut consommer un moteur au deutérium et quatre barres d’acier pour motoriser durablement un astéroïde du secteur, sans empêcher son minage, puis revient automatiquement vers la sonde.
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-08-13

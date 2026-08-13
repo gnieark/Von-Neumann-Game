@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '107'
+  version: '108'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -1500,6 +1500,59 @@ paths:
       - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1mine/post'
+  /api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid:
+    post:
+      summary: Install a deuterium engine on an asteroid
+      description: >
+        Requires the Distributed Thrust Anchoring blueprint and an idle onboard
+        Manny. The target asteroid must be in the selected probe sector. One
+        deuterium engine and four steel bars are consumed when the task starts.
+        The task lasts one configured Manny mining outbound trip plus five
+        minutes. On completion the asteroid is persisted with `motorized: true`,
+        retains its resources and remains mineable. The Manny then automatically
+        starts a returning task toward the probe.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectId]
+              properties:
+                objectId:
+                  type: string
+            example:
+              objectId: asteroid-metal-deut-a12f
+      responses:
+        '202':
+          description: Asteroid motorization task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Blueprint unavailable, invalid target, or missing components
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/craft:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
@@ -4363,6 +4416,9 @@ components:
         sizeCategory:
           type: string
           enum: [small, medium, large]
+        motorized:
+          type: boolean
+          description: For asteroids, true after a deuterium engine has been installed through Distributed Thrust Anchoring.
         category:
           type: string
           description: Present for planet targets.
@@ -6105,7 +6161,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, motorizing_asteroid, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0
