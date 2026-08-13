@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '106'
+  version: '107'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -928,6 +928,50 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/probe/{probeId}/storage-containers/{containerId}/crafting-reservations/reassign:
+    post:
+      summary: Reassign active crafting reservations from a storage container
+      description: >
+        Atomically moves every active Manny or atomic-printer crafting output
+        reservation targeting this container to other containers attached to
+        the selected probe. Destination routing honors capacity and strict
+        exclusion filters. If all reservations cannot be reassigned, none is
+        changed.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/StorageContainerId'
+      responses:
+        '200':
+          description: Reservations reassigned, or no active reservation targeted the container
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reassignedCount, reassignments]
+                properties:
+                  reassignedCount:
+                    type: integer
+                    minimum: 0
+                  reassignments:
+                    type: array
+                    items:
+                      type: object
+                      required: [mannyId, containerId]
+                      properties:
+                        mannyId:
+                          type: string
+                        containerId:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: At least one reservation has no compatible destination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/storage-moves:
     post:
       summary: Assign a Manny to move stock between containers

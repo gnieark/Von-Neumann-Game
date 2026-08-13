@@ -176,6 +176,35 @@
         setText("manny-status", value);
     }
 
+    function setCraftingReservationStatus(message, containerId) {
+        const status = document.getElementById("manny-status");
+        if (!status) {
+            return;
+        }
+        status.textContent = message + " ";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "reassign-crafting-reservations-button";
+        button.textContent = tr("reassignCraftingReservations", "Reassign crafting reservations");
+        button.addEventListener("click", async () => {
+            button.disabled = true;
+            setStatus(tr("orderSent", "Order transmitted..."));
+            try {
+                await window.VNG.apiJson(window.VNG.probeApiPath("/storage-containers/" + encodeURIComponent(containerId) + "/crafting-reservations/reassign"), {
+                    "method": "POST",
+                });
+                setStatus(tr("craftingReservationsReassigned", "Crafting reservations reassigned. You can retry the container operation."));
+                await loadManniesPage();
+            } catch (error) {
+                const errorMessage = error && error.errorCode === "crafting_reservations_cannot_be_reassigned"
+                    ? tr("craftingReservationsReassignmentImpossible", "Crafting reservations cannot be reassigned: no compatible container has enough free space.")
+                    : ((error && error.message) || tr("requestDenied", "Request denied"));
+                setCraftingReservationStatus(errorMessage, containerId);
+            }
+        });
+        status.appendChild(button);
+    }
+
     function mannyActionErrorMessage(form, error) {
         const isProbeTransferForm = form && (
             form.classList.contains("manny-transfer-probe-form")
@@ -4225,7 +4254,12 @@
                     await loadManniesPage();
                 }
             } catch (error) {
-                setStatus(mannyActionErrorMessage(event.target, error));
+                const containerId = String(form.get("containerId") || "");
+                if (error && error.errorCode === "storage_container_reserved" && containerId) {
+                    setCraftingReservationStatus(mannyActionErrorMessage(event.target, error), containerId);
+                } else {
+                    setStatus(mannyActionErrorMessage(event.target, error));
+                }
             }
         });
 

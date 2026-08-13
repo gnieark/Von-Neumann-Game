@@ -608,6 +608,69 @@ final class ProbeStorageService
     }
 
     /**
+     * @return array{reassignedCount:int,reassignments:list<array{mannyId:string,containerId:string}>}
+     */
+    public function reassignCraftingReservations(NeumannProbe $probe, string $sourceContainerUid): array
+    {
+        return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($sourceContainerUid): array {
+            $this->ensureProbeStorage($lockedProbe);
+            $source = $this->requiredContainer($lockedProbe, $sourceContainerUid);
+            $this->mannies->lockCraftingReservationsForContainer($lockedProbe->id, $source->id);
+            $containers = $this->containers->findByProbeId($lockedProbe->id);
+            $mannies = $this->mannies->findByProbeId($lockedProbe->id);
+            $affected = array_values(array_filter(
+                $mannies,
+                static fn(Manny $manny): bool => in_array($manny->currentTask, [Manny::TASK_CRAFTING, Manny::TASK_ASSISTING_ATOMIC_PRINTER], true)
+                    && $manny->reservedStorageContainerId === $source->id
+                    && $manny->reservedCargoSpace > self::EPSILON,
+            ));
+            if ($affected === []) {
+                return ['reassignedCount' => 0, 'reassignments' => []];
+            }
+
+            $used = $this->usedCapacityByContainer($lockedProbe, $containers, $mannies, $this->items->findByProbeId($lockedProbe->id));
+            foreach ($affected as $manny) {
+                $used[$source->id] = round(max(0.0, (float) ($used[$source->id] ?? 0.0) - $manny->reservedCargoSpace), 4);
+            }
+
+            /** @var array<int, StorageContainer> $destinations */
+            $destinations = [];
+            foreach ($affected as $manny) {
+                $destination = null;
+                foreach ($this->placementCandidatesFrom($containers, (string) $manny->reservedCargoType) as $candidate) {
+                    if ($candidate->id === $source->id) {
+                        continue;
+                    }
+                    $free = round(max(0.0, $candidate->capacity - (float) ($used[$candidate->id] ?? 0.0)), 4);
+                    if ($free + self::EPSILON >= $manny->reservedCargoSpace) {
+                        $destination = $candidate;
+                        break;
+                    }
+                }
+                if ($destination === null) {
+                    throw new MannyActionException(
+                        409,
+                        'crafting_reservations_cannot_be_reassigned',
+                        'No other storage container can accept all active crafting reservations.',
+                    );
+                }
+                $used[$destination->id] = round((float) ($used[$destination->id] ?? 0.0) + $manny->reservedCargoSpace, 4);
+                $destinations[$manny->id] = $destination;
+            }
+
+            $reassignments = [];
+            foreach ($affected as $manny) {
+                $destination = $destinations[$manny->id];
+                $manny->reservedStorageContainerId = $destination->id;
+                $this->mannies->save($manny);
+                $reassignments[] = ['mannyId' => $manny->uid, 'containerId' => $destination->uid];
+            }
+
+            return ['reassignedCount' => count($reassignments), 'reassignments' => $reassignments];
+        });
+    }
+
+    /**
      * @param array<string, float> $resources
      * @param list<array{type:string, space:float}> $units
      */
