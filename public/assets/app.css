@@ -267,6 +267,10 @@ button:disabled {
     color: var(--error);
 }
 
+.action-status .reassign-crafting-reservations-button {
+    margin-inline-start: 8px;
+}
+
 .movement-cancel-control {
     display: flex;
     align-items: center;

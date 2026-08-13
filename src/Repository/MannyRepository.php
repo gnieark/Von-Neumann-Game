@@ -141,6 +141,28 @@ final class MannyRepository
         );
     }
 
+    /** Locks active crafting reservation owners inside the caller transaction. */
+    public function lockCraftingReservationsForContainer(int $probeId, int $containerId): void
+    {
+        $sql = 'SELECT id FROM mannies
+                WHERE probe_id = :probe_id
+                  AND reserved_storage_container_id = :container_id
+                  AND reserved_cargo_space > 0
+                  AND current_task IN (:crafting, :atomic_printing)
+                ORDER BY id ASC';
+        if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
+            $sql .= ' FOR UPDATE';
+        }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'container_id' => $containerId,
+            'crafting' => Manny::TASK_CRAFTING,
+            'atomic_printing' => Manny::TASK_ASSISTING_ATOMIC_PRINTER,
+        ]);
+        $stmt->fetchAll();
+    }
+
     public function findAtomicPrinterAssistantByProbeId(int $probeId): ?Manny
     {
         $stmt = $this->pdo->prepare(

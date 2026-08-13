@@ -694,7 +694,10 @@ final class ProbeMovementService
         $runAt = $atOrigin ? $movement->accelerationEndsAt : $movement->cruiseEndsAt;
         $objectId = SectorDetachedContainer::objectIdForContainer((string) $container['id']);
         $riskPercent = round($risk * 100, 2);
-        $startsAtAdditionalContainers = 5 + $this->fragileContainerRiskDiscount($probe);
+        $startsAtAdditionalContainers = ProbeModel::containerBreakThreshold(
+            $probe->model,
+            $this->hasReinforcedContainerCouplings($probe),
+        );
         $sectorLabel = $this->publicMovementSectorLabel($sector, $player, $atOrigin ? 'movement origin sector' : 'movement target sector');
         $message = 'Fragile external storage warning: from ' . $startsAtAdditionalContainers . ' additional containers onward, movement can break a container link. '
             . 'This jump is expected to lose ' . (string) $container['label']
@@ -800,21 +803,6 @@ final class ProbeMovementService
         );
 
         return min(1.0, max(0.0, ($additionalContainerCount - $threshold + 1) * 0.10));
-    }
-
-    private function fragileContainerRiskDiscount(NeumannProbe $probe): int
-    {
-        if (!$this->hasReinforcedContainerCouplings($probe)) {
-            return 0;
-        }
-
-        $definition = ProbeImprovementCatalog::find(
-            ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS,
-            Config::getArray($this->gameplayConfig, 'probeImprovements'),
-        );
-        $effects = is_array($definition['effects'] ?? null) ? $definition['effects'] : [];
-
-        return max(0, (int) ($effects['fragileContainerRiskAdditionalContainerDiscount'] ?? ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS_CONTAINER_RISK_DISCOUNT));
     }
 
     private function hasReinforcedContainerCouplings(NeumannProbe $probe): bool

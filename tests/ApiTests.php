@@ -23,6 +23,7 @@ use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
+use VonNeumannGame\Domain\StorageContainer;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
 use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
@@ -763,6 +764,14 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyAc
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'insufficientCraftStorage'), 'mannies JS translates cargo-capacity craft errors');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'storage_container_reserved'), 'mannies JS translates reserved-container detach errors');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'storage_container_reserved'), 'inventories JS translates reserved-container detach errors');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/crafting-reservations/reassign'), 'mannies JS offers crafting reservation reassignment after reserved-container errors');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, '/crafting-reservations/reassign'), 'inventories JS offers crafting reservation reassignment after reserved-container jettison errors');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'crafting_reservations_cannot_be_reassigned'), 'mannies JS explains impossible crafting reservation reassignment');
+$test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'crafting_reservations_cannot_be_reassigned'), 'inventories JS explains impossible crafting reservation reassignment');
+$alertsScript = file_get_contents(__DIR__ . '/../public/assets/alerts.js');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, 'warning.risk.ruleStartsAtAdditionalContainers'), 'alerts JS reads the effective fragile-container threshold from each warning');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'à partir de {threshold} containers supplémentaires'), 'French fragile-storage warning interpolates the effective probe threshold');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'from {threshold} additional containers onward'), 'English fragile-storage warning interpolates the effective probe threshold');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'Ce container est réservé"), 'French translations explain reserved-container detach conflicts');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'This container is reserved"), 'English translations explain reserved-container detach conflicts');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeTransferUnavailableWhileMoving'), 'mannies JS translates moving-probe transfer errors');
@@ -1790,7 +1799,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(106, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(107, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -3710,6 +3719,10 @@ if ($detachProbe !== null && $detachMannyId !== '') {
 
         $detachReservationOwner = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId);
         if ($detachReservationOwner !== null) {
+            $detachReservationOwner->currentTask = Manny::TASK_CRAFTING;
+            $detachReservationOwner->taskStartedAt = gmdate('c');
+            $detachReservationOwner->taskEndsAt = gmdate('c', time() + 3600);
+            $detachReservationOwner->taskPayload = ['recipe' => 'manny', 'output' => ['type' => 'manny', 'containerSpace' => 0.05]];
             $detachReservationOwner->reservedCargoType = 'manny';
             $detachReservationOwner->reservedCargoSpace = 0.05;
             $detachReservationOwner->reservedStorageContainerId = $detachContainer->id;
@@ -3723,7 +3736,32 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals('storage_container_reserved', $detachReserved->body['error']['code'] ?? null, 'reserved container detach returns a stable error code');
         $test->assertEquals('This storage container has space reserved for an active crafting output and cannot be detached.', $detachReserved->body['error']['message'] ?? null, 'reserved container detach explains the conflict');
         $test->assert($storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId) !== null, 'rejected reserved container detach keeps the container attached');
+
+        $detachCoreContainer = $storageContainers->findByUidForProbe($detachProbe->id, StorageContainer::CORE_UID);
+        if ($detachCoreContainer !== null) {
+            $storageContainers->updateRules($detachCoreContainer, [], [], ['manny']);
+            $failedReservationReassignment = $kernel->handle('POST', '/api/probe/' . $detachProbe->id . '/storage-containers/' . rawurlencode($detachContainerId) . '/crafting-reservations/reassign', $detachHeaders);
+            $test->assertEquals(409, $failedReservationReassignment->status, 'crafting reservation reassignment reports an impossible filtered destination');
+            $test->assertEquals('crafting_reservations_cannot_be_reassigned', $failedReservationReassignment->body['error']['code'] ?? null, 'impossible crafting reservation reassignment returns a stable error code');
+            $test->assertEquals($detachContainer->id, $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId)?->reservedStorageContainerId, 'failed crafting reservation reassignment is atomic');
+
+            $storageContainers->updateRules($detachCoreContainer, [], [], []);
+            $reservationReassignment = $kernel->handle('POST', '/api/probe/' . $detachProbe->id . '/storage-containers/' . rawurlencode($detachContainerId) . '/crafting-reservations/reassign', $detachHeaders);
+            $test->assertEquals(200, $reservationReassignment->status, 'crafting reservations can be reassigned to another attached container');
+            $test->assertEquals(1, $reservationReassignment->body['reassignedCount'] ?? null, 'crafting reservation reassignment reports its modified task count');
+            $test->assertEquals(StorageContainer::CORE_UID, $reservationReassignment->body['reassignments'][0]['containerId'] ?? null, 'crafting reservation reassignment exposes the new public container id');
+            $test->assertEquals($detachCoreContainer->id, $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId)?->reservedStorageContainerId, 'crafting task now targets the selected compatible container');
+
+            $emptyReservationReassignment = $kernel->handle('POST', '/api/probe/' . $detachProbe->id . '/storage-containers/' . rawurlencode($detachContainerId) . '/crafting-reservations/reassign', $detachHeaders);
+            $test->assertEquals(200, $emptyReservationReassignment->status, 'reassigning an already drained container is idempotent');
+            $test->assertEquals(0, $emptyReservationReassignment->body['reassignedCount'] ?? null, 'an already drained container reports no modified task');
+        }
         if ($detachReservationOwner !== null) {
+            $detachReservationOwner = $mannies->findByUidForProbe($detachProbe->id, $detachSecondMannyId) ?? $detachReservationOwner;
+            $detachReservationOwner->currentTask = null;
+            $detachReservationOwner->taskStartedAt = null;
+            $detachReservationOwner->taskEndsAt = null;
+            $detachReservationOwner->taskPayload = [];
             $detachReservationOwner->reservedCargoType = null;
             $detachReservationOwner->reservedCargoSpace = 0.0;
             $detachReservationOwner->reservedStorageContainerId = null;

@@ -41,7 +41,36 @@
         }
     }
 
-    function runApiOrder(statusId, pendingText, request, onSuccess) {
+    function setCraftingReservationStatus(statusId, message, containerId) {
+        const status = document.getElementById(statusId);
+        if (!status) {
+            return;
+        }
+        status.textContent = message + " ";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "reassign-crafting-reservations-button";
+        button.textContent = tr("reassignCraftingReservations", "Reassign crafting reservations");
+        button.addEventListener("click", async () => {
+            button.disabled = true;
+            setText(statusId, tr("orderSent", "Order transmitted..."));
+            try {
+                await window.VNG.apiJson(window.VNG.probeApiPath("/storage-containers/" + encodeURIComponent(containerId) + "/crafting-reservations/reassign"), {
+                    "method": "POST",
+                });
+                setText(statusId, tr("craftingReservationsReassigned", "Crafting reservations reassigned. You can retry the container operation."));
+                await refreshInventoryPage();
+            } catch (error) {
+                const errorMessage = error && error.errorCode === "crafting_reservations_cannot_be_reassigned"
+                    ? tr("craftingReservationsReassignmentImpossible", "Crafting reservations cannot be reassigned: no compatible container has enough free space.")
+                    : ((error && error.message) || tr("requestDenied", "Request denied"));
+                setCraftingReservationStatus(statusId, errorMessage, containerId);
+            }
+        });
+        status.appendChild(button);
+    }
+
+    function runApiOrder(statusId, pendingText, request, onSuccess, options) {
         setText(statusId, pendingText);
         return request()
             .then((data) => {
@@ -57,7 +86,11 @@
                 } else if (error && error.errorCode === "probe_already_moving") {
                     message = tr("probeTransferUnavailableWhileMoving", "Transfer is unavailable while the source or target probe is moving.");
                 }
-                setText(statusId, message);
+                if (error && error.errorCode === "storage_container_reserved" && options && options.containerId) {
+                    setCraftingReservationStatus(statusId, message, options.containerId);
+                } else {
+                    setText(statusId, message);
+                }
             });
     }
 
@@ -1367,7 +1400,8 @@
                     setText("inventory-status", tr("detachStorageAccepted", "Container detachment assigned."));
                     closeSubmittedInventoryLineForm(submittedForm);
                     await refreshInventoryPage();
-                }
+                },
+                {"containerId": order.payload.containerId}
             );
             return;
         }

@@ -30,13 +30,16 @@
             ? (warning.container.label || warning.container.id || "-")
             : "-";
         const risk = warning && warning.risk ? window.VNG.numberValue(warning.risk.percent, "%") : "-";
+        const threshold = warning && warning.risk && Number.isFinite(Number(warning.risk.ruleStartsAtAdditionalContainers))
+            ? window.VNG.numberValue(Number(warning.risk.ruleStartsAtAdditionalContainers))
+            : "-";
         const when = warning && warning.phase === "deceleration_start"
             ? tr("damageWarningArrivalSector", "arrival sector")
             : tr("damageWarningOriginSector", "origin sector");
 
         return window.VNG.formatText(
-            tr("damageWarningContainerBreakMessage", "Fragile storage warning: {container} may break loose during this jump near the {when} ({sector}). Risk: {risk}. This can happen from 5 additional containers onward."),
-            {container, when, sector, risk}
+            tr("damageWarningContainerBreakMessage", "Fragile storage warning: {container} may break loose during this jump near the {when} ({sector}). Risk: {risk}. This can happen from {threshold} additional containers onward."),
+            {container, when, sector, risk, threshold}
         );
     }
 

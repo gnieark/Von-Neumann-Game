@@ -53,7 +53,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 106;
+    public const API_VERSION = 107;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -118,6 +118,7 @@ final class ApiKernel
     private function routes(): array
     {
         return [
+            ApiRoute::regex('#^/api/probe/(\d+)/storage-containers/([^/]+)/crafting-reservations/reassign$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageCraftingReservationsReassignResponse($player, $ctx->stringParam(1), $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/inventory/([^/]+)/jettison$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeInventoryJettisonResponse($player, $ctx->stringParam(1), $ctx->body, probe: $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/inventory/([^/]+)/jettison$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeInventoryJettisonResponse($player, $ctx->stringParam(0), $ctx->body))),
             ApiRoute::regex('#^/api/probe/(\d+)/inventory/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeInventoryItemResponse($player, $ctx->stringParam(1), $probe), $ctx->intParam(0), ['GET'])),
@@ -811,6 +812,14 @@ final class ApiKernel
             ),
             'inventory' => $this->inventoryForProbe($probe)->toArray(),
         ]);
+    }
+
+    private function probeStorageCraftingReservationsReassignResponse(Player $player, string $containerId, NeumannProbe $probe): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe);
+        $this->movements->ensureProbeOperational($probe);
+
+        return new ApiResponse(200, $this->storage->reassignCraftingReservations($probe, $containerId));
     }
 
     private function probeStorageMoveResponse(Player $player, ?string $body, ?NeumannProbe $probe = null): ApiResponse
