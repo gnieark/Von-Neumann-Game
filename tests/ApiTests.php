@@ -779,6 +779,11 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeTransferUnavailableWhileMoving' => 'Le transfert est indisponible"), 'French translations explain moving-probe transfer conflicts');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeTransferUnavailableWhileMoving' => 'Transfer is unavailable"), 'English translations explain moving-probe transfer conflicts');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeApiPath("/probe-improvements-available")'), 'mannies JS loads selected-probe available probe improvements');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasDistributedThrustAnchoringBlueprint()'), 'mannies JS gates asteroid motorization on its unlocked blueprint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-motorize-asteroid-form'), 'mannies JS renders the asteroid propulsion installation form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/motorize-asteroid'), 'mannies JS posts asteroid propulsion installation orders');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'motorizeAsteroidActionTitle' => 'Installer une propulsion sur un astéroïde'"), 'French translations include the asteroid propulsion action title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'motorizeAsteroidActionTitle' => 'Install propulsion on an asteroid'"), 'English translations include the asteroid propulsion action title');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-improve-probe-form'), 'mannies JS renders the probe improvement form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/improve-probe'), 'mannies JS posts probe improvement orders');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeImprovementAvailability'), 'mannies JS checks improvement ingredient availability');
@@ -5528,8 +5533,20 @@ if ($motorizeProbe !== null) {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(422, $lockedMotorization->status, 'asteroid motorization requires its unlocked blueprint');
     $test->assertEquals('distributed_thrust_anchoring_unavailable', $lockedMotorization->body['error']['code'] ?? null, 'locked asteroid motorization returns a stable blueprint error');
+    $lockedMotorizationBlueprints = $kernel->handle('GET', '/api/probe/' . $motorizeProbe->id . '/probe-improvements-available', $motorizeHeaders);
+    $test->assert(!in_array(
+        ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING,
+        array_column($lockedMotorizationBlueprints->body['improvements'] ?? [], 'id'),
+        true,
+    ), 'available improvements hide the locked asteroid motorization blueprint from the WebUI');
 
     $probeImprovements->markAvailable($motorizeProbe->id, ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING);
+    $unlockedMotorizationBlueprints = $kernel->handle('GET', '/api/probe/' . $motorizeProbe->id . '/probe-improvements-available', $motorizeHeaders);
+    $test->assert(in_array(
+        ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING,
+        array_column($unlockedMotorizationBlueprints->body['improvements'] ?? [], 'id'),
+        true,
+    ), 'available improvements expose the unlocked asteroid motorization blueprint to the WebUI');
     $missingMotorizationComponents = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
         'objectId' => 'motorize-rock',
     ], JSON_THROW_ON_ERROR));

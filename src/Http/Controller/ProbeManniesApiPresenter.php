@@ -48,6 +48,14 @@ final class ProbeManniesApiPresenter
         foreach (ProbeImprovementCatalog::all($this->gameplayConfig['probeImprovements'] ?? []) as $definition) {
             $definitions[(string) $definition['id']] = $definition;
         }
+        $definitions[ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING] = [
+            'id' => ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING,
+            'name' => 'Distributed Thrust Anchoring',
+            'description' => 'Allows a Manny to anchor a deuterium engine to an asteroid.',
+            'durationSeconds' => 0,
+            'ingredients' => [],
+            'effects' => [],
+        ];
 
         $rows = [];
         if ($this->improvements !== null) {
