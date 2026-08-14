@@ -3299,10 +3299,12 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $manniesBeforeCraft = $mannies->findByProbeId($craftProbeEntity->id);
     $mannyCountBeforeCraft = count($manniesBeforeCraft);
     $mannyIdsBeforeCraft = array_map(static fn(Manny $candidate): int => $candidate->id, $manniesBeforeCraft);
-    $mannyCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
+    $mannyCraft = $kernel->handle('POST', '/api/probe/' . $craftProbeEntity->id . '/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([
         'recipe' => 'manny',
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $mannyCraft->status, 'Manny can start a Manny craft from stored components');
+    $test->assertEquals(58, count($mannyCraft->body['manny']['task']['consumedItems'] ?? []), 'Manny craft response exposes all consumed component items');
+    $test->assert(isset($mannyCraft->body['manny']['task']['consumedItems'][0]['uid']), 'Manny craft consumed items retain their public identity');
     $mannyCraftReservation = $mannies->findById($craftMannyDbId)?->reservedStorageContainerId;
     $test->assert($mannyCraftReservation !== null, 'Manny craft reserves a precise output container');
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([

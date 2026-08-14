@@ -6124,7 +6124,9 @@ components:
           description: >
             Current task payload. When currentTask is mining, this payload has
             the MannyMiningTask shape, including target.resourceAmounts for
-            asteroids and resourceProfile for the selected split. Sensitive
+            asteroids and resourceProfile for the selected split. Crafting
+            tasks include consumedItems with the inventory items committed
+            when the order was accepted. Sensitive
             internal task state such as detached-container reservation objects,
             detached-container snapshots, scheduler transition deadlines, and
             absolute target sectors is omitted from public responses. Idle

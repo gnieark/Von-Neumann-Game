@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-14
+
+### Fixed
+
+- API : les réponses Manny exposent de nouveau `task.consumedItems` pour les fabrications en cours, notamment dans la réponse de `POST /api/probe/{probeId}/mannies/{mannyId}/craft`.
+
 ## 2026-08-13
 
 ### Changed

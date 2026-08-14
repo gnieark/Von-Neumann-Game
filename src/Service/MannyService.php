@@ -1754,6 +1754,8 @@ final class MannyService implements MannyTaskRuntime
 
     public function publicArray(NeumannProbe $probe, Manny $manny, ?array $relativeSector = null): array
     {
+        $this->mannies->loadConsumedItems($manny);
+
         return $this->presenter->present($probe, $manny, $relativeSector);
     }
 
