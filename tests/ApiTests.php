@@ -5489,6 +5489,7 @@ if ($dormantInspectionProbe !== null) {
     ));
     $test->assertEquals(1, count($dormantThrustAnchoringReports), 'completed thrust-anchored asteroid inspection creates a Manny report alert');
     $test->assert(str_contains((string) ($dormantThrustAnchoringReports[0]['message'] ?? ''), 'Recovered blueprint: Distributed Thrust Anchoring.'), 'thrust-anchored asteroid report identifies the recovered blueprint');
+    $test->assert(str_contains((string) ($dormantThrustAnchoringReports[0]['message'] ?? ''), 'Blueprint unlocked: Distributed-thrust anchor. You can now install deuterium engines on asteroids.'), 'thrust-anchored asteroid report explains the unlocked motorization action');
     $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING)?->available, 'thrust-anchored asteroid report unlocks distributed thrust anchoring');
     $test->assertEquals(null, ProbeImprovementCatalog::find(ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING), 'distributed thrust anchoring remains outside the installable improvement catalog');
 

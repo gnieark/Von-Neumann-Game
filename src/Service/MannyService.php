@@ -2318,7 +2318,7 @@ final class MannyService implements MannyTaskRuntime
                 . "The object started life as an asteroid. Someone then bolted a deuterium engine to it, which is the sort of sentence that usually ends with a crater. The engine is cold, its feed system is ruined, and bringing it back online would require equal parts engineering and optimism.\n\n"
                 . "The remarkable part is the mounting system. Instead of concentrating thrust through a single frame, hundreds of anchors disappear into natural fractures and spread the load across the asteroid's entire mass. The rock was not reinforced into a ship; the thrust was taught how to use the rock already there.\n\n"
                 . "Recovered blueprint: Distributed Thrust Anchoring.\n\n"
-                . "Blueprint unlocked: Distributed Thrust Anchoring. Its practical effects remain to be determined.",
+                . "Blueprint unlocked: Distributed-thrust anchor. You can now install deuterium engines on asteroids.",
             default => "Manny report\n\nThe structure is artificial, but the recovered data could not be classified.",
         };
     }
