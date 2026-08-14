@@ -779,6 +779,8 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeTransferUnavailableWhileMoving' => 'Le transfert est indisponible"), 'French translations explain moving-probe transfer conflicts');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeTransferUnavailableWhileMoving' => 'Transfer is unavailable"), 'English translations explain moving-probe transfer conflicts');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeApiPath("/probe-improvements-available")'), 'mannies JS loads selected-probe available probe improvements');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'button.dataset.actionGroup !== "sector"'), 'mannies JS refreshes blueprints when the sector action group opens');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await refreshProbeImprovements();'), 'sector action refresh waits for the selected-probe blueprints');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasDistributedThrustAnchoringBlueprint()'), 'mannies JS gates asteroid motorization on its unlocked blueprint');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-motorize-asteroid-form'), 'mannies JS renders the asteroid propulsion installation form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/motorize-asteroid'), 'mannies JS posts asteroid propulsion installation orders');

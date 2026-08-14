@@ -2108,14 +2108,15 @@
             + "</section>";
     }
 
-    function renderMannyActionGroupAccordion(id, title, actions) {
+    function renderMannyActionGroupAccordion(id, title, actions, actionGroup) {
         const items = Array.isArray(actions) ? actions.filter(Boolean) : [];
         if (items.length === 0) {
             return "";
         }
 
         return "<section class=\"manny-action-section manny-action-accordion manny-action-group\">"
-            + "<button class=\"manny-action-accordion-trigger manny-action-group-trigger\" type=\"button\" aria-expanded=\"false\" aria-controls=\"" + escaped(id) + "\">"
+            + "<button class=\"manny-action-accordion-trigger manny-action-group-trigger\" type=\"button\" aria-expanded=\"false\" aria-controls=\"" + escaped(id) + "\""
+            + (actionGroup ? " data-action-group=\"" + escaped(actionGroup) + "\"" : "") + ">"
             + "<span>" + escaped(title) + "</span>"
             + "</button>"
             + "<div id=\"" + escaped(id) + "\" class=\"manny-action-accordion-panel manny-action-group-panel\" hidden>"
@@ -2977,19 +2978,8 @@
         )).join("");
     }
 
-    function renderMannyActionForms(idPrefix, manny) {
-        const prefix = String(idPrefix || "manny-actions").replace(/[^a-zA-Z0-9_-]/g, "-");
-        const renderAction = (action) => renderMannyActionAccordion(
-            prefix + "-" + action.id,
-            action.title,
-            action.id,
-            actionNeedsProbeInventory(action.id) ? "" : action.render()
-        );
-        const probeActions = [
-            {"id": "repair", "title": tr("repairActionTitle", "Repair the probe"), "render": renderRepairForm},
-            {"id": "improve-probe", "title": tr("improveProbeActionTitle", "Improve the probe"), "render": renderImproveProbeForm},
-        ];
-        const sectorActions = [
+    function sectorActionDefinitions(manny) {
+        const actions = [
             {"id": "transfer-manny", "title": tr("transferMannyToProbeActionTitle", "Transfer Manny to a probe"), "render": () => renderMannyTransferForm(manny)},
             {"id": "mine", "title": tr("miningActionTitle", "Mine the sector"), "render": renderMineForm},
             {"id": "salvage", "title": tr("salvageActionTitle", "Recover a drifting object"), "render": renderSalvageForm},
@@ -2999,11 +2989,31 @@
             {"id": "install-scut-transit-beacon", "title": tr("installScutTransitBeaconActionTitle", "Beacon a SCUT relay"), "render": renderScutTransitBeaconInstallForm},
         ];
         if (hasDistributedThrustAnchoringBlueprint()) {
-            sectorActions.push({"id": "motorize-asteroid", "title": tr("motorizeAsteroidActionTitle", "Install propulsion on an asteroid"), "render": renderMotorizeAsteroidForm});
+            actions.push({"id": "motorize-asteroid", "title": tr("motorizeAsteroidActionTitle", "Install propulsion on an asteroid"), "render": renderMotorizeAsteroidForm});
         }
         if (sectorHasDeuteriumRefuelStation()) {
-            sectorActions.unshift({"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
+            actions.unshift({"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
         }
+
+        return actions;
+    }
+
+    function renderMannyActionDefinitions(prefix, actions) {
+        return actions.map((action) => renderMannyActionAccordion(
+            prefix + "-" + action.id,
+            action.title,
+            action.id,
+            actionNeedsProbeInventory(action.id) ? "" : action.render()
+        )).join("");
+    }
+
+    function renderMannyActionForms(idPrefix, manny) {
+        const prefix = String(idPrefix || "manny-actions").replace(/[^a-zA-Z0-9_-]/g, "-");
+        const renderAction = (action) => renderMannyActionDefinitions(prefix, [action]);
+        const probeActions = [
+            {"id": "repair", "title": tr("repairActionTitle", "Repair the probe"), "render": renderRepairForm},
+            {"id": "improve-probe", "title": tr("improveProbeActionTitle", "Improve the probe"), "render": renderImproveProbeForm},
+        ];
         const containerActions = [
             {"id": "transfer-deuterium", "title": tr("transferDeuteriumToProbeActionTitle", "Transfer deuterium to a probe or drone"), "render": renderDeuteriumTransferForm},
             {"id": "detach-storage", "title": tr("detachStorageActionTitle", "Detach a container"), "render": renderDetachStorageContainerForm},
@@ -3018,7 +3028,7 @@
         return "<div class=\"manny-action-grid\">"
             + "<h4 class=\"manny-action-heading\">" + escaped(tr("assignMannyTask", "Assign a task to this Manny")) + "</h4>"
             + renderMannyActionGroupAccordion(prefix + "-probe-group", tr("mannyActionGroupProbe", "Probe"), probeActions.map(renderAction))
-            + renderMannyActionGroupAccordion(prefix + "-sector-group", tr("mannyActionGroupSector", "Sector"), sectorActions.map(renderAction))
+            + renderMannyActionGroupAccordion(prefix + "-sector-group", tr("mannyActionGroupSector", "Sector"), [renderMannyActionDefinitions(prefix, sectorActionDefinitions(manny))], "sector")
             + renderMannyActionGroupAccordion(prefix + "-containers-group", tr("mannyActionGroupContainers", "Containers"), containerActions.map(renderAction))
             + renderMannyActionGroupAccordion(prefix + "-craft-group", tr("mannyActionGroupCraft", "Craft"), craftActions.map(renderAction))
             + "</div>";
@@ -3921,6 +3931,29 @@
         return true;
     }
 
+    async function openMannyActionGroupAccordion(button, panel) {
+        if (!panel || button.dataset.actionGroup !== "sector") {
+            return true;
+        }
+
+        button.disabled = true;
+        try {
+            await refreshProbeImprovements();
+            const card = panel.closest(".manny-card");
+            const mannyId = card ? String(card.dataset.mannyId || "") : "";
+            const manny = state.currentMannies.find((entry) => String(entry.id || "") === mannyId) || null;
+            const prefix = panel.id.replace(/-sector-group$/, "");
+            panel.innerHTML = renderMannyActionDefinitions(prefix, sectorActionDefinitions(manny));
+        } catch (error) {
+            setStatus(error.message || tr("requestDenied", "Request denied"));
+            return false;
+        } finally {
+            button.disabled = false;
+        }
+
+        return true;
+    }
+
     function scheduleMannyRefresh(data) {
         if (refreshTimer !== null) {
             window.clearTimeout(refreshTimer);
@@ -4442,7 +4475,12 @@
                 const targetId = accordionButton.getAttribute("aria-controls");
                 const panel = targetId ? document.getElementById(targetId) : null;
                 const willOpen = accordionButton.getAttribute("aria-expanded") !== "true";
-                if (willOpen && accordionButton.classList.contains("manny-action-accordion-trigger") && !accordionButton.classList.contains("manny-action-group-trigger")) {
+                if (willOpen && accordionButton.classList.contains("manny-action-group-trigger")) {
+                    const canOpen = await openMannyActionGroupAccordion(accordionButton, panel);
+                    if (!canOpen) {
+                        return;
+                    }
+                } else if (willOpen && accordionButton.classList.contains("manny-action-accordion-trigger")) {
                     const canOpen = await openMannyActionAccordion(accordionButton, panel);
                     if (!canOpen) {
                         return;
