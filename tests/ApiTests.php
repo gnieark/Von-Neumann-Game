@@ -742,6 +742,9 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'SCUT coverage: unknown'"), 'English translations include unknown SCUT coverage');
 $test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'scheduleRefresh'), 'sensors JS does not poll and overwrite coordinate input');
 $test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'setTimeout(loadDisplayedSector'), 'sensors JS only reloads sector data after explicit actions');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'body.type === "asteroid" && body.motorized === true'), 'sensors JS identifies motorized asteroids in solar-system scan details');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'tr("asteroidMotorized", "Installed")'), 'sensors JS displays installed asteroid propulsion');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidMotorized' => 'Installée'"), 'French translations describe installed asteroid propulsion');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'deuterium_refuel_station'), 'sensors JS recognizes deuterium refuel station objects');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-deuterium-station-highlight'), 'sensors CSS styles deuterium station tile highlights');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorHasDeuteriumRefuelStation'), 'mannies JS detects current-sector deuterium refuel stations');
@@ -844,7 +847,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260816-swagger-input-contrast"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260816-motorized-asteroid-scan"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1810,7 +1813,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(109, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(110, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -1937,6 +1940,10 @@ $sectorRepository->save(new SectorContent($privacySector, [
                 new Planet('privacy-nested-life-planet', $leakyPlanetName, 'rocky', 1.0, 1.0, true, 0.72, ['silicates'], intelligentLife: true),
                 new OrbitDescriptor(1.0, 0.01, 0.0),
             ),
+            new OrbitingBody(
+                (new Asteroid('privacy-motorized-asteroid', 'Metal private', 'iron', ['iron'], 'small', 0.000001, 0.001))->withDeuteriumEngine(),
+                new OrbitDescriptor(1.5, 0.01, 0.0),
+            ),
         ],
         1.0,
         4.0,
@@ -1950,9 +1957,12 @@ $privacyObservation = (new SectorObservationService($sectorService, $visitedSect
 $privacyJson = json_encode($privacyObservation, JSON_THROW_ON_ERROR);
 $privacyTopObject = $privacyObservation['objects'][0] ?? [];
 $privacyNestedTarget = $privacyObservation['objects'][1]['bookmarkTargets'][1] ?? [];
+$privacyMotorizedTarget = $privacyObservation['objects'][1]['bookmarkTargets'][2] ?? [];
 $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $privacyObservation['relativeCoordinates'] ?? null, 'sector observation computes player-relative coordinates');
 $test->assertEquals('Monde habite du secteur relatif ' . $privacyRelativeLabel, $privacyTopObject['name'] ?? null, 'sector observation hides absolute coordinates in unnamed inhabited planet labels');
 $test->assertEquals('Monde habite du secteur relatif ' . $privacyRelativeLabel, $privacyNestedTarget['name'] ?? null, 'nested inhabited planet targets hide absolute-coordinate debug names');
+$test->assertEquals(true, $privacyMotorizedTarget['motorized'] ?? null, 'bookmark target object lists expose motorized state for asteroids');
+$test->assert(!array_key_exists('motorized', $privacyNestedTarget), 'bookmark target object lists reserve motorized state for asteroids');
 $test->assert(!str_contains($privacyJson, $privacySector->toKey()), 'sector observation payload does not expose absolute sector keys through inhabited planet names');
 $test->assert(!str_contains($privacyJson, str_replace(':', '-', $privacySector->toKey())), 'sector observation payload does not expose hyphenated absolute sector keys through inhabited planet names');
 $forceInhabitedOutput = [];

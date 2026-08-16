@@ -566,6 +566,9 @@
         if (body.sizeCategory) {
             details.push({"label": tr("size", "Size"), "value": sizeCategoryLabel(body.sizeCategory)});
         }
+        if (body.type === "asteroid" && body.motorized === true) {
+            details.push({"label": tr("propulsion", "Propulsion"), "value": tr("asteroidMotorized", "Installed")});
+        }
         if (hasResourceDetails(body)) {
             const resourceTypes = resourceTypesForTarget(body);
             if (resourceTypes.length > 0) {

@@ -427,6 +427,9 @@ final class SectorObservationService
             $target['habitabilityScore'] = $object->getHabitabilityScore();
             $target['intelligentLife'] = $object->hasIntelligentLife();
         }
+        if ($object instanceof Asteroid) {
+            $target['motorized'] = $object->isMotorized();
+        }
         if ($object->getWaypointBookmarks() !== []) {
             $target['waypointBookmarks'] = $object->getWaypointBookmarks();
         }

@@ -1,5 +1,9 @@
 # Changelog
 
+- API v110 : les scans détaillés de `GET /api/probe/sector`, `GET /api/probe/{probeId}/sector` et `GET /api/sector` exposent désormais `motorized` sur les astéroïdes présents dans les listes générales `bookmarkTargets`, en plus de `minableTargets`. Ce champ reste absent des autres types d’objets.
+
+- Interface : le détail des corps d’un système dans le scan Sensors affiche désormais « Propulsion : Installée » pour les astéroïdes motorisés.
+
 - Interface : les champs de saisie Swagger de `/api-docs` utilisent désormais un texte sombre sur fond blanc, sans hériter de la couleur claire des formulaires généraux de la WebUI.
 
 - API v109 : `GET /api/probe/probe-improvements-available` et sa variante ciblant une sonde exposent désormais `installableOnProbe` pour chaque blueprint. La valeur est `false` pour `distributed_thrust_anchoring`, dont l’installation cible les astéroïdes, et `true` pour les améliorations de sonde.

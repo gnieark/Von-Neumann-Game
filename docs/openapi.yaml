@@ -4429,6 +4429,9 @@ components:
           minimum: 0
           maximum: 1
           description: Present for planet targets; 0 means hostile or unknown, 1 is highly habitable.
+        motorized:
+          type: boolean
+          description: Present only for asteroid targets; true after a deuterium engine has been installed through Distributed Thrust Anchoring.
         waypointBookmarks:
           type: array
           items:
