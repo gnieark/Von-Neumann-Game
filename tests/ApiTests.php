@@ -782,6 +782,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeAp
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'button.dataset.actionGroup !== "sector"'), 'mannies JS refreshes blueprints when the sector action group opens');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await refreshProbeImprovements();'), 'sector action refresh waits for the selected-probe blueprints');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasDistributedThrustAnchoringBlueprint()'), 'mannies JS gates asteroid motorization on its unlocked blueprint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'improvement.installableOnProbe === true'), 'mannies JS only lists blueprints installable on probes in the probe improvement form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'return asteroidTargets()'), 'mannies JS includes nested sector asteroids in motorization targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-motorize-asteroid-form'), 'mannies JS renders the asteroid propulsion installation form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/motorize-asteroid'), 'mannies JS posts asteroid propulsion installation orders');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'motorizeAsteroidActionTitle' => 'Installer une propulsion sur un astéroïde'"), 'French translations include the asteroid propulsion action title');
@@ -840,7 +842,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placé par {playerName} il y a {age}'"), 'French translations include waypoint bookmark placement text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'waypointBookmarkPlacedBy' => 'Placed by {playerName} {age} ago'"), 'English translations include waypoint bookmark placement text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260812-moving-probe-transfer-error"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260816-probe-installable-blueprints"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1806,7 +1808,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(108, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(109, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5552,6 +5554,11 @@ if ($motorizeProbe !== null) {
         array_column($unlockedMotorizationBlueprints->body['improvements'] ?? [], 'id'),
         true,
     ), 'available improvements expose the unlocked asteroid motorization blueprint to the WebUI');
+    $unlockedMotorizationBlueprint = array_values(array_filter(
+        $unlockedMotorizationBlueprints->body['improvements'] ?? [],
+        static fn(array $improvement): bool => ($improvement['id'] ?? null) === ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING,
+    ))[0] ?? [];
+    $test->assertEquals(false, $unlockedMotorizationBlueprint['installableOnProbe'] ?? null, 'distributed thrust anchoring is identified as not installable on probes');
     $missingMotorizationComponents = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
         'objectId' => 'motorize-rock',
     ], JSON_THROW_ON_ERROR));
@@ -6366,6 +6373,7 @@ if ($createdProbe !== null) {
     $probeImprovements->markAvailable($improvementProbe->id, ProbeImprovementCatalog::DEUTERIUM_COMPRESSION);
     $availableImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
     $test->assertEquals('deuterium_compression', $availableImprovements->body['improvements'][0]['id'] ?? null, 'available probe improvements are returned by default');
+    $test->assertEquals(true, $availableImprovements->body['improvements'][0]['installableOnProbe'] ?? null, 'probe improvement blueprints identify themselves as installable on probes');
     $test->assertEquals(300, $availableImprovements->body['improvements'][0]['durationSeconds'] ?? null, 'deuterium compression exposes its configured duration');
     $availableOnSecondProbe = $kernel->handle('GET', '/api/probe/' . $improvementSecondProbe->id . '/probe-improvements-available', $improvementHeaders);
     $test->assertEquals('deuterium_compression', $availableOnSecondProbe->body['improvements'][0]['id'] ?? null, 'known probe improvement blueprints are shared by all probes owned by the player');

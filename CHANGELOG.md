@@ -1,5 +1,8 @@
 # Changelog
 
+- API v109 : `GET /api/probe/probe-improvements-available` et sa variante ciblant une sonde exposent désormais `installableOnProbe` pour chaque blueprint. La valeur est `false` pour `distributed_thrust_anchoring`, dont l’installation cible les astéroïdes, et `true` pour les améliorations de sonde.
+- Interface : le formulaire d’amélioration de sonde filtre les blueprints selon `installableOnProbe`; `distributed_thrust_anchoring` reste disponible pour la motorisation des astéroïdes sans être proposé comme amélioration de sonde.
+
 - Maintenance : `force-pending-scheduled-events-now.php` avance aussi les échéances métier des tâches Manny et de tous les mouvements encore actifs. Il recrée l’événement terminal d’un mouvement dont les événements ont déjà été consommés, afin que le prochain passage du scheduler termine réellement le transit au lieu de laisser la sonde bloquée.
 
 - API v108 : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid`. Après déblocage du blueprint Distributed Thrust Anchoring, une Manny peut consommer un moteur au deutérium et quatre barres d’acier pour motoriser durablement un astéroïde du secteur, sans empêcher son minage, puis revient automatiquement vers la sonde. La WebUI `/mannies` affiche alors l’action « Installer une propulsion sur un astéroïde » dans le groupe Secteur.

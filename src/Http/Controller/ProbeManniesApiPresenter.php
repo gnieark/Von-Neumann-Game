@@ -52,6 +52,7 @@ final class ProbeManniesApiPresenter
             'id' => ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING,
             'name' => 'Distributed Thrust Anchoring',
             'description' => 'Allows a Manny to anchor a deuterium engine to an asteroid.',
+            'installableOnProbe' => false,
             'durationSeconds' => 0,
             'ingredients' => [],
             'effects' => [],

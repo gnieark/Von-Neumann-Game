@@ -1892,6 +1892,7 @@ paths:
                     description: Compresses the external deuterium tank reserve so it can hold up to 200% fuel.
                     available: true
                     done: false
+                    installableOnProbe: true
                     durationSeconds: 300
                     ingredients:
                       - type: electric_motor
@@ -1909,6 +1910,7 @@ paths:
                     description: Reinforces external container couplings so five additional containers are ignored when movement break risk is calculated.
                     available: true
                     done: false
+                    installableOnProbe: true
                     durationSeconds: 300
                     ingredients:
                       - type: integrated_circuit
@@ -4909,7 +4911,7 @@ components:
           description: Optional cap applied to itemIds or targetMannyIds.
     ProbeImprovement:
       type: object
-      required: [id, name, description, available, done, durationSeconds, ingredients, effects]
+      required: [id, name, description, available, done, installableOnProbe, durationSeconds, ingredients, effects]
       properties:
         id:
           type: string
@@ -4924,6 +4926,9 @@ components:
         done:
           type: boolean
           description: Whether the improvement effect has already been installed on the selected probe.
+        installableOnProbe:
+          type: boolean
+          description: Whether this blueprint describes an improvement that can be installed on probes. False for distributed_thrust_anchoring, whose effect is installed on asteroids.
         durationSeconds:
           type: integer
           minimum: 1

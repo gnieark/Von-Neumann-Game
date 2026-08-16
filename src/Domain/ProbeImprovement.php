@@ -29,6 +29,7 @@ final class ProbeImprovement
             'description' => (string) ($definition['description'] ?? ''),
             'available' => $this->available,
             'done' => $this->done,
+            'installableOnProbe' => (bool) ($definition['installableOnProbe'] ?? true),
             'durationSeconds' => (int) ($definition['durationSeconds'] ?? 0),
             'ingredients' => is_array($definition['ingredients'] ?? null) ? $definition['ingredients'] : [],
             'effects' => is_array($definition['effects'] ?? null) ? $definition['effects'] : [],

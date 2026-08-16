@@ -1498,7 +1498,7 @@
     function availableProbeImprovements() {
         return (Array.isArray(state.currentProbeImprovements) ? state.currentProbeImprovements : [])
             .filter((improvement) => improvement
-                && improvement.id !== "distributed_thrust_anchoring"
+                && improvement.installableOnProbe === true
                 && improvement.available === true
                 && improvement.done !== true);
     }
@@ -2917,8 +2917,8 @@
     }
 
     function motorizationAsteroidTargets() {
-        return (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
-            .filter((object) => object && object.type === "asteroid" && object.motorized !== true);
+        return asteroidTargets()
+            .filter((object) => object.motorized !== true);
     }
 
     function motorizationAsteroidTargetOptions(selected) {
