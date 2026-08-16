@@ -1,5 +1,7 @@
 # Changelog
 
+- Interface : les champs de saisie Swagger de `/api-docs` utilisent désormais un texte sombre sur fond blanc, sans hériter de la couleur claire des formulaires généraux de la WebUI.
+
 - API v109 : `GET /api/probe/probe-improvements-available` et sa variante ciblant une sonde exposent désormais `installableOnProbe` pour chaque blueprint. La valeur est `false` pour `distributed_thrust_anchoring`, dont l’installation cible les astéroïdes, et `true` pour les améliorations de sonde.
 - Interface : le formulaire d’amélioration de sonde filtre les blueprints selon `installableOnProbe`; `distributed_thrust_anchoring` reste disponible pour la motorisation des astéroïdes sans être proposé comme amélioration de sonde.
 

@@ -624,6 +624,19 @@ button:disabled {
     color: #1b1f23;
 }
 
+#swagger-ui input:not([type="checkbox"]):not([type="radio"]),
+#swagger-ui select,
+#swagger-ui textarea {
+    background-color: #fff;
+    color: #182026;
+}
+
+#swagger-ui input::placeholder,
+#swagger-ui textarea::placeholder {
+    color: #667078;
+    opacity: 1;
+}
+
 .api-key-dialog {
     width: min(560px, calc(100% - 28px));
     border: 1px solid rgba(143, 182, 189, .45);
