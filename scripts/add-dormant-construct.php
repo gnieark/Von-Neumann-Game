@@ -17,6 +17,10 @@ try {
         echo addDormantConstructUsage();
         exit(0);
     }
+    if ($options['listTypes']) {
+        echo addDormantConstructTypeList();
+        exit(0);
+    }
 
     $root = dirname(__DIR__);
     $factory = new AppFactory($root);
@@ -33,22 +37,25 @@ try {
         ? $repository->load($coordinates)
         : (new SectorContentGenerator($factory->universeConfig()))->generate($coordinates, $worldSeed, []);
 
-    $existing = addDormantConstructExistingObjectId($sector);
+    $existing = addDormantConstructExistingObject($sector);
     $objectId = $options['id'] ?? DormantConstruct::objectIdForSector($coordinates, $worldSeed);
+    $construct = addDormantConstructCreate($objectId, $options['type']);
     $action = 'already_present';
     if ($existing === null) {
-        $sector->addObject(new DormantConstruct($objectId));
+        $sector->addObject($construct);
         $action = 'added';
         if (!$options['dryRun']) {
             $repository->save($sector);
         }
     }
+    $reportedConstruct = $existing ?? $construct;
 
     echo ($options['dryRun'] ? '[dry-run] ' : '') . 'Dormant construct in sector ' . $coordinates->toKey() . ".\n";
     echo '- sector file: ' . $repository->getPath($coordinates) . "\n";
     echo '- sector existed: ' . ($sectorExisted ? 'yes' : 'no') . "\n";
     echo '- action: ' . ($existing === null ? $action : 'already present') . "\n";
-    echo '- object id: ' . ($existing ?? $objectId) . "\n";
+    echo '- object id: ' . $reportedConstruct->getId() . "\n";
+    echo '- structure type: ' . ($reportedConstruct->getInspectionScenario() ?? 'random on inspection') . "\n";
     exit(0);
 } catch (InvalidArgumentException | InvalidSectorCoordinatesException | RuntimeException $e) {
     fwrite(STDERR, $e->getMessage() . "\n\n" . addDormantConstructUsage());
@@ -60,7 +67,7 @@ try {
 
 /**
  * @param array<int, string> $argv
- * @return array{x:int,y:int,z:int,id:?string,universePath:?string,dryRun:bool,help:bool}
+ * @return array{x:int,y:int,z:int,id:?string,type:?string,universePath:?string,dryRun:bool,listTypes:bool,help:bool}
  */
 function addDormantConstructParseArguments(array $argv): array
 {
@@ -69,8 +76,10 @@ function addDormantConstructParseArguments(array $argv): array
         'y' => 0,
         'z' => 0,
         'id' => null,
+        'type' => null,
         'universePath' => null,
         'dryRun' => false,
+        'listTypes' => false,
         'help' => false,
     ];
     $coordinates = [];
@@ -84,12 +93,20 @@ function addDormantConstructParseArguments(array $argv): array
             $options['dryRun'] = true;
             continue;
         }
+        if ($argument === '--list-types') {
+            $options['listTypes'] = true;
+            continue;
+        }
         if (str_starts_with($argument, '--sector=')) {
             $coordinates = addDormantConstructParseCoordinates(substr($argument, strlen('--sector=')));
             continue;
         }
         if (str_starts_with($argument, '--id=')) {
             $options['id'] = addDormantConstructNonEmpty(substr($argument, strlen('--id=')), 'object id');
+            continue;
+        }
+        if (str_starts_with($argument, '--type=')) {
+            $options['type'] = addDormantConstructParseType(substr($argument, strlen('--type=')));
             continue;
         }
         if (str_starts_with($argument, '--universe-path=')) {
@@ -101,7 +118,7 @@ function addDormantConstructParseArguments(array $argv): array
         $coordinates[] = $argument;
     }
 
-    if ($options['help']) {
+    if ($options['help'] || $options['listTypes']) {
         return $options;
     }
     if (count($coordinates) === 1) {
@@ -128,12 +145,15 @@ Usage:
 
 Options:
   --id=<id>                Object id. Default is opaque and stable for the sector.
+  --type=<type>            Force the structure type instead of choosing it on inspection.
+  --list-types             List the accepted structure types and exit.
   --universe-path=<path>   Use another universe storage path.
   --dry-run                Show what would be written without saving.
   -h, --help               Show this help.
 
 Coordinates are absolute sector coordinates and must respect the FCC parity rule.
 The script creates the sector if needed, then adds one Dormant construct unless one is already present.
+When a construct is already present, --type does not replace or modify it.
 
 TEXT;
 }
@@ -167,11 +187,55 @@ function addDormantConstructNonEmpty(string $value, string $label): string
     return $value;
 }
 
-function addDormantConstructExistingObjectId(\VonNeumannGame\Sector\SectorContent $sector): ?string
+function addDormantConstructParseType(string $value): string
+{
+    $type = strtolower(str_replace([' ', '-'], '_', addDormantConstructNonEmpty($value, 'structure type')));
+    if (!in_array($type, DormantConstruct::inspectionScenarios(), true)) {
+        throw new InvalidArgumentException(
+            'Unknown structure type "' . $value . '". Accepted types: '
+            . implode(', ', DormantConstruct::inspectionScenarios()) . '.',
+        );
+    }
+
+    return $type;
+}
+
+function addDormantConstructCreate(string $objectId, ?string $type): DormantConstruct
+{
+    if ($type === DormantConstruct::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING) {
+        return new DormantConstruct(
+            $objectId,
+            DormantConstruct::THRUST_ANCHORED_ASTEROID_NAME,
+            description: DormantConstruct::THRUST_ANCHORED_ASTEROID_DESCRIPTION,
+            inspectionScenario: $type,
+        );
+    }
+    if ($type === DormantConstruct::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING) {
+        return new DormantConstruct(
+            $objectId,
+            DormantConstruct::ANATIFORM_ASTEROID_NAME,
+            description: DormantConstruct::ANATIFORM_ASTEROID_DESCRIPTION,
+            inspectionScenario: $type,
+        );
+    }
+
+    return new DormantConstruct($objectId, inspectionScenario: $type);
+}
+
+function addDormantConstructTypeList(): string
+{
+    return "Available dormant construct types:\n"
+        . '- ' . DormantConstruct::INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION . " (Dormant construct)\n"
+        . '- ' . DormantConstruct::INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS . " (Dormant construct)\n"
+        . '- ' . DormantConstruct::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING . ' (' . DormantConstruct::THRUST_ANCHORED_ASTEROID_NAME . ")\n"
+        . '- ' . DormantConstruct::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING . ' (' . DormantConstruct::ANATIFORM_ASTEROID_NAME . ")\n";
+}
+
+function addDormantConstructExistingObject(\VonNeumannGame\Sector\SectorContent $sector): ?DormantConstruct
 {
     foreach ($sector->getObjects() as $object) {
         if ($object instanceof DormantConstruct) {
-            return $object->getId();
+            return $object;
         }
     }
 

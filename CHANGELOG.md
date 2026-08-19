@@ -5,6 +5,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-08-19
 
 ### Changed
+- Outils : `scripts/add-dormant-construct.php` accepte désormais `--type=<type>` pour forcer le scénario d’une nouvelle structure et `--list-types` pour afficher les quatre types disponibles ; les astéroïdes à ancrage distribué et anatiformes reçoivent aussi leur intitulé spécialisé.
 - API v115 : un nouveau dormant construct « Anatiform asteroid » permet à une Manny de récupérer le blueprint « Anatiform Asteroid Sculpting » ; son rapport illustré utilise `https://neumann-probe.net/images/duck-asteroid.png`. Le nouveau `POST /api/probe/{probeId}/mannies/{mannyId}/sculpt-duck-asteroid`, réservé aux joueurs qui possèdent ce blueprint, sculpte en deux jours un astéroïde local. Une annulation avant l’échéance ne modifie pas l’astéroïde.
 - API v115 : les astéroïdes ainsi sculptés exposent le champ optionnel `distinctiveFeature: "Sculpted in the shape of a duck"` dans leurs représentations publiques. Ils conservent toutes les propriétés et actions des astéroïdes ordinaires, notamment le minage et la motorisation.
 - Interface : dans le groupe « Secteur » de `/mannies`, le formulaire de sculpture n’apparaît qu’avec le blueprint correspondant. Les scans courant et précis de `/sensors` les identifient comme des « Astéroïdes en forme de canard ».

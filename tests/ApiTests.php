@@ -2524,6 +2524,41 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($addConstructText, 'Dormant construct in sector 6:0:0'), 'add-dormant-construct CLI reports the target sector');
     $test->assert($cliSectorRepository->load($addConstructCoordinates)->findObjectById(DormantConstruct::objectIdForSector($addConstructCoordinates, 'local-development-world')) instanceof DormantConstruct, 'add-dormant-construct CLI persists a dormant construct');
 
+    $forcedConstructCoordinates = new SectorCoordinates(8, 0, 0);
+    $forcedConstructCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --type=anatiform-asteroid-sculpting'
+        . ' --sector=8:0:0';
+    exec($forcedConstructCommand . ' 2>&1', $forcedConstructOutput, $forcedConstructStatus);
+    $forcedConstructText = implode("\n", $forcedConstructOutput);
+    $forcedConstruct = $cliSectorRepository->load($forcedConstructCoordinates)
+        ->findObjectById(DormantConstruct::objectIdForSector($forcedConstructCoordinates, 'local-development-world'));
+    $test->assertEquals(0, $forcedConstructStatus, 'add-dormant-construct CLI accepts a forced structure type');
+    $test->assert(str_contains($forcedConstructText, 'structure type: anatiform_asteroid_sculpting'), 'add-dormant-construct CLI reports the forced structure type');
+    $test->assert($forcedConstruct instanceof DormantConstruct, 'add-dormant-construct CLI persists the forced dormant construct');
+    $test->assertEquals(DormantConstruct::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING, $forcedConstruct instanceof DormantConstruct ? $forcedConstruct->getInspectionScenario() : null, 'forced dormant construct persists its inspection scenario');
+    $test->assertEquals(DormantConstruct::ANATIFORM_ASTEROID_NAME, $forcedConstruct instanceof DormantConstruct ? $forcedConstruct->getName() : null, 'forced anatiform construct uses its specialized public name');
+
+    $listConstructTypesCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --list-types';
+    exec($listConstructTypesCommand . ' 2>&1', $listConstructTypesOutput, $listConstructTypesStatus);
+    $listConstructTypesText = implode("\n", $listConstructTypesOutput);
+    $test->assertEquals(0, $listConstructTypesStatus, 'add-dormant-construct CLI lists structure types without coordinates');
+    foreach (DormantConstruct::inspectionScenarios() as $inspectionScenario) {
+        $test->assert(str_contains($listConstructTypesText, $inspectionScenario), 'add-dormant-construct CLI lists structure type ' . $inspectionScenario);
+    }
+
+    $invalidConstructTypeCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --type=definitely-not-a-construct'
+        . ' --sector=10:0:0';
+    exec($invalidConstructTypeCommand . ' 2>&1', $invalidConstructTypeOutput, $invalidConstructTypeStatus);
+    $test->assert($invalidConstructTypeStatus !== 0, 'add-dormant-construct CLI rejects an unknown forced structure type');
+    $test->assert(str_contains(implode("\n", $invalidConstructTypeOutput), 'Unknown structure type'), 'add-dormant-construct CLI explains an unknown forced structure type');
+
     $cliInventoryPlayer = $auth->registerPlayerWithPassword('cli-inventory', 'secret', 'CLI Inventory');
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
     if ($cliInventoryProbe !== null) {
