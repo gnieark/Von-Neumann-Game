@@ -127,18 +127,33 @@ final class AsteroidTrajectoryService
                         : null,
                 ],
             );
+            $ignitionAlertMessage = $this->ignitionAlertMessage($trajectory, $sector);
             foreach ($this->probes->findBySector($probe->currentSector) as $localProbe) {
                 $this->alerts?->createAsteroidTrajectoryAlert(
                     $localProbe->id,
                     $probe->currentSector,
                     $trajectory->uid,
                     $asteroidId,
-                    'Motorized asteroid ignition detected. Trajectory: ' . $trajectory->mode . '.',
+                    $ignitionAlertMessage,
                 );
             }
 
             return $trajectory;
         });
+    }
+
+    private function ignitionAlertMessage(AsteroidTrajectory $trajectory, SectorContent $sector): string
+    {
+        $message = 'Motorized asteroid ignition detected. Trajectory: ' . $trajectory->mode . '.';
+        if ($trajectory->mode !== AsteroidTrajectory::MODE_SYSTEM_IMPACT || $trajectory->targetObjectId === null) {
+            return $message;
+        }
+
+        $targetType = $trajectory->targetProbeId !== null
+            ? 'probe'
+            : ($sector->findObjectById($trajectory->targetObjectId)?->getType()->value ?? 'unknown');
+
+        return $message . ' Target: ' . $trajectory->targetObjectId . ' (' . $targetType . ').';
     }
 
     public function getForLocalProbe(NeumannProbe $probe, string $uid, ?\DateTimeImmutable $now = null): array

@@ -1,10 +1,12 @@
 # Changelog
 
 - API v111 : ajout des trajectoires persistantes d’astéroïdes motorisés. `POST /api/probe/{probeId}/asteroids/{asteroidId}/trajectories` lance soit un impact local relativiste, soit un transfert vers un voisin FCC, et `GET /api/probe/{probeId}/asteroid-trajectories/{trajectoryId}` expose uniquement la télémétrie détectable dans le secteur courant, sans coordonnée absolue. Les phases sont exécutées et rejouées de façon idempotente par le scheduler.
+- API v111 : l’alerte d’allumage d’une trajectoire `system_impact` indique désormais l’identifiant opaque de la cible et son type (`probe`, `asteroid`, `planet` ou `star`).
 - API v111 : les astéroïdes motorisés ont désormais un réservoir binaire explicite (`motorFuelStatus: full|empty`). La motorisation consomme aussi deux plaques d’acier et 0,2 point de deutérium, attribue un nouvel identifiant opaque, et `POST /api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid` permet à une Manny de refaire le plein avant son retour automatique.
 - Moteur : les impacts gèrent étoiles, planètes, astéroïdes et sondes avec énergie relativiste, dégâts ou fragmentation déterministes, tandis que les transferts traversent un secteur par 24 heures, tentent une capture pondérée, conservent containers et signets, et disparaissent après une capture par trou noir.
 - Migration obligatoire : ajout de `scripts/one-shot-scripts/migrate-asteroid-trajectories.php`. Worker arrêté, ce script convertit les anciens astéroïdes motorisés au format strict avec réservoir plein et installe la table SQL des trajectoires ; aucun fallback de lecture de l’ancien format n’est conservé.
 - Interface : `/mannies` propose le ravitaillement et le lancement des astéroïdes motorisés, affiche les prérequis complets et les estimations de durée.
+- Interface : `/sensors` met désormais en exergue tout astéroïde motorisé en mouvement détecté par le scan du secteur courant, avec le mode et la phase de trajectoire, la cible, la vitesse ou la progression, ainsi qu’un compte à rebours local jusqu’à l’impact ou au prochain franchissement de secteur.
 
 - API v110 : les scans détaillés de `GET /api/probe/sector`, `GET /api/probe/{probeId}/sector` et `GET /api/sector` exposent désormais `motorized` sur les astéroïdes présents dans les listes générales `bookmarkTargets`, en plus de `minableTargets`. Ce champ reste absent des autres types d’objets.
 

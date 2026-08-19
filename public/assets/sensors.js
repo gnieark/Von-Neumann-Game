@@ -760,6 +760,218 @@
         }));
     }
 
+    function trajectoryPhaseLabel(status) {
+        return {
+            "accelerating": tr("asteroidTrajectoryPhaseAccelerating", "Accelerating"),
+            "coasting": tr("asteroidTrajectoryPhaseCoasting", "Final approach"),
+            "crossing_sector": tr("asteroidTrajectoryPhaseCrossingSector", "Intersector crossing"),
+            "orbiting_black_hole": tr("asteroidTrajectoryPhaseOrbitingBlackHole", "Orbiting a black hole"),
+        }[status] || status || "-";
+    }
+
+    function trajectoryModeLabel(mode) {
+        return mode === "system_impact"
+            ? tr("asteroidTrajectorySystemImpact", "System impact")
+            : tr("asteroidTrajectorySectorTransfer", "Intersector transfer");
+    }
+
+    function trajectoryObjectIndex(sector) {
+        const objects = new Map();
+        const collect = (object) => {
+            if (!object || typeof object !== "object") {
+                return;
+            }
+            if (object.id !== undefined && object.id !== null) {
+                const key = String(object.id);
+                objects.set(key, {...(objects.get(key) || {}), ...object});
+            }
+            ["bookmarkTargets", "minableTargets"].forEach((childKey) => {
+                if (Array.isArray(object[childKey])) {
+                    object[childKey].forEach(collect);
+                }
+            });
+        };
+
+        (Array.isArray(sector && sector.objects) ? sector.objects : []).forEach(collect);
+        (Array.isArray(sector && sector.probes) ? sector.probes : []).forEach((probe) => {
+            if (probe && probe.id !== undefined && probe.id !== null) {
+                objects.set(String(probe.id), {...probe, "type": "probe"});
+            }
+        });
+
+        return objects;
+    }
+
+    function detectedMovingAsteroids(sector) {
+        const activeStatuses = new Set(["accelerating", "coasting", "crossing_sector", "orbiting_black_hole"]);
+        const trajectories = new Map();
+        const collect = (object) => {
+            if (!object || typeof object !== "object") {
+                return;
+            }
+            const trajectory = object.trajectory;
+            if (
+                object.type === "asteroid"
+                && object.motorized === true
+                && trajectory
+                && typeof trajectory === "object"
+                && activeStatuses.has(trajectory.status)
+            ) {
+                trajectories.set(String(trajectory.id || object.id), {"asteroid": object, "trajectory": trajectory});
+            }
+            ["bookmarkTargets", "minableTargets"].forEach((childKey) => {
+                if (Array.isArray(object[childKey])) {
+                    object[childKey].forEach(collect);
+                }
+            });
+        };
+
+        (Array.isArray(sector && sector.objects) ? sector.objects : []).forEach(collect);
+
+        return Array.from(trajectories.values());
+    }
+
+    function trajectoryNumber(value, maximumFractionDigits = 6) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+            return "-";
+        }
+
+        return new Intl.NumberFormat(document.documentElement.lang || undefined, {maximumFractionDigits}).format(number);
+    }
+
+    function trajectoryDirectionLabel(direction) {
+        if (!direction || typeof direction !== "object") {
+            return "-";
+        }
+
+        return ["x", "y", "z"].map((axis) => axis.toUpperCase() + " " + trajectoryNumber(direction[axis], 0)).join(" · ");
+    }
+
+    function trajectoryCountdownKind(trajectory) {
+        if (trajectory.mode === "system_impact") {
+            return "impact";
+        }
+
+        return trajectory.status === "orbiting_black_hole" ? "disappearance" : "crossing";
+    }
+
+    function trajectoryCountdownText(kind, remainingSeconds) {
+        const duration = window.VNG.duration(remainingSeconds, tr);
+        const labels = {
+            "impact": ["asteroidTrajectoryImpactIn", "Estimated impact in {duration}"],
+            "crossing": ["asteroidTrajectoryCrossingIn", "Next sector crossing in {duration}"],
+            "disappearance": ["asteroidTrajectoryDisappearanceIn", "Estimated disappearance in {duration}"],
+        };
+        const [key, fallback] = labels[kind] || labels.crossing;
+
+        return window.VNG.formatText(tr(key, fallback), {"duration": duration});
+    }
+
+    function trajectoryCountdownHtml(trajectory) {
+        const deadline = trajectory.mode === "system_impact"
+            ? (trajectory.estimatedCompletionAt || trajectory.nextTransitionAt)
+            : trajectory.nextTransitionAt;
+        const endAt = Date.parse(deadline || "");
+        if (!Number.isFinite(endAt)) {
+            return window.VNG.escapeHtml(tr("asteroidTrajectoryDurationUnknown", "Estimated duration unavailable"));
+        }
+
+        const kind = trajectoryCountdownKind(trajectory);
+        const remainingSeconds = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+        return "<span class=\"asteroid-trajectory-countdown\" data-countdown-end-at=\"" + window.VNG.escapeHtml(String(endAt)) + "\" data-countdown-kind=\"" + window.VNG.escapeHtml(kind) + "\">"
+            + window.VNG.escapeHtml(trajectoryCountdownText(kind, remainingSeconds))
+            + "</span>"
+            + "<small>" + window.VNG.escapeHtml(formatDate(deadline)) + "</small>";
+    }
+
+    function trajectoryTargetLabel(trajectory, objectIndex) {
+        if (trajectory.mode !== "system_impact") {
+            return window.VNG.formatText(
+                tr("asteroidTrajectoryRelativeDirection", "Next sector — relative direction {direction}"),
+                {"direction": trajectoryDirectionLabel(trajectory.direction)}
+            );
+        }
+
+        const targetId = String(trajectory.targetObjectId || "");
+        const target = objectIndex.get(targetId);
+        const inferredType = target && target.type
+            ? target.type
+            : (/^\d+$/.test(targetId) ? "probe" : "object");
+        const targetName = target && target.name ? target.name : (targetId || tr("unknownObject", "Unknown object"));
+
+        return targetName + " (" + objectTypeLabel(inferredType) + ")";
+    }
+
+    function trajectoryDetailHtml(record, objectIndex) {
+        const asteroid = record.asteroid;
+        const trajectory = record.trajectory;
+        const details = [
+            {"label": tr("asteroidTrajectoryType", "Trajectory type"), "value": trajectoryModeLabel(trajectory.mode)},
+            {"label": tr("asteroidTrajectoryPhase", "Phase"), "value": trajectoryPhaseLabel(trajectory.status)},
+            {"label": tr("asteroidTrajectoryTarget", "Target"), "value": trajectoryTargetLabel(trajectory, objectIndex)},
+        ];
+
+        if (trajectory.mode === "system_impact") {
+            details.push({
+                "label": tr("asteroidTrajectorySpeed", "Current / target speed"),
+                "value": trajectoryNumber(trajectory.currentSpeedC) + " c / " + trajectoryNumber(trajectory.targetSpeedC) + " c",
+            });
+            details.push({
+                "label": tr("asteroidTrajectoryRevolutions", "Completed / planned revolutions"),
+                "value": trajectoryNumber(trajectory.completedRevolutions, 0) + " / " + trajectoryNumber(trajectory.plannedRevolutions, 0),
+            });
+        } else {
+            details.push({
+                "label": tr("asteroidTrajectorySectorProgress", "Sectors crossed / limit"),
+                "value": trajectoryNumber(trajectory.sectorsCrossed, 0) + " / " + trajectoryNumber(trajectory.maximumSectorCrossings, 0),
+            });
+        }
+
+        details.push({
+            "label": trajectory.mode === "system_impact"
+                ? tr("asteroidTrajectoryEstimatedImpact", "Estimated impact")
+                : tr("asteroidTrajectoryNextTransition", "Next transition"),
+            "html": trajectoryCountdownHtml(trajectory),
+        });
+
+        return "<article class=\"asteroid-trajectory-alert-card\">"
+            + "<p class=\"asteroid-trajectory-identity\"><span>" + window.VNG.escapeHtml(objectTypeLabel("asteroid")) + "</span><strong>" + window.VNG.escapeHtml(asteroid.name || asteroid.id || trajectory.asteroidId || "-") + "</strong></p>"
+            + "<dl>"
+            + details.map((detail) => (
+                "<div><dt>" + window.VNG.escapeHtml(detail.label) + "</dt><dd>" + (detail.html || window.VNG.escapeHtml(detail.value)) + "</dd></div>"
+            )).join("")
+            + "</dl>"
+            + "</article>";
+    }
+
+    function renderAsteroidTrajectoryAlerts(sector) {
+        const node = document.getElementById("asteroid-trajectory-alerts");
+        if (!node) {
+            return;
+        }
+
+        const records = detectedMovingAsteroids(sector);
+        if (records.length === 0) {
+            node.hidden = true;
+            node.innerHTML = "";
+            return;
+        }
+
+        const title = records.length === 1
+            ? tr("asteroidTrajectoryAlertTitle", "ALERT: MOTORIZED ASTEROID IN MOTION")
+            : window.VNG.formatText(tr("asteroidTrajectoryAlertMultipleTitle", "ALERT: {count} MOTORIZED ASTEROIDS IN MOTION"), {"count": records.length});
+        const objectIndex = trajectoryObjectIndex(sector);
+        node.innerHTML = "<header class=\"asteroid-trajectory-alert-heading\">"
+            + "<span class=\"asteroid-trajectory-alert-signal\" aria-hidden=\"true\">▲</span>"
+            + "<h4>" + window.VNG.escapeHtml(title) + "</h4>"
+            + "</header>"
+            + "<div class=\"asteroid-trajectory-alert-list\">"
+            + records.map((record) => trajectoryDetailHtml(record, objectIndex)).join("")
+            + "</div>";
+        node.hidden = false;
+    }
+
     function countdownHtml(object) {
         const secondsRemaining = Number(object && object.noReturnCountdown && object.noReturnCountdown.secondsRemaining);
         if (!Number.isFinite(secondsRemaining)) {
@@ -837,12 +1049,13 @@
         return "";
     }
 
-    function renderSectorObjects(sector) {
+    function renderSectorObjects(sector, showTrajectoryAlerts = false) {
         const node = document.getElementById("sector-objects");
         if (!node) {
             return;
         }
 
+        renderAsteroidTrajectoryAlerts(showTrajectoryAlerts ? sector : null);
         const openPanels = window.VNG.openDisclosureIds(node, ".sector-system-toggle[aria-expanded=\"true\"][aria-controls]");
         setText("sector-context", sectorContext(sector));
         const scutCoverage = document.getElementById("sector-scut-coverage");
@@ -957,6 +1170,7 @@
 
     function updateLiveCountdowns() {
         const countdowns = Array.from(document.querySelectorAll(".sector-countdown-value[data-countdown-end-at]"));
+        const trajectoryCountdowns = Array.from(document.querySelectorAll(".asteroid-trajectory-countdown[data-countdown-end-at]"));
         let hasPendingCountdown = false;
         const now = Date.now();
 
@@ -976,12 +1190,25 @@
             }
         });
 
+        trajectoryCountdowns.forEach((countdown) => {
+            const endAt = Number(countdown.dataset.countdownEndAt);
+            if (!Number.isFinite(endAt)) {
+                return;
+            }
+
+            const remainingSeconds = Math.max(0, Math.ceil((endAt - now) / 1000));
+            countdown.textContent = trajectoryCountdownText(countdown.dataset.countdownKind || "crossing", remainingSeconds);
+            if (remainingSeconds > 0 && now < endAt) {
+                hasPendingCountdown = true;
+            }
+        });
+
         countdownTimer = hasPendingCountdown ? window.setTimeout(updateLiveCountdowns, 1000) : null;
     }
 
     function scheduleLiveCountdowns() {
         clearCountdownTimer();
-        if (!document.querySelector(".sector-countdown-value[data-countdown-end-at]")) {
+        if (!document.querySelector(".sector-countdown-value[data-countdown-end-at], .asteroid-trajectory-countdown[data-countdown-end-at]")) {
             return;
         }
 
@@ -1326,11 +1553,12 @@
         try {
             window.VNG.setProbeUnreachablePanel?.("environment-panel", false);
             const data = await window.VNG.apiJson(path, {"method": "GET"});
-            if (path === window.VNG.probeApiPath("/sector")) {
+            const isCurrentProbeSector = path === window.VNG.probeApiPath("/sector");
+            if (isCurrentProbeSector) {
                 currentProbeSectorRelative = relativeCoordinates(data.sector && data.sector.relativeCoordinates);
             }
             syncSectorForm(data.sector);
-            renderSectorObjects(data.sector);
+            renderSectorObjects(data.sector, isCurrentProbeSector);
             syncPrepareJumpButton(data.sector);
             applySectorScanButtonState();
             return data;

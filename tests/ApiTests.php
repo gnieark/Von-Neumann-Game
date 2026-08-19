@@ -758,6 +758,15 @@ $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id=
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorScutCoverageHtml(sector)'), 'sensors JS exposes SCUT coverage in sector tiles');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutNetworks.length > 0'), 'sensors JS derives SCUT coverage from the sector endpoint');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutCoverageStatus === "unknown"'), 'sensors JS renders unknown SCUT coverage');
+$test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="asteroid-trajectory-alerts"'), 'sensors view exposes a prominent live asteroid trajectory alert region');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function detectedMovingAsteroids'), 'sensors JS detects active motorized asteroid trajectories in sector scan objects');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, '["bookmarkTargets", "minableTargets"]'), 'sensors JS also detects trajectories on solar-system asteroid representations');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'trajectory.estimatedCompletionAt || trajectory.nextTransitionAt'), 'sensors JS computes the system-impact countdown from sector telemetry');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'trajectory.targetObjectId'), 'sensors JS resolves the system-impact target from sector telemetry');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'renderSectorObjects(data.sector, isCurrentProbeSector)'), 'sensors JS limits moving-asteroid alerts to the selected probe current-sector scan');
+$test->assert(is_string($appCss) && str_contains($appCss, '.asteroid-trajectory-alerts'), 'sensors CSS puts moving motorized asteroid telemetry in a dedicated alert panel');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidTrajectoryImpactIn' => 'Impact estimé dans {duration}'"), 'French translations include the live estimated-impact countdown');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidTrajectoryImpactIn' => 'Estimated impact in {duration}'"), 'English translations include the live estimated-impact countdown');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'Couverture SCUT : inconnue'"), 'French translations include unknown SCUT coverage');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'SCUT coverage: unknown'"), 'English translations include unknown SCUT coverage');
 $test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'scheduleRefresh'), 'sensors JS does not poll and overwrite coordinate input');
@@ -867,7 +876,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-asteroid-trajectories"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-sensors-asteroid-alert"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -5861,6 +5870,10 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
                 && $warning->objectId === $impactTrajectoryUid,
         ));
         $test->assertEquals(1, count($trajectoryAlerts), 'ignition creates exactly one alert for each probe physically present in the sector');
+        $test->assert(
+            str_contains($trajectoryAlerts[0]->message ?? '', 'Target: system-impact-star (star).'),
+            'system-impact ignition alerts identify the target and its type',
+        );
     }
     if ($impactTrajectory !== null) {
         $accelerationFinishedAt = new DateTimeImmutable($impactTrajectory->accelerationEndsAt ?? 'now', new DateTimeZone('UTC'));

@@ -4360,7 +4360,7 @@ components:
     AsteroidTrajectory:
       type: object
       required: [id, asteroidId, mode, status, startedAt, nextTransitionAt]
-      description: Public telemetry deliberately omits origin and current absolute sectors.
+      description: Public telemetry deliberately omits origin and current absolute sectors. The same object is embedded as `trajectory` on every detectable asteroid representation in a detailed sector scan, so clients can render local alerts and countdowns without another request.
       properties:
         id:
           type: string
@@ -4990,7 +4990,7 @@ components:
           type: string
         message:
           type: string
-          description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
+          description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates. An asteroid_trajectory ignition alert for system_impact identifies the opaque target id and its type.
         action:
           type: object
           required: [label, method, endpoint]
