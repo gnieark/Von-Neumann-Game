@@ -11,6 +11,17 @@
         <select id="scut-network-select"></select>
     </label>
     <div id="scut-summary" class="metrics" aria-live="polite"></div>
+    <section class="scut-section scut-blueprint-share" aria-labelledby="scut-blueprint-share-title">
+        <h3 id="scut-blueprint-share-title">{{t.scutBlueprintShareTitle}}</h3>
+        <p class="scut-blueprint-share-intro">{{t.scutBlueprintShareIntro}}</p>
+        <form id="scut-blueprint-share-form" class="scut-blueprint-share-form">
+            <label>{{t.scutBlueprintShareBlueprint}}<select id="scut-blueprint-share-blueprint" name="blueprint" required></select></label>
+            <label>{{t.scutBlueprintShareRecipient}}<select id="scut-blueprint-share-recipient" name="recipientProbeId" required></select></label>
+            <button id="scut-blueprint-share-submit" class="primary" type="submit">{{t.scutBlueprintShareSubmit}}</button>
+        </form>
+        <p id="scut-blueprint-share-availability" class="sector-context" aria-live="polite"></p>
+        <p id="scut-blueprint-share-status" class="action-status" aria-live="polite"></p>
+    </section>
     <section class="scut-section" aria-labelledby="scut-probes-title">
         <h3 id="scut-probes-title">{{t.scutNetworkProbes}}</h3>
         <div id="scut-probes-list" class="scut-list" aria-live="polite"></div>

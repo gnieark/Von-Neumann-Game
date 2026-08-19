@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Repository;
 
 use PDO;
+use PDOException;
 use VonNeumannGame\Domain\ProbeImprovement;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 
@@ -101,7 +102,7 @@ final class ProbeImprovementRepository
     public function markAvailable(int $probeId, string $improvement): ProbeImprovement
     {
         $playerId = $this->playerIdForProbe($probeId) ?? throw new \RuntimeException('Probe not found.');
-        $this->ensureBlueprint($playerId, $improvement);
+        $this->grantBlueprintToPlayer($playerId, $improvement);
 
         return $this->findForProbe($probeId, $improvement) ?? throw new \RuntimeException('Probe improvement availability failed.');
     }
@@ -110,7 +111,7 @@ final class ProbeImprovementRepository
     {
         $playerId = $this->playerIdForProbe($probeId) ?? throw new \RuntimeException('Probe not found.');
         $improvement = ProbeImprovementCatalog::normalizeId($improvement);
-        $this->ensureBlueprint($playerId, $improvement);
+        $this->grantBlueprintToPlayer($playerId, $improvement);
         $this->ensureInstallation($probeId, $improvement);
 
         return $this->findForProbe($probeId, $improvement) ?? throw new \RuntimeException('Probe improvement installation failed.');
@@ -122,7 +123,7 @@ final class ProbeImprovementRepository
         $stmt->execute(['probe_id' => $probeId]);
     }
 
-    private function ensureBlueprint(int $playerId, string $improvement): void
+    public function playerHasBlueprint(int $playerId, string $improvement): bool
     {
         $improvement = ProbeImprovementCatalog::normalizeId($improvement);
         $stmt = $this->pdo->prepare(
@@ -132,8 +133,15 @@ final class ProbeImprovementRepository
             'player_id' => $playerId,
             'improvement' => $improvement,
         ]);
-        if ($stmt->fetchColumn() !== false) {
-            return;
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function grantBlueprintToPlayer(int $playerId, string $improvement): bool
+    {
+        $improvement = ProbeImprovementCatalog::normalizeId($improvement);
+        if ($this->playerHasBlueprint($playerId, $improvement)) {
+            return false;
         }
 
         $now = gmdate('c');
@@ -142,12 +150,22 @@ final class ProbeImprovementRepository
              (player_id, improvement, created_at, updated_at)
              VALUES (:player_id, :improvement, :created_at, :updated_at)'
         );
-        $insert->execute([
-            'player_id' => $playerId,
-            'improvement' => $improvement,
-            'created_at' => $now,
-            'updated_at' => $now,
-        ]);
+        try {
+            $insert->execute([
+                'player_id' => $playerId,
+                'improvement' => $improvement,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        } catch (PDOException $exception) {
+            if ($this->playerHasBlueprint($playerId, $improvement)) {
+                return false;
+            }
+
+            throw $exception;
+        }
+
+        return true;
     }
 
     private function ensureInstallation(int $probeId, string $improvement): void

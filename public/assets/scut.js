@@ -5,6 +5,9 @@
         "networks": [],
         "selectedNetworkId": "",
         "network": null,
+        "blueprints": [],
+        "ownedProbeIds": [],
+        "sharePending": false,
     };
 
     let i18n = {};
@@ -26,6 +29,13 @@
 
     function setStatus(value) {
         const node = document.getElementById("scut-status");
+        if (node) {
+            node.textContent = value || "";
+        }
+    }
+
+    function setBlueprintShareStatus(value) {
+        const node = document.getElementById("scut-blueprint-share-status");
         if (node) {
             node.textContent = value || "";
         }
@@ -106,6 +116,77 @@
         ]);
     }
 
+    function knownBlueprints() {
+        return Array.isArray(state.blueprints)
+            ? state.blueprints.filter((blueprint) => blueprint && blueprint.id && blueprint.available === true)
+            : [];
+    }
+
+    function blueprintShareRecipients() {
+        const ownedProbeIds = new Set((Array.isArray(state.ownedProbeIds) ? state.ownedProbeIds : []).map(String));
+        const probes = Array.isArray(state.network && state.network.probes) ? state.network.probes : [];
+
+        return probes.filter((probe) => probe && probe.id && !ownedProbeIds.has(String(probe.id)));
+    }
+
+    function renderBlueprintShareForm() {
+        const blueprintSelect = document.getElementById("scut-blueprint-share-blueprint");
+        const recipientSelect = document.getElementById("scut-blueprint-share-recipient");
+        const submit = document.getElementById("scut-blueprint-share-submit");
+        const availability = document.getElementById("scut-blueprint-share-availability");
+        if (!blueprintSelect || !recipientSelect || !submit) {
+            return;
+        }
+
+        const previousBlueprint = blueprintSelect.value;
+        const previousRecipient = recipientSelect.value;
+        const blueprints = knownBlueprints();
+        const recipients = blueprintShareRecipients();
+
+        blueprintSelect.innerHTML = blueprints.length > 0
+            ? blueprints.map((blueprint) => (
+                "<option value=\"" + window.VNG.escapeHtml(String(blueprint.id)) + "\">"
+                    + window.VNG.escapeHtml(blueprint.name || String(blueprint.id))
+                + "</option>"
+            )).join("")
+            : "<option value=\"\">" + window.VNG.escapeHtml(tr("scutBlueprintShareNoBlueprints", "No blueprint is available to share.")) + "</option>";
+        if (previousBlueprint && blueprints.some((blueprint) => String(blueprint.id) === previousBlueprint)) {
+            blueprintSelect.value = previousBlueprint;
+        }
+
+        recipientSelect.innerHTML = recipients.length > 0
+            ? recipients.map((probe) => (
+                "<option value=\"" + window.VNG.escapeHtml(String(probe.id)) + "\">"
+                    + window.VNG.escapeHtml((probe.name || tr("unknownProbe", "Unknown probe")) + " — ID " + String(probe.id))
+                + "</option>"
+            )).join("")
+            : "<option value=\"\">" + window.VNG.escapeHtml(tr("scutBlueprintShareNoRecipients", "No other player's probe is reachable through this network.")) + "</option>";
+        if (previousRecipient && recipients.some((probe) => String(probe.id) === previousRecipient)) {
+            recipientSelect.value = previousRecipient;
+        }
+
+        const ready = Boolean(state.network) && blueprints.length > 0 && recipients.length > 0 && !state.sharePending;
+        blueprintSelect.disabled = !state.network || blueprints.length === 0 || state.sharePending;
+        recipientSelect.disabled = !state.network || recipients.length === 0 || state.sharePending;
+        submit.disabled = !ready;
+        submit.setAttribute("aria-disabled", ready ? "false" : "true");
+        submit.textContent = state.sharePending
+            ? tr("scutBlueprintShareSending", "Sharing blueprint...")
+            : tr("scutBlueprintShareSubmit", "Share blueprint");
+
+        if (availability) {
+            if (!state.network) {
+                availability.textContent = tr("scutBlueprintShareRequiresCoverage", "The selected probe must be covered by an active SCUT network.");
+            } else if (blueprints.length === 0) {
+                availability.textContent = tr("scutBlueprintShareNoBlueprints", "No blueprint is available to share.");
+            } else if (recipients.length === 0) {
+                availability.textContent = tr("scutBlueprintShareNoRecipients", "No other player's probe is reachable through this network.");
+            } else {
+                availability.textContent = tr("scutBlueprintShareReady", "The blueprint will become available to every probe owned by the recipient player.");
+            }
+        }
+    }
+
     function renderProbes() {
         const list = document.getElementById("scut-probes-list");
         const empty = document.getElementById("scut-probes-empty");
@@ -158,6 +239,7 @@
     function renderPage() {
         renderNetworkChoice();
         renderSummary();
+        renderBlueprintShareForm();
         renderProbes();
         renderRelays();
     }
@@ -177,7 +259,15 @@
 
         try {
             window.VNG.setProbeUnreachablePanel?.("scut-panel", false);
-            const sectorData = await window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"});
+            const [sectorData, blueprintData, ownedProbeData] = await Promise.all([
+                window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}),
+                window.VNG.apiJson(window.VNG.probeApiPath("/probe-improvements-available"), {"method": "GET"}),
+                window.VNG.loadProbeList(),
+            ]);
+            state.blueprints = Array.isArray(blueprintData && blueprintData.improvements) ? blueprintData.improvements : [];
+            state.ownedProbeIds = Array.isArray(ownedProbeData && ownedProbeData.probes)
+                ? ownedProbeData.probes.map((probe) => probe && probe.id).filter(Boolean)
+                : [];
             const networks = Array.isArray(sectorData && sectorData.sector && sectorData.sector.scutNetworks)
                 ? sectorData.sector.scutNetworks
                 : [];
@@ -215,6 +305,48 @@
         document.getElementById("scut-network-select")?.addEventListener("change", (event) => {
             state.selectedNetworkId = event.target.value || "";
             loadScutPage();
+        });
+        document.getElementById("scut-blueprint-share-form")?.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (state.sharePending) {
+                return;
+            }
+
+            const form = new FormData(event.currentTarget);
+            const improvementId = String(form.get("blueprint") || "");
+            const recipientProbeId = Number.parseInt(String(form.get("recipientProbeId") || ""), 10);
+            if (!improvementId || !Number.isInteger(recipientProbeId) || recipientProbeId <= 0) {
+                setBlueprintShareStatus(tr("requestDenied", "Request denied"));
+                return;
+            }
+
+            state.sharePending = true;
+            setBlueprintShareStatus(tr("scutBlueprintShareSending", "Sharing blueprint..."));
+            renderBlueprintShareForm();
+            try {
+                const data = await window.VNG.apiJson(
+                    window.VNG.probeApiPath("/probe-improvement-blueprints/" + encodeURIComponent(improvementId) + "/share"),
+                    {
+                        "method": "POST",
+                        "body": JSON.stringify({"recipientProbeId": recipientProbeId}),
+                    },
+                );
+                const values = {
+                    "blueprint": data && data.blueprint && data.blueprint.name ? data.blueprint.name : improvementId,
+                    "probe": data && data.recipientProbe && data.recipientProbe.name ? data.recipientProbe.name : String(recipientProbeId),
+                };
+                setBlueprintShareStatus(window.VNG.formatText(
+                    data && data.alreadyKnown === true
+                        ? tr("scutBlueprintShareAlreadyKnown", "{probe}'s player already knew {blueprint}; the notification remains available.")
+                        : tr("scutBlueprintShareSuccess", "{blueprint} was shared with {probe}. The recipient player has been notified."),
+                    values,
+                ));
+            } catch (error) {
+                setBlueprintShareStatus(error.message || tr("requestDenied", "Request denied"));
+            } finally {
+                state.sharePending = false;
+                renderBlueprintShareForm();
+            }
         });
     }
 

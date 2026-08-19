@@ -5,6 +5,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-08-19
 
 ### Changed
+- Interface : la page `/scut` permet désormais de choisir un blueprint connu et une sonde appartenant à un autre joueur dans le réseau sélectionné, puis de partager ce blueprint. Les sondes du joueur émetteur sont exclues des destinataires et l’interface confirme aussi les partages idempotents.
+- API v113 : ajout de `POST /api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share`. Le joueur authentifié peut copier un blueprint connu vers le propriétaire d’une autre sonde uniquement lorsque les deux sondes sont couvertes par un même réseau SCUT actif ; la simple présence dans un même secteur ne suffit pas. L’opération est idempotente et crée sur la sonde destinataire une alerte persistante `blueprint_shared`, dédupliquée lors des rejeux.
 - API v112 : ajout de `DELETE /api/probe/alerts/{alertId}` et `DELETE /api/probe/damage-warnings/{damageWarningId}`, ainsi que de leurs variantes ciblant explicitement une sonde. Une suppression n’est autorisée que pour une alerte appartenant à la sonde sélectionnée du joueur authentifié ; toute autre ressource répond `404`.
 - Interface : les alertes persistantes de `/alerts` disposent désormais d’une icône de suppression ; les avertissements de dégâts utilisent leur endpoint dédié.
 - Documentation API : Swagger propose désormais un sélecteur d’exemple « System impact / Sector transfer » pour préremplir la commande de lancement d’un astéroïde motorisé, expose explicitement les deux valeurs autorisées de `mode` et détaille la probabilité décroissante de capture après la traversée de secteurs vides.

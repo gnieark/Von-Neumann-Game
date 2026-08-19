@@ -146,6 +146,24 @@ final class ScutNetworkService
         return false;
     }
 
+    /** @return list<int> */
+    public function sharedActiveNetworkIds(SectorCoordinates $a, SectorCoordinates $b): array
+    {
+        $aNetworkIds = array_fill_keys(
+            array_map(static fn(ScutNetwork $network): int => $network->id, $this->networksCoveringSector($a)),
+            true,
+        );
+        $shared = [];
+        foreach ($this->networksCoveringSector($b) as $network) {
+            if (isset($aNetworkIds[$network->id])) {
+                $shared[] = $network->id;
+            }
+        }
+        sort($shared);
+
+        return $shared;
+    }
+
     public function hasTransitBeaconCorridor(SectorCoordinates $a, SectorCoordinates $b): bool
     {
         if ($a->equals($b)) {

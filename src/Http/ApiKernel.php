@@ -55,7 +55,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 112;
+    public const API_VERSION = 113;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -252,6 +252,12 @@ final class ApiKernel
             ApiRoute::path('/api/probe/mannies', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->list($player))),
             ApiRoute::regex('#^/api/probe/(\d+)/storage-containers$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageContainersResponse($player, $probe), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/probe-improvements-available$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeImprovementsResponse($player, $ctx->query, $probe), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/probe-improvement-blueprints/([^/]+)/share$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeImprovementBlueprintShareResponse($player, $probe, $ctx->stringParam(1), $ctx->body),
+                $ctx->intParam(0),
+                ['POST'],
+            )),
             ApiRoute::regex('#^/api/probe/(\d+)/storage-moves$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageMoveResponse($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/atomic-printer/craft$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->atomicPrinterCraft($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/messages$#', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
@@ -649,6 +655,86 @@ final class ApiKernel
         return new ApiResponse(200, [
             'improvements' => $this->probeManniesPresenter()->probeImprovements($probe, $includeAll),
         ]);
+    }
+
+    private function probeImprovementBlueprintShareResponse(
+        Player $player,
+        NeumannProbe $probe,
+        string $improvementId,
+        ?string $body,
+    ): ApiResponse {
+        if ($this->improvements === null) {
+            return ApiResponse::error(503, 'probe_improvements_unavailable', 'Probe improvement storage is unavailable.');
+        }
+
+        $improvementId = ProbeImprovementCatalog::normalizeId($improvementId);
+        $definition = $this->probeImprovementDefinition($probe, $improvementId);
+        if ($definition === null) {
+            return ApiResponse::error(404, 'blueprint_not_found', 'Blueprint not found.');
+        }
+        if (!$this->improvements->playerHasBlueprint($player->id, $improvementId)) {
+            return ApiResponse::error(403, 'blueprint_not_known', 'The authenticated player does not know this blueprint.');
+        }
+
+        $data = $this->decodeJsonBody($body);
+        $recipientProbeId = is_array($data) && is_int($data['recipientProbeId'] ?? null)
+            ? $data['recipientProbeId']
+            : 0;
+        if ($recipientProbeId <= 0) {
+            return ApiResponse::error(400, 'bad_request', 'recipientProbeId must be a positive integer.');
+        }
+
+        $recipientProbe = $this->probes->findById($recipientProbeId);
+        if ($recipientProbe === null) {
+            return ApiResponse::error(404, 'recipient_probe_not_found', 'Recipient probe not found.');
+        }
+        if ($recipientProbe->playerId === $player->id) {
+            return ApiResponse::error(422, 'invalid_blueprint_recipient', 'A blueprint can only be shared with another player.');
+        }
+        $recipientProbe = $this->movements->refreshProbeMovementState($recipientProbe);
+
+        $sharedNetworkIds = $this->scut->sharedActiveNetworkIds($probe->currentSector, $recipientProbe->currentSector);
+        if ($sharedNetworkIds === []) {
+            return ApiResponse::error(422, 'probes_not_in_same_scut_network', 'Both probes must be covered by the same active SCUT network.');
+        }
+
+        $created = $this->improvements->grantBlueprintToPlayer($recipientProbe->playerId, $improvementId);
+        $senderName = trim((string) ($player->displayName ?? '')) !== '' ? trim((string) $player->displayName) : $player->username;
+        $blueprintName = (string) ($definition['name'] ?? $improvementId);
+        $this->damageWarnings->createBlueprintSharedAlert(
+            $recipientProbe->id,
+            $recipientProbe->currentSector,
+            $improvementId,
+            $probe->id,
+            $probe->name,
+            'SCUT blueprint received: ' . $blueprintName . ' was shared by ' . $senderName
+                . ' via probe ' . $probe->name . '. It is now available to all your probes.',
+        );
+
+        return new ApiResponse($created ? 201 : 200, [
+            'blueprint' => [
+                'id' => $improvementId,
+                'name' => $blueprintName,
+            ],
+            'recipientProbe' => [
+                'id' => $recipientProbe->id,
+                'name' => $recipientProbe->name,
+            ],
+            'alreadyKnown' => !$created,
+            'recipientNotified' => true,
+        ]);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function probeImprovementDefinition(NeumannProbe $probe, string $improvementId): ?array
+    {
+        foreach ($this->probeManniesPresenter()->probeImprovements($probe, true) as $definition) {
+            if (($definition['id'] ?? null) === $improvementId) {
+                return $definition;
+            }
+        }
+
+        return null;
     }
 
     private function probeMindSnapshotReassignResponse(Player $player): ApiResponse
@@ -2331,6 +2417,16 @@ final class ApiKernel
             $alert['destroyedProbe'] = [
                 'probeId' => ctype_digit($warning->objectId) ? (int) $warning->objectId : null,
                 'reason' => $warning->containerId !== '' ? $warning->containerId : null,
+            ];
+        }
+
+        if ($warning->type === ProbeDamageWarning::TYPE_BLUEPRINT_SHARED) {
+            $alert['blueprintShare'] = [
+                'blueprintId' => $warning->objectId,
+                'senderProbe' => [
+                    'id' => ctype_digit($warning->containerId) ? (int) $warning->containerId : null,
+                    'name' => $warning->containerLabel !== '' ? $warning->containerLabel : null,
+                ],
             ];
         }
 

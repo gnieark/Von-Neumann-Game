@@ -501,6 +501,8 @@ $test->assert(is_string($scutRoute) && str_contains($scutRoute, '/assets/scut.js
 $test->assert(is_string($scutRoute) && str_contains($scutRoute, 'Subspace Communications Universal Transceiver'), 'SCUT route uses the expanded page title');
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, '<h2>Subspace Communications Universal Transceiver</h2>'), 'SCUT template exposes the expanded visible heading');
 $test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-summary" class="metrics"'), 'SCUT template exposes metric summary cards');
+$test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'id="scut-blueprint-share-form"'), 'SCUT template exposes the blueprint sharing form');
+$test->assert(is_string($scutTemplate) && str_contains($scutTemplate, 'name="blueprint"') && str_contains($scutTemplate, 'name="recipientProbeId"'), 'SCUT blueprint sharing form selects a blueprint and recipient probe');
 $test->assert(is_string($mainTemplate) && str_contains($mainTemplate, 'id="nav-probe-select"'), 'main template exposes the active probe selector');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'function probeApiPath'), 'main JS builds selected-probe API endpoints');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'probeApiPath("/messages") + "?status=unread&limit=50&offset=0"'), 'navigation warning polling requests unread messages only');
@@ -522,10 +524,18 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'C
 $test->assert(is_string($probeTemplate) && str_contains($probeTemplate, 'id="sector-context" class="sector-context"'), 'Probe template exposes the unreachable selected-probe warning');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/sector")'), 'SCUT page reads selected probe current sector coverage');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/scut-network/"'), 'SCUT page reads selected probe network details');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'probeApiPath("/probe-improvements-available")'), 'SCUT page loads known blueprints for sharing');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'window.VNG.loadProbeList()'), 'SCUT page loads owned probes before presenting share recipients');
+$test->assert(is_string($scutScript) && str_contains($scutScript, '!ownedProbeIds.has(String(probe.id))'), 'SCUT blueprint sharing excludes every probe owned by the sender');
+$test->assert(is_string($scutScript) && str_contains($scutScript, '"/probe-improvement-blueprints/" + encodeURIComponent(improvementId) + "/share"'), 'SCUT blueprint sharing calls the selected-probe share endpoint');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'JSON.stringify({"recipientProbeId": recipientProbeId})'), 'SCUT blueprint sharing sends the selected recipient probe id');
+$test->assert(is_string($scutScript) && str_contains($scutScript, 'data.alreadyKnown === true'), 'SCUT blueprint sharing reports idempotent replays');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.sector.relative'), 'SCUT page renders relay relative coordinates');
 $test->assert(is_string($scutScript) && str_contains($scutScript, 'relay.isTransitBeacon === true'), 'SCUT page renders relay transit beacon status');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitBeaconStatus' => 'Balise transit'"), 'French translations include SCUT relay transit beacon status label');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitBeaconStatus' => 'Transit beacon'"), 'English translations include SCUT relay transit beacon status label');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutBlueprintShareTitle' => 'Partager un blueprint'"), 'French translations include the SCUT blueprint sharing title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutBlueprintShareTitle' => 'Share a blueprint'"), 'English translations include the SCUT blueprint sharing title');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'observationSummaryScutRelayTransitBeacon' => 'Balise de transit installée.'"), 'French translations include SCUT relay transit beacon sensor text');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'observationSummaryScutRelayTransitBeacon' => 'Transit beacon installed.'"), 'English translations include SCUT relay transit beacon sensor text');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigationScutCoverage'), 'main JS can set SCUT nav LED state');
@@ -613,6 +623,8 @@ $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny r
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
 $test->assert(str_contains($openApi, 'summary: Delete a persistent probe alert'), 'OpenAPI documents persistent alert deletion');
 $test->assert(str_contains($openApi, 'summary: Delete a movement damage warning'), 'OpenAPI documents damage-warning deletion');
+$test->assert(str_contains($openApi, '/api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share:'), 'OpenAPI documents SCUT blueprint sharing');
+$test->assert(str_contains($openApi, 'recipientNotified:') && str_contains($openApi, 'blueprint_shared'), 'OpenAPI documents blueprint share notification alerts');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories:'), 'OpenAPI documents asteroid trajectory creation');
 $test->assert(
     str_contains($openApi, 'summary: System impact')
@@ -1914,6 +1926,81 @@ $sameScutProbeUnreadAlertsAfterRead = $kernel->handle('GET', '/api/probe/' . $sa
 $test->assertEquals([], $sameScutProbeUnreadAlertsAfterRead->body['alerts'] ?? null, 'unread alert filter excludes alerts after they are marked read');
 $invalidAlertStatus = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts?status=read', $multiProbeHeaders);
 $test->assertEquals(400, $invalidAlertStatus->status, 'GET /api/probe/{probeId}/alerts rejects unsupported status filters');
+$blueprintRecipientPlayer = $players->createPlayer('blueprint-recipient', 'Blueprint Recipient', null, $sameSectorProbe->currentSector);
+$blueprintRecipientProbe = $probes->createForPlayer($blueprintRecipientPlayer->id, 'Blueprint receiver', $blueprintRecipientPlayer->homeSector);
+$blueprintRecipientProbe->excludeFromStats = true;
+$probes->save($blueprintRecipientProbe);
+$blueprintRecipientHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($blueprintRecipientPlayer)['token']];
+$sharedBlueprintId = ProbeImprovementCatalog::DEUTERIUM_COMPRESSION;
+$probeImprovements->markAvailable($primaryProbe->id, $sharedBlueprintId);
+$test->assert($scut->sharedActiveNetworkIds($primaryProbe->currentSector, $blueprintRecipientProbe->currentSector) !== [], 'blueprint share fixtures are covered by a common active SCUT network');
+$blueprintSharePath = '/api/probe/' . $primaryProbe->id . '/probe-improvement-blueprints/' . $sharedBlueprintId . '/share';
+$blueprintShare = $kernel->handle('POST', $blueprintSharePath, $multiProbeHeaders, json_encode([
+    'recipientProbeId' => $blueprintRecipientProbe->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(201, $blueprintShare->status, 'POST probe improvement blueprint share grants a blueprint through SCUT');
+$test->assertEquals($sharedBlueprintId, $blueprintShare->body['blueprint']['id'] ?? null, 'blueprint share response identifies the shared blueprint');
+$test->assertEquals($blueprintRecipientProbe->id, $blueprintShare->body['recipientProbe']['id'] ?? null, 'blueprint share response identifies the recipient probe');
+$test->assertEquals(false, $blueprintShare->body['alreadyKnown'] ?? null, 'first blueprint share reports a newly granted blueprint');
+$test->assertEquals(true, $blueprintShare->body['recipientNotified'] ?? null, 'blueprint share confirms recipient notification');
+$test->assert($probeImprovements->playerHasBlueprint($blueprintRecipientPlayer->id, $sharedBlueprintId), 'shared blueprint becomes available to the recipient player');
+$recipientBlueprintAlerts = $kernel->handle('GET', '/api/probe/' . $blueprintRecipientProbe->id . '/alerts', $blueprintRecipientHeaders);
+$recipientBlueprintAlertList = array_values(array_filter(
+    $recipientBlueprintAlerts->body['alerts'] ?? [],
+    static fn(array $alert): bool => ($alert['type'] ?? null) === ProbeDamageWarning::TYPE_BLUEPRINT_SHARED,
+));
+$test->assertEquals(1, count($recipientBlueprintAlertList), 'successful blueprint share creates one persistent recipient alert');
+$recipientBlueprintAlert = $recipientBlueprintAlertList[0] ?? [];
+$test->assertEquals($sharedBlueprintId, $recipientBlueprintAlert['blueprintShare']['blueprintId'] ?? null, 'blueprint share alert identifies the received blueprint');
+$test->assertEquals($primaryProbe->id, $recipientBlueprintAlert['blueprintShare']['senderProbe']['id'] ?? null, 'blueprint share alert identifies the sender probe');
+$test->assert(str_contains((string) ($recipientBlueprintAlert['message'] ?? ''), 'Multi Probe Owner'), 'blueprint share alert identifies the sender player');
+$replayedBlueprintShare = $kernel->handle('POST', $blueprintSharePath, $multiProbeHeaders, json_encode([
+    'recipientProbeId' => $blueprintRecipientProbe->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $replayedBlueprintShare->status, 'replaying a blueprint share succeeds idempotently');
+$test->assertEquals(true, $replayedBlueprintShare->body['alreadyKnown'] ?? null, 'replayed blueprint share reports the existing recipient blueprint');
+$recipientBlueprintAlertsAfterReplay = $kernel->handle('GET', '/api/probe/' . $blueprintRecipientProbe->id . '/alerts', $blueprintRecipientHeaders);
+$test->assertEquals(1, count(array_filter(
+    $recipientBlueprintAlertsAfterReplay->body['alerts'] ?? [],
+    static fn(array $alert): bool => ($alert['type'] ?? null) === ProbeDamageWarning::TYPE_BLUEPRINT_SHARED,
+)), 'replaying a blueprint share does not duplicate its recipient alert');
+$selfBlueprintShare = $kernel->handle('POST', $blueprintSharePath, $multiProbeHeaders, json_encode([
+    'recipientProbeId' => $sameSectorProbe->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(422, $selfBlueprintShare->status, 'blueprints cannot be shared with another probe owned by the sender');
+$test->assertEquals('invalid_blueprint_recipient', $selfBlueprintShare->body['error']['code'] ?? null, 'self blueprint share exposes a stable recipient error');
+$unknownBlueprintShare = $kernel->handle('POST', '/api/probe/' . $primaryProbe->id . '/probe-improvement-blueprints/unknown/share', $multiProbeHeaders, json_encode([
+    'recipientProbeId' => $blueprintRecipientProbe->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(404, $unknownBlueprintShare->status, 'unknown blueprints cannot be shared');
+$lockedBlueprintShare = $kernel->handle('POST', '/api/probe/' . $primaryProbe->id . '/probe-improvement-blueprints/' . ProbeImprovementCatalog::REINFORCED_CONTAINER_COUPLINGS . '/share', $multiProbeHeaders, json_encode([
+    'recipientProbeId' => $blueprintRecipientProbe->id,
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(403, $lockedBlueprintShare->status, 'a player cannot share a blueprint they do not know');
+$invalidBlueprintShareBody = $kernel->handle('POST', $blueprintSharePath, $multiProbeHeaders, json_encode([
+    'recipientProbeId' => 'not-an-integer',
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $invalidBlueprintShareBody->status, 'blueprint share requires an integer recipient probe id');
+$isolatedShareSector = new SectorCoordinates(10000, 0, 0);
+$isolatedShareSender = $players->createPlayer('isolated-blueprint-sender', 'Isolated sender', null, $isolatedShareSector);
+$isolatedShareSenderProbe = $probes->createForPlayer($isolatedShareSender->id, 'Isolated sender probe', $isolatedShareSector);
+$isolatedShareSenderProbe->excludeFromStats = true;
+$probes->save($isolatedShareSenderProbe);
+$isolatedShareRecipient = $players->createPlayer('isolated-blueprint-recipient', 'Isolated recipient', null, $isolatedShareSector);
+$isolatedShareRecipientProbe = $probes->createForPlayer($isolatedShareRecipient->id, 'Isolated recipient probe', $isolatedShareSector);
+$isolatedShareRecipientProbe->excludeFromStats = true;
+$probes->save($isolatedShareRecipientProbe);
+$probeImprovements->markAvailable($isolatedShareSenderProbe->id, $sharedBlueprintId);
+$isolatedShareHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($isolatedShareSender)['token']];
+$isolatedSameSectorShare = $kernel->handle(
+    'POST',
+    '/api/probe/' . $isolatedShareSenderProbe->id . '/probe-improvement-blueprints/' . $sharedBlueprintId . '/share',
+    $isolatedShareHeaders,
+    json_encode(['recipientProbeId' => $isolatedShareRecipientProbe->id], JSON_THROW_ON_ERROR),
+);
+$test->assertEquals(422, $isolatedSameSectorShare->status, 'same-sector probes cannot share a blueprint without common active SCUT coverage');
+$test->assertEquals('probes_not_in_same_scut_network', $isolatedSameSectorShare->body['error']['code'] ?? null, 'out-of-network blueprint share exposes a stable SCUT error');
+$test->assert(!$probeImprovements->playerHasBlueprint($isolatedShareRecipient->id, $sharedBlueprintId), 'rejected same-sector share does not grant the blueprint');
 $primaryProbeAlert = $damageWarnings->createMannyReportAlert($primaryProbe->id, $primaryProbe->currentSector, 'primary-report', 'Primary report', 'Primary report ready.');
 $foreignProbeAlert = $damageWarnings->createMannyReportAlert($foreignProbe->id, $foreignProbe->currentSector, 'foreign-report', 'Foreign report', 'Foreign report ready.');
 $foreignProbeAlertDelete = $kernel->handle('DELETE', '/api/probe/alerts/' . $foreignProbeAlert->id, $multiProbeHeaders);
@@ -1989,7 +2076,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(112, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(113, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -8491,6 +8578,7 @@ foreach ([
     'GET /api/probe/messages/sent',
     'GET /api/probe/1/logbook-pages',
     'POST /api/probe/1/logbook-page',
+    'POST /api/probe/1/probe-improvement-blueprints/deuterium_compression/share',
     'DELETE /api/probe/alerts/1',
     'DELETE /api/probe/1/alerts/1',
     'DELETE /api/probe/damage-warnings/1',

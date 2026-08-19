@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '112'
+  version: '113'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 112
+                apiVersion: 113
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1004,6 +1004,63 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
     get:
       $ref: '#/paths/~1api~1probe~1probe-improvements-available/get'
+  /api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share:
+    post:
+      summary: Share a known probe-improvement blueprint through SCUT
+      description: >
+        Copies a blueprint known by the authenticated player to the player who
+        owns the recipient probe. The sender and recipient probes must be
+        covered by at least one common active SCUT network; merely occupying
+        the same sector without SCUT coverage is insufficient. The sender
+        keeps the blueprint, the recipient gains it for all owned probes, and
+        the recipient probe receives one persistent `blueprint_shared` alert.
+        Replaying the same share is idempotent and does not duplicate that
+        alert. The `/scut` WebUI page exposes this operation for blueprints and
+        recipient probes reachable through the selected network.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - name: improvementId
+          in: path
+          required: true
+          description: Stable identifier of the blueprint to share.
+          schema:
+            type: string
+            enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeImprovementBlueprintShareRequest'
+            example:
+              recipientProbeId: 314
+      responses:
+        '201':
+          description: Blueprint granted and recipient notified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeImprovementBlueprintShareResponse'
+        '200':
+          description: Recipient already knew the blueprint; notification remains deduplicated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeImprovementBlueprintShareResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Recipient belongs to the sender or probes do not share active SCUT coverage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/messages:
     get:
       summary: List messages received by the current probe
@@ -4351,7 +4408,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, invalid_probe_model, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_asteroid_motorization_components, distributed_thrust_anchoring_unavailable, asteroid_already_motorized, asteroid_motorization_already_scheduled, asteroid_motor_already_full, asteroid_refueling_already_scheduled, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, asteroid_not_found, asteroid_not_motorized, asteroid_motor_empty, asteroid_trajectory_already_active, asteroid_trajectory_not_found, asteroid_temporarily_occluded, invalid_asteroid_trajectory_mode, invalid_asteroid_impact_target, invalid_asteroid_target_speed, invalid_neighbor_sector, system_impact_black_hole_forbidden, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_relay_not_active, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, invalid_probe_model, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_asteroid_motorization_components, distributed_thrust_anchoring_unavailable, asteroid_already_motorized, asteroid_motorization_already_scheduled, asteroid_motor_already_full, asteroid_refueling_already_scheduled, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, asteroid_not_found, asteroid_not_motorized, asteroid_motor_empty, asteroid_trajectory_already_active, asteroid_trajectory_not_found, asteroid_temporarily_occluded, invalid_asteroid_trajectory_mode, invalid_asteroid_impact_target, invalid_asteroid_target_speed, invalid_neighbor_sector, system_impact_black_hole_forbidden, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_relay_not_active, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, blueprint_not_found, blueprint_not_known, recipient_probe_not_found, invalid_blueprint_recipient, probes_not_in_same_scut_network, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -5282,6 +5339,43 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ProbeImprovementBlueprintShareRequest:
+      type: object
+      required: [recipientProbeId]
+      additionalProperties: false
+      properties:
+        recipientProbeId:
+          type: integer
+          minimum: 1
+          description: Probe whose active SCUT coverage proves that the recipient player is reachable.
+    ProbeImprovementBlueprintShareResponse:
+      type: object
+      required: [blueprint, recipientProbe, alreadyKnown, recipientNotified]
+      properties:
+        blueprint:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+              enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
+            name:
+              type: string
+        recipientProbe:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: integer
+              minimum: 1
+            name:
+              type: string
+        alreadyKnown:
+          type: boolean
+          description: True when the recipient player already owned the blueprint before this request.
+        recipientNotified:
+          type: boolean
+          description: Confirms that a persistent recipient alert exists; retries do not duplicate it.
     ProbeMessageSendRequest:
       type: object
       required: [body]
@@ -5751,7 +5845,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred, probe_destroyed, asteroid_trajectory]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred, probe_destroyed, asteroid_trajectory, blueprint_shared]
         status:
           type: string
           enum: [unread, read]
@@ -5760,7 +5854,7 @@ components:
           description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
         phase:
           type: string
-          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch, probe_loss]
+          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch, probe_loss, ignition, blueprint_share]
         scheduledAt:
           type: string
           format: date-time
@@ -5869,6 +5963,24 @@ components:
               type: string
               nullable: true
               enum: [black_hole_trap, movement_collision]
+        blueprintShare:
+          type: object
+          description: Present for `blueprint_shared` alerts.
+          required: [blueprintId, senderProbe]
+          properties:
+            blueprintId:
+              type: string
+              enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
+            senderProbe:
+              type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: integer
+                  nullable: true
+                name:
+                  type: string
+                  nullable: true
         createdAt:
           type: string
           format: date-time

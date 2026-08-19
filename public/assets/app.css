@@ -2227,6 +2227,30 @@ button.account-menu-item {
     letter-spacing: 0;
 }
 
+.scut-blueprint-share {
+    padding: 16px;
+    border: 1px solid rgba(143, 182, 189, .32);
+    background: rgba(143, 182, 189, .07);
+}
+
+.scut-blueprint-share-intro {
+    margin: 0 0 14px;
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.scut-blueprint-share-form {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr) minmax(150px, auto);
+    gap: 12px;
+    align-items: end;
+}
+
+#scut-blueprint-share-availability,
+#scut-blueprint-share-status {
+    margin: 10px 0 0;
+}
+
 .scut-list {
     display: grid;
     gap: 10px;
@@ -3899,6 +3923,7 @@ button.account-menu-item {
     .coordinate-form,
     .action-panel,
     .message-form,
+    .scut-blueprint-share-form,
     .manny-form,
     .inventory-card,
     .storage-rules-form,
