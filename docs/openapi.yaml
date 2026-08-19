@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '113'
+  version: '115'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 113
+                apiVersion: 115
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1661,6 +1661,60 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           description: Refueling prerequisites are not met
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/mannies/{mannyId}/sculpt-duck-asteroid:
+    post:
+      summary: Sculpt an asteroid into the shape of a duck
+      description: >
+        Requires the Anatiform Asteroid Sculpting blueprint and an idle onboard
+        Manny. The target must be a local asteroid that has not already been
+        sculpted. The task takes exactly 172800 seconds (two days). The asteroid
+        remains unchanged until completion, so cancelling or recalling the Manny
+        before the deadline leaves it as an ordinary asteroid. On completion the
+        asteroid gains `distinctiveFeature: Sculpted in the shape of a duck`
+        while retaining its resources, propulsion, fuel status, trajectory
+        compatibility and all ordinary asteroid gameplay properties. The Manny
+        then automatically returns to the probe.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectId]
+              properties:
+                objectId:
+                  type: string
+                  description: Opaque id of the local asteroid to sculpt.
+            example:
+              objectId: asteroid-metal-deut-a12f
+      responses:
+        '202':
+          description: Two-day sculpting task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Blueprint unavailable or invalid asteroid target
           content:
             application/json:
               schema:
@@ -4792,6 +4846,10 @@ components:
         capturedByObjectId:
           type: string
           description: Present when the asteroid was captured by a planet or standalone star.
+        distinctiveFeature:
+          type: string
+          enum: [Sculpted in the shape of a duck]
+          description: Present only when an asteroid has been sculpted into the shape of a duck; omitted for ordinary asteroids.
         trajectory:
           $ref: '#/components/schemas/AsteroidTrajectory'
         category:
@@ -5288,7 +5346,7 @@ components:
       properties:
         id:
           type: string
-          enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
+          enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring, anatiform_asteroid_sculpting]
         name:
           type: string
         description:
@@ -5301,10 +5359,10 @@ components:
           description: Whether the improvement effect has already been installed on the selected probe.
         installableOnProbe:
           type: boolean
-          description: Whether this blueprint describes an improvement that can be installed on probes. False for distributed_thrust_anchoring, whose effect is installed on asteroids.
+          description: Whether this blueprint describes an improvement installed on probes. False for action blueprints such as distributed_thrust_anchoring and anatiform_asteroid_sculpting.
         durationSeconds:
           type: integer
-          minimum: 1
+          minimum: 0
         ingredients:
           type: array
           items:
@@ -5839,7 +5897,7 @@ components:
           $ref: '#/components/schemas/ProbeDamageWarning'
     ProbeDamageWarning:
       type: object
-      required: [id, type, status, message, phase, scheduledAt, sector, createdAt, updatedAt, readAt, resolvedAt]
+      required: [id, type, status, message, illustrationImageUrl, phase, scheduledAt, sector, createdAt, updatedAt, readAt, resolvedAt]
       properties:
         id:
           type: integer
@@ -5852,6 +5910,12 @@ components:
         message:
           type: string
           description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
+        illustrationImageUrl:
+          type: string
+          format: uri
+          pattern: '^https?://'
+          nullable: true
+          description: Absolute HTTP or HTTPS URL of the optional alert illustration. Null when the alert has no illustration.
         phase:
           type: string
           enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch, probe_loss, ignition, blueprint_share]
@@ -6594,7 +6658,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, motorizing_asteroid, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, motorizing_asteroid, refueling_motorized_asteroid, sculpting_duck_asteroid, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -7004,6 +7068,10 @@ components:
         capturedByObjectId:
           type: string
           description: Present when the asteroid is captured by another local celestial object.
+        distinctiveFeature:
+          type: string
+          enum: [Sculpted in the shape of a duck]
+          description: Present only on duck-shaped asteroids; omitted from ordinary asteroid objects.
         inTransit:
           type: boolean
           description: Present and true for a sector-transfer asteroid between two phase transitions.
@@ -7154,6 +7222,10 @@ components:
         capturedByObjectId:
           type: string
           description: Present when the asteroid was captured by another celestial object.
+        distinctiveFeature:
+          type: string
+          enum: [Sculpted in the shape of a duck]
+          description: Present only on duck-shaped asteroid targets; omitted otherwise.
         trajectory:
           $ref: '#/components/schemas/AsteroidTrajectory'
         waypointBookmarks:

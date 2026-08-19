@@ -28,6 +28,7 @@ final class SchemaInitializer
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+        $nullableUrl = $this->driver === 'mysql' ? 'VARCHAR(2048) NULL' : 'TEXT NULL';
         $caseSensitiveText = $this->driver === 'mysql' ? 'VARCHAR(255) COLLATE utf8mb4_bin' : 'TEXT';
         $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
         $boolean = $this->driver === 'mysql' ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'INTEGER NOT NULL DEFAULT 0';
@@ -395,6 +396,7 @@ final class SchemaInitializer
                 risk_percent $decimal NOT NULL,
                 additional_container_count INTEGER NOT NULL,
                 message TEXT NOT NULL,
+                illustration_image_url $nullableUrl,
                 read_at $nullableText,
                 resolved_at $nullableText,
                 created_at $text NOT NULL,
@@ -880,6 +882,7 @@ final class SchemaInitializer
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+        $nullableUrl = $this->driver === 'mysql' ? 'VARCHAR(2048) NULL' : 'TEXT NULL';
 
         $pdo->exec(
             "CREATE TABLE IF NOT EXISTS scut_networks (
@@ -1168,6 +1171,7 @@ final class SchemaInitializer
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
         $nullableText = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+        $nullableUrl = $this->driver === 'mysql' ? 'VARCHAR(2048) NULL' : 'TEXT NULL';
         $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
 
         $pdo->exec(
@@ -1188,6 +1192,7 @@ final class SchemaInitializer
                 risk_percent $decimal NOT NULL,
                 additional_container_count INTEGER NOT NULL,
                 message TEXT NOT NULL,
+                illustration_image_url $nullableUrl,
                 read_at $nullableText,
                 resolved_at $nullableText,
                 created_at $text NOT NULL,

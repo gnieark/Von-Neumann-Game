@@ -1,5 +1,19 @@
 Scripts de migration à exécuter explicitement lors des déploiements qui le demandent.
 
+## Images d’illustration des alertes
+
+`migrate-alert-illustration-images.php` est obligatoire avant de déployer la
+version API 114 sur une base existante. Il ajoute, de façon idempotente, la
+colonne nullable `probe_damage_warnings.illustration_image_url` :
+
+```bash
+php scripts/one-shot-scripts/migrate-alert-illustration-images.php --database-config=config/database.json
+```
+
+Sauvegardez la base, arrêtez l’application et les workers, déployez le code,
+exécutez cette commande puis relancez-la. Le second passage doit indiquer
+`column_added=no`. Ne redémarrez l’application qu’après ces contrôles.
+
 ## Trajectoires d’astéroïdes motorisés
 
 `migrate-asteroid-trajectories.php` est obligatoire avant de déployer la version

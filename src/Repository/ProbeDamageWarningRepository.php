@@ -193,7 +193,9 @@ final class ProbeDamageWarningRepository
         string $message,
         string $objectType = 'detached_storage_container',
         ?string $scheduledAt = null,
+        ?string $illustrationImageUrl = null,
     ): ProbeDamageWarning {
+        $illustrationImageUrl = $this->normalizeIllustrationImageUrl($illustrationImageUrl);
         $now = gmdate('c');
         $scheduledAt = $scheduledAt !== null && trim($scheduledAt) !== '' ? $scheduledAt : $now;
         $existing = $this->findMannyReportAlert(
@@ -211,8 +213,8 @@ final class ProbeDamageWarningRepository
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO probe_damage_warnings
-             (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, read_at, resolved_at, created_at, updated_at)
-             VALUES (:probe_id, :movement_id, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, :risk_percent, :additional_container_count, :message, NULL, NULL, :created_at, :updated_at)'
+             (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, illustration_image_url, read_at, resolved_at, created_at, updated_at)
+             VALUES (:probe_id, :movement_id, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, :risk_percent, :additional_container_count, :message, :illustration_image_url, NULL, NULL, :created_at, :updated_at)'
         );
         $stmt->execute([
             'probe_id' => $probeId,
@@ -230,6 +232,7 @@ final class ProbeDamageWarningRepository
             'risk_percent' => 0.0,
             'additional_container_count' => 0,
             'message' => $message,
+            'illustration_image_url' => $illustrationImageUrl,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -536,6 +539,25 @@ final class ProbeDamageWarningRepository
         return $this->findById($warning->id) ?? $warning;
     }
 
+    public function setIllustrationImageUrl(ProbeDamageWarning $warning, ?string $illustrationImageUrl): ProbeDamageWarning
+    {
+        $illustrationImageUrl = $this->normalizeIllustrationImageUrl($illustrationImageUrl);
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'UPDATE probe_damage_warnings
+             SET illustration_image_url = :illustration_image_url, updated_at = :updated_at
+             WHERE id = :id AND probe_id = :probe_id'
+        );
+        $stmt->execute([
+            'id' => $warning->id,
+            'probe_id' => $warning->probeId,
+            'illustration_image_url' => $illustrationImageUrl,
+            'updated_at' => $now,
+        ]);
+
+        return $this->findById($warning->id) ?? throw new \RuntimeException('Alert illustration update failed.');
+    }
+
     public function delete(ProbeDamageWarning $warning): void
     {
         $stmt = $this->pdo->prepare(
@@ -592,10 +614,29 @@ final class ProbeDamageWarningRepository
             (float) $row['risk_percent'],
             (int) $row['additional_container_count'],
             (string) $row['message'],
+            $this->normalizeIllustrationImageUrl($row['illustration_image_url'] !== null ? (string) $row['illustration_image_url'] : null),
             (string) $row['created_at'],
             (string) $row['updated_at'],
             $row['read_at'] !== null ? (string) $row['read_at'] : null,
             $row['resolved_at'] !== null ? (string) $row['resolved_at'] : null,
         );
+    }
+
+    private function normalizeIllustrationImageUrl(?string $illustrationImageUrl): ?string
+    {
+        $illustrationImageUrl = trim((string) $illustrationImageUrl);
+        if ($illustrationImageUrl === '') {
+            return null;
+        }
+        $scheme = strtolower((string) parse_url($illustrationImageUrl, PHP_URL_SCHEME));
+        if (
+            strlen($illustrationImageUrl) > 2048
+            || filter_var($illustrationImageUrl, FILTER_VALIDATE_URL) === false
+            || !in_array($scheme, ['http', 'https'], true)
+        ) {
+            throw new \InvalidArgumentException('Alert illustration must be an absolute HTTP or HTTPS URL of at most 2048 bytes.');
+        }
+
+        return $illustrationImageUrl;
     }
 }

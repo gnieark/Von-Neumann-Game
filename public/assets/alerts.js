@@ -79,6 +79,9 @@
             "id": alert.id,
             "className": persistentAlertClassName(alert),
             "message": persistentAlertMessage(alert),
+            "illustrationImageUrl": typeof alert.illustrationImageUrl === "string" && alert.illustrationImageUrl !== ""
+                ? alert.illustrationImageUrl
+                : null,
             "acknowledged": alert.status !== "unread",
         }));
     }
@@ -128,6 +131,9 @@
         list.innerHTML = alerts.map((alert, index) => (
             "<article class=\"sector-alert " + window.VNG.escapeHtml(alert.className) + (alert.acknowledged ? " acknowledged" : "") + "\" data-alert-index=\"" + String(index) + "\">"
                 + "<span class=\"sector-alert-message\">" + alertMessageHtml(alert.message) + "</span>"
+                + (alert.illustrationImageUrl
+                    ? "<img class=\"sector-alert-illustration\" src=\"" + window.VNG.escapeHtml(alert.illustrationImageUrl) + "\" alt=\"\" loading=\"lazy\" decoding=\"async\" referrerpolicy=\"no-referrer\">"
+                    : "")
                 + "<span class=\"sector-alert-actions\">"
                     + "<button class=\"sector-alert-acknowledge\" type=\"button\"" + (alert.acknowledged ? " disabled aria-disabled=\"true\"" : " aria-disabled=\"false\"") + ">"
                     + window.VNG.escapeHtml(alert.acknowledged ? tr("acknowledgedAlert", "Acknowledged") : tr("acknowledgeAlert", "Acknowledge"))

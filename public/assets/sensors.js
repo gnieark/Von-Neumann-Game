@@ -52,6 +52,14 @@
         }[type] || type || tr("unknownObject", "Unknown object");
     }
 
+    function observedObjectTypeLabel(object) {
+        if (object && object.type === "asteroid" && object.distinctiveFeature === "Sculpted in the shape of a duck") {
+            return tr("duckAsteroidObject", "Duck-shaped asteroid");
+        }
+
+        return objectTypeLabel(object && object.type || "unknown");
+    }
+
     function dangerLevelLabel(level) {
         return {
             "low": tr("dangerLow", "low"),
@@ -542,7 +550,7 @@
     }
 
     function systemBodyLabel(body) {
-        return objectTypeLabel(body.type || "object") + " - " + (body.name || body.id || tr("unknownObject", "Unknown object"));
+        return observedObjectTypeLabel(body) + " - " + (body.name || body.id || tr("unknownObject", "Unknown object"));
     }
 
     function systemBodyDetails(body) {
@@ -645,7 +653,7 @@
                 return;
             }
             if (Array.isArray(object.waypointBookmarks) && object.waypointBookmarks.length > 0) {
-                const label = [objectTypeLabel(object.type || "object"), object.name || object.id].filter(Boolean).join(" ");
+                const label = [observedObjectTypeLabel(object), object.name || object.id].filter(Boolean).join(" ");
                 const key = String(object.id || object.name || label);
                 if (!seen.has(key)) {
                     seen.add(key);
@@ -1077,7 +1085,7 @@
             const classes = ["sector-object", danger === "extreme" ? "sector-object-warning" : ""].filter(Boolean).join(" ");
 
             return "<article class=\"" + classes + "\">"
-                + "<div class=\"sector-object-heading\"><span>" + window.VNG.escapeHtml(objectTypeLabel(object.type || "unknown")) + "</span><b>" + window.VNG.escapeHtml(dangerLevelLabel(danger)) + "</b></div>"
+                + "<div class=\"sector-object-heading\"><span>" + window.VNG.escapeHtml(observedObjectTypeLabel(object)) + "</span><b>" + window.VNG.escapeHtml(dangerLevelLabel(danger)) + "</b></div>"
                 + "<p>" + window.VNG.escapeHtml(objectSummaryLabel(object)) + "</p>"
                 + objectDetailHtml(object)
                 + solarSystemDetails(object, index)
@@ -1309,7 +1317,7 @@
             const danger = object.dangerLevel || "unknown";
 
             return "<article class=\"visited-sector-object\">"
-                + "<div class=\"sector-object-heading\"><span>" + window.VNG.escapeHtml(objectTypeLabel(object.type || "unknown")) + "</span><b>" + window.VNG.escapeHtml(dangerLevelLabel(danger)) + "</b></div>"
+                + "<div class=\"sector-object-heading\"><span>" + window.VNG.escapeHtml(observedObjectTypeLabel(object)) + "</span><b>" + window.VNG.escapeHtml(dangerLevelLabel(danger)) + "</b></div>"
                 + "<p>" + window.VNG.escapeHtml(objectSummaryLabel(object)) + "</p>"
                 + objectDetailHtml(object)
                 + "</article>";

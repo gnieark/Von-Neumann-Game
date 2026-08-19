@@ -26,6 +26,7 @@ final class ProbeManniesApiController
         'mine',
         'motorize-asteroid',
         'refuel-motorized-asteroid',
+        'sculpt-duck-asteroid',
         'craft',
         'salvage',
         'install-bookmark',
@@ -285,6 +286,17 @@ final class ProbeManniesApiController
                 'manny' => $this->presenter->manny($player, $probe, $manny),
                 'inventory' => $this->inventoryForProbe($probe)->toArray(),
             ]);
+        }
+
+        if ($action === 'sculpt-duck-asteroid') {
+            if (!isset($data['objectId']) || !is_string($data['objectId']) || trim($data['objectId']) === '') {
+                return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
+            }
+
+            $manny = $this->mannies->startSculptingDuckAsteroid($probe, $uid, $data['objectId']);
+            $probe = $this->freshProbe($probe);
+
+            return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
 
         if ($action === 'craft') {

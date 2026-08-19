@@ -35,7 +35,7 @@ final class InspectSectorObjectTaskHandler implements TaskHandlerInterface
      * @param \Closure(Manny): void $saveManny
      * @param \Closure(SectorDetachedContainer): array<string, mixed> $detachedContainerInspectionReport
      * @param \Closure(NeumannProbe, SectorContent, DormantConstruct): array<string, string> $dormantConstructInspectionReport
-     * @param \Closure(int, SectorCoordinates, string, string, string, string, ?string): void $createMannyReportAlert
+     * @param \Closure(int, SectorCoordinates, string, string, string, string, ?string, ?string): void $createMannyReportAlert
      * @param \Closure(Manny, array<string, mixed>): void $clearTask
      * @param \Closure(Manny, string): void $registerMannyInSector
      * @param \Closure(NeumannProbe, Manny): bool $placeMannyOnProbe
@@ -164,6 +164,7 @@ final class InspectSectorObjectTaskHandler implements TaskHandlerInterface
                 $report['message'],
                 'dormant_construct',
                 $reportScheduledAt,
+                $report['illustrationImageUrl'] ?? null,
             );
         }
 

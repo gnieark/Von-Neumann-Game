@@ -1970,8 +1970,9 @@ button.account-menu-item {
 .sector-detached-container-alert,
 .sector-manny-report-alert,
 .sector-damage-alert {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
     gap: 12px;
     margin: -2px 0 12px;
     padding: 10px 12px;
@@ -2024,12 +2025,25 @@ button.account-menu-item {
 }
 
 .sector-alert-message {
-    flex: 1 1 auto;
+    min-width: 0;
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.sector-alert-illustration {
+    display: block;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
 }
 
 .sector-alert-actions {
     display: flex;
-    flex: 0 0 auto;
+    grid-column: 2;
+    grid-row: 1;
     align-items: center;
     gap: 8px;
     margin-left: auto;

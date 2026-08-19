@@ -35,6 +35,7 @@ final class ProbeDamageWarning
         public readonly float $riskPercent,
         public readonly int $additionalContainerCount,
         public readonly string $message,
+        public readonly ?string $illustrationImageUrl,
         public readonly string $createdAt,
         public string $updatedAt,
         public ?string $readAt = null,

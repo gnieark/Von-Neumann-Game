@@ -12,9 +12,12 @@ final class DormantConstruct extends UniverseObject
     public const INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION = 'deuterium_compression';
     public const INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS = 'reinforced_container_couplings';
     public const INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING = 'distributed_thrust_anchoring';
+    public const INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING = 'anatiform_asteroid_sculpting';
 
     public const THRUST_ANCHORED_ASTEROID_NAME = 'Thrust-anchored asteroid';
     public const THRUST_ANCHORED_ASTEROID_DESCRIPTION = 'A deuterium engine has been mounted on this otherwise unremarkable asteroid. The engine is cold and inoperative. What stands out is not the engine itself, but the web of anchor points distributing its thrust through the rock without tearing it apart.';
+    public const ANATIFORM_ASTEROID_NAME = 'Anatiform asteroid';
+    public const ANATIFORM_ASTEROID_DESCRIPTION = 'An asteroid whose silhouette is uncannily reminiscent of a duck. Its surface appears inactive, but several unnaturally smooth planes suggest deliberate shaping.';
 
     public function __construct(
         string $id,
@@ -37,6 +40,7 @@ final class DormantConstruct extends UniverseObject
             self::INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION,
             self::INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS,
             self::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING,
+            self::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING,
         ];
     }
 

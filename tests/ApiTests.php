@@ -479,6 +479,7 @@ $appCss = file_get_contents($root . '/public/assets/app.css');
 $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
+$alertIllustrationMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-alert-illustration-images.php');
 $sectorPointCloudScript = file_get_contents($root . '/scripts/generate-threejs-point-cloud-sectors.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
@@ -603,6 +604,8 @@ $test->assert(str_contains($openApi, 'For scut_relay objects this is the relay i
 $test->assert(str_contains($openApi, 'description: Present only for SCUT relay objects.'), 'OpenAPI documents SCUT relay-only SectorObject fields');
 $test->assert(str_contains($openApi, '$ref: \'#/components/schemas/ScutNetworkReference\''), 'OpenAPI documents SCUT relay SectorObject network references');
 $test->assert(str_contains($openApi, 'dormant_construct'), 'OpenAPI documents dormant construct sector objects');
+$test->assert(str_contains($openApi, '/api/probe/{probeId}/mannies/{mannyId}/sculpt-duck-asteroid:'), 'OpenAPI documents the two-day duck asteroid sculpting task');
+$test->assert(str_contains($openApi, 'distinctiveFeature:') && str_contains($openApi, 'Sculpted in the shape of a duck'), 'OpenAPI documents the optional duck-shaped asteroid feature');
 $test->assert(str_contains($openApi, 'knownFunction'), 'OpenAPI documents dormant construct function ambiguity');
 $test->assert(str_contains($openApi, '/api/probes'), 'OpenAPI documents the player probe list endpoint');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}'), 'OpenAPI documents the owned probe detail endpoint');
@@ -623,6 +626,7 @@ $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny r
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
 $test->assert(str_contains($openApi, 'summary: Delete a persistent probe alert'), 'OpenAPI documents persistent alert deletion');
 $test->assert(str_contains($openApi, 'summary: Delete a movement damage warning'), 'OpenAPI documents damage-warning deletion');
+$test->assert(str_contains($openApi, 'illustrationImageUrl:') && str_contains($openApi, "pattern: '^https?://'"), 'OpenAPI documents absolute optional alert illustration URLs');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share:'), 'OpenAPI documents SCUT blueprint sharing');
 $test->assert(str_contains($openApi, 'recipientNotified:') && str_contains($openApi, 'blueprint_shared'), 'OpenAPI documents blueprint share notification alerts');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories:'), 'OpenAPI documents asteroid trajectory creation');
@@ -841,7 +845,11 @@ $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'warning.r
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'sector-alert-delete'), 'alerts JS renders a delete icon for persistent alerts');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, '"method": "DELETE"'), 'alerts JS deletes persistent alerts through the API');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, '"/damage-warnings/"'), 'alerts JS uses the dedicated delete endpoint for damage warnings');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alert.illustrationImageUrl'), 'alerts JS reads optional illustration image URLs');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, 'class=\"sector-alert-illustration\"'), 'alerts JS renders illustrations below persistent alert text');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-alert-delete'), 'alerts CSS styles the persistent-alert delete icon');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-alert-illustration') && str_contains($appCss, 'object-fit: contain;'), 'alerts CSS preserves illustration aspect ratios');
+$test->assert(is_string($appCss) && preg_match('/\.sector-alert-illustration\s*\{[^}]*width:\s*100%;[^}]*height:\s*auto;/s', $appCss) === 1, 'alerts CSS keeps illustrations at full card width without distortion');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'deleteAlert' => 'Supprimer l’alerte'"), 'French translations label the alert delete icon');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'à partir de {threshold} containers supplémentaires'), 'French fragile-storage warning interpolates the effective probe threshold');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'from {threshold} additional containers onward'), 'English fragile-storage warning interpolates the effective probe threshold');
@@ -855,6 +863,11 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'probeAp
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'button.dataset.actionGroup !== "sector"'), 'mannies JS refreshes blueprints when the sector action group opens');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await refreshProbeImprovements();'), 'sector action refresh waits for the selected-probe blueprints');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasDistributedThrustAnchoringBlueprint()'), 'mannies JS gates asteroid motorization on its unlocked blueprint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'hasAnatiformAsteroidSculptingBlueprint()'), 'mannies JS gates duck asteroid sculpting on its unlocked blueprint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-sculpt-duck-asteroid-form'), 'mannies JS renders the duck asteroid sculpting form in sector actions');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/sculpt-duck-asteroid'), 'mannies JS submits duck asteroid sculpting orders');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'object.distinctiveFeature === "Sculpted in the shape of a duck"'), 'sensors JS detects duck-shaped asteroids from their optional API feature');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'tr("duckAsteroidObject", "Duck-shaped asteroid")'), 'sensors JS labels duck-shaped asteroids in detailed scans');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'improvement.installableOnProbe === true'), 'mannies JS only lists blueprints installable on probes in the probe improvement form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'return asteroidTargets()'), 'mannies JS includes nested sector asteroids in motorization targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-motorize-asteroid-form'), 'mannies JS renders the asteroid propulsion installation form');
@@ -921,7 +934,8 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-asteroid-launch-help"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-duck-shaped-asteroids"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1350,6 +1364,7 @@ $damageWarningSchemaColumns = array_map(
 );
 $test->assert(in_array('container_id', $damageWarningSchemaColumns, true), 'Probe damage warning table stores container ids');
 $test->assert(in_array('status', $damageWarningSchemaColumns, true), 'Probe damage warning table stores read status');
+$test->assert(in_array('illustration_image_url', $damageWarningSchemaColumns, true), 'Probe damage warning table stores optional illustration image URLs');
 $damageWarningSchemaRows = $pdo->query('PRAGMA table_info(probe_damage_warnings)')->fetchAll(PDO::FETCH_ASSOC);
 $damageWarningMovementColumn = null;
 foreach ($damageWarningSchemaRows as $row) {
@@ -1528,6 +1543,29 @@ $test->assert(str_contains(implode("\n", $purgeOutput), 'Purged scheduled events
 $remainingPurgeStatuses = $pdo->query("SELECT status FROM scheduled_events WHERE type LIKE 'test.purge.%' ORDER BY status")->fetchAll(PDO::FETCH_COLUMN);
 $test->assertEquals(['done', 'pending', 'running'], $remainingPurgeStatuses, 'scheduled-event purge keeps recent and active events');
 $pdo->exec("DELETE FROM scheduled_events WHERE type LIKE 'test.purge.%'");
+
+$alertIllustrationMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'alert-illustration-migration.sqlite';
+$alertIllustrationMigrationPdo = new PDO('sqlite:' . $alertIllustrationMigrationDbPath);
+$alertIllustrationMigrationPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$alertIllustrationMigrationPdo->exec('CREATE TABLE probe_damage_warnings (id INTEGER PRIMARY KEY, message TEXT NOT NULL)');
+$alertIllustrationMigrationPdo->exec("INSERT INTO probe_damage_warnings (id, message) VALUES (1, 'Legacy alert')");
+$alertIllustrationMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'alert-illustration-migration.json';
+file_put_contents($alertIllustrationMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $alertIllustrationMigrationDbPath], JSON_THROW_ON_ERROR));
+$alertIllustrationMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-alert-illustration-images.php')
+    . ' --database-config=' . escapeshellarg($alertIllustrationMigrationConfig);
+exec($alertIllustrationMigrationCommand . ' 2>&1', $alertIllustrationMigrationOutput, $alertIllustrationMigrationStatus);
+$test->assertEquals(0, $alertIllustrationMigrationStatus, 'alert illustration migration exits successfully');
+$test->assert(str_contains(implode("\n", $alertIllustrationMigrationOutput), 'column_added=yes'), 'alert illustration migration reports its first schema change');
+$alertIllustrationColumns = $alertIllustrationMigrationPdo->query('PRAGMA table_info(probe_damage_warnings)')->fetchAll(PDO::FETCH_ASSOC);
+$alertIllustrationColumnNames = array_column($alertIllustrationColumns, 'name');
+$test->assert(in_array('illustration_image_url', $alertIllustrationColumnNames, true), 'alert illustration migration adds the URL column');
+$test->assertEquals(null, $alertIllustrationMigrationPdo->query('SELECT illustration_image_url FROM probe_damage_warnings WHERE id = 1')->fetchColumn(), 'alert illustration migration keeps existing alerts without an image');
+$secondAlertIllustrationMigrationOutput = [];
+$secondAlertIllustrationMigrationStatus = 0;
+exec($alertIllustrationMigrationCommand . ' 2>&1', $secondAlertIllustrationMigrationOutput, $secondAlertIllustrationMigrationStatus);
+$test->assertEquals(0, $secondAlertIllustrationMigrationStatus, 'alert illustration migration can be replayed safely');
+$test->assert(str_contains(implode("\n", $secondAlertIllustrationMigrationOutput), 'column_added=no'), 'replayed alert illustration migration reports an unchanged schema');
 
 $itemMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'item-metadata-migration.sqlite';
 $itemMigrationPdo = new PDO('sqlite:' . $itemMigrationDbPath);
@@ -1917,6 +1955,8 @@ $test->assertEquals(404, $deletedLogbookDetail->status, 'deleted logbook pages a
 $sameScutProbeAlert = $damageWarnings->createMannyReportAlert($sameSectorProbe->id, $sameSectorProbe->currentSector, 'remote-report', 'Remote report', 'Remote report ready.');
 $sameScutProbeAlerts = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeAlerts->status, 'GET /api/probe/{probeId}/alerts lists same-SCUT owned probe alerts');
+$test->assert(array_key_exists('illustrationImageUrl', $sameScutProbeAlerts->body['alerts'][0] ?? []), 'every persistent alert exposes the illustration image URL field');
+$test->assertEquals(null, $sameScutProbeAlerts->body['alerts'][0]['illustrationImageUrl'] ?? null, 'alerts without an illustration expose a null image URL');
 $sameScutProbeUnreadAlerts = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts?status=unread', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeUnreadAlerts->status, 'GET /api/probe/{probeId}/alerts accepts the unread status filter');
 $test->assertEquals([$sameScutProbeAlert->id], array_column($sameScutProbeUnreadAlerts->body['alerts'] ?? [], 'id'), 'unread alert filter only returns unread alerts');
@@ -2001,6 +2041,29 @@ $isolatedSameSectorShare = $kernel->handle(
 $test->assertEquals(422, $isolatedSameSectorShare->status, 'same-sector probes cannot share a blueprint without common active SCUT coverage');
 $test->assertEquals('probes_not_in_same_scut_network', $isolatedSameSectorShare->body['error']['code'] ?? null, 'out-of-network blueprint share exposes a stable SCUT error');
 $test->assert(!$probeImprovements->playerHasBlueprint($isolatedShareRecipient->id, $sharedBlueprintId), 'rejected same-sector share does not grant the blueprint');
+$illustratedAlert = $damageWarnings->createMannyReportAlert(
+    $sameSectorProbe->id,
+    $sameSectorProbe->currentSector,
+    'illustrated-report',
+    'Illustrated report',
+    'Illustrated report ready.',
+);
+$test->assertThrows(
+    fn() => $damageWarnings->setIllustrationImageUrl($illustratedAlert, '/images/relative-alert.webp'),
+    'alert illustration storage rejects relative URLs',
+);
+$illustrationImageUrl = 'https://static.example.com/vng/alerts/illustrated-report.webp';
+$illustratedAlert = $damageWarnings->setIllustrationImageUrl($illustratedAlert, $illustrationImageUrl);
+$test->assertEquals($illustrationImageUrl, $illustratedAlert->illustrationImageUrl, 'alert repository persists an absolute illustration image URL');
+$illustratedAlertsResponse = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts', $multiProbeHeaders);
+$illustratedAlertResponse = null;
+foreach ($illustratedAlertsResponse->body['alerts'] ?? [] as $alert) {
+    if (($alert['id'] ?? null) === $illustratedAlert->id) {
+        $illustratedAlertResponse = $alert;
+        break;
+    }
+}
+$test->assertEquals($illustrationImageUrl, $illustratedAlertResponse['illustrationImageUrl'] ?? null, 'GET probe alerts exposes the absolute illustration image URL');
 $primaryProbeAlert = $damageWarnings->createMannyReportAlert($primaryProbe->id, $primaryProbe->currentSector, 'primary-report', 'Primary report', 'Primary report ready.');
 $foreignProbeAlert = $damageWarnings->createMannyReportAlert($foreignProbe->id, $foreignProbe->currentSector, 'foreign-report', 'Foreign report', 'Foreign report ready.');
 $foreignProbeAlertDelete = $kernel->handle('DELETE', '/api/probe/alerts/' . $foreignProbeAlert->id, $multiProbeHeaders);
@@ -2076,7 +2139,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(113, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(115, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5693,6 +5756,12 @@ if ($dormantInspectionProbe !== null) {
         description: DormantConstruct::THRUST_ANCHORED_ASTEROID_DESCRIPTION,
         inspectionScenario: ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING,
     ));
+    $dormantInspectionSector->addObject(new DormantConstruct(
+        'dormant-report-anatiform',
+        DormantConstruct::ANATIFORM_ASTEROID_NAME,
+        description: DormantConstruct::ANATIFORM_ASTEROID_DESCRIPTION,
+        inspectionScenario: ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING,
+    ));
     $dormantInspectionSector->addObject(new DormantConstruct('dormant-report-random'));
     $sectorRepository->save($dormantInspectionSector);
 
@@ -5700,9 +5769,9 @@ if ($dormantInspectionProbe !== null) {
     $dormantInspectionObjects = array_values(array_filter(
         $dormantInspectionScan->body['sector']['objects'] ?? [],
         static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct'
-            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-thrust-anchoring', 'dormant-report-random'], true),
+            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-thrust-anchoring', 'dormant-report-anatiform', 'dormant-report-random'], true),
     ));
-    $test->assertEquals(4, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
+    $test->assertEquals(5, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
     foreach ($dormantInspectionObjects as $dormantInspectionObject) {
         $test->assert(!array_key_exists('inspectionScenario', $dormantInspectionObject), 'dormant construct inspection scenario is not exposed through sector scans');
     }
@@ -5773,6 +5842,27 @@ if ($dormantInspectionProbe !== null) {
     $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING)?->available, 'thrust-anchored asteroid report unlocks distributed thrust anchoring');
     $test->assertEquals(null, ProbeImprovementCatalog::find(ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING), 'distributed thrust anchoring remains outside the installable improvement catalog');
 
+    $inspectDormantAnatiform = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => 'dormant-report-anatiform',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectDormantAnatiform->status, 'Manny can inspect an anatiform asteroid dormant construct');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
+    $dormantAnatiformAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
+    $dormantAnatiformReports = array_values(array_filter(
+        $dormantAnatiformAlerts->body['alerts'] ?? [],
+        static fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+            && ($alert['report']['objectId'] ?? null) === 'dormant-report-anatiform'
+    ));
+    $test->assertEquals(1, count($dormantAnatiformReports), 'completed anatiform asteroid inspection creates one Manny report alert');
+    $test->assert(str_contains((string) ($dormantAnatiformReports[0]['message'] ?? ''), 'appears to have been deliberately sculpted into the shape of a duck'), 'anatiform asteroid report identifies the sculpted duck shape');
+    $test->assertEquals('https://neumann-probe.net/images/duck-asteroid.png', $dormantAnatiformReports[0]['illustrationImageUrl'] ?? null, 'anatiform asteroid report alert exposes its absolute illustration URL');
+    $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING)?->available, 'anatiform asteroid report unlocks its action blueprint');
+    $test->assertEquals(null, ProbeImprovementCatalog::find(ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING), 'anatiform asteroid sculpting remains outside the installable improvement catalog');
+
     $inspectDormantRandom = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
         'objectId' => 'dormant-report-random',
     ], JSON_THROW_ON_ERROR));
@@ -5791,6 +5881,99 @@ if ($dormantInspectionProbe !== null) {
         static fn(array $object): bool => ($object['id'] ?? null) === 'dormant-report-random',
     ))[0] ?? [];
     $test->assert(!array_key_exists('inspectionScenario', $storedRandomPublicObject), 'stored dormant construct inspection scenario remains hidden from sector scans');
+}
+
+$duckSculptingPlayer = $auth->registerPlayerWithPassword('duck-sculpting-user', 'secret', 'Duck Sculpting User');
+$duckSculptingProbe = $probes->findByPlayerId($duckSculptingPlayer->id);
+$duckSculptingHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($duckSculptingPlayer)['token']];
+if ($duckSculptingProbe !== null) {
+    $duckSculptingSector = $sectorRepository->load($duckSculptingProbe->currentSector);
+    $duckSculptingSector->addObject(new Asteroid(
+        'cancelled-duck-rock', 'Cancelled duck rock', 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001,
+        resourceAmounts: ['metals' => 1.0],
+    ));
+    $duckSculptingSector->addObject(new Asteroid(
+        'completed-duck-rock', 'Completed duck rock', 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001,
+        resourceAmounts: ['metals' => 1.0],
+    ));
+    $sectorRepository->save($duckSculptingSector);
+
+    $duckSculptingMannies = $kernel->handle('GET', '/api/probe/mannies', $duckSculptingHeaders);
+    $cancelledSculptMannyId = (string) ($duckSculptingMannies->body['mannies'][0]['id'] ?? '');
+    $completedSculptMannyId = (string) ($duckSculptingMannies->body['mannies'][1]['id'] ?? '');
+    $duckMiningMannyId = (string) ($duckSculptingMannies->body['mannies'][2]['id'] ?? '');
+    $duplicateSculptMannyId = (string) ($duckSculptingMannies->body['mannies'][3]['id'] ?? '');
+
+    $lockedDuckSculpting = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($cancelledSculptMannyId) . '/sculpt-duck-asteroid', $duckSculptingHeaders, json_encode([
+        'objectId' => 'cancelled-duck-rock',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $lockedDuckSculpting->status, 'duck asteroid sculpting requires its blueprint');
+    $test->assertEquals('anatiform_asteroid_sculpting_unavailable', $lockedDuckSculpting->body['error']['code'] ?? null, 'locked duck sculpting exposes a stable blueprint error');
+
+    $probeImprovements->markAvailable($duckSculptingProbe->id, ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING);
+    $duckBlueprints = $kernel->handle('GET', '/api/probe/' . $duckSculptingProbe->id . '/probe-improvements-available', $duckSculptingHeaders);
+    $duckBlueprint = array_values(array_filter(
+        $duckBlueprints->body['improvements'] ?? [],
+        static fn(array $improvement): bool => ($improvement['id'] ?? null) === ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING,
+    ))[0] ?? [];
+    $test->assertEquals('Anatiform Asteroid Sculpting', $duckBlueprint['name'] ?? null, 'available blueprints expose the anatiform sculpting name');
+    $test->assertEquals(false, $duckBlueprint['installableOnProbe'] ?? null, 'anatiform sculpting is an action blueprint rather than a probe installation');
+
+    $cancelledDuckSculpting = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($cancelledSculptMannyId) . '/sculpt-duck-asteroid', $duckSculptingHeaders, json_encode([
+        'objectId' => 'cancelled-duck-rock',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $cancelledDuckSculpting->status, 'an onboard Manny can start duck asteroid sculpting');
+    $test->assertEquals(Manny::TASK_SCULPTING_DUCK_ASTEROID, $cancelledDuckSculpting->body['manny']['currentTask'] ?? null, 'duck sculpting exposes its dedicated Manny task type');
+    $test->assertEquals(172800, $cancelledDuckSculpting->body['manny']['task']['durationSeconds'] ?? null, 'duck asteroid sculpting takes exactly two days');
+    $test->assertEquals(
+        172800,
+        strtotime((string) ($cancelledDuckSculpting->body['manny']['taskEstimatedEndTime'] ?? '')) - strtotime((string) ($cancelledDuckSculpting->body['manny']['taskStartTime'] ?? '')),
+        'duck sculpting task timestamps span exactly 48 hours',
+    );
+    $cancelDuckSculpting = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($cancelledSculptMannyId) . '/recall', $duckSculptingHeaders, json_encode([], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $cancelDuckSculpting->status, 'duck sculpting can be cancelled through Manny recall');
+    $cancelledDuckAsteroid = $sectorRepository->load($duckSculptingProbe->currentSector)->findObjectById('cancelled-duck-rock');
+    $test->assert($cancelledDuckAsteroid instanceof Asteroid && !$cancelledDuckAsteroid->isDuckShaped(), 'cancelling before completion leaves the asteroid ordinary');
+
+    $acceptedDuckSculpting = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($completedSculptMannyId) . '/sculpt-duck-asteroid', $duckSculptingHeaders, json_encode([
+        'objectId' => 'completed-duck-rock',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $acceptedDuckSculpting->status, 'a second Manny can start a complete duck sculpting task');
+    $beforeDuckCompletion = $sectorRepository->load($duckSculptingProbe->currentSector)->findObjectById('completed-duck-rock');
+    $test->assert($beforeDuckCompletion instanceof Asteroid && !$beforeDuckCompletion->isDuckShaped(), 'the asteroid remains ordinary while the two-day task is running');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
+        'uid' => $completedSculptMannyId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $duckSculptingHeaders);
+    $completedDuckAsteroid = $sectorRepository->load($duckSculptingProbe->currentSector)->findObjectById('completed-duck-rock');
+    $test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, $completedDuckAsteroid instanceof Asteroid ? $completedDuckAsteroid->getDistinctiveFeature() : null, 'task completion sculpts the persisted asteroid into a duck shape');
+    $test->assertEquals(1.0, $completedDuckAsteroid instanceof Asteroid ? ($completedDuckAsteroid->getResourceAmounts()['metals'] ?? null) : null, 'duck sculpting preserves asteroid resources');
+
+    $duckSectorScan = $kernel->handle('GET', '/api/probe/' . $duckSculptingProbe->id . '/sector', $duckSculptingHeaders);
+    $duckPublicAsteroid = array_values(array_filter(
+        $duckSectorScan->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['id'] ?? null) === 'completed-duck-rock',
+    ))[0] ?? [];
+    $ordinaryPublicAsteroid = array_values(array_filter(
+        $duckSectorScan->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['id'] ?? null) === 'cancelled-duck-rock',
+    ))[0] ?? [];
+    $test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, $duckPublicAsteroid['distinctiveFeature'] ?? null, 'sector APIs expose the English duck-shaped distinctive feature');
+    $test->assert(!array_key_exists('distinctiveFeature', $ordinaryPublicAsteroid), 'sector APIs omit distinctiveFeature for ordinary asteroids');
+
+    $mineDuckAsteroid = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($duckMiningMannyId) . '/mine', $duckSculptingHeaders, json_encode([
+        'objectId' => 'completed-duck-rock',
+        'resources' => ['metals'],
+        'targetAmount' => 0.01,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $mineDuckAsteroid->status, 'a duck-shaped asteroid remains mineable');
+
+    $duplicateDuckSculpting = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($duplicateSculptMannyId) . '/sculpt-duck-asteroid', $duckSculptingHeaders, json_encode([
+        'objectId' => 'completed-duck-rock',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(409, $duplicateDuckSculpting->status, 'an already duck-shaped asteroid cannot be sculpted again');
+    $test->assertEquals('asteroid_already_duck_shaped', $duplicateDuckSculpting->body['error']['code'] ?? null, 'repeat duck sculpting exposes a stable conflict code');
 }
 
 $motorizePlayer = $auth->registerPlayerWithPassword('motorize-asteroid-user', 'secret', 'Motorize Asteroid User');
@@ -8572,6 +8755,7 @@ foreach ([
     'POST /api/probe/atomic-printer/craft',
     'POST /api/probe/1/mannies/mny_missing/install-scut-transit-beacon',
     'POST /api/probe/1/mannies/mny_missing/refuel-motorized-asteroid',
+    'POST /api/probe/1/mannies/mny_missing/sculpt-duck-asteroid',
     'POST /api/probe/1/asteroids/mtr_missing/trajectories',
     'GET /api/probe/1/asteroid-trajectories/atr_missing',
     'GET /api/probe/messages',

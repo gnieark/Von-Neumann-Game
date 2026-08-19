@@ -55,7 +55,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 113;
+    public const API_VERSION = 115;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -148,7 +148,7 @@ final class ApiKernel
                     ? $this->probeStorageContainerRenameResponse($player, $ctx->stringParam(0), $ctx->body)
                     : $this->probeStorageContainerResponse($player, $ctx->stringParam(0)),
             )),
-            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/(repair|mine|motorize-asteroid|refuel-motorized-asteroid|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|transfer-to-probe|turn-on-relay|install-scut-transit-beacon|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(1), $ctx->params[2], $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/(repair|mine|motorize-asteroid|refuel-motorized-asteroid|sculpt-duck-asteroid|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|transfer-to-probe|turn-on-relay|install-scut-transit-beacon|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(1), $ctx->params[2], $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies/tasks$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->batchActions($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|transfer-to-probe|turn-on-relay|install-scut-transit-beacon|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(0), $ctx->params[1], $ctx->body))),
             ApiRoute::regex('#^/api/probe/(\d+)/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['GET'])),
@@ -2336,6 +2336,7 @@ final class ApiKernel
             'type' => $warning->type,
             'status' => $warning->status,
             'message' => $warning->message,
+            'illustrationImageUrl' => $warning->illustrationImageUrl,
             'phase' => $warning->phase,
             'scheduledAt' => $warning->scheduledAt,
             'sector' => [
