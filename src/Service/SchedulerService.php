@@ -10,6 +10,7 @@ use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\ScheduledEventLeaseLostException;
+use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryPhaseProcessor;
 
 final class SchedulerService
 {
@@ -17,6 +18,7 @@ final class SchedulerService
     public const PROBE_BLACK_HOLE_TRAP = 'probe.black_hole.trap';
     public const PROBE_STORAGE_CONTAINER_BREAK = 'probe.storage_container.break';
     public const MANNY_TASK = 'manny.task';
+    public const ASTEROID_TRAJECTORY_PHASE = 'asteroid.trajectory.phase';
 
     public function __construct(
         private readonly ScheduledEventRepository $events,
@@ -24,6 +26,7 @@ final class SchedulerService
         private readonly ProbeMovementRepository $movements,
         private readonly ProbeMovementService $movementService,
         private readonly ?MannyService $mannyService = null,
+        private readonly ?AsteroidTrajectoryPhaseProcessor $asteroidTrajectoryProcessor = null,
     ) {}
 
     /**
@@ -82,6 +85,7 @@ final class SchedulerService
             self::PROBE_BLACK_HOLE_TRAP => $this->processProbeBlackHoleTrap($event),
             self::PROBE_STORAGE_CONTAINER_BREAK => $this->processProbeStorageContainerBreak($event),
             self::MANNY_TASK => $this->processMannyTask($event),
+            self::ASTEROID_TRAJECTORY_PHASE => $this->processAsteroidTrajectoryPhase($event),
             default => throw new \RuntimeException('Unsupported scheduled event type: ' . $event->type),
         };
     }
@@ -156,5 +160,23 @@ final class SchedulerService
         $this->events->release($event, $runAt, $manny->taskPayload);
 
         return false;
+    }
+
+    private function processAsteroidTrajectoryPhase(ScheduledEvent $event): bool
+    {
+        if ($event->entityType !== 'asteroid_trajectory' || $this->asteroidTrajectoryProcessor === null) {
+            throw new \RuntimeException('Asteroid trajectory scheduler is unavailable.');
+        }
+        $expectedStatus = $event->payload['expectedStatus'] ?? null;
+        if (!is_string($expectedStatus) || $expectedStatus === '') {
+            throw new \RuntimeException('Asteroid trajectory event is missing expectedStatus.');
+        }
+        $expectedSectorsCrossed = $event->payload['expectedSectorsCrossed'] ?? null;
+        if ($expectedSectorsCrossed !== null && !is_int($expectedSectorsCrossed)) {
+            throw new \RuntimeException('Asteroid trajectory event has an invalid expectedSectorsCrossed value.');
+        }
+        $this->asteroidTrajectoryProcessor->process($event->entityId, $expectedStatus, $expectedSectorsCrossed);
+
+        return true;
     }
 }

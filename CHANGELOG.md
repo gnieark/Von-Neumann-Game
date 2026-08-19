@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-08-19
+
+### Changed
+- API v111 : ajout des trajectoires persistantes d’astéroïdes motorisés. `POST /api/probe/{probeId}/asteroids/{asteroidId}/trajectories` lance soit un impact local relativiste, soit un transfert vers un voisin FCC, et `GET /api/probe/{probeId}/asteroid-trajectories/{trajectoryId}` expose uniquement la télémétrie détectable dans le secteur courant, sans coordonnée absolue. Les phases sont exécutées et rejouées de façon idempotente par le scheduler.
+- API v111 : l’alerte d’allumage d’une trajectoire `system_impact` indique désormais l’identifiant opaque de la cible et son type (`probe`, `asteroid`, `planet` ou `star`).
+- API v111 : les astéroïdes motorisés ont désormais un réservoir binaire explicite (`motorFuelStatus: full|empty`). La motorisation consomme aussi deux plaques d’acier et 0,2 point de deutérium, attribue un nouvel identifiant opaque, et `POST /api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid` permet à une Manny de refaire le plein avant son retour automatique.
+- Moteur : les impacts gèrent étoiles, planètes, astéroïdes et sondes avec énergie relativiste, dégâts ou fragmentation déterministes, tandis que les transferts traversent un secteur par 24 heures, tentent une capture pondérée, conservent containers et signets, et disparaissent après une capture par trou noir.
+- Migration obligatoire : ajout de `scripts/one-shot-scripts/migrate-asteroid-trajectories.php`. Worker arrêté, ce script convertit les anciens astéroïdes motorisés au format strict avec réservoir plein et installe la table SQL des trajectoires ; aucun fallback de lecture de l’ancien format n’est conservé.
+- Interface : `/mannies` propose le ravitaillement et le lancement des astéroïdes motorisés, affiche les prérequis complets et les estimations de durée.
+- Interface : `/sensors` met désormais en exergue tout astéroïde motorisé en mouvement détecté par le scan du secteur courant, avec le mode et la phase de trajectoire, la cible, la vitesse ou la progression, ainsi qu’un compte à rebours local jusqu’à l’impact ou au prochain franchissement de secteur.
+
+- API v110 : les scans détaillés de `GET /api/probe/sector`, `GET /api/probe/{probeId}/sector` et `GET /api/sector` exposent désormais `motorized` sur les astéroïdes présents dans les listes générales `bookmarkTargets`, en plus de `minableTargets`. Ce champ reste absent des autres types d’objets.
+
+- Interface : le détail des corps d’un système dans le scan Sensors affiche désormais « Propulsion : Installée » pour les astéroïdes motorisés.
+
+- Interface : les champs de saisie Swagger de `/api-docs` utilisent désormais un texte sombre sur fond blanc, sans hériter de la couleur claire des formulaires généraux de la WebUI.
+
+- API v109 : `GET /api/probe/probe-improvements-available` et sa variante ciblant une sonde exposent désormais `installableOnProbe` pour chaque blueprint. La valeur est `false` pour `distributed_thrust_anchoring`, dont l’installation cible les astéroïdes, et `true` pour les améliorations de sonde.
+- Interface : le formulaire d’amélioration de sonde filtre les blueprints selon `installableOnProbe`; `distributed_thrust_anchoring` reste disponible pour la motorisation des astéroïdes sans être proposé comme amélioration de sonde.
+
+- Maintenance : `force-pending-scheduled-events-now.php` avance aussi les échéances métier des tâches Manny et de tous les mouvements encore actifs. Il recrée l’événement terminal d’un mouvement dont les événements ont déjà été consommés, afin que le prochain passage du scheduler termine réellement le transit au lieu de laisser la sonde bloquée.
+
+- API v108 : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid`. Après déblocage du blueprint Distributed Thrust Anchoring, une Manny peut consommer un moteur au deutérium et quatre barres d’acier pour motoriser durablement un astéroïde du secteur, sans empêcher son minage, puis revient automatiquement vers la sonde. La WebUI `/mannies` affiche alors l’action « Installer une propulsion sur un astéroïde » dans le groupe Secteur.
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-08-14

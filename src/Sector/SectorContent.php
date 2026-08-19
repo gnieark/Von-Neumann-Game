@@ -101,6 +101,15 @@ final class SectorContent
         ));
     }
 
+    /** @return list<SectorDetachedContainer> */
+    public function containersForObject(string $objectId): array
+    {
+        return array_values(array_filter(
+            [...$this->detachedContainers, ...$this->hiddenDetachedContainers, ...$this->planetDroppedContainers],
+            static fn(SectorDetachedContainer $container): bool => $container->getTargetObjectId() === $objectId,
+        ));
+    }
+
     /**
      * @return array<SectorDetachedContainer>
      */
@@ -377,6 +386,43 @@ final class SectorContent
         return false;
     }
 
+    public function replaceObjectAndReferences(string $oldObjectId, UniverseObject $replacement): bool
+    {
+        $replaced = false;
+        foreach ($this->objects as $index => $object) {
+            if ($object->getId() === $oldObjectId) {
+                $this->objects[$index] = $replacement;
+                $replaced = true;
+                break;
+            }
+            if ($object instanceof SolarSystem) {
+                $updatedSystem = $this->replaceObjectInSystemById($object, $oldObjectId, $replacement);
+                if ($updatedSystem !== null) {
+                    $this->objects[$index] = $updatedSystem;
+                    $replaced = true;
+                    break;
+                }
+            }
+        }
+        if (!$replaced) {
+            return false;
+        }
+
+        foreach (['detachedContainers', 'hiddenDetachedContainers', 'planetDroppedContainers'] as $collectionName) {
+            foreach ($this->{$collectionName} as $index => $container) {
+                if ($container->getTargetObjectId() !== $oldObjectId) {
+                    continue;
+                }
+                $updated = $container->withTargetObjectId($replacement->getId());
+                $this->{$collectionName}[$index] = $updated;
+                $this->detachedContainerChanges[$updated->getId()] = $updated;
+            }
+        }
+        $this->touch();
+
+        return true;
+    }
+
     public function replaceDetachedContainer(SectorDetachedContainer $replacement): bool
     {
         $removed = $this->removeDetachedContainerFromAllCollections($replacement->getId());
@@ -408,9 +454,49 @@ final class SectorContent
 
                 return true;
             }
+            if ($object instanceof SolarSystem) {
+                $updatedSystem = $this->removeObjectFromSystem($object, $id);
+                if ($updatedSystem !== null) {
+                    $this->objects[$index] = $updatedSystem;
+                    $this->touch();
+                    return true;
+                }
+            }
         }
 
         return false;
+    }
+
+    public function removeContainersForObject(string $objectId): void
+    {
+        foreach (['detachedContainers', 'hiddenDetachedContainers', 'planetDroppedContainers'] as $collectionName) {
+            $kept = [];
+            foreach ($this->{$collectionName} as $container) {
+                if ($container->getTargetObjectId() === $objectId) {
+                    $this->detachedContainerChanges[$container->getId()] = null;
+                } else {
+                    $kept[] = $container;
+                }
+            }
+            $this->{$collectionName} = $kept;
+        }
+        $this->touch();
+    }
+
+    /** @param list<string> $oldObjectIds */
+    public function retargetContainers(array $oldObjectIds, string $newObjectId): void
+    {
+        foreach (['detachedContainers', 'hiddenDetachedContainers', 'planetDroppedContainers'] as $collectionName) {
+            foreach ($this->{$collectionName} as $index => $container) {
+                if (!in_array($container->getTargetObjectId(), $oldObjectIds, true)) {
+                    continue;
+                }
+                $updated = $container->withTargetObjectId($newObjectId);
+                $this->{$collectionName}[$index] = $updated;
+                $this->detachedContainerChanges[$updated->getId()] = $updated;
+            }
+        }
+        $this->touch();
     }
 
     public function findHiddenDetachedContainerById(string $id): ?SectorDetachedContainer
@@ -555,6 +641,67 @@ final class SectorContent
             $system->getRadius(),
             $system->getDescription(),
             $system->getWaypointBookmarks(),
+        );
+    }
+
+    private function replaceObjectInSystemById(SolarSystem $system, string $oldObjectId, UniverseObject $replacement): ?SolarSystem
+    {
+        $primaryStar = $system->getPrimaryStar();
+        $secondaryStar = $system->getSecondaryStar();
+        $updatedBodies = [];
+        $replaced = false;
+
+        if ($replacement instanceof Star && $primaryStar->getId() === $oldObjectId) {
+            $primaryStar = $replacement;
+            $replaced = true;
+        }
+        if ($replacement instanceof Star && $secondaryStar !== null && $secondaryStar->getId() === $oldObjectId) {
+            $secondaryStar = $replacement;
+            $replaced = true;
+        }
+        foreach ($system->getOrbitalBodies() as $body) {
+            if ($body->getObject()->getId() === $oldObjectId) {
+                $updatedBodies[] = new OrbitingBody($replacement, $body->getOrbit());
+                $replaced = true;
+            } else {
+                $updatedBodies[] = $body;
+            }
+        }
+        if (!$replaced) {
+            return null;
+        }
+
+        return new SolarSystem(
+            $system->getId(),
+            $system->getName(),
+            $primaryStar,
+            $secondaryStar,
+            $updatedBodies,
+            $system->getMass(),
+            $system->getRadius(),
+            $system->getDescription(),
+            $system->getWaypointBookmarks(),
+        );
+    }
+
+    private function removeObjectFromSystem(SolarSystem $system, string $objectId): ?SolarSystem
+    {
+        $bodies = [];
+        $removed = false;
+        foreach ($system->getOrbitalBodies() as $body) {
+            if ($body->getObject()->getId() === $objectId) {
+                $removed = true;
+                continue;
+            }
+            $bodies[] = $body;
+        }
+        if (!$removed) {
+            return null;
+        }
+
+        return new SolarSystem(
+            $system->getId(), $system->getName(), $system->getPrimaryStar(), $system->getSecondaryStar(),
+            $bodies, $system->getMass(), $system->getRadius(), $system->getDescription(), $system->getWaypointBookmarks(),
         );
     }
 

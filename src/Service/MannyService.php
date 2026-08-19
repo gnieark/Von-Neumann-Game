@@ -24,6 +24,7 @@ use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
+use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
 use VonNeumannGame\Service\Manny\DetachStorageContainerTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTankRefillTaskHandler;
 use VonNeumannGame\Service\Manny\DeuteriumTransferTaskHandler;
@@ -33,6 +34,8 @@ use VonNeumannGame\Service\Manny\MannyPublicPresenter;
 use VonNeumannGame\Service\Manny\MannyTaskRefresher;
 use VonNeumannGame\Service\Manny\MannyTaskRuntime;
 use VonNeumannGame\Service\Manny\MiningTaskHandler;
+use VonNeumannGame\Service\Manny\MotorizeAsteroidTaskHandler;
+use VonNeumannGame\Service\Manny\RefuelMotorizedAsteroidTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeAssemblyTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeImprovementTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeTransferTaskHandler;
@@ -91,6 +94,8 @@ final class MannyService implements MannyTaskRuntime
     private readonly MannyTaskRefresher $taskRefresher;
     private readonly RepairTaskHandler $repairTaskHandler;
     private readonly MiningTaskHandler $miningTaskHandler;
+    private readonly MotorizeAsteroidTaskHandler $motorizeAsteroidTaskHandler;
+    private readonly RefuelMotorizedAsteroidTaskHandler $refuelMotorizedAsteroidTaskHandler;
     private readonly DetachStorageContainerTaskHandler $detachStorageContainerTaskHandler;
     private readonly DropStorageContainerTaskHandler $dropStorageContainerTaskHandler;
     private readonly InspectSectorObjectTaskHandler $inspectSectorObjectTaskHandler;
@@ -124,6 +129,7 @@ final class MannyService implements MannyTaskRuntime
         ?MannyCraftingService $crafting = null,
         ?MannyCargoService $cargo = null,
         private readonly ?ProbeMovementRepository $movements = null,
+        private readonly ?AsteroidTrajectoryRepository $asteroidTrajectories = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
         $this->crafting = $crafting ?? new MannyCraftingService($mannies, $probes, $items, $storage, $config);
@@ -326,6 +332,49 @@ final class MannyService implements MannyTaskRuntime
             function (Manny $manny, array $payload): void {
                 $this->cargo->waitForStorageSpace($manny, $payload);
             },
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
+        $this->motorizeAsteroidTaskHandler = new MotorizeAsteroidTaskHandler(
+            fn(NeumannProbe $probe): mixed => $this->ensureProbeAcceptsMannyOrders($probe),
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            fn(Manny $manny, NeumannProbe $probe): mixed => $this->ensureMannyInRange($manny, $probe),
+            fn(Manny $manny): mixed => $this->ensureMannyIdle($manny),
+            fn(NeumannProbe $probe, Manny $manny): mixed => $this->refreshOtherMannyStates($probe, $manny),
+            fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
+            fn(NeumannProbe $probe): array => $this->items->findByProbeId($probe->id),
+            fn(NeumannProbe $probe, string $objectId): bool => $this->hasScheduledAsteroidMotorization($probe, $objectId),
+            fn(ProbeItem $item): mixed => $this->items->delete($item),
+            fn(ProbeItem $item): array => $this->crafting->consumedItemPayload($item),
+            fn(NeumannProbe $probe): mixed => $this->consumeAsteroidMotorFuel($probe),
+            fn(): int => $this->miningTravelSeconds(),
+            fn(Manny $manny): mixed => $this->storage->releaseMannyFromStorage($manny),
+            fn(Manny $manny): mixed => $this->removeMannyFromSector($manny),
+            fn(Manny $manny): mixed => $this->mannies->save($manny),
+            fn(SectorContent $sector): mixed => $this->sectors->saveSector($sector),
+            fn(Manny $manny, array $payload): mixed => $this->clearTask($manny, $payload),
+            fn(Manny $manny, string $state): mixed => $this->registerMannyInSector($manny, $state),
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+            fn(string $oldObjectId, string $newObjectId): mixed => $this->mannies->replaceObjectIdReferences($oldObjectId, $newObjectId),
+        );
+        $this->refuelMotorizedAsteroidTaskHandler = new RefuelMotorizedAsteroidTaskHandler(
+            fn(NeumannProbe $probe): mixed => $this->ensureProbeAcceptsMannyOrders($probe),
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            fn(Manny $manny, NeumannProbe $probe): mixed => $this->ensureMannyInRange($manny, $probe),
+            fn(Manny $manny): mixed => $this->ensureMannyIdle($manny),
+            fn(NeumannProbe $probe, Manny $manny): mixed => $this->refreshOtherMannyStates($probe, $manny),
+            fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
+            fn(NeumannProbe $probe, string $objectId): bool => $this->hasScheduledAsteroidTask($probe, $objectId, Manny::TASK_REFUELING_MOTORIZED_ASTEROID),
+            fn(string $objectId): bool => $this->asteroidTrajectories?->findActiveByAsteroidId($objectId) !== null,
+            fn(NeumannProbe $probe): mixed => $this->consumeAsteroidMotorFuel($probe),
+            fn(): int => $this->miningTravelSeconds(),
+            fn(Manny $manny): mixed => $this->storage->releaseMannyFromStorage($manny),
+            fn(Manny $manny): mixed => $this->removeMannyFromSector($manny),
+            fn(Manny $manny): mixed => $this->mannies->save($manny),
+            fn(SectorContent $sector): mixed => $this->sectors->saveSector($sector),
+            fn(Manny $manny, array $payload): mixed => $this->clearTask($manny, $payload),
+            fn(Manny $manny, string $state): mixed => $this->registerMannyInSector($manny, $state),
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
         );
         $this->probeImprovementTaskHandler = new ProbeImprovementTaskHandler(
@@ -707,6 +756,8 @@ final class MannyService implements MannyTaskRuntime
             $taskHandlers ?? TaskHandlerRegistry::defaultHandlers(
                 $this->repairTaskHandler,
                 $this->miningTaskHandler,
+                $this->motorizeAsteroidTaskHandler,
+                $this->refuelMotorizedAsteroidTaskHandler,
                 $this->detachStorageContainerTaskHandler,
                 $this->dropStorageContainerTaskHandler,
                 $this->inspectSectorObjectTaskHandler,
@@ -895,6 +946,28 @@ final class MannyService implements MannyTaskRuntime
     private function startMiningLocked(NeumannProbe $probe, string $uid, string $objectId, string|array $resourceTypes, float $targetAmount, ?string $targetContainerId = null): Manny
     {
         return $this->miningTaskHandler->start($probe, $uid, $objectId, $resourceTypes, $targetAmount, $targetContainerId);
+    }
+
+    public function startMotorizingAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
+    {
+        return $this->withProbeLock(
+            $probe,
+            function (NeumannProbe $lockedProbe) use ($uid, $objectId): Manny {
+                if ($this->improvements?->findForProbe($lockedProbe->id, ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING)?->available !== true) {
+                    throw new MannyActionException(422, 'distributed_thrust_anchoring_unavailable', 'The Distributed Thrust Anchoring blueprint has not been unlocked.');
+                }
+
+                return $this->motorizeAsteroidTaskHandler->start($lockedProbe, $uid, $objectId);
+            },
+        );
+    }
+
+    public function startRefuelingMotorizedAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
+    {
+        return $this->withProbeLock(
+            $probe,
+            fn(NeumannProbe $lockedProbe): Manny => $this->refuelMotorizedAsteroidTaskHandler->start($lockedProbe, $uid, $objectId),
+        );
     }
 
     public function startCrafting(NeumannProbe $probe, string $uid, string $recipe): Manny
@@ -1810,6 +1883,25 @@ final class MannyService implements MannyTaskRuntime
         return $this->firstItemOfType($probe, ProbeItem::TYPE_WAYPOINT_BOOKMARK);
     }
 
+    private function hasScheduledAsteroidMotorization(NeumannProbe $probe, string $objectId): bool
+    {
+        return $this->hasScheduledAsteroidTask($probe, $objectId, Manny::TASK_MOTORIZING_ASTEROID);
+    }
+
+    private function hasScheduledAsteroidTask(NeumannProbe $probe, string $objectId, string $task): bool
+    {
+        foreach ($this->mannies->findByProbeId($probe->id) as $candidate) {
+            if (
+                $candidate->currentTask === $task
+                && ($candidate->taskPayload['objectId'] ?? null) === $objectId
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function firstItemOfType(NeumannProbe $probe, string $type): ?ProbeItem
     {
         foreach ($this->items->findByProbeId($probe->id) as $item) {
@@ -2262,6 +2354,11 @@ final class MannyService implements MannyTaskRuntime
                 . "Manny analysis focused on the module fasteners. The recovered pattern describes a more tolerant coupling geometry for external containers under movement stress.\n\n"
                 . "Recovered data: reinforced container coupling design.\n\n"
                 . "Probe improvement unlocked: Reinforced container couplings.",
+            ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING => "Manny report\n\n"
+                . "The object started life as an asteroid. Someone then bolted a deuterium engine to it, which is the sort of sentence that usually ends with a crater. The engine is cold, its feed system is ruined, and bringing it back online would require equal parts engineering and optimism.\n\n"
+                . "The remarkable part is the mounting system. Instead of concentrating thrust through a single frame, hundreds of anchors disappear into natural fractures and spread the load across the asteroid's entire mass. The rock was not reinforced into a ship; the thrust was taught how to use the rock already there.\n\n"
+                . "Recovered blueprint: Distributed Thrust Anchoring.\n\n"
+                . "Blueprint unlocked: Distributed-thrust anchor. You can now install deuterium engines on asteroids.",
             default => "Manny report\n\nThe structure is artificial, but the recovered data could not be classified.",
         };
     }
@@ -2849,6 +2946,16 @@ final class MannyService implements MannyTaskRuntime
     private function mineablePlanetMaxMass(): float
     {
         return max(0.0, Config::float($this->config, 'manny.mineablePlanetMaxMassEarthUnits', self::MOON_MASS_EARTH_UNITS));
+    }
+
+    private function consumeAsteroidMotorFuel(NeumannProbe $probe): void
+    {
+        $cost = max(0.0, Config::float($this->config, 'asteroidTrajectories.fuelCostDeuteriumPercent', 0.2));
+        if ($probe->deuteriumStock + 0.00001 < $cost) {
+            throw new MannyActionException(422, 'insufficient_deuterium', 'The probe needs 0.2 deuterium point for this asteroid motor.');
+        }
+        $probe->deuteriumStock = round($probe->deuteriumStock - $cost, 4);
+        $this->probes->save($probe);
     }
 
     private function maxDeuteriumPercent(?NeumannProbe $probe = null): float

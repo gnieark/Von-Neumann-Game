@@ -30,6 +30,8 @@ final class Manny
     public const TASK_INSTALLING_SCUT_TRANSIT_BEACON = 'installing_scut_transit_beacon';
     public const TASK_IMPROVING_PROBE = 'improving_probe';
     public const TASK_ASSEMBLING_PROBE = 'assembling_probe';
+    public const TASK_MOTORIZING_ASTEROID = 'motorizing_asteroid';
+    public const TASK_REFUELING_MOTORIZED_ASTEROID = 'refueling_motorized_asteroid';
     public const TASK_TRANSFERRING_DEUTERIUM_TO_PROBE = 'transferring_deuterium_to_probe';
     public const TASK_TRANSFERRING_TO_PROBE = 'transferring_to_probe';
     public const CARGO_CAPACITY = 0.05;

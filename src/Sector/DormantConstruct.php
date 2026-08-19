@@ -11,6 +11,10 @@ final class DormantConstruct extends UniverseObject
     public const KNOWN_FUNCTION = 'unknown';
     public const INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION = 'deuterium_compression';
     public const INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS = 'reinforced_container_couplings';
+    public const INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING = 'distributed_thrust_anchoring';
+
+    public const THRUST_ANCHORED_ASTEROID_NAME = 'Thrust-anchored asteroid';
+    public const THRUST_ANCHORED_ASTEROID_DESCRIPTION = 'A deuterium engine has been mounted on this otherwise unremarkable asteroid. The engine is cold and inoperative. What stands out is not the engine itself, but the web of anchor points distributing its thrust through the rock without tearing it apart.';
 
     public function __construct(
         string $id,
@@ -32,6 +36,7 @@ final class DormantConstruct extends UniverseObject
         return [
             self::INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION,
             self::INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS,
+            self::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING,
         ];
     }
 

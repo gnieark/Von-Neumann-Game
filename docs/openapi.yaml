@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '107'
+  version: '111'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 104
+                apiVersion: 111
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1500,6 +1500,183 @@ paths:
       - $ref: '#/components/parameters/MannyId'
     post:
       $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1mine/post'
+  /api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid:
+    post:
+      summary: Install a deuterium engine on an asteroid
+      description: >
+        Requires the Distributed Thrust Anchoring blueprint and an idle onboard
+        Manny. The target asteroid must be in the selected probe sector. One
+        deuterium engine, four steel bars, two steel plates and 0.2 deuterium
+        point are consumed when the task starts.
+        The task lasts one configured Manny mining outbound trip plus five
+        minutes. On completion the asteroid receives a new opaque id, is persisted
+        with `motorized: true` and `motorFuelStatus: full`, retains its resources
+        and remains mineable. The Manny then automatically starts a returning
+        task toward the probe.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectId]
+              properties:
+                objectId:
+                  type: string
+            example:
+              objectId: asteroid-metal-deut-a12f
+      responses:
+        '202':
+          description: Asteroid motorization task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Blueprint unavailable, invalid target, or missing components
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid:
+    post:
+      summary: Refuel an empty motorized asteroid
+      description: >
+        Starts one configured Manny outbound mining trip, consumes exactly 0.2
+        deuterium point at acceptance, fills the asteroid's binary motor tank at
+        arrival, then automatically returns the Manny over the same duration.
+        An asteroid with an active trajectory cannot be refueled.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectId]
+              properties:
+                objectId:
+                  type: string
+                  description: Opaque id of a local empty motorized asteroid.
+      responses:
+        '202':
+          description: Refueling task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Refueling prerequisites are not met
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/asteroids/{asteroidId}/trajectories:
+    post:
+      summary: Launch a full motorized asteroid
+      description: >
+        Consumes the asteroid's binary fuel tank and creates one durable,
+        scheduler-driven trajectory. A system impact accelerates around the
+        sector reference star before a ten-minute coasting phase. A sector
+        transfer accepts only a direct FCC-grid neighbor expressed in the
+        player's relative frame and then crosses one sector every 24 hours.
+        Absolute coordinates are never returned.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - name: asteroidId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque id of a local full motorized asteroid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AsteroidTrajectoryCreateRequest'
+      responses:
+        '202':
+          description: Trajectory accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsteroidTrajectoryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Invalid trajectory mode, speed, target, or neighbor sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/asteroid-trajectories/{trajectoryId}:
+    get:
+      summary: Read locally detectable asteroid trajectory telemetry
+      description: >
+        Returns telemetry only while the selected probe occupies the
+        trajectory's current sector. During deterministic stellar occultation
+        windows the endpoint responds with 409 and no hidden trajectory data.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - name: trajectoryId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque trajectory id returned at launch.
+      responses:
+        '200':
+          description: Public local trajectory telemetry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsteroidTrajectoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/probe/{probeId}/mannies/{mannyId}/craft:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
@@ -1839,6 +2016,7 @@ paths:
                     description: Compresses the external deuterium tank reserve so it can hold up to 200% fuel.
                     available: true
                     done: false
+                    installableOnProbe: true
                     durationSeconds: 300
                     ingredients:
                       - type: electric_motor
@@ -1856,6 +2034,7 @@ paths:
                     description: Reinforces external container couplings so five additional containers are ignored when movement break risk is calculated.
                     available: true
                     done: false
+                    installableOnProbe: true
                     durationSeconds: 300
                     ingredients:
                       - type: integrated_circuit
@@ -4117,7 +4296,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, invalid_probe_model, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_relay_not_active, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
+              enum: [bad_request, invalid_probe_model, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_asteroid_motorization_components, distributed_thrust_anchoring_unavailable, asteroid_already_motorized, asteroid_motorization_already_scheduled, asteroid_motor_already_full, asteroid_refueling_already_scheduled, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, asteroid_not_found, asteroid_not_motorized, asteroid_motor_empty, asteroid_trajectory_already_active, asteroid_trajectory_not_found, asteroid_temporarily_occluded, invalid_asteroid_trajectory_mode, invalid_asteroid_impact_target, invalid_asteroid_target_speed, invalid_neighbor_sector, system_impact_black_hole_forbidden, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_relay_not_active, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, internal_error]
             message:
               type: string
     ApiVersionResponse:
@@ -4128,6 +4307,127 @@ components:
           type: integer
           minimum: 1
           description: Monotonic public API version. Increment it when the API contract changes.
+    AsteroidTrajectoryCreateRequest:
+      oneOf:
+        - $ref: '#/components/schemas/AsteroidSystemImpactRequest'
+        - $ref: '#/components/schemas/AsteroidSectorTransferRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          system_impact: '#/components/schemas/AsteroidSystemImpactRequest'
+          sector_transfer: '#/components/schemas/AsteroidSectorTransferRequest'
+    AsteroidSystemImpactRequest:
+      type: object
+      required: [mode, targetObjectId, targetSpeedC]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [system_impact]
+        targetObjectId:
+          type: string
+          description: Opaque id of a local star, planet, asteroid, or probe.
+        targetSpeedC:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          maximum: 0.5
+    AsteroidSectorTransferRequest:
+      type: object
+      required: [mode, target]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [sector_transfer]
+        target:
+          type: object
+          required: [x, y, z]
+          description: Direct FCC-grid neighbor in the player's relative coordinate frame.
+          properties:
+            x:
+              type: integer
+            y:
+              type: integer
+            z:
+              type: integer
+    AsteroidTrajectoryResponse:
+      type: object
+      required: [trajectory]
+      properties:
+        trajectory:
+          $ref: '#/components/schemas/AsteroidTrajectory'
+    AsteroidTrajectory:
+      type: object
+      required: [id, asteroidId, mode, status, startedAt, nextTransitionAt]
+      description: Public telemetry deliberately omits origin and current absolute sectors. The same object is embedded as `trajectory` on every detectable asteroid representation in a detailed sector scan, so clients can render local alerts and countdowns without another request.
+      properties:
+        id:
+          type: string
+          pattern: '^atr_[a-f0-9]{24}$'
+        asteroidId:
+          type: string
+        mode:
+          type: string
+          enum: [system_impact, sector_transfer]
+        status:
+          type: string
+          enum: [accelerating, coasting, crossing_sector, orbiting_black_hole, captured, completed, missed, no_effect, destroyed, lost, failed]
+        startedAt:
+          type: string
+          format: date-time
+        nextTransitionAt:
+          type: string
+          format: date-time
+          nullable: true
+        targetObjectId:
+          type: string
+        targetSpeedC:
+          type: number
+          maximum: 0.5
+        currentSpeedC:
+          type: number
+          minimum: 0
+          maximum: 0.5
+        plannedRevolutions:
+          type: integer
+          minimum: 1
+        completedRevolutions:
+          type: integer
+          minimum: 0
+        estimatedCompletionAt:
+          type: string
+          format: date-time
+        speed:
+          type: object
+          properties:
+            sectors:
+              type: integer
+              enum: [1]
+            perSeconds:
+              type: integer
+              enum: [86400]
+        direction:
+          type: object
+          description: Launch direction vector, not an absolute coordinate.
+          required: [x, y, z]
+          properties:
+            x:
+              type: integer
+            y:
+              type: integer
+            z:
+              type: integer
+        sectorsCrossed:
+          type: integer
+          minimum: 0
+        maximumSectorCrossings:
+          type: integer
+          minimum: 1
+        result:
+          type: string
+        failureReason:
+          type: string
     SessionRequest:
       type: object
       required: [username, password]
@@ -4363,6 +4663,18 @@ components:
         sizeCategory:
           type: string
           enum: [small, medium, large]
+        motorized:
+          type: boolean
+          description: For asteroids, true after a deuterium engine has been installed through Distributed Thrust Anchoring.
+        motorFuelStatus:
+          type: string
+          enum: [full, empty]
+          description: Present only for motorized asteroids. Fuel is a binary state.
+        capturedByObjectId:
+          type: string
+          description: Present when the asteroid was captured by a planet or standalone star.
+        trajectory:
+          $ref: '#/components/schemas/AsteroidTrajectory'
         category:
           type: string
           description: Present for planet targets.
@@ -4678,7 +4990,7 @@ components:
           type: string
         message:
           type: string
-          description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates.
+          description: Public alert text. Sector coordinates in messages are expressed relative to the player reference frame and must not expose absolute sector coordinates. An asteroid_trajectory ignition alert for system_impact identifies the opaque target id and its type.
         action:
           type: object
           required: [label, method, endpoint]
@@ -4853,11 +5165,11 @@ components:
           description: Optional cap applied to itemIds or targetMannyIds.
     ProbeImprovement:
       type: object
-      required: [id, name, description, available, done, durationSeconds, ingredients, effects]
+      required: [id, name, description, available, done, installableOnProbe, durationSeconds, ingredients, effects]
       properties:
         id:
           type: string
-          enum: [deuterium_compression, reinforced_container_couplings]
+          enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
         name:
           type: string
         description:
@@ -4868,6 +5180,9 @@ components:
         done:
           type: boolean
           description: Whether the improvement effect has already been installed on the selected probe.
+        installableOnProbe:
+          type: boolean
+          description: Whether this blueprint describes an improvement that can be installed on probes. False for distributed_thrust_anchoring, whose effect is installed on asteroids.
         durationSeconds:
           type: integer
           minimum: 1
@@ -5374,7 +5689,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred, probe_destroyed]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred, probe_destroyed, asteroid_trajectory]
         status:
           type: string
           enum: [unread, read]
@@ -6105,7 +6420,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, motorizing_asteroid, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0
@@ -6505,6 +6820,21 @@ components:
         composition:
           type: string
           description: Present on asteroids; generator composition class such as iron, silicate, carbonaceous, ice or rare_metals.
+        motorized:
+          type: boolean
+          description: Present on asteroid objects; true once Distributed Thrust Anchoring propulsion is installed.
+        motorFuelStatus:
+          type: string
+          enum: [full, empty]
+          description: Present only on motorized asteroids.
+        capturedByObjectId:
+          type: string
+          description: Present when the asteroid is captured by another local celestial object.
+        inTransit:
+          type: boolean
+          description: Present and true for a sector-transfer asteroid between two phase transitions.
+        trajectory:
+          $ref: '#/components/schemas/AsteroidTrajectory'
         category:
           type: string
           description: Present on planets.
@@ -6640,6 +6970,18 @@ components:
           minimum: 0
           maximum: 1
           description: Present for planet targets; 0 means hostile or unknown, 1 is highly habitable.
+        motorized:
+          type: boolean
+          description: Present only for asteroid targets; true after a deuterium engine has been installed through Distributed Thrust Anchoring.
+        motorFuelStatus:
+          type: string
+          enum: [full, empty]
+          description: Present only for motorized asteroid targets.
+        capturedByObjectId:
+          type: string
+          description: Present when the asteroid was captured by another celestial object.
+        trajectory:
+          $ref: '#/components/schemas/AsteroidTrajectory'
         waypointBookmarks:
           type: array
           items:

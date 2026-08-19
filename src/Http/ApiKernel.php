@@ -45,6 +45,8 @@ use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
 use VonNeumannGame\Service\ScutNetworkService;
 use VonNeumannGame\Service\SectorObservationService;
+use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryException;
+use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -53,7 +55,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 107;
+    public const API_VERSION = 111;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -79,6 +81,7 @@ final class ApiKernel
         private readonly array $gameplayConfig = [],
         private readonly ?ProbeImprovementRepository $improvements = null,
         private readonly ?TokenRateLimiter $rateLimiter = null,
+        private readonly ?AsteroidTrajectoryService $asteroidTrajectories = null,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -100,6 +103,8 @@ final class ApiKernel
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (ObservationAccessException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage(), $e->details);
+        } catch (AsteroidTrajectoryException $e) {
+            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (InvalidSectorCoordinatesException|\InvalidArgumentException $e) {
             return ApiResponse::error(400, 'bad_request', $e->getMessage());
         } catch (\Throwable) {
@@ -118,6 +123,8 @@ final class ApiKernel
     private function routes(): array
     {
         return [
+            ApiRoute::regex('#^/api/probe/(\d+)/asteroids/([^/]+)/trajectories$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->asteroidTrajectoryCreateResponse($player, $probe, $ctx->stringParam(1), $ctx->body), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/asteroid-trajectories/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->asteroidTrajectoryResponse($probe, $ctx->stringParam(1)), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/storage-containers/([^/]+)/crafting-reservations/reassign$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageCraftingReservationsReassignResponse($player, $ctx->stringParam(1), $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/inventory/([^/]+)/jettison$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeInventoryJettisonResponse($player, $ctx->stringParam(1), $ctx->body, probe: $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/inventory/([^/]+)/jettison$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeInventoryJettisonResponse($player, $ctx->stringParam(0), $ctx->body))),
@@ -141,7 +148,7 @@ final class ApiKernel
                     ? $this->probeStorageContainerRenameResponse($player, $ctx->stringParam(0), $ctx->body)
                     : $this->probeStorageContainerResponse($player, $ctx->stringParam(0)),
             )),
-            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|transfer-to-probe|turn-on-relay|install-scut-transit-beacon|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(1), $ctx->params[2], $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/(repair|mine|motorize-asteroid|refuel-motorized-asteroid|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|transfer-to-probe|turn-on-relay|install-scut-transit-beacon|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(1), $ctx->params[2], $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies/tasks$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeManniesController()->batchActions($player, $ctx->body, $probe), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/mannies/([^/]+)/(repair|mine|craft|salvage|install-bookmark|detach-storage-container|drop-storage-container|drop-manny-cargo|inspect-sector-object|inspect-asteroid|recover-storage-container|refill-deuterium-tank|transfer-deuterium-to-probe|transfer-to-probe|turn-on-relay|install-scut-transit-beacon|improve-probe|assemble-probe|recall)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['POST'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeManniesController()->action($player, $ctx->stringParam(0), $ctx->params[1], $ctx->body))),
             ApiRoute::regex('#^/api/probe/(\d+)/scut-network/(\d+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeScutNetworkResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['GET'])),
@@ -2323,6 +2330,29 @@ final class ApiKernel
         }
 
         return is_array($decoded) ? $decoded : null;
+    }
+
+    private function asteroidTrajectoryCreateResponse(Player $player, NeumannProbe $probe, string $asteroidId, ?string $body): ApiResponse
+    {
+        if ($this->asteroidTrajectories === null) {
+            return ApiResponse::error(503, 'asteroid_trajectories_unavailable', 'Asteroid trajectory service is unavailable.');
+        }
+        $data = $this->decodeJsonBody($body);
+        if ($data === null) {
+            return ApiResponse::error(400, 'bad_request', 'JSON body must contain an asteroid trajectory order.');
+        }
+        $trajectory = $this->asteroidTrajectories->create($player, $probe, $asteroidId, $data);
+
+        return new ApiResponse(202, ['trajectory' => $this->asteroidTrajectories->publicArray($trajectory)]);
+    }
+
+    private function asteroidTrajectoryResponse(NeumannProbe $probe, string $trajectoryId): ApiResponse
+    {
+        if ($this->asteroidTrajectories === null) {
+            return ApiResponse::error(503, 'asteroid_trajectories_unavailable', 'Asteroid trajectory service is unavailable.');
+        }
+
+        return new ApiResponse(200, ['trajectory' => $this->asteroidTrajectories->getForLocalProbe($probe, $trajectoryId)]);
     }
 
     private function validRelativeCoordinateParity(int $x, int $y, int $z): bool

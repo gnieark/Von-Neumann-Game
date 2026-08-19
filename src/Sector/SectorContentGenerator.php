@@ -38,7 +38,7 @@ final class SectorContentGenerator
         };
 
         if ($random->nextInt(1, max(1, $this->int('dormantConstruct.chanceDenominator', self::DORMANT_CONSTRUCT_CHANCE_DENOMINATOR))) === 1) {
-            $sector->addObject($this->createDormantConstruct($coordinates, $worldSeed));
+            $sector->addObject($this->createDormantConstruct($random, $coordinates, $worldSeed));
         }
 
         return $sector;
@@ -361,9 +361,24 @@ final class SectorContentGenerator
         }
     }
 
-    private function createDormantConstruct(SectorCoordinates $coordinates, string $worldSeed): DormantConstruct
+    private function createDormantConstruct(DeterministicRandom $random, SectorCoordinates $coordinates, string $worldSeed): DormantConstruct
     {
-        return new DormantConstruct(DormantConstruct::objectIdForSector($coordinates, $worldSeed));
+        $scenarios = DormantConstruct::inspectionScenarios();
+        $scenario = $scenarios[$random->nextInt(0, count($scenarios) - 1)];
+
+        if ($scenario === DormantConstruct::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING) {
+            return new DormantConstruct(
+                DormantConstruct::objectIdForSector($coordinates, $worldSeed),
+                DormantConstruct::THRUST_ANCHORED_ASTEROID_NAME,
+                description: DormantConstruct::THRUST_ANCHORED_ASTEROID_DESCRIPTION,
+                inspectionScenario: $scenario,
+            );
+        }
+
+        return new DormantConstruct(
+            DormantConstruct::objectIdForSector($coordinates, $worldSeed),
+            inspectionScenario: $scenario,
+        );
     }
 
     private function createOrbit(DeterministicRandom $random, float $axis, float $starMass): OrbitDescriptor

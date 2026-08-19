@@ -23,6 +23,14 @@ use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Service\DetachedContainerJsonAuditService;
+use VonNeumannGame\Sector\DeterministicRandom;
+use VonNeumannGame\Service\AsteroidTrajectory\CaptureCalculator;
+use VonNeumannGame\Service\AsteroidTrajectory\ImpactDamageResolver;
+use VonNeumannGame\Service\AsteroidTrajectory\MaterialDistributionCalculator;
+use VonNeumannGame\Service\AsteroidTrajectory\RelativisticEnergyCalculator;
+use VonNeumannGame\Service\AsteroidTrajectory\RevolutionCalculator;
+use VonNeumannGame\Service\AsteroidTrajectory\SectorAsteroidFormatMigration;
+use VonNeumannGame\Service\AsteroidTrajectory\TrajectoryKinematicsCalculator;
 
 /**
  * Simple test runner with assertions.
@@ -451,6 +459,7 @@ $constructObjects = array_values(array_filter(
 ));
 $test->assertCount(1, $constructObjects, 'configured sector generation can add one dormant construct');
 $test->assertEquals('dormant_construct', $constructObjects[0]->getType()->value, 'dormant construct uses the public object type');
+$test->assert(in_array($constructObjects[0]->getInspectionScenario(), DormantConstruct::inspectionScenarios(), true), 'generated dormant construct stores a deterministic inspection scenario');
 
 $blackHoleSector = findGeneratedSector(
     $contentGenerator,
@@ -682,9 +691,124 @@ $test->assertEquals('loaded', $loadedExisting->getSource(), 'an existing sector 
 $test->assertCount(13, $service->getCreatedSectorKeys(), 'an existing sector is not regenerated');
 $test->assert($createdOrigin->getCoordinates()->equals($loadedExisting->getCoordinates()), 'loaded sector has the requested coordinates');
 
+echo "\n>>> Testing asteroid trajectory calculators\n\n";
+
+$gameplayConfig = json_decode((string) file_get_contents(__DIR__ . '/../config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR);
+$universeConfig = json_decode((string) file_get_contents(__DIR__ . '/../config/universe.json'), true, 512, JSON_THROW_ON_ERROR);
+$trajectoryConfig = $gameplayConfig['asteroidTrajectories'];
+[$minimumAsteroidMass, $maximumAsteroidMass] = $universeConfig['asteroids']['massRange'];
+$kinematics = new TrajectoryKinematicsCalculator(
+    (float) $minimumAsteroidMass,
+    (float) $maximumAsteroidMass,
+    (float) $trajectoryConfig['maximumTargetSpeedC'],
+    (int) $trajectoryConfig['minimumAccelerationDurationSeconds'],
+    (int) $trajectoryConfig['maximumAccelerationDurationSeconds'],
+);
+$test->assertEquals(7200, $kinematics->accelerationDurationSeconds((float) $minimumAsteroidMass, 0.5), 'minimum asteroid mass reaches 0.5c in exactly two hours');
+$test->assertEquals(259200, $kinematics->accelerationDurationSeconds((float) $maximumAsteroidMass, 0.5), 'maximum asteroid mass reaches 0.5c in exactly 72 hours');
+$test->assertEquals(1, $kinematics->accelerationDurationSeconds((float) $minimumAsteroidMass, 0.000001), 'very low target speeds respect the technical duration floor');
+$test->assert(abs($kinematics->currentSpeedC(0.5, 3600, 7200) - 0.25) < 1.0e-12, 'public speed progresses linearly during acceleration');
+$test->assertThrows(fn() => $kinematics->accelerationDurationSeconds((float) $minimumAsteroidMass, 0.500001), \InvalidArgumentException::class, 'target speeds above 0.5c are rejected');
+
+$energy = new RelativisticEnergyCalculator();
+$halfCEnergy = $energy->kineticEnergyJoules((float) $minimumAsteroidMass, 0.5);
+$test->assert($halfCEnergy > 0.0 && is_finite($halfCEnergy), 'relativistic impact energy is finite and positive at 0.5c');
+$test->assertEquals(0.0, $energy->kineticEnergyJoules((float) $minimumAsteroidMass, 0.0), 'relativistic impact energy is zero at rest');
+
+$revolutions = new RevolutionCalculator($trajectoryConfig['revolutionDurations'], (float) $trajectoryConfig['occultationWindowFraction']);
+$test->assertEquals(21600, $revolutions->durationSeconds(0.45), 'revolution table includes the 0.45 solar-mass boundary');
+$test->assertEquals(28800, $revolutions->durationSeconds(0.450001), 'revolution table advances immediately above a mass boundary');
+$test->assertEquals(129600, $revolutions->durationSeconds(17.0), 'revolution table uses 36 hours above 16 solar masses');
+$test->assertEquals(3, $revolutions->plannedRevolutions(259200, 86400), 'planned revolutions use the configured narrative period');
+$test->assertEquals(2, $revolutions->completedRevolutions(172800, 86400, 3), 'completed revolutions are derived rather than persisted');
+$test->assertEquals(
+    $revolutions->isOcculted('atr-deterministic', 12345, 43200),
+    $revolutions->isOcculted('atr-deterministic', 12345, 43200),
+    'occultation is deterministic for a trajectory phase',
+);
+
+$capture = new CaptureCalculator(
+    (int) $trajectoryConfig['capture']['penaltyPercentPerStep'],
+    (float) $trajectoryConfig['capture']['minimumPlanetMassEarth'],
+);
+$test->assertEquals(100, $capture->chancePercent(0), 'first eligible capture attempt has 100 percent chance');
+$test->assertEquals(0, $capture->chancePercent(10), 'capture chance reaches zero after ten penalty steps');
+$captureCandidates = [
+    ['id' => 'star-b', 'type' => 'star', 'mass' => 2.0],
+    ['id' => 'planet-heavy', 'type' => 'planet', 'mass' => 3.0],
+    ['id' => 'planet-light', 'type' => 'planet', 'mass' => 2.999],
+];
+$firstCapture = $capture->resolve('atr-capture', 1, '1:1:0', 0, $captureCandidates);
+$secondCapture = $capture->resolve('atr-capture', 1, '1:1:0', 0, array_reverse($captureCandidates));
+$test->assertEquals($firstCapture, $secondCapture, 'capture choice is deterministic and independent of candidate input order');
+$blackHoleCapture = $capture->resolve('atr-hole', 9, '2:0:0', 10, [
+    ['id' => 'star-a', 'type' => 'star', 'mass' => 40.0],
+    ['id' => 'hole-a', 'type' => 'black_hole', 'mass' => 3.0],
+]);
+$test->assertEquals('hole-a', $blackHoleCapture['id'] ?? null, 'black holes capture regardless of the current probability');
+
+$impactSource = (new Asteroid('impact-source', null, 'iron', ['iron'], 'small', 0.000001, 0.001))->withDeuteriumEngine();
+$impactResolver = new ImpactDamageResolver();
+$starImpact = $impactResolver->resolve(
+    $impactSource,
+    new Star('impact-star', null, 'G', 1.0, 5778, 1.0, 1.0),
+    0.5,
+    new DeterministicRandom('impact-star'),
+);
+$test->assertEquals('no_effect', $starImpact['outcome'] ?? null, 'stellar impacts always have no effect on the star');
+$test->assertEquals(true, $starImpact['sourceDestroyed'] ?? null, 'stellar impacts vaporize the source asteroid');
+$gentleAsteroidImpact = $impactResolver->resolve(
+    $impactSource,
+    new Asteroid('impact-target', null, 'iron', ['iron'], 'large', 0.02, 0.2),
+    0.000000001,
+    new DeterministicRandom('impact-merge'),
+);
+$test->assertEquals('merged', $gentleAsteroidImpact['outcome'] ?? null, 'sub-disruption asteroid impacts merge both bodies');
+$test->assertEquals(0.0, $gentleAsteroidImpact['unrecoverableMassFraction'] ?? null, 'asteroid fusion preserves the combined mass');
+
+$materials = new MaterialDistributionCalculator();
+$test->assert(abs($materials->unrecoverableMassFraction(0.01) - (0.005 / 1.01)) < 1.0e-12, 'material loss is exact at effective ratio 0.01');
+$test->assert(abs($materials->unrecoverableMassFraction(0.1) - (0.05 / 1.1)) < 1.0e-12, 'material loss is exact at effective ratio 0.1');
+$test->assertEquals(0.25, $materials->unrecoverableMassFraction(1.0), 'material loss is 25 percent at effective ratio 1');
+$test->assert($materials->unrecoverableMassFraction(1000000.0) < 0.5 && $materials->unrecoverableMassFraction(1000000.0) > 0.499, 'material loss approaches 50 percent without reaching it');
+$distributed = $materials->distribute(12.3456, 10, new DeterministicRandom('material-distribution'));
+$test->assertEquals(12.3456, round(array_sum($distributed), 4), 'fragment rounding preserves the exact recoverable total');
+$test->assertEquals(
+    $distributed,
+    $materials->distribute(12.3456, 10, new DeterministicRandom('material-distribution')),
+    'fragment material distribution is deterministic',
+);
+
+$migrationBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_asteroid_format_migration_' . bin2hex(random_bytes(4));
+$migrationSectorDirectory = $migrationBase . '/sectors/x_p0/y_p0/z_p0';
+mkdir($migrationSectorDirectory, 0775, true);
+$migrationPath = $migrationSectorDirectory . '/sector_p0_p0_p0.json';
+$legacyMotorized = (new Asteroid('legacy-motorized', null, 'iron', ['iron'], 'small', 0.000001, 0.001))->toArray();
+$legacyMotorized['motorized'] = true;
+unset($legacyMotorized['motorFuelStatus']);
+$alreadyMigrated = (new Asteroid('already-migrated', null, 'iron', ['iron'], 'small', 0.000001, 0.001))
+    ->withDeuteriumEngine()
+    ->toArray();
+$legacyPlain = (new Asteroid('legacy-plain', null, 'iron', ['iron'], 'small', 0.000001, 0.001))->toArray();
+file_put_contents($migrationPath, json_encode(['objects' => [$legacyMotorized, $alreadyMigrated, $legacyPlain]], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+$formatMigration = new SectorAsteroidFormatMigration();
+$migrationReport = $formatMigration->migrate($migrationBase);
+$test->assertEquals(1, $migrationReport['asteroidsChanged'], 'sector migration fills only legacy motorized asteroid fuel state');
+$migratedSectorData = json_decode((string) file_get_contents($migrationPath), true, 512, JSON_THROW_ON_ERROR);
+$test->assertEquals('full', $migratedSectorData['objects'][0]['motorFuelStatus'] ?? null, 'legacy motorized asteroids migrate with a full tank');
+$test->assert(!array_key_exists('motorFuelStatus', $migratedSectorData['objects'][2]), 'non-motorized asteroids do not receive a fuel status');
+$secondMigrationReport = $formatMigration->migrate($migrationBase);
+$test->assertEquals(0, $secondMigrationReport['filesChanged'], 'sector asteroid format migration is idempotent');
+$test->assertThrows(
+    fn() => Asteroid::fromArray($legacyMotorized),
+    \InvalidArgumentException::class,
+    'application deserialization rejects legacy motorized asteroids instead of applying a fallback',
+);
+
 removeDirectory($tmpBase);
 removeDirectory($serviceBase);
 removeDirectory($auditBase);
+removeDirectory($migrationBase);
 
 // Print summary
 $test->printSummary();

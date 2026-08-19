@@ -352,6 +352,54 @@ final class MannyRepository
         ]);
     }
 
+    public function replaceObjectIdReferences(string $oldObjectId, string $newObjectId): void
+    {
+        if ($oldObjectId === '' || $oldObjectId === $newObjectId) {
+            return;
+        }
+
+        $replace = static function (mixed $value) use (&$replace, $oldObjectId, $newObjectId): mixed {
+            if (is_string($value)) {
+                return $value === $oldObjectId ? $newObjectId : $value;
+            }
+            if (!is_array($value)) {
+                return $value;
+            }
+            foreach ($value as $key => $nested) {
+                $value[$key] = $replace($nested);
+            }
+            return $value;
+        };
+
+        foreach (['scheduled_events' => 'payload_json'] as $table => $column) {
+            $rows = $this->pdo->query("SELECT id, {$column} FROM {$table}")->fetchAll(PDO::FETCH_ASSOC);
+            $update = $this->pdo->prepare("UPDATE {$table} SET {$column} = :payload, updated_at = :updated_at WHERE id = :id");
+            foreach ($rows as $row) {
+                $payload = json_decode((string) ($row[$column] ?? '{}'), true, 512, JSON_THROW_ON_ERROR);
+                $updated = $replace($payload);
+                if ($updated === $payload) {
+                    continue;
+                }
+                $update->execute([
+                    'id' => $row['id'],
+                    'payload' => json_encode($updated, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                    'updated_at' => gmdate('c'),
+                ]);
+            }
+        }
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE detached_storage_containers
+             SET target_object_id = :new_object_id, updated_at = :updated_at
+             WHERE target_object_id = :old_object_id'
+        );
+        $stmt->execute([
+            'old_object_id' => $oldObjectId,
+            'new_object_id' => $newObjectId,
+            'updated_at' => gmdate('c'),
+        ]);
+    }
+
     private function hydrate(array $row): Manny
     {
         $payload = json_decode((string) ($row['active_task_payload_json'] ?? '{}'), true);

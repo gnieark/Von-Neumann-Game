@@ -13,6 +13,8 @@ use VonNeumannGame\Domain\SectorKnowledgeLevel;
 use VonNeumannGame\Domain\SectorObservation;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
+use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
+use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -45,6 +47,8 @@ final class SectorObservationService
         ?SectorGrid $grid = null,
         array $config = [],
         private readonly ?MannyRepository $mannies = null,
+        private readonly ?AsteroidTrajectoryRepository $asteroidTrajectories = null,
+        private readonly ?AsteroidTrajectoryService $asteroidTrajectoryService = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->scanConfig = Config::getArray($config, 'scan', $config);
@@ -228,6 +232,13 @@ final class SectorObservationService
             if ($object instanceof Asteroid) {
                 $data['composition'] = $object->toArray()['composition'] ?? null;
                 $data['resourceAmounts'] = $object->getResourceAmounts();
+                $data['motorized'] = $object->isMotorized();
+                if ($object->isMotorized()) {
+                    $data['motorFuelStatus'] = $object->getMotorFuelStatus();
+                }
+                if ($object->getCapturedByObjectId() !== null) {
+                    $data['capturedByObjectId'] = $object->getCapturedByObjectId();
+                }
             }
             if ($object instanceof Planet) {
                 $data['category'] = $object->getCategory();
@@ -292,7 +303,15 @@ final class SectorObservationService
                 continue;
             }
 
-            $objects[] = $this->detailedObject($object, $content->getCoordinates(), $relativeCoordinates);
+            $activeTrajectory = $object instanceof Asteroid ? $this->asteroidTrajectories?->findActiveByAsteroidId($object->getId()) : null;
+            if ($activeTrajectory !== null && $this->asteroidTrajectoryService?->isOcculted($activeTrajectory) === true) {
+                continue;
+            }
+            $public = $this->detailedObject($object, $content->getCoordinates(), $relativeCoordinates);
+            if ($activeTrajectory !== null && $this->asteroidTrajectoryService !== null) {
+                $public['trajectory'] = $this->asteroidTrajectoryService->publicArray($activeTrajectory);
+            }
+            $objects[] = $public;
         }
         foreach ($content->getHiddenDetachedContainers() as $container) {
             if (!$container->isDiscoveredByPlayer($playerId)) {
@@ -300,6 +319,19 @@ final class SectorObservationService
             }
 
             $objects[] = $this->detailedObject($container, $content->getCoordinates(), $relativeCoordinates);
+        }
+
+        if ($isCurrentSector && $this->asteroidTrajectories !== null && $this->asteroidTrajectoryService !== null) {
+            foreach ($this->asteroidTrajectories->findActiveInSector($content->getCoordinates()) as $trajectory) {
+                if ($trajectory->mode !== \VonNeumannGame\Domain\AsteroidTrajectory::MODE_SECTOR_TRANSFER || $content->findObjectById($trajectory->asteroidId) !== null) {
+                    continue;
+                }
+                $asteroid = Asteroid::fromArray($trajectory->asteroidSnapshot);
+                $public = $this->detailedObject($asteroid, $content->getCoordinates(), $relativeCoordinates);
+                $public['inTransit'] = true;
+                $public['trajectory'] = $this->asteroidTrajectoryService->publicArray($trajectory);
+                $objects[] = $public;
+            }
         }
 
         return $objects;
@@ -367,6 +399,10 @@ final class SectorObservationService
             if (!$this->isMannyMineable($object)) {
                 continue;
             }
+            $activeTrajectory = $object instanceof Asteroid ? $this->asteroidTrajectories?->findActiveByAsteroidId($object->getId()) : null;
+            if ($activeTrajectory !== null && $this->asteroidTrajectoryService?->isOcculted($activeTrajectory) === true) {
+                continue;
+            }
 
             $resources = $this->objectResourceHints($object);
             $composition = $this->objectResourceComposition($object);
@@ -385,6 +421,16 @@ final class SectorObservationService
             }
             if ($object instanceof Asteroid) {
                 $target['resourceAmounts'] = $object->getResourceAmounts();
+                $target['motorized'] = $object->isMotorized();
+                if ($object->isMotorized()) {
+                    $target['motorFuelStatus'] = $object->getMotorFuelStatus();
+                }
+                if ($object->getCapturedByObjectId() !== null) {
+                    $target['capturedByObjectId'] = $object->getCapturedByObjectId();
+                }
+                if ($activeTrajectory !== null && $this->asteroidTrajectoryService !== null) {
+                    $target['trajectory'] = $this->asteroidTrajectoryService->publicArray($activeTrajectory);
+                }
             }
             if ($object instanceof Planet) {
                 $target['category'] = $object->getCategory();
@@ -404,14 +450,21 @@ final class SectorObservationService
             $targets[] = $this->bookmarkTargetArray($star, $sector, $relativeCoordinates);
         }
         foreach ($system->getOrbitalBodies() as $body) {
-            $targets[] = $this->bookmarkTargetArray($body->getObject(), $sector, $relativeCoordinates);
+            $target = $this->bookmarkTargetArray($body->getObject(), $sector, $relativeCoordinates);
+            if ($target !== null) {
+                $targets[] = $target;
+            }
         }
 
         return $targets;
     }
 
-    private function bookmarkTargetArray(UniverseObject $object, SectorCoordinates $sector, array $relativeCoordinates): array
+    private function bookmarkTargetArray(UniverseObject $object, SectorCoordinates $sector, array $relativeCoordinates): ?array
     {
+        $activeTrajectory = $object instanceof Asteroid ? $this->asteroidTrajectories?->findActiveByAsteroidId($object->getId()) : null;
+        if ($activeTrajectory !== null && $this->asteroidTrajectoryService?->isOcculted($activeTrajectory) === true) {
+            return null;
+        }
         $target = [
             'id' => $object->getId(),
             'type' => $object->getType()->value,
@@ -424,6 +477,18 @@ final class SectorObservationService
             $target['category'] = $object->getCategory();
             $target['habitabilityScore'] = $object->getHabitabilityScore();
             $target['intelligentLife'] = $object->hasIntelligentLife();
+        }
+        if ($object instanceof Asteroid) {
+            $target['motorized'] = $object->isMotorized();
+            if ($object->isMotorized()) {
+                $target['motorFuelStatus'] = $object->getMotorFuelStatus();
+            }
+            if ($object->getCapturedByObjectId() !== null) {
+                $target['capturedByObjectId'] = $object->getCapturedByObjectId();
+            }
+            if ($activeTrajectory !== null && $this->asteroidTrajectoryService !== null) {
+                $target['trajectory'] = $this->asteroidTrajectoryService->publicArray($activeTrajectory);
+            }
         }
         if ($object->getWaypointBookmarks() !== []) {
             $target['waypointBookmarks'] = $object->getWaypointBookmarks();
