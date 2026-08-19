@@ -822,6 +822,10 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'improve
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'return asteroidTargets()'), 'mannies JS includes nested sector asteroids in motorization targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-motorize-asteroid-form'), 'mannies JS renders the asteroid propulsion installation form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/motorize-asteroid'), 'mannies JS posts asteroid propulsion installation orders');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"hasSteelPlates": (counts.steel_plate || 0) >= 2'), 'mannies JS requires two steel plates for asteroid motorization');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"hasDeuterium": state.currentProbeDeuterium >= 0.2'), 'mannies JS requires the asteroid motorization deuterium cost');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missingAsteroidMotorizationComponents' => 'Un moteur au deutérium, quatre barres d’acier et deux plaques d’acier sont nécessaires dans l’inventaire, ainsi que 0,2 point de deutérium dans le réservoir de la sonde.'"), 'French motorization requirements include steel plates and deuterium');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missingAsteroidMotorizationComponents' => 'One deuterium engine, four steel bars and two steel plates are required in inventory, plus 0.2 deuterium point in the probe tank.'"), 'English motorization requirements include steel plates and deuterium');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'motorizeAsteroidActionTitle' => 'Installer une propulsion sur un astéroïde'"), 'French translations include the asteroid propulsion action title');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'motorizeAsteroidActionTitle' => 'Install propulsion on an asteroid'"), 'English translations include the asteroid propulsion action title');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-improve-probe-form'), 'mannies JS renders the probe improvement form');
@@ -880,7 +884,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-explicit-asteroid-actions"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-motorization-cost-copy"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

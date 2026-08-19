@@ -2950,6 +2950,7 @@
             "hasEngine": (counts.deuterium_engine || 0) >= 1,
             "hasSteelBars": (counts.steel_bar || 0) >= 4,
             "hasSteelPlates": (counts.steel_plate || 0) >= 2,
+            "hasDeuterium": state.currentProbeDeuterium >= 0.2,
         };
     }
 
@@ -2957,8 +2958,8 @@
         if (targetCount === 0) {
             return tr("noAsteroidToMotorize", "No non-motorized asteroid is available in this sector.");
         }
-        if (!availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates) {
-            return tr("missingAsteroidMotorizationComponents", "One deuterium engine, four steel bars and two steel plates are required in inventory.");
+        if (!availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates || !availability.hasDeuterium) {
+            return tr("missingAsteroidMotorizationComponents", "One deuterium engine, four steel bars and two steel plates are required in inventory, plus 0.2 deuterium point in the probe tank.");
         }
 
         return tr("asteroidMotorizationHint", "The Manny installs the engine, then automatically returns to the probe.");
@@ -2967,7 +2968,7 @@
     function renderMotorizeAsteroidForm() {
         const targets = motorizationAsteroidTargets();
         const availability = asteroidMotorizationAvailability();
-        const disabled = targets.length === 0 || !availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates;
+        const disabled = targets.length === 0 || !availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates || !availability.hasDeuterium;
 
         return "<form class=\"manny-motorize-asteroid-form manny-form\">"
             + "<label>" + escaped(tr("asteroidToMotorize", "Asteroid")) + "<select class=\"manny-motorize-asteroid-target\" name=\"objectId\" required>" + motorizationAsteroidTargetOptions("") + "</select></label>"
@@ -3907,7 +3908,7 @@
                 }
             }
             if (button) {
-                const disabled = targets.length === 0 || !availability.hasEngine || !availability.hasSteelBars;
+                const disabled = targets.length === 0 || !availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates || !availability.hasDeuterium;
                 button.disabled = disabled;
                 button.setAttribute("aria-disabled", disabled ? "true" : "false");
             }
@@ -4336,8 +4337,8 @@
             updateMotorizeAsteroidForms();
             const targetSelect = form.querySelector(".manny-motorize-asteroid-target");
             const availability = asteroidMotorizationAvailability();
-            if (!availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates) {
-                setStatus(tr("missingAsteroidMotorizationComponents", "One deuterium engine, four steel bars and two steel plates are required in inventory."));
+            if (!availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates || !availability.hasDeuterium) {
+                setStatus(tr("missingAsteroidMotorizationComponents", "One deuterium engine, four steel bars and two steel plates are required in inventory, plus 0.2 deuterium point in the probe tank."));
                 return null;
             }
             if (!targetSelect || !targetSelect.value) {
