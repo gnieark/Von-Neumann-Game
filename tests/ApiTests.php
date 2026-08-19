@@ -614,6 +614,12 @@ $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents dest
 $test->assert(str_contains($openApi, 'summary: Delete a persistent probe alert'), 'OpenAPI documents persistent alert deletion');
 $test->assert(str_contains($openApi, 'summary: Delete a movement damage warning'), 'OpenAPI documents damage-warning deletion');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories:'), 'OpenAPI documents asteroid trajectory creation');
+$test->assert(
+    str_contains($openApi, 'summary: System impact')
+        && str_contains($openApi, 'summary: Sector transfer')
+        && str_contains($openApi, 'enum: [system_impact, sector_transfer]'),
+    'OpenAPI offers Swagger launch-mode choices for asteroid trajectories',
+);
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroid-trajectories/{trajectoryId}:'), 'OpenAPI documents local trajectory telemetry');
 $test->assert(str_contains($openApi, 'discriminator:') && str_contains($openApi, "propertyName: mode"), 'OpenAPI discriminates trajectory requests by mode');
 $test->assert(str_contains($openApi, 'asteroid_temporarily_occluded') && str_contains($openApi, 'motorFuelStatus'), 'OpenAPI documents trajectory errors and binary asteroid fuel');

@@ -1632,6 +1632,18 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AsteroidTrajectoryCreateRequest'
+            examples:
+              systemImpact:
+                summary: System impact
+                value:
+                  mode: system_impact
+                  targetObjectId: planet-abc123
+                  targetSpeedC: 0.1
+              sectorTransfer:
+                summary: Sector transfer
+                value:
+                  mode: sector_transfer
+                  target: { x: 1, y: 1, z: 0 }
       responses:
         '202':
           description: Trajectory accepted
@@ -4342,6 +4354,13 @@ components:
           minimum: 1
           description: Monotonic public API version. Increment it when the API contract changes.
     AsteroidTrajectoryCreateRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          description: Launch mode selected before filling the mode-specific fields.
+          enum: [system_impact, sector_transfer]
       oneOf:
         - $ref: '#/components/schemas/AsteroidSystemImpactRequest'
         - $ref: '#/components/schemas/AsteroidSectorTransferRequest'
