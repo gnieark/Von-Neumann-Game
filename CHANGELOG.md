@@ -1,5 +1,7 @@
 # Changelog
 
+Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
+
 ## 2026-08-19
 
 ### Changed
@@ -23,7 +25,6 @@
 - Maintenance : `force-pending-scheduled-events-now.php` avance aussi les échéances métier des tâches Manny et de tous les mouvements encore actifs. Il recrée l’événement terminal d’un mouvement dont les événements ont déjà été consommés, afin que le prochain passage du scheduler termine réellement le transit au lieu de laisser la sonde bloquée.
 
 - API v108 : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid`. Après déblocage du blueprint Distributed Thrust Anchoring, une Manny peut consommer un moteur au deutérium et quatre barres d’acier pour motoriser durablement un astéroïde du secteur, sans empêcher son minage, puis revient automatiquement vers la sonde. La WebUI `/mannies` affiche alors l’action « Installer une propulsion sur un astéroïde » dans le groupe Secteur.
-Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
 ## 2026-08-14
 
