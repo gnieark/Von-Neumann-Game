@@ -8,6 +8,7 @@ use VonNeumannGame\Domain\ResourceComposition;
 
 final class Asteroid extends UniverseObject
 {
+    public const DISTINCTIVE_FEATURE_DUCK_SCULPTURE = 'Sculpted in the shape of a duck';
     public const MOTOR_FUEL_FULL = 'full';
     public const MOTOR_FUEL_EMPTY = 'empty';
     private const RESOURCE_CONTAINERS_PER_EARTH_MASS = 1000000.0;
@@ -36,6 +37,7 @@ final class Asteroid extends UniverseObject
         private readonly bool $motorized = false,
         private readonly ?string $motorFuelStatus = null,
         private readonly ?string $capturedByObjectId = null,
+        private readonly ?string $distinctiveFeature = null,
     ) {
         if ($this->motorized && !in_array($this->motorFuelStatus, [self::MOTOR_FUEL_FULL, self::MOTOR_FUEL_EMPTY], true)) {
             throw new \InvalidArgumentException('A motorized asteroid must explicitly define motorFuelStatus as full or empty.');
@@ -70,6 +72,7 @@ final class Asteroid extends UniverseObject
             motorized: $this->motorized,
             motorFuelStatus: $this->motorFuelStatus,
             capturedByObjectId: $this->capturedByObjectId,
+            distinctiveFeature: $this->distinctiveFeature,
         );
     }
 
@@ -89,6 +92,7 @@ final class Asteroid extends UniverseObject
             motorized: $this->motorized,
             motorFuelStatus: $this->motorFuelStatus,
             capturedByObjectId: $this->capturedByObjectId,
+            distinctiveFeature: $this->distinctiveFeature,
         );
     }
 
@@ -107,6 +111,36 @@ final class Asteroid extends UniverseObject
         return $this->capturedByObjectId;
     }
 
+    public function getDistinctiveFeature(): ?string
+    {
+        return $this->distinctiveFeature;
+    }
+
+    public function isDuckShaped(): bool
+    {
+        return $this->distinctiveFeature === self::DISTINCTIVE_FEATURE_DUCK_SCULPTURE;
+    }
+
+    public function sculptedInTheShapeOfADuck(): self
+    {
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->composition,
+            $this->estimatedResources,
+            $this->sizeCategory,
+            $this->getMass(),
+            $this->getRadius(),
+            $this->getDescription(),
+            $this->resourceAmounts,
+            $this->getWaypointBookmarks(),
+            motorized: $this->motorized,
+            motorFuelStatus: $this->motorFuelStatus,
+            capturedByObjectId: $this->capturedByObjectId,
+            distinctiveFeature: self::DISTINCTIVE_FEATURE_DUCK_SCULPTURE,
+        );
+    }
+
     public function withDeuteriumEngine(?string $newId = null): self
     {
         return new self(
@@ -123,6 +157,7 @@ final class Asteroid extends UniverseObject
             motorized: true,
             motorFuelStatus: self::MOTOR_FUEL_FULL,
             capturedByObjectId: $this->capturedByObjectId,
+            distinctiveFeature: $this->distinctiveFeature,
         );
     }
 
@@ -146,6 +181,7 @@ final class Asteroid extends UniverseObject
             motorized: true,
             motorFuelStatus: $status,
             capturedByObjectId: $this->capturedByObjectId,
+            distinctiveFeature: $this->distinctiveFeature,
         );
     }
 
@@ -165,6 +201,7 @@ final class Asteroid extends UniverseObject
             motorized: $this->motorized,
             motorFuelStatus: $this->motorFuelStatus,
             capturedByObjectId: $objectId,
+            distinctiveFeature: $this->distinctiveFeature,
         );
     }
 
@@ -175,6 +212,7 @@ final class Asteroid extends UniverseObject
             $this->getMass(), $this->getRadius(), $this->getDescription(), $this->resourceAmounts,
             $this->getWaypointBookmarks(), motorized: $this->motorized, motorFuelStatus: $this->motorFuelStatus,
             capturedByObjectId: $this->capturedByObjectId,
+            distinctiveFeature: $this->distinctiveFeature,
         );
     }
 
@@ -190,6 +228,9 @@ final class Asteroid extends UniverseObject
         ];
         if ($this->motorized) {
             $data['motorFuelStatus'] = $this->motorFuelStatus;
+        }
+        if ($this->distinctiveFeature !== null) {
+            $data['distinctiveFeature'] = $this->distinctiveFeature;
         }
 
         return $data;
@@ -257,6 +298,7 @@ final class Asteroid extends UniverseObject
             motorized: $motorized,
             motorFuelStatus: $motorFuelStatus,
             capturedByObjectId: isset($data['capturedByObjectId']) ? (string) $data['capturedByObjectId'] : null,
+            distinctiveFeature: isset($data['distinctiveFeature']) ? (string) $data['distinctiveFeature'] : null,
         );
     }
 

@@ -375,6 +375,15 @@ final class SectorContentGenerator
             );
         }
 
+        if ($scenario === DormantConstruct::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING) {
+            return new DormantConstruct(
+                DormantConstruct::objectIdForSector($coordinates, $worldSeed),
+                DormantConstruct::ANATIFORM_ASTEROID_NAME,
+                description: DormantConstruct::ANATIFORM_ASTEROID_DESCRIPTION,
+                inspectionScenario: $scenario,
+            );
+        }
+
         return new DormantConstruct(
             DormantConstruct::objectIdForSector($coordinates, $worldSeed),
             inspectionScenario: $scenario,

@@ -239,6 +239,9 @@ final class SectorObservationService
                 if ($object->getCapturedByObjectId() !== null) {
                     $data['capturedByObjectId'] = $object->getCapturedByObjectId();
                 }
+                if ($object->getDistinctiveFeature() !== null) {
+                    $data['distinctiveFeature'] = $object->getDistinctiveFeature();
+                }
             }
             if ($object instanceof Planet) {
                 $data['category'] = $object->getCategory();
@@ -428,6 +431,9 @@ final class SectorObservationService
                 if ($object->getCapturedByObjectId() !== null) {
                     $target['capturedByObjectId'] = $object->getCapturedByObjectId();
                 }
+                if ($object->getDistinctiveFeature() !== null) {
+                    $target['distinctiveFeature'] = $object->getDistinctiveFeature();
+                }
                 if ($activeTrajectory !== null && $this->asteroidTrajectoryService !== null) {
                     $target['trajectory'] = $this->asteroidTrajectoryService->publicArray($activeTrajectory);
                 }
@@ -485,6 +491,9 @@ final class SectorObservationService
             }
             if ($object->getCapturedByObjectId() !== null) {
                 $target['capturedByObjectId'] = $object->getCapturedByObjectId();
+            }
+            if ($object->getDistinctiveFeature() !== null) {
+                $target['distinctiveFeature'] = $object->getDistinctiveFeature();
             }
             if ($activeTrajectory !== null && $this->asteroidTrajectoryService !== null) {
                 $target['trajectory'] = $this->asteroidTrajectoryService->publicArray($activeTrajectory);

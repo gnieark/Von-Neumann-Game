@@ -460,6 +460,7 @@ $constructObjects = array_values(array_filter(
 $test->assertCount(1, $constructObjects, 'configured sector generation can add one dormant construct');
 $test->assertEquals('dormant_construct', $constructObjects[0]->getType()->value, 'dormant construct uses the public object type');
 $test->assert(in_array($constructObjects[0]->getInspectionScenario(), DormantConstruct::inspectionScenarios(), true), 'generated dormant construct stores a deterministic inspection scenario');
+$test->assert(in_array(DormantConstruct::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING, DormantConstruct::inspectionScenarios(), true), 'dormant constructs include the anatiform asteroid sculpting discovery');
 
 $blackHoleSector = findGeneratedSector(
     $contentGenerator,
@@ -765,6 +766,14 @@ $gentleAsteroidImpact = $impactResolver->resolve(
 );
 $test->assertEquals('merged', $gentleAsteroidImpact['outcome'] ?? null, 'sub-disruption asteroid impacts merge both bodies');
 $test->assertEquals(0.0, $gentleAsteroidImpact['unrecoverableMassFraction'] ?? null, 'asteroid fusion preserves the combined mass');
+
+$ordinaryAsteroid = new Asteroid('ordinary-rock', 'Ordinary rock', 'iron', ['iron'], 'small', 0.000001, 0.001);
+$test->assert(!array_key_exists('distinctiveFeature', $ordinaryAsteroid->toArray()), 'ordinary asteroids omit the optional distinctive feature');
+$duckAsteroid = $ordinaryAsteroid->sculptedInTheShapeOfADuck();
+$test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, $duckAsteroid->toArray()['distinctiveFeature'] ?? null, 'anatiform sculpting persists the public duck-shaped feature');
+$test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, Asteroid::fromArray($duckAsteroid->toArray())->getDistinctiveFeature(), 'duck-shaped asteroid feature survives sector serialization');
+$test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, $duckAsteroid->withResourceAmounts(['metals' => 0.5])->getDistinctiveFeature(), 'mining-compatible resource updates preserve duck sculpting');
+$test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, $duckAsteroid->withDeuteriumEngine()->getDistinctiveFeature(), 'deuterium motorization preserves duck sculpting');
 
 $materials = new MaterialDistributionCalculator();
 $test->assert(abs($materials->unrecoverableMassFraction(0.01) - (0.005 / 1.01)) < 1.0e-12, 'material loss is exact at effective ratio 0.01');

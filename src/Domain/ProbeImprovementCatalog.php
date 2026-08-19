@@ -11,6 +11,7 @@ final class ProbeImprovementCatalog
     public const DEUTERIUM_COMPRESSION = 'deuterium_compression';
     public const REINFORCED_CONTAINER_COUPLINGS = 'reinforced_container_couplings';
     public const DISTRIBUTED_THRUST_ANCHORING = 'distributed_thrust_anchoring';
+    public const ANATIFORM_ASTEROID_SCULPTING = 'anatiform_asteroid_sculpting';
 
     public const DEUTERIUM_COMPRESSION_DURATION_SECONDS = 300;
     public const DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT = 200.0;
@@ -24,6 +25,35 @@ final class ProbeImprovementCatalog
         return [
             self::deuteriumCompression($config),
             self::reinforcedContainerCouplings($config),
+        ];
+    }
+
+    /**
+     * Blueprints that unlock actions but are not installed on a probe.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function actionBlueprints(): array
+    {
+        return [
+            [
+                'id' => self::DISTRIBUTED_THRUST_ANCHORING,
+                'name' => 'Distributed Thrust Anchoring',
+                'description' => 'Allows a Manny to anchor a deuterium engine to an asteroid.',
+                'installableOnProbe' => false,
+                'durationSeconds' => 0,
+                'ingredients' => [],
+                'effects' => [],
+            ],
+            [
+                'id' => self::ANATIFORM_ASTEROID_SCULPTING,
+                'name' => 'Anatiform Asteroid Sculpting',
+                'description' => 'Allows a Manny to sculpt an asteroid into the shape of a duck.',
+                'installableOnProbe' => false,
+                'durationSeconds' => 0,
+                'ingredients' => [],
+                'effects' => [],
+            ],
         ];
     }
 

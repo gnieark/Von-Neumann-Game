@@ -271,6 +271,7 @@
             "manny": item,
             "actions": {
                 "distributedThrustAnchoring": hasDistributedThrustAnchoringBlueprint(),
+                "anatiformAsteroidSculpting": hasAnatiformAsteroidSculptingBlueprint(),
                 "deuteriumRefuelStationAvailable": sectorHasDeuteriumRefuelStation(),
                 "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
                 "scutTransitBeaconTargets": scutTransitBeaconRelayTargets().map((relay) => relay.id).join(","),
@@ -353,6 +354,7 @@
             "repair": tr("repair", "Repair"),
             "mining": tr("mine", "Mine"),
             "motorizing_asteroid": tr("motorizingAsteroid", "Motorizing asteroid"),
+            "sculpting_duck_asteroid": tr("sculptingDuckAsteroid", "Sculpting a duck-shaped asteroid"),
             "crafting": tr("craft", "Craft"),
             "salvage": tr("salvage", "Salvage"),
             "returning": tr("returning", "Returning"),
@@ -1513,11 +1515,19 @@
                 && improvement.done !== true);
     }
 
-    function hasDistributedThrustAnchoringBlueprint() {
+    function hasActionBlueprint(id) {
         return (Array.isArray(state.currentProbeImprovements) ? state.currentProbeImprovements : [])
             .some((improvement) => improvement
-                && improvement.id === "distributed_thrust_anchoring"
+                && improvement.id === id
                 && improvement.available === true);
+    }
+
+    function hasDistributedThrustAnchoringBlueprint() {
+        return hasActionBlueprint("distributed_thrust_anchoring");
+    }
+
+    function hasAnatiformAsteroidSculptingBlueprint() {
+        return hasActionBlueprint("anatiform_asteroid_sculpting");
     }
 
     function probeImprovementById(id) {
@@ -1923,6 +1933,16 @@
             return "<section class=\"manny-task-panel\">"
                 + "<h4>" + escaped(tr("asteroidMotorizationInProgress", "Asteroid motorization in progress")) + "</h4>"
                 + "<p>" + escaped(window.VNG.formatText(tr("asteroidMotorizationTaskDetail", "Installing deuterium propulsion on {target}."), {
+                    "target": payload.target && (payload.target.name || payload.target.id) ? (payload.target.name || payload.target.id) : payload.objectId,
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "<button class=\"manny-recall-button\" type=\"button\">" + escaped(recallLabel || tr("recall", "Recall")) + "</button>"
+                + "</section>";
+        }
+        if (manny.currentTask === "sculpting_duck_asteroid") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("duckAsteroidSculptingInProgress", "Duck-shaped asteroid sculpting in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("duckAsteroidSculptingTaskDetail", "Sculpting {target} into the shape of a duck."), {
                     "target": payload.target && (payload.target.name || payload.target.id) ? (payload.target.name || payload.target.id) : payload.objectId,
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
@@ -2977,6 +2997,22 @@
             + "</form>";
     }
 
+    function duckSculptingAsteroidTargets() {
+        return asteroidTargets().filter((object) => object.distinctiveFeature !== "Sculpted in the shape of a duck");
+    }
+
+    function renderSculptDuckAsteroidForm() {
+        const targets = duckSculptingAsteroidTargets();
+
+        return "<form class=\"manny-sculpt-duck-asteroid-form manny-form\">"
+            + "<label>" + escaped(tr("asteroidToSculpt", "Asteroid")) + "<select name=\"objectId\" required>" + asteroidOptionList(targets) + "</select></label>"
+            + "<button type=\"submit\"" + (targets.length ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("sculptDuckAsteroid", "Sculpt into a duck")) + "</button>"
+            + "<p>" + escaped(targets.length
+                ? tr("duckAsteroidSculptingHint", "Sculpting takes two days. If the task is cancelled before completion, the asteroid remains unchanged.")
+                : tr("noAsteroidToSculpt", "No ordinary asteroid is available in this sector.")) + "</p>"
+            + "</form>";
+    }
+
     function fueledMotorizedAsteroids(status) {
         return asteroidTargets().filter((object) => object.motorized === true && object.motorFuelStatus === status && !object.trajectory);
     }
@@ -3092,6 +3128,9 @@
             actions.push({"id": "motorize-asteroid", "title": tr("motorizeAsteroidActionTitle", "Install propulsion on an asteroid"), "render": renderMotorizeAsteroidForm});
             actions.push({"id": "refuel-motorized-asteroid", "title": tr("refuelMotorizedAsteroid", "Refuel a motorized asteroid"), "render": renderRefuelMotorizedAsteroidForm});
             actions.push({"id": "launch-asteroid", "title": tr("launchAsteroid", "Launch a motorized asteroid"), "render": renderLaunchAsteroidForm});
+        }
+        if (hasAnatiformAsteroidSculptingBlueprint()) {
+            actions.push({"id": "sculpt-duck-asteroid", "title": tr("sculptDuckAsteroidActionTitle", "Sculpt an asteroid into a duck"), "render": renderSculptDuckAsteroidForm});
         }
         if (sectorHasDeuteriumRefuelStation()) {
             actions.unshift({"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
@@ -4375,6 +4414,13 @@
             const objectId = String(formData.get("objectId") || "");
             if (!objectId) return null;
             return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refuel-motorized-asteroid"), {
+                "method": "POST", "body": JSON.stringify({"objectId": objectId}),
+            });
+        }
+        if (form.classList.contains("manny-sculpt-duck-asteroid-form")) {
+            const objectId = String(formData.get("objectId") || "");
+            if (!objectId) return null;
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/sculpt-duck-asteroid"), {
                 "method": "POST", "body": JSON.stringify({"objectId": objectId}),
             });
         }

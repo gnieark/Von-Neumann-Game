@@ -36,6 +36,7 @@ use VonNeumannGame\Service\Manny\MannyTaskRuntime;
 use VonNeumannGame\Service\Manny\MiningTaskHandler;
 use VonNeumannGame\Service\Manny\MotorizeAsteroidTaskHandler;
 use VonNeumannGame\Service\Manny\RefuelMotorizedAsteroidTaskHandler;
+use VonNeumannGame\Service\Manny\SculptDuckAsteroidTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeAssemblyTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeImprovementTaskHandler;
 use VonNeumannGame\Service\Manny\ProbeTransferTaskHandler;
@@ -96,6 +97,7 @@ final class MannyService implements MannyTaskRuntime
     private readonly MiningTaskHandler $miningTaskHandler;
     private readonly MotorizeAsteroidTaskHandler $motorizeAsteroidTaskHandler;
     private readonly RefuelMotorizedAsteroidTaskHandler $refuelMotorizedAsteroidTaskHandler;
+    private readonly SculptDuckAsteroidTaskHandler $sculptDuckAsteroidTaskHandler;
     private readonly DetachStorageContainerTaskHandler $detachStorageContainerTaskHandler;
     private readonly DropStorageContainerTaskHandler $dropStorageContainerTaskHandler;
     private readonly InspectSectorObjectTaskHandler $inspectSectorObjectTaskHandler;
@@ -319,8 +321,8 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(SectorDetachedContainer $container): array => $this->detachedContainerInspectionReport($container),
             fn(NeumannProbe $probe, SectorContent $sector, DormantConstruct $construct): array => $this->dormantConstructInspectionReport($probe, $sector, $construct),
-            function (int $probeId, SectorCoordinates $sectorCoordinates, string $objectId, string $objectLabel, string $message, string $objectType, ?string $scheduledAt): void {
-                $this->alerts?->createMannyReportAlert($probeId, $sectorCoordinates, $objectId, $objectLabel, $message, $objectType, $scheduledAt);
+            function (int $probeId, SectorCoordinates $sectorCoordinates, string $objectId, string $objectLabel, string $message, string $objectType, ?string $scheduledAt, ?string $illustrationImageUrl = null): void {
+                $this->alerts?->createMannyReportAlert($probeId, $sectorCoordinates, $objectId, $objectLabel, $message, $objectType, $scheduledAt, $illustrationImageUrl);
             },
             function (Manny $manny, array $payload): void {
                 $this->clearTask($manny, $payload);
@@ -376,6 +378,24 @@ final class MannyService implements MannyTaskRuntime
             fn(Manny $manny, array $payload): mixed => $this->clearTask($manny, $payload),
             fn(Manny $manny, string $state): mixed => $this->registerMannyInSector($manny, $state),
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+        );
+        $this->sculptDuckAsteroidTaskHandler = new SculptDuckAsteroidTaskHandler(
+            fn(NeumannProbe $probe): mixed => $this->ensureProbeAcceptsMannyOrders($probe),
+            fn(Manny $manny, NeumannProbe $probe): Manny => $this->refreshMannyState($manny, $probe),
+            fn(NeumannProbe $probe, string $uid): Manny => $this->requiredManny($probe, $uid),
+            fn(Manny $manny, NeumannProbe $probe): mixed => $this->ensureMannyInRange($manny, $probe),
+            fn(Manny $manny): mixed => $this->ensureMannyIdle($manny),
+            fn(NeumannProbe $probe, Manny $manny): mixed => $this->refreshOtherMannyStates($probe, $manny),
+            fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
+            fn(NeumannProbe $probe, string $objectId): bool => $this->hasScheduledAsteroidTask($probe, $objectId, Manny::TASK_SCULPTING_DUCK_ASTEROID),
+            fn(Manny $manny): mixed => $this->storage->releaseMannyFromStorage($manny),
+            fn(Manny $manny): mixed => $this->removeMannyFromSector($manny),
+            fn(Manny $manny): mixed => $this->mannies->save($manny),
+            fn(SectorContent $sector): mixed => $this->sectors->saveSector($sector),
+            fn(Manny $manny, array $payload): mixed => $this->clearTask($manny, $payload),
+            fn(Manny $manny, string $state): mixed => $this->registerMannyInSector($manny, $state),
+            fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
+            fn(): int => $this->miningTravelSeconds(),
         );
         $this->probeImprovementTaskHandler = new ProbeImprovementTaskHandler(
             function (): void {
@@ -758,6 +778,7 @@ final class MannyService implements MannyTaskRuntime
                 $this->miningTaskHandler,
                 $this->motorizeAsteroidTaskHandler,
                 $this->refuelMotorizedAsteroidTaskHandler,
+                $this->sculptDuckAsteroidTaskHandler,
                 $this->detachStorageContainerTaskHandler,
                 $this->dropStorageContainerTaskHandler,
                 $this->inspectSectorObjectTaskHandler,
@@ -967,6 +988,20 @@ final class MannyService implements MannyTaskRuntime
         return $this->withProbeLock(
             $probe,
             fn(NeumannProbe $lockedProbe): Manny => $this->refuelMotorizedAsteroidTaskHandler->start($lockedProbe, $uid, $objectId),
+        );
+    }
+
+    public function startSculptingDuckAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
+    {
+        return $this->withProbeLock(
+            $probe,
+            function (NeumannProbe $lockedProbe) use ($uid, $objectId): Manny {
+                if ($this->improvements?->findForProbe($lockedProbe->id, ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING)?->available !== true) {
+                    throw new MannyActionException(422, 'anatiform_asteroid_sculpting_unavailable', 'The Anatiform Asteroid Sculpting blueprint has not been unlocked.');
+                }
+
+                return $this->sculptDuckAsteroidTaskHandler->start($lockedProbe, $uid, $objectId);
+            },
         );
     }
 
@@ -2335,10 +2370,15 @@ final class MannyService implements MannyTaskRuntime
 
         $this->improvements?->markAvailable($probe->id, $scenario);
 
-        return [
+        $report = [
             'scenario' => $scenario,
             'message' => $this->dormantConstructReportMessage($scenario),
         ];
+        if ($scenario === ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING) {
+            $report['illustrationImageUrl'] = 'https://neumann-probe.net/images/duck-asteroid.png';
+        }
+
+        return $report;
     }
 
     private function dormantConstructReportMessage(string $scenario): string
@@ -2359,6 +2399,11 @@ final class MannyService implements MannyTaskRuntime
                 . "The remarkable part is the mounting system. Instead of concentrating thrust through a single frame, hundreds of anchors disappear into natural fractures and spread the load across the asteroid's entire mass. The rock was not reinforced into a ship; the thrust was taught how to use the rock already there.\n\n"
                 . "Recovered blueprint: Distributed Thrust Anchoring.\n\n"
                 . "Blueprint unlocked: Distributed-thrust anchor. You can now install deuterium engines on asteroids.",
+            ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING => "Manny report\n\n"
+                . "This is an asteroid that appears to have been deliberately sculpted into the shape of a duck. The proportions are too precise to be erosion, collision damage, or an astronomical coincidence with a particularly strong sense of comedy.\n\n"
+                . "Tool marks across the surface reveal a method for removing material without destabilizing the asteroid or compromising its mineral deposits.\n\n"
+                . "Recovered blueprint: Anatiform Asteroid Sculpting.\n\n"
+                . "Blueprint unlocked: Anatiform Asteroid Sculpting. You can now send a Manny to sculpt an asteroid into the shape of a duck.",
             default => "Manny report\n\nThe structure is artificial, but the recovered data could not be classified.",
         };
     }
