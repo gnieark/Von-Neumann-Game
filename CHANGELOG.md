@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-08-19
+
+### Changed
 - API v111 : ajout des trajectoires persistantes d’astéroïdes motorisés. `POST /api/probe/{probeId}/asteroids/{asteroidId}/trajectories` lance soit un impact local relativiste, soit un transfert vers un voisin FCC, et `GET /api/probe/{probeId}/asteroid-trajectories/{trajectoryId}` expose uniquement la télémétrie détectable dans le secteur courant, sans coordonnée absolue. Les phases sont exécutées et rejouées de façon idempotente par le scheduler.
 - API v111 : l’alerte d’allumage d’une trajectoire `system_impact` indique désormais l’identifiant opaque de la cible et son type (`probe`, `asteroid`, `planet` ou `star`).
 - API v111 : les astéroïdes motorisés ont désormais un réservoir binaire explicite (`motorFuelStatus: full|empty`). La motorisation consomme aussi deux plaques d’acier et 0,2 point de deutérium, attribue un nouvel identifiant opaque, et `POST /api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid` permet à une Manny de refaire le plein avant son retour automatique.
