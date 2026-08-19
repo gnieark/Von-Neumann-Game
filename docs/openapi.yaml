@@ -1616,8 +1616,17 @@ paths:
         scheduler-driven trajectory. A system impact accelerates around the
         sector reference star before a ten-minute coasting phase. A sector
         transfer accepts only a direct FCC-grid neighbor expressed in the
-        player's relative frame and then crosses one sector every 24 hours.
-        Absolute coordinates are never returned.
+        player's relative frame; that neighbor sets a straight-line direction,
+        and the asteroid then crosses one sector every 24 hours. Capture is
+        guaranteed in the first entered sector containing at least one eligible
+        body. In a stellar system the captor is selected proportionally to
+        mass, so the star is overwhelmingly favored and places the asteroid in
+        orbit when selected. Each sector crossed without an eligible body, and
+        each failed capture attempt, reduces the next capture probability by
+        10 percentage points (100%, 90%, 80%, and so on). Crossing several
+        empty sectors therefore makes a later capture progressively less
+        certain. Black holes always capture the asteroid. Absolute coordinates
+        are never returned.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
         - name: asteroidId

@@ -3013,12 +3013,31 @@
         return acceleration + 600;
     }
 
+    function asteroidLaunchHint(mode) {
+        if (mode === "sector_transfer") {
+            return tr(
+                "asteroidLaunchSectorTransferHint",
+                "The selected neighbor sets a straight-line direction and the asteroid then crosses one sector every 24 hours. Capture is guaranteed in the first sector containing an eligible body; each empty sector or failed attempt lowers the next chance by 10 points (100%, 90%, 80%...). In a stellar system the star is strongly favored by its mass, and a black hole always captures the asteroid."
+            );
+        }
+
+        return tr(
+            "asteroidLaunchSystemImpactHint",
+            "The asteroid accelerates around the system star to the selected speed, then strikes its target after a ten-minute final approach. Ignition empties the fuel tank and cannot be cancelled."
+        );
+    }
+
     function updateAsteroidLaunchEstimate(form) {
         if (!form) return;
         const output = form.querySelector(".manny-asteroid-launch-estimate");
+        const hint = form.querySelector(".manny-asteroid-launch-hint");
+        const mode = String(form.elements.mode ? form.elements.mode.value : "system_impact");
         const duration = asteroidLaunchDurationSeconds(form);
         if (output) {
             output.textContent = tr("asteroidEstimatedDuration", "Estimated duration") + " " + (duration > 0 ? window.VNG.duration(duration, tr) : "-");
+        }
+        if (hint) {
+            hint.textContent = asteroidLaunchHint(mode);
         }
     }
 
@@ -3037,10 +3056,11 @@
         const initialDuration = targets.length ? Math.max(1, Math.min(259200, Math.round((7200 + (252000 * initialMassRatio)) * 0.1))) + 600 : 0;
         return "<form class=\"manny-launch-asteroid-form manny-form\">"
             + "<label>" + escaped(tr("asteroidToLaunch", "Asteroid")) + "<select class=\"manny-asteroid-launch-input\" name=\"objectId\" required>" + asteroidOptionList(targets) + "</select></label>"
-            + "<label>" + escaped(tr("trajectoryMode", "Trajectory")) + "<select class=\"manny-asteroid-launch-input\" name=\"mode\"><option value=\"system_impact\">system impact</option><option value=\"sector_transfer\">sector transfer</option></select></label>"
+            + "<label>" + escaped(tr("trajectoryMode", "Trajectory")) + "<select class=\"manny-asteroid-launch-input\" name=\"mode\"><option value=\"system_impact\">" + escaped(tr("asteroidTrajectorySystemImpact", "System impact")) + "</option><option value=\"sector_transfer\">" + escaped(tr("asteroidTrajectorySectorTransfer", "Intersector transfer")) + "</option></select></label>"
             + "<label>" + escaped(tr("impactTarget", "Impact target")) + "<select name=\"targetObjectId\" required>" + asteroidOptionList(impactTargets) + "</select></label>"
             + "<label>" + escaped(tr("targetSpeedC", "Target speed (c)")) + "<input class=\"manny-asteroid-launch-input\" name=\"targetSpeedC\" type=\"number\" min=\"0.000001\" max=\"0.5\" step=\"0.000001\" value=\"0.05\"></label>"
             + "<fieldset><legend>" + escaped(tr("neighborSector", "Neighbor sector")) + "</legend><input name=\"x\" type=\"number\" value=\"1\"><input name=\"y\" type=\"number\" value=\"1\"><input name=\"z\" type=\"number\" value=\"0\"></fieldset>"
+            + "<p class=\"manny-asteroid-launch-hint\">" + escaped(asteroidLaunchHint("system_impact")) + "</p>"
             + "<p class=\"manny-asteroid-launch-estimate\">" + escaped(tr("asteroidEstimatedDuration", "Estimated duration:") + " " + (initialDuration > 0 ? window.VNG.duration(initialDuration, tr) : "-")) + "</p>"
             + "<button type=\"submit\"" + (targets.length ? "" : " disabled") + ">" + escaped(tr("launchAsteroid", "Launch asteroid")) + "</button></form>";
     }
