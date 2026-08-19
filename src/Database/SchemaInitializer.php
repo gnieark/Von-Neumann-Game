@@ -35,6 +35,10 @@ final class SchemaInitializer
             ? ",
                 active_probe_id INTEGER GENERATED ALWAYS AS (CASE WHEN status IN ('preparing','accelerating','cruising','decelerating') THEN probe_id ELSE NULL END) STORED"
             : '';
+        $activeAsteroidTrajectoryColumn = $this->driver === 'mysql'
+            ? ",
+                active_asteroid_id VARCHAR(255) GENERATED ALWAYS AS (CASE WHEN status IN ('accelerating','coasting','crossing_sector','orbiting_black_hole') THEN asteroid_id ELSE NULL END) STORED"
+            : '';
 
         $statements = [
             "CREATE TABLE IF NOT EXISTS players (
@@ -400,6 +404,49 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_probe_status ON probe_damage_warnings(probe_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_probe_damage_warnings_movement ON probe_damage_warnings(movement_id)",
+            "CREATE TABLE IF NOT EXISTS asteroid_trajectories (
+                id $id,
+                uid $text NOT NULL UNIQUE,
+                asteroid_id $text NOT NULL,
+                mode $text NOT NULL,
+                status $text NOT NULL,
+                origin_sector_x INTEGER NOT NULL,
+                origin_sector_y INTEGER NOT NULL,
+                origin_sector_z INTEGER NOT NULL,
+                current_sector_x INTEGER NOT NULL,
+                current_sector_y INTEGER NOT NULL,
+                current_sector_z INTEGER NOT NULL,
+                direction_x INTEGER NULL,
+                direction_y INTEGER NULL,
+                direction_z INTEGER NULL,
+                target_object_id $nullableText,
+                target_probe_id INTEGER NULL,
+                target_speed_c $decimal NULL,
+                asteroid_mass_earth $decimal NOT NULL,
+                star_mass_solar $decimal NULL,
+                acceleration_started_at $nullableText,
+                acceleration_ends_at $nullableText,
+                revolution_duration_seconds INTEGER NULL,
+                planned_revolutions INTEGER NULL,
+                next_transition_at $text NOT NULL,
+                sectors_crossed INTEGER NOT NULL DEFAULT 0,
+                capture_penalty_steps INTEGER NOT NULL DEFAULT 0,
+                maximum_sector_crossings INTEGER NOT NULL,
+                result $nullableText,
+                failure_reason $nullableText,
+                asteroid_snapshot_json TEXT NOT NULL,
+                attachments_snapshot_json TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL
+                $activeAsteroidTrajectoryColumn
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_asteroid_trajectories_status_due ON asteroid_trajectories(status, next_transition_at)",
+            "CREATE INDEX IF NOT EXISTS idx_asteroid_trajectories_sector ON asteroid_trajectories(current_sector_x, current_sector_y, current_sector_z)",
+            $this->driver === 'sqlite'
+                ? "CREATE UNIQUE INDEX IF NOT EXISTS idx_asteroid_trajectories_one_active_per_asteroid
+                   ON asteroid_trajectories(asteroid_id)
+                   WHERE status IN ('accelerating','coasting','crossing_sector','orbiting_black_hole')"
+                : "CREATE UNIQUE INDEX IF NOT EXISTS idx_asteroid_trajectories_one_active_per_asteroid ON asteroid_trajectories(active_asteroid_id)",
             "CREATE TABLE IF NOT EXISTS scheduled_events (
                 id $id,
                 type $text NOT NULL,

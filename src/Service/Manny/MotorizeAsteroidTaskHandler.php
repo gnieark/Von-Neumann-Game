@@ -26,6 +26,7 @@ final class MotorizeAsteroidTaskHandler implements TaskHandlerInterface
         private readonly \Closure $motorizationAlreadyScheduled,
         private readonly \Closure $deleteItem,
         private readonly \Closure $consumedItemPayload,
+        private readonly \Closure $consumeMotorizationFuel,
         private readonly \Closure $miningTravelSeconds,
         private readonly \Closure $releaseMannyFromStorage,
         private readonly \Closure $removeMannyFromSector,
@@ -34,6 +35,7 @@ final class MotorizeAsteroidTaskHandler implements TaskHandlerInterface
         private readonly \Closure $clearTask,
         private readonly \Closure $registerMannyInSector,
         private readonly \Closure $findMannyById,
+        private readonly \Closure $replaceObjectIdReferences,
     ) {}
 
     public function supports(?string $task): bool
@@ -73,15 +75,21 @@ final class MotorizeAsteroidTaskHandler implements TaskHandlerInterface
         }
         $engines = $itemsByType[ProbeItem::TYPE_DEUTERIUM_ENGINE] ?? [];
         $steelBars = $itemsByType[ProbeItem::TYPE_STEEL_BAR] ?? [];
-        if (count($engines) < 1 || count($steelBars) < 4) {
-            throw new MannyActionException(422, 'insufficient_asteroid_motorization_components', 'One deuterium engine and four steel bars are required.');
+        $steelPlates = $itemsByType[ProbeItem::TYPE_STEEL_PLATE] ?? [];
+        if (count($engines) < 1 || count($steelBars) < 4 || count($steelPlates) < 2) {
+            throw new MannyActionException(422, 'insufficient_asteroid_motorization_components', 'One deuterium engine, four steel bars and two steel plates are required.');
         }
 
+        ($this->consumeMotorizationFuel)($probe);
         $consumedItems = [($this->consumedItemPayload)($engines[0])];
         ($this->deleteItem)($engines[0]);
         foreach (array_slice($steelBars, 0, 4) as $steelBar) {
             $consumedItems[] = ($this->consumedItemPayload)($steelBar);
             ($this->deleteItem)($steelBar);
+        }
+        foreach (array_slice($steelPlates, 0, 2) as $steelPlate) {
+            $consumedItems[] = ($this->consumedItemPayload)($steelPlate);
+            ($this->deleteItem)($steelPlate);
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
@@ -118,15 +126,23 @@ final class MotorizeAsteroidTaskHandler implements TaskHandlerInterface
             'objectId' => $objectId,
             'target' => $manny->taskPayload['target'] ?? null,
         ];
+        $installed = false;
         if (!$target instanceof Asteroid) {
             $result += ['result' => 'failed', 'failureReason' => 'target_unavailable'];
         } elseif ($target->isMotorized()) {
             $result += ['result' => 'failed', 'failureReason' => 'asteroid_already_motorized'];
         } else {
-            $motorized = $target->withDeuteriumEngine();
-            $sector->replaceObject($motorized);
+            $newObjectId = 'mtr_' . bin2hex(random_bytes(12));
+            $motorized = $target->withDeuteriumEngine($newObjectId);
+            if (!$sector->replaceObjectAndReferences($objectId, $motorized)) {
+                throw new \RuntimeException('Asteroid replacement failed during motorization.');
+            }
+            ($this->replaceObjectIdReferences)($objectId, $newObjectId);
             ($this->saveSector)($sector);
-            $result += ['result' => 'success', 'asteroid' => $motorized->toArray()];
+            $result['result'] = 'success';
+            $result['previousObjectId'] = $objectId;
+            $result['objectId'] = $newObjectId;
+            $result['asteroid'] = $motorized->toArray();
             $installed = true;
         }
 

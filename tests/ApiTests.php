@@ -11,11 +11,13 @@ use VonNeumannGame\Config\JsonConfigLoader;
 use VonNeumannGame\Database\DatabaseConfig;
 use VonNeumannGame\Database\DatabaseConnectionFactory;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
+use VonNeumannGame\Domain\AsteroidTrajectory;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\Mission;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDirection;
+use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
@@ -37,6 +39,7 @@ use VonNeumannGame\RateLimit\RedisScriptExecutor;
 use VonNeumannGame\RateLimit\RedisTokenRateLimiter;
 use VonNeumannGame\RateLimit\TokenRateLimiter;
 use VonNeumannGame\Repository\MannyRepository;
+use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
 use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ApiKeyRepository;
@@ -67,6 +70,15 @@ use VonNeumannGame\Service\ScutNetworkService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\UniverseStatsService;
 use VonNeumannGame\Service\WaypointBookmarkService;
+use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryService;
+use VonNeumannGame\Service\AsteroidTrajectory\AccelerationPhaseHandler;
+use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryPhaseProcessor;
+use VonNeumannGame\Service\AsteroidTrajectory\BlackHoleOrbitPhaseHandler;
+use VonNeumannGame\Service\AsteroidTrajectory\CaptureCalculator;
+use VonNeumannGame\Service\AsteroidTrajectory\ImpactDamageResolver;
+use VonNeumannGame\Service\AsteroidTrajectory\PhaseHandlerRegistry;
+use VonNeumannGame\Service\AsteroidTrajectory\SectorTransferPhaseHandler;
+use VonNeumannGame\Service\AsteroidTrajectory\SystemImpactPhaseHandler;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\BlackHole;
 use VonNeumannGame\Sector\DeuteriumRefuelStation;
@@ -599,6 +611,10 @@ $test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attac
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
+$test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories:'), 'OpenAPI documents asteroid trajectory creation');
+$test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroid-trajectories/{trajectoryId}:'), 'OpenAPI documents local trajectory telemetry');
+$test->assert(str_contains($openApi, 'discriminator:') && str_contains($openApi, "propertyName: mode"), 'OpenAPI discriminates trajectory requests by mode');
+$test->assert(str_contains($openApi, 'asteroid_temporarily_occluded') && str_contains($openApi, 'motorFuelStatus'), 'OpenAPI documents trajectory errors and binary asteroid fuel');
 $test->assert(str_contains($openApi, 'Generated asteroids have a short content-based name such as Ice Deut 15ce'), 'OpenAPI documents content/hash asteroid names');
 $test->assert(str_contains($openApi, 'nextUsefulRefreshDelayMs'), 'OpenAPI documents Manny list useful refresh delay hints');
 $test->assert(str_contains($openApi, 'enum: [covered, uncovered, unknown]'), 'OpenAPI documents SCUT coverage knowledge states');
@@ -653,6 +669,10 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyIn
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'recoverableDetachedContainerTargets'), 'mannies JS limits recovery targets to current-sector detached container objects');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargets'), 'mannies JS builds a generic sector-object inspection target list');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspect-sector-object'), 'mannies JS posts generic sector-object inspections');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-refuel-motorized-asteroid-form'), 'mannies JS renders the motorized asteroid refueling form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-asteroid-form'), 'mannies JS renders the asteroid trajectory launch form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/asteroids/') && str_contains($manniesScript, '/trajectories'), 'mannies JS posts asteroid trajectory orders');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'asteroidLaunchDurationSeconds'), 'mannies JS computes the trajectory duration estimate before launch');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'data-manny-hash'), 'mannies JS exposes the Manny state hash on Manny cards');
@@ -847,7 +867,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260816-motorized-asteroid-scan"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-asteroid-trajectories"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1478,6 +1498,34 @@ $test->assertEquals(1.0, (float)($migratedMetadata['capacity_bonus'] ?? 0), 'ite
 $test->assertEquals('source-1', $migratedMetadata['restored_detached_container_source_uid'] ?? null, 'item metadata migration extracts restored source uid');
 $test->assertEquals(['administrativeRepairReason'=>'test'], json_decode((string)($migratedMetadata['audit_metadata_json'] ?? '{}'), true), 'item metadata migration keeps rare audit metadata');
 
+$asteroidMigrationUniverse = $tmp . DIRECTORY_SEPARATOR . 'asteroid-trajectory-migration-universe';
+$asteroidMigrationSectorDirectory = $asteroidMigrationUniverse . DIRECTORY_SEPARATOR . 'sectors' . DIRECTORY_SEPARATOR . 'x_p0' . DIRECTORY_SEPARATOR . 'y_p0' . DIRECTORY_SEPARATOR . 'z_p0';
+mkdir($asteroidMigrationSectorDirectory, 0775, true);
+$asteroidMigrationSectorPath = $asteroidMigrationSectorDirectory . DIRECTORY_SEPARATOR . 'sector_p0_p0_p0.json';
+$asteroidMigrationLegacy = (new Asteroid('migration-motorized', null, 'iron', ['iron'], 'small', 0.000001, 0.001))->toArray();
+$asteroidMigrationLegacy['motorized'] = true;
+unset($asteroidMigrationLegacy['motorFuelStatus']);
+file_put_contents($asteroidMigrationSectorPath, json_encode(['objects' => [$asteroidMigrationLegacy]], JSON_THROW_ON_ERROR));
+$asteroidMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'asteroid-trajectory-migration.sqlite';
+$asteroidMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'asteroid-trajectory-migration.json';
+file_put_contents($asteroidMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $asteroidMigrationDbPath], JSON_THROW_ON_ERROR));
+$asteroidMigrationCommand = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-asteroid-trajectories.php')
+    . ' --database-config=' . escapeshellarg($asteroidMigrationConfig)
+    . ' --universe-path=' . escapeshellarg($asteroidMigrationUniverse);
+exec($asteroidMigrationCommand . ' 2>&1', $asteroidMigrationOutput, $asteroidMigrationStatus);
+$test->assertEquals(0, $asteroidMigrationStatus, 'asteroid trajectory migration exits successfully');
+$test->assert(str_contains(implode("\n", $asteroidMigrationOutput), 'asteroids_changed=1'), 'asteroid trajectory migration reports the converted legacy asteroid');
+$asteroidMigrationData = json_decode((string) file_get_contents($asteroidMigrationSectorPath), true, 512, JSON_THROW_ON_ERROR);
+$test->assertEquals('full', $asteroidMigrationData['objects'][0]['motorFuelStatus'] ?? null, 'asteroid trajectory migration writes the explicit full fuel state');
+$asteroidMigrationPdo = new PDO('sqlite:' . $asteroidMigrationDbPath);
+$asteroidMigrationTables = $asteroidMigrationPdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='asteroid_trajectories'")->fetchAll(PDO::FETCH_COLUMN);
+$test->assertEquals(['asteroid_trajectories'], $asteroidMigrationTables, 'asteroid trajectory migration installs its SQL schema');
+$secondAsteroidMigrationOutput = [];
+$secondAsteroidMigrationStatus = 0;
+exec($asteroidMigrationCommand . ' 2>&1', $secondAsteroidMigrationOutput, $secondAsteroidMigrationStatus);
+$test->assertEquals(0, $secondAsteroidMigrationStatus, 'asteroid trajectory migration can be rerun safely');
+$test->assert(str_contains(implode("\n", $secondAsteroidMigrationOutput), 'asteroids_changed=0'), 'second asteroid trajectory migration performs no sector rewrite');
+
 $mannies = new MannyRepository($pdo, scheduledEvents: $scheduledEvents);
 $items = new ProbeItemRepository($pdo);
 $probeImprovements = new ProbeImprovementRepository($pdo);
@@ -1491,6 +1539,7 @@ $forum = new ForumRepository($pdo);
 $storageContainers = new StorageContainerRepository($pdo);
 $logbook = new ProbeLogbookRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
+$asteroidTrajectories = new AsteroidTrajectoryRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $apiKeys = new ApiKeyRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
@@ -1503,8 +1552,23 @@ $missionService = new MissionService($missions, $messages, [], 'api-test-world',
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents, movements: $movements);
-$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories);
+$asteroidTrajectoryService = new AsteroidTrajectoryService(
+    $asteroidTrajectories,
+    $probes,
+    $scheduledEvents,
+    $sectorService,
+    json_decode((string) file_get_contents($root . '/config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR),
+    json_decode((string) file_get_contents($root . '/config/universe.json'), true, 512, JSON_THROW_ON_ERROR),
+    $damageWarnings,
+);
+$testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTrajectories, new PhaseHandlerRegistry([
+    new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, 600),
+    new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, new ImpactDamageResolver()),
+    new SectorTransferPhaseHandler($asteroidTrajectories, $scheduledEvents, $sectorService, new CaptureCalculator()),
+    new BlackHoleOrbitPhaseHandler($asteroidTrajectories, $sectorService),
+]));
+$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $testTrajectoryProcessor);
 $processScheduledMannyNow = static function (int $mannyId) use ($pdo, $scheduler): array {
     $pdo->prepare(
         "UPDATE scheduled_events
@@ -1517,7 +1581,60 @@ $processScheduledMannyNow = static function (int $mannyId) use ($pdo, $scheduler
 
     return $scheduler->processDueEvents(100);
 };
-$kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements);
+$kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
+    $sectorService,
+    $visitedSectors,
+    mannies: $mannies,
+    asteroidTrajectories: $asteroidTrajectories,
+    asteroidTrajectoryService: $asteroidTrajectoryService,
+), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService);
+
+$trajectoryColumns = array_column($pdo->query('PRAGMA table_info(asteroid_trajectories)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assert(in_array('uid', $trajectoryColumns, true) && in_array('current_sector_x', $trajectoryColumns, true), 'asteroid trajectory SQL schema is installed by the explicit schema migration');
+$repositoryTrajectory = $asteroidTrajectories->create([
+    'asteroidId' => 'repository-trajectory-rock',
+    'mode' => AsteroidTrajectory::MODE_SECTOR_TRANSFER,
+    'status' => AsteroidTrajectory::STATUS_CROSSING_SECTOR,
+    'originSector' => new SectorCoordinates(0, 0, 0),
+    'direction' => ['x' => 1, 'y' => 1, 'z' => 0],
+    'asteroidMassEarth' => 0.000001,
+    'nextTransitionAt' => gmdate('c', time() + 86400),
+    'maximumSectorCrossings' => 10,
+]);
+$test->assert(str_starts_with($repositoryTrajectory->uid, 'atr_'), 'trajectory repository creates opaque public ids');
+$test->assertThrows(
+    fn() => $asteroidTrajectories->create([
+        'asteroidId' => 'repository-trajectory-rock',
+        'mode' => AsteroidTrajectory::MODE_SECTOR_TRANSFER,
+        'status' => AsteroidTrajectory::STATUS_CROSSING_SECTOR,
+        'originSector' => new SectorCoordinates(0, 0, 0),
+        'direction' => ['x' => 1, 'y' => 1, 'z' => 0],
+        'asteroidMassEarth' => 0.000001,
+        'nextTransitionAt' => gmdate('c', time() + 86400),
+        'maximumSectorCrossings' => 10,
+    ]),
+    PDOException::class,
+    'SQL uniqueness prevents two active trajectories for one asteroid',
+);
+$repositoryTrajectory = $asteroidTrajectories->transition($repositoryTrajectory->id, [AsteroidTrajectory::STATUS_CROSSING_SECTOR], [
+    'status' => AsteroidTrajectory::STATUS_LOST,
+    'result' => 'crossing_limit_reached',
+]);
+$test->assertEquals(AsteroidTrajectory::STATUS_LOST, $repositoryTrajectory->status, 'trajectory transition atomically advances from its expected phase');
+$replayedRepositoryTrajectory = $asteroidTrajectories->transition($repositoryTrajectory->id, [AsteroidTrajectory::STATUS_CROSSING_SECTOR], [
+    'status' => AsteroidTrajectory::STATUS_FAILED,
+]);
+$test->assertEquals(AsteroidTrajectory::STATUS_LOST, $replayedRepositoryTrajectory->status, 'replayed phase transition succeeds without applying a second effect');
+$test->assert($asteroidTrajectories->create([
+    'asteroidId' => 'repository-trajectory-rock',
+    'mode' => AsteroidTrajectory::MODE_SECTOR_TRANSFER,
+    'status' => AsteroidTrajectory::STATUS_CROSSING_SECTOR,
+    'originSector' => new SectorCoordinates(0, 0, 0),
+    'direction' => ['x' => 1, 'y' => 1, 'z' => 0],
+    'asteroidMassEarth' => 0.000001,
+    'nextTransitionAt' => gmdate('c', time() + 86400),
+    'maximumSectorCrossings' => 10,
+])->isActive(), 'terminal trajectories no longer block a later launch after refueling');
 
 $multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
 $primaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Primary future probe', $multiProbePlayer->homeSector);
@@ -1813,7 +1930,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(110, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(111, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -5545,7 +5662,8 @@ if ($motorizeProbe !== null) {
     $sectorRepository->save($motorizeSector);
     $motorizeMannies = $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
     $motorizeMannyId = (string) ($motorizeMannies->body['mannies'][0]['id'] ?? '');
-    $motorizeMiningMannyId = (string) ($motorizeMannies->body['mannies'][1]['id'] ?? '');
+    $motorizeRefuelMannyId = (string) ($motorizeMannies->body['mannies'][1]['id'] ?? '');
+    $motorizeMiningMannyId = (string) ($motorizeMannies->body['mannies'][2]['id'] ?? '');
 
     $lockedMotorization = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
         'objectId' => 'motorize-rock',
@@ -5574,12 +5692,16 @@ if ($motorizeProbe !== null) {
     $missingMotorizationComponents = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
         'objectId' => 'motorize-rock',
     ], JSON_THROW_ON_ERROR));
-    $test->assertEquals(422, $missingMotorizationComponents->status, 'asteroid motorization requires one engine and four steel bars');
+    $test->assertEquals(422, $missingMotorizationComponents->status, 'asteroid motorization requires its complete component set');
     $test->assertEquals('insufficient_asteroid_motorization_components', $missingMotorizationComponents->body['error']['code'] ?? null, 'missing asteroid motorization components return a stable error');
     $storage->addItem($motorizeProbe, ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::DEUTERIUM_ENGINE_NAME, 0.05);
     for ($index = 0; $index < 4; $index++) {
         $storage->addItem($motorizeProbe, ProbeItem::TYPE_STEEL_BAR, ProbeItem::STEEL_BAR_NAME, 0.01);
     }
+    for ($index = 0; $index < 2; $index++) {
+        $storage->addItem($motorizeProbe, ProbeItem::TYPE_STEEL_PLATE, ProbeItem::STEEL_PLATE_NAME, 0.01);
+    }
+    $motorizationFuelBefore = $probes->findById($motorizeProbe->id)?->deuteriumStock;
     $acceptedMotorization = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMannyId) . '/motorize-asteroid', $motorizeHeaders, json_encode([
         'objectId' => 'motorize-rock',
     ], JSON_THROW_ON_ERROR));
@@ -5588,9 +5710,10 @@ if ($motorizeProbe !== null) {
     $test->assertEquals(1200, $acceptedMotorization->body['manny']['task']['durationSeconds'] ?? null, 'asteroid motorization lasts one mining trip plus five minutes');
     $remainingMotorizationComponents = array_values(array_filter(
         $items->findByProbeId($motorizeProbe->id),
-        static fn(ProbeItem $item): bool => in_array($item->type, [ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::TYPE_STEEL_BAR], true),
+        static fn(ProbeItem $item): bool => in_array($item->type, [ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::TYPE_STEEL_BAR, ProbeItem::TYPE_STEEL_PLATE], true),
     ));
-    $test->assertEquals(0, count($remainingMotorizationComponents), 'asteroid motorization consumes one deuterium engine and four steel bars');
+    $test->assertEquals(0, count($remainingMotorizationComponents), 'asteroid motorization consumes one engine, four bars and two plates atomically');
+    $test->assertEquals(round((float) $motorizationFuelBefore - 0.2, 4), $probes->findById($motorizeProbe->id)?->deuteriumStock, 'asteroid motorization consumes 0.2 deuterium point');
 
     $motorizeMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $motorizeMannyRow->execute(['uid' => $motorizeMannyId]);
@@ -5607,22 +5730,154 @@ if ($motorizeProbe !== null) {
     $test->assertEquals(Manny::TASK_RETURNING, $returningMotorizationManny['currentTask'] ?? null, 'Manny automatically starts returning after installing the asteroid engine');
     $test->assertEquals('asteroid_motorization_completed', $returningMotorizationManny['task']['reason'] ?? null, 'automatic motorization recall exposes a stable reason');
     $test->assertEquals(900, $returningMotorizationManny['task']['durationSeconds'] ?? null, 'automatic motorization recall uses the configured Manny travel duration');
-    $storedMotorizedAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById('motorize-rock');
+    $motorizedAsteroidId = (string) ($returningMotorizationManny['task']['objectId'] ?? '');
+    $test->assert(str_starts_with($motorizedAsteroidId, 'mtr_'), 'first motorization replaces the asteroid id with an opaque motorization marker');
+    $test->assertEquals('motorize-rock', $returningMotorizationManny['task']['previousObjectId'] ?? null, 'motorization terminal payload retains the replaced id for correlation');
+    $storedMotorizedAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
     $test->assert($storedMotorizedAsteroid instanceof Asteroid && $storedMotorizedAsteroid->isMotorized(), 'completed motorization persists the asteroid motorized state');
+    $test->assertEquals(Asteroid::MOTOR_FUEL_FULL, $storedMotorizedAsteroid instanceof Asteroid ? $storedMotorizedAsteroid->getMotorFuelStatus() : null, 'completed motorization fills the asteroid binary fuel tank');
     $test->assertEquals(1.0, $storedMotorizedAsteroid instanceof Asteroid ? ($storedMotorizedAsteroid->getResourceAmounts()['metals'] ?? null) : null, 'motorization preserves asteroid resources');
     $motorizedSectorScan = $kernel->handle('GET', '/api/probe/' . $motorizeProbe->id . '/sector', $motorizeHeaders);
     $publicMotorizedAsteroid = array_values(array_filter(
         $motorizedSectorScan->body['sector']['objects'] ?? [],
-        static fn(array $object): bool => ($object['id'] ?? null) === 'motorize-rock',
+        static fn(array $object): bool => str_starts_with((string) ($object['id'] ?? ''), 'mtr_'),
     ))[0] ?? [];
     $test->assertEquals(true, $publicMotorizedAsteroid['motorized'] ?? null, 'sector scans expose the persisted motorized asteroid state');
+    $test->assertEquals('full', $publicMotorizedAsteroid['motorFuelStatus'] ?? null, 'sector scans expose fuel state only for motorized asteroids');
+
+    if ($storedMotorizedAsteroid instanceof Asteroid) {
+        $emptyMotorizedSector = $sectorRepository->load($motorizeProbe->currentSector);
+        $emptyMotorizedSector->replaceObject($storedMotorizedAsteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY));
+        $sectorRepository->save($emptyMotorizedSector);
+    }
+    $refuelFuelBefore = $probes->findById($motorizeProbe->id)?->deuteriumStock;
+    $acceptedRefuel = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeRefuelMannyId) . '/refuel-motorized-asteroid', $motorizeHeaders, json_encode([
+        'objectId' => $motorizedAsteroidId,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $acceptedRefuel->status, 'an onboard Manny can start refueling an empty motorized asteroid');
+    $test->assertEquals(Manny::TASK_REFUELING_MOTORIZED_ASTEROID, $acceptedRefuel->body['manny']['currentTask'] ?? null, 'asteroid refueling exposes its dedicated Manny task');
+    $test->assertEquals(round((float) $refuelFuelBefore - 0.2, 4), $probes->findById($motorizeProbe->id)?->deuteriumStock, 'asteroid refueling consumes 0.2 deuterium point when launched');
+    $refuelMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
+    $refuelMannyRow->execute(['uid' => $motorizeRefuelMannyId]);
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => (int) $refuelMannyRow->fetchColumn(),
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
+    $refueledAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
+    $test->assertEquals(Asteroid::MOTOR_FUEL_FULL, $refueledAsteroid instanceof Asteroid ? $refueledAsteroid->getMotorFuelStatus() : null, 'refueling completion fills the asteroid tank exactly once');
 
     $mineMotorizedAsteroid = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMiningMannyId) . '/mine', $motorizeHeaders, json_encode([
-        'objectId' => 'motorize-rock',
+        'objectId' => $motorizedAsteroidId,
         'resources' => ['metals'],
         'targetAmount' => 0.01,
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $mineMotorizedAsteroid->status, 'a motorized asteroid remains mineable');
+
+    $createdTransfer = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/asteroids/' . rawurlencode($motorizedAsteroidId) . '/trajectories', $motorizeHeaders, json_encode([
+        'mode' => AsteroidTrajectory::MODE_SECTOR_TRANSFER,
+        'target' => ['x' => 1, 'y' => 1, 'z' => 0],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $createdTransfer->status, 'POST creates a sector-transfer trajectory for a local full motorized asteroid');
+    $transferPublicId = (string) ($createdTransfer->body['trajectory']['id'] ?? '');
+    $test->assert(str_starts_with($transferPublicId, 'atr_'), 'trajectory creation returns its opaque public id');
+    $test->assertEquals(AsteroidTrajectory::STATUS_CROSSING_SECTOR, $createdTransfer->body['trajectory']['status'] ?? null, 'sector transfer begins in crossing_sector');
+    $test->assert(!array_key_exists('originSector', $createdTransfer->body['trajectory'] ?? []) && !array_key_exists('currentSector', $createdTransfer->body['trajectory'] ?? []), 'trajectory creation never exposes absolute internal sectors');
+    $emptyLaunchedAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
+    $test->assertEquals(null, $emptyLaunchedAsteroid, 'sector-transfer acceptance removes the asteroid from its origin at effective departure');
+    $test->assertEquals(Asteroid::MOTOR_FUEL_EMPTY, $asteroidTrajectories->findByUid($transferPublicId)?->asteroidSnapshot['motorFuelStatus'] ?? null, 'trajectory acceptance atomically persists the empty in-flight tank');
+    $readTransfer = $kernel->handle('GET', '/api/probe/' . $motorizeProbe->id . '/asteroid-trajectories/' . rawurlencode($transferPublicId), $motorizeHeaders);
+    $test->assertEquals(200, $readTransfer->status, 'GET reads a trajectory only through a probe in its current sector');
+    $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $readTransfer->body['trajectory']['direction'] ?? null, 'transfer telemetry exposes only the relative launch direction');
+    $duplicateTransfer = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/asteroids/' . rawurlencode($motorizedAsteroidId) . '/trajectories', $motorizeHeaders, json_encode([
+        'mode' => AsteroidTrajectory::MODE_SECTOR_TRANSFER,
+        'target' => ['x' => 1, 'y' => 1, 'z' => 0],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(409, $duplicateTransfer->status, 'a launched empty asteroid cannot accept another trajectory');
+    $test->assertEquals('asteroid_trajectory_already_active', $duplicateTransfer->body['error']['code'] ?? null, 'duplicate launch rejection prioritizes the active trajectory conflict');
+
+    $transfer = $asteroidTrajectories->findByUid($transferPublicId);
+    if ($transfer !== null && $transfer->direction !== null) {
+        $firstTransferSector = $transfer->currentSector->add(
+            $transfer->direction['x'],
+            $transfer->direction['y'],
+            $transfer->direction['z'],
+        );
+        $sectorRepository->save(new SectorContent($firstTransferSector, []));
+        $testTrajectoryProcessor->process(
+            $transfer->id,
+            AsteroidTrajectory::STATUS_CROSSING_SECTOR,
+            0,
+            new DateTimeImmutable('now', new DateTimeZone('UTC')),
+        );
+        $afterFirstCrossing = $asteroidTrajectories->findById($transfer->id);
+        $test->assertEquals(1, $afterFirstCrossing?->sectorsCrossed, 'an empty destination advances a transfer by exactly one sector');
+        $test->assertEquals(1, $afterFirstCrossing?->capturePenaltySteps, 'a failed capture increments the cumulative capture penalty');
+        $testTrajectoryProcessor->process(
+            $transfer->id,
+            AsteroidTrajectory::STATUS_CROSSING_SECTOR,
+            0,
+            new DateTimeImmutable('now', new DateTimeZone('UTC')),
+        );
+        $afterReplay = $asteroidTrajectories->findById($transfer->id);
+        $test->assertEquals(1, $afterReplay?->sectorsCrossed, 'replaying the same crossing event does not move the asteroid twice');
+    }
+}
+
+$impactPlayer = $auth->registerPlayerWithPassword('asteroid-impact-user', 'secret', 'Asteroid Impact User');
+$impactProbe = $probes->findByPlayerId($impactPlayer->id);
+$impactObserverPlayer = $auth->registerPlayerWithPassword('asteroid-impact-observer', 'secret', 'Asteroid Impact Observer');
+$impactObserverProbe = $probes->findByPlayerId($impactObserverPlayer->id);
+if ($impactProbe !== null && $impactObserverProbe !== null) {
+    $impactObserverProbe->currentSector = $impactProbe->currentSector;
+    $probes->save($impactObserverProbe);
+    $impactAsteroid = (new Asteroid(
+        'system-impact-rock', 'System impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
+        resourceAmounts: ['metals' => 1.0],
+    ))->withDeuteriumEngine();
+    $sectorRepository->save(new SectorContent($impactProbe->currentSector, [
+        new Star('system-impact-star', 'Impact Star', 'G', 1.0, 5778, 1.0, 1.0),
+        $impactAsteroid,
+    ]));
+    $impactHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($impactPlayer)['token']];
+    $impactLaunch = $kernel->handle(
+        'POST',
+        '/api/probe/' . $impactProbe->id . '/asteroids/system-impact-rock/trajectories',
+        $impactHeaders,
+        json_encode([
+            'mode' => AsteroidTrajectory::MODE_SYSTEM_IMPACT,
+            'targetObjectId' => 'system-impact-star',
+            'targetSpeedC' => 0.05,
+        ], JSON_THROW_ON_ERROR),
+    );
+    $test->assertEquals(202, $impactLaunch->status, 'a full motorized asteroid can begin a local system impact');
+    $impactTrajectoryUid = (string) ($impactLaunch->body['trajectory']['id'] ?? '');
+    $impactTrajectory = $asteroidTrajectories->findByUid($impactTrajectoryUid);
+    $test->assertEquals(AsteroidTrajectory::STATUS_ACCELERATING, $impactTrajectory?->status, 'system impact begins in acceleration');
+    foreach ([$impactProbe, $impactObserverProbe] as $alertedProbe) {
+        $trajectoryAlerts = array_values(array_filter(
+            $damageWarnings->findByProbeId($alertedProbe->id),
+            static fn(ProbeDamageWarning $warning): bool => $warning->type === ProbeDamageWarning::TYPE_ASTEROID_TRAJECTORY
+                && $warning->objectId === $impactTrajectoryUid,
+        ));
+        $test->assertEquals(1, count($trajectoryAlerts), 'ignition creates exactly one alert for each probe physically present in the sector');
+    }
+    if ($impactTrajectory !== null) {
+        $accelerationFinishedAt = new DateTimeImmutable($impactTrajectory->accelerationEndsAt ?? 'now', new DateTimeZone('UTC'));
+        $testTrajectoryProcessor->process($impactTrajectory->id, AsteroidTrajectory::STATUS_ACCELERATING, null, $accelerationFinishedAt);
+        $coastingTrajectory = $asteroidTrajectories->findById($impactTrajectory->id);
+        $test->assertEquals(AsteroidTrajectory::STATUS_COASTING, $coastingTrajectory?->status, 'acceleration completion enters the coasting phase');
+        $test->assertEquals(600, (new DateTimeImmutable((string) $coastingTrajectory?->nextTransitionAt))->getTimestamp() - $accelerationFinishedAt->getTimestamp(), 'system impacts coast for exactly ten minutes');
+        $impactAt = $accelerationFinishedAt->modify('+600 seconds');
+        $testTrajectoryProcessor->process($impactTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $impactAt);
+        $completedImpact = $asteroidTrajectories->findById($impactTrajectory->id);
+        $test->assertEquals(AsteroidTrajectory::STATUS_NO_EFFECT, $completedImpact?->status, 'an impact on a star terminates with no_effect');
+        $postImpactSector = $sectorRepository->load($impactProbe->currentSector);
+        $test->assertEquals(null, $postImpactSector->findObjectById('system-impact-rock'), 'a stellar impact vaporizes the source asteroid');
+        $test->assert($postImpactSector->findObjectById('system-impact-star') instanceof Star, 'a stellar impact leaves the star unchanged');
+        $testTrajectoryProcessor->process($impactTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $impactAt);
+        $test->assertEquals(AsteroidTrajectory::STATUS_NO_EFFECT, $asteroidTrajectories->findById($impactTrajectory->id)?->status, 'replaying a terminal impact event has no second effect');
+    }
 }
 
 $stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');
@@ -8163,6 +8418,9 @@ foreach ([
     'POST /api/probe/mind-snapshot/reassign',
     'POST /api/probe/atomic-printer/craft',
     'POST /api/probe/1/mannies/mny_missing/install-scut-transit-beacon',
+    'POST /api/probe/1/mannies/mny_missing/refuel-motorized-asteroid',
+    'POST /api/probe/1/asteroids/mtr_missing/trajectories',
+    'GET /api/probe/1/asteroid-trajectories/atr_missing',
     'GET /api/probe/messages',
     'GET /api/probe/messages/sent',
     'GET /api/probe/1/logbook-pages',

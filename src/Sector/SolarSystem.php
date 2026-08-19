@@ -49,6 +49,16 @@ final class SolarSystem extends UniverseObject
         return $this->orbitalBodies;
     }
 
+    public function withOrbitalBody(OrbitingBody $body): self
+    {
+        return new self(
+            $this->getId(), $this->getName(), $this->primaryStar, $this->secondaryStar,
+            [...$this->orbitalBodies, $body], $this->getMass() + $body->getObject()->getMass(),
+            max($this->getRadius(), $body->getOrbit()->toArray()['semiMajorAxisAU']),
+            $this->getDescription(), $this->getWaypointBookmarks(),
+        );
+    }
+
     public function toArray(): array
     {
         return parent::toArray() + [

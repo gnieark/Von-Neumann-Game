@@ -236,6 +236,46 @@ final class ProbeDamageWarningRepository
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Manny report alert creation failed.');
     }
 
+    public function createAsteroidTrajectoryAlert(
+        int $probeId,
+        SectorCoordinates $sector,
+        string $trajectoryUid,
+        string $asteroidId,
+        string $message,
+    ): ProbeDamageWarning {
+        $existing = $this->findByProbeMovementTypeAndObject(
+            $probeId,
+            null,
+            ProbeDamageWarning::TYPE_ASTEROID_TRAJECTORY,
+            $trajectoryUid,
+        );
+        if ($existing !== null) {
+            return $existing;
+        }
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO probe_damage_warnings
+             (probe_id, movement_id, type, status, phase, scheduled_at, sector_x, sector_y, sector_z, container_id, container_label, object_id, risk_percent, additional_container_count, message, read_at, resolved_at, created_at, updated_at)
+             VALUES (:probe_id, NULL, :type, :status, :phase, :scheduled_at, :sector_x, :sector_y, :sector_z, :container_id, :container_label, :object_id, 0, 0, :message, NULL, NULL, :created_at, :updated_at)'
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'type' => ProbeDamageWarning::TYPE_ASTEROID_TRAJECTORY,
+            'status' => ProbeDamageWarning::STATUS_UNREAD,
+            'phase' => 'ignition',
+            'scheduled_at' => $now,
+            'sector_x' => $sector->getX(), 'sector_y' => $sector->getY(), 'sector_z' => $sector->getZ(),
+            'container_id' => $asteroidId,
+            'container_label' => 'Motorized asteroid',
+            'object_id' => $trajectoryUid,
+            'message' => $message,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Asteroid trajectory alert creation failed.');
+    }
+
     public function createMindSnapshotTransferredAlert(
         int $probeId,
         SectorCoordinates $sector,

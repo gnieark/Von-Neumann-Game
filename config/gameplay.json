@@ -113,6 +113,38 @@
       "maxMass": 30.0
     }
   },
+  "asteroidTrajectories": {
+    "maximumTargetSpeedC": 0.5,
+    "minimumAccelerationDurationSeconds": 1,
+    "maximumAccelerationDurationSeconds": 259200,
+    "fuelCostDeuteriumPercent": 0.2,
+    "maximumSectorCrossings": 10,
+    "sectorCrossingDurationSeconds": 86400,
+    "coastingDurationSeconds": 600,
+    "revolutionDurations": [
+      {"maximumStarMassSolar": 0.45, "durationSeconds": 21600},
+      {"maximumStarMassSolar": 0.8, "durationSeconds": 28800},
+      {"maximumStarMassSolar": 1.4, "durationSeconds": 43200},
+      {"maximumStarMassSolar": 2.1, "durationSeconds": 57600},
+      {"maximumStarMassSolar": 16.0, "durationSeconds": 86400},
+      {"maximumStarMassSolar": null, "durationSeconds": 129600}
+    ],
+    "occultationWindowFraction": 0.15,
+    "capture": {
+      "penaltyPercentPerStep": 10,
+      "minimumPlanetMassEarth": 3.0
+    },
+    "impact": {
+      "probeAutomaticDestructionSpeedC": 0.05,
+      "probeReferenceAsteroidMassEarth": 0.00005,
+      "deterministicFactorMinimum": 0.9,
+      "deterministicFactorMaximum": 1.1,
+      "fragmentCountMinimum": 3,
+      "fragmentCountMaximum": 10,
+      "planetaryMassLossMinimumFraction": 0.01,
+      "planetaryMassLossMaximumFraction": 0.3
+    }
+  },
   "intelligentLife": {
     "scenarios": {
       "return_to_space_program": {

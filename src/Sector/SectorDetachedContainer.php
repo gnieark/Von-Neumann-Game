@@ -156,6 +156,26 @@ final class SectorDetachedContainer extends UniverseObject
         );
     }
 
+    public function withTargetObjectId(?string $targetObjectId): self
+    {
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->mode,
+            $this->ownerProbeId,
+            $this->ownerPlayerId,
+            $this->originProbeId,
+            $targetObjectId,
+            $this->capacity,
+            $this->capacityUnit,
+            $this->createdAt,
+            $this->payload,
+            $this->getDescription(),
+            $this->getWaypointBookmarks(),
+            $this->getDiscoveredByPlayerIds(),
+        );
+    }
+
     public function toArray(): array
     {
         return parent::toArray() + [

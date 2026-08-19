@@ -8,6 +8,8 @@ use VonNeumannGame\Domain\ResourceComposition;
 
 final class Asteroid extends UniverseObject
 {
+    public const MOTOR_FUEL_FULL = 'full';
+    public const MOTOR_FUEL_EMPTY = 'empty';
     private const RESOURCE_CONTAINERS_PER_EARTH_MASS = 1000000.0;
     private const LEGACY_OTHER = 'other';
     private const NAME_PARTS = [
@@ -32,7 +34,12 @@ final class Asteroid extends UniverseObject
         array $waypointBookmarks = [],
         ?float $resourceContainersPerEarthMass = null,
         private readonly bool $motorized = false,
+        private readonly ?string $motorFuelStatus = null,
+        private readonly ?string $capturedByObjectId = null,
     ) {
+        if ($this->motorized && !in_array($this->motorFuelStatus, [self::MOTOR_FUEL_FULL, self::MOTOR_FUEL_EMPTY], true)) {
+            throw new \InvalidArgumentException('A motorized asteroid must explicitly define motorFuelStatus as full or empty.');
+        }
         parent::__construct($id, $name, UniverseObjectType::Asteroid, $mass, $radius, $description, $waypointBookmarks);
         $this->resourceAmounts = $resourceAmounts === null
             ? self::initialResourceAmounts($estimatedResources, $mass, $resourceContainersPerEarthMass ?? self::RESOURCE_CONTAINERS_PER_EARTH_MASS)
@@ -61,6 +68,8 @@ final class Asteroid extends UniverseObject
             $this->resourceAmounts,
             $this->getWaypointBookmarks(),
             motorized: $this->motorized,
+            motorFuelStatus: $this->motorFuelStatus,
+            capturedByObjectId: $this->capturedByObjectId,
         );
     }
 
@@ -78,6 +87,8 @@ final class Asteroid extends UniverseObject
             $resourceAmounts,
             $this->getWaypointBookmarks(),
             motorized: $this->motorized,
+            motorFuelStatus: $this->motorFuelStatus,
+            capturedByObjectId: $this->capturedByObjectId,
         );
     }
 
@@ -86,8 +97,41 @@ final class Asteroid extends UniverseObject
         return $this->motorized;
     }
 
-    public function withDeuteriumEngine(): self
+    public function getMotorFuelStatus(): ?string
     {
+        return $this->motorFuelStatus;
+    }
+
+    public function getCapturedByObjectId(): ?string
+    {
+        return $this->capturedByObjectId;
+    }
+
+    public function withDeuteriumEngine(?string $newId = null): self
+    {
+        return new self(
+            $newId ?? $this->getId(),
+            $this->getName(),
+            $this->composition,
+            $this->estimatedResources,
+            $this->sizeCategory,
+            $this->getMass(),
+            $this->getRadius(),
+            $this->getDescription(),
+            $this->resourceAmounts,
+            $this->getWaypointBookmarks(),
+            motorized: true,
+            motorFuelStatus: self::MOTOR_FUEL_FULL,
+            capturedByObjectId: $this->capturedByObjectId,
+        );
+    }
+
+    public function withMotorFuelStatus(string $status): self
+    {
+        if (!$this->motorized) {
+            throw new \LogicException('A non-motorized asteroid has no fuel tank.');
+        }
+
         return new self(
             $this->getId(),
             $this->getName(),
@@ -100,18 +144,55 @@ final class Asteroid extends UniverseObject
             $this->resourceAmounts,
             $this->getWaypointBookmarks(),
             motorized: true,
+            motorFuelStatus: $status,
+            capturedByObjectId: $this->capturedByObjectId,
+        );
+    }
+
+    public function withCapturedByObjectId(?string $objectId): self
+    {
+        return new self(
+            $this->getId(),
+            $this->getName(),
+            $this->composition,
+            $this->estimatedResources,
+            $this->sizeCategory,
+            $this->getMass(),
+            $this->getRadius(),
+            $this->getDescription(),
+            $this->resourceAmounts,
+            $this->getWaypointBookmarks(),
+            motorized: $this->motorized,
+            motorFuelStatus: $this->motorFuelStatus,
+            capturedByObjectId: $objectId,
+        );
+    }
+
+    public function withId(string $id): self
+    {
+        return new self(
+            $id, $this->getName(), $this->composition, $this->estimatedResources, $this->sizeCategory,
+            $this->getMass(), $this->getRadius(), $this->getDescription(), $this->resourceAmounts,
+            $this->getWaypointBookmarks(), motorized: $this->motorized, motorFuelStatus: $this->motorFuelStatus,
+            capturedByObjectId: $this->capturedByObjectId,
         );
     }
 
     public function toArray(): array
     {
-        return parent::toArray() + [
+        $data = parent::toArray() + [
             'composition' => $this->composition,
             'estimatedResources' => $this->estimatedResources,
             'sizeCategory' => $this->sizeCategory,
             'resourceAmounts' => $this->resourceAmounts,
             'motorized' => $this->motorized,
+            'capturedByObjectId' => $this->capturedByObjectId,
         ];
+        if ($this->motorized) {
+            $data['motorFuelStatus'] = $this->motorFuelStatus;
+        }
+
+        return $data;
     }
 
     /**
@@ -151,6 +232,15 @@ final class Asteroid extends UniverseObject
 
     public static function fromArray(array $data): self
     {
+        $motorized = (bool) ($data['motorized'] ?? false);
+        $motorFuelStatus = null;
+        if ($motorized) {
+            if (!array_key_exists('motorFuelStatus', $data)) {
+                throw new \InvalidArgumentException('Motorized asteroid data is missing motorFuelStatus; run the asteroid trajectory migration first.');
+            }
+            $motorFuelStatus = is_string($data['motorFuelStatus']) ? $data['motorFuelStatus'] : null;
+        }
+
         return new self(
             (string) $data['id'],
             $data['name'] ?? null,
@@ -164,7 +254,9 @@ final class Asteroid extends UniverseObject
                 ? $data['resourceAmounts']
                 : null,
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
-            motorized: (bool) ($data['motorized'] ?? false),
+            motorized: $motorized,
+            motorFuelStatus: $motorFuelStatus,
+            capturedByObjectId: isset($data['capturedByObjectId']) ? (string) $data['capturedByObjectId'] : null,
         );
     }
 

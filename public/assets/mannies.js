@@ -8,7 +8,7 @@
     const MANNY_CARGO_CAPACITY = 0.05;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "install-scut-transit-beacon", "motorize-asteroid", "improve-probe", "assemble-probe", "transfer-deuterium", "transfer-manny"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "install-scut-transit-beacon", "motorize-asteroid", "refuel-motorized-asteroid", "launch-asteroid", "improve-probe", "assemble-probe", "transfer-deuterium", "transfer-manny"]);
     const PROBE_ASSEMBLY_COMPONENTS = [
         {"type": "deuterium_engine", "quantity": 1},
         {"type": "scut_relay", "quantity": 1},
@@ -2939,6 +2939,7 @@
         return {
             "hasEngine": (counts.deuterium_engine || 0) >= 1,
             "hasSteelBars": (counts.steel_bar || 0) >= 4,
+            "hasSteelPlates": (counts.steel_plate || 0) >= 2,
         };
     }
 
@@ -2946,8 +2947,8 @@
         if (targetCount === 0) {
             return tr("noAsteroidToMotorize", "No non-motorized asteroid is available in this sector.");
         }
-        if (!availability.hasEngine || !availability.hasSteelBars) {
-            return tr("missingAsteroidMotorizationComponents", "One deuterium engine and four steel bars are required in inventory.");
+        if (!availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates) {
+            return tr("missingAsteroidMotorizationComponents", "One deuterium engine, four steel bars and two steel plates are required in inventory.");
         }
 
         return tr("asteroidMotorizationHint", "The Manny installs the engine, then automatically returns to the probe.");
@@ -2956,13 +2957,81 @@
     function renderMotorizeAsteroidForm() {
         const targets = motorizationAsteroidTargets();
         const availability = asteroidMotorizationAvailability();
-        const disabled = targets.length === 0 || !availability.hasEngine || !availability.hasSteelBars;
+        const disabled = targets.length === 0 || !availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates;
 
         return "<form class=\"manny-motorize-asteroid-form manny-form\">"
             + "<label>" + escaped(tr("asteroidToMotorize", "Asteroid")) + "<select class=\"manny-motorize-asteroid-target\" name=\"objectId\" required>" + motorizationAsteroidTargetOptions("") + "</select></label>"
             + "<button class=\"manny-motorize-asteroid-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("motorizeAsteroid", "Install deuterium propulsion")) + "</button>"
             + "<p class=\"manny-motorize-asteroid-hint\">" + escaped(asteroidMotorizationHint(targets.length, availability)) + "</p>"
             + "</form>";
+    }
+
+    function fueledMotorizedAsteroids(status) {
+        return asteroidTargets().filter((object) => object.motorized === true && object.motorFuelStatus === status && !object.trajectory);
+    }
+
+    function asteroidOptionList(targets) {
+        return targets.length ? targets.map((target) => "<option value=\"" + escaped(target.id) + "\">" + escaped(target.name || target.id) + "</option>").join("") : "<option value=\"\">-</option>";
+    }
+
+    function asteroidImpactTargets() {
+        const targets = [];
+        state.currentSectorObjects.forEach((object) => {
+            if (["star", "planet", "asteroid"].includes(object.type)) targets.push(object);
+            (object.bookmarkTargets || []).forEach((target) => {
+                if (["star", "planet", "asteroid"].includes(target.type)) targets.push(target);
+            });
+        });
+        state.currentSectorProbes.forEach((probe) => targets.push({"id": String(probe.id), "name": probe.name, "type": "probe"}));
+        return Array.from(new Map(targets.map((target) => [String(target.id), target])).values());
+    }
+
+    function asteroidLaunchDurationSeconds(form) {
+        const objectId = String(form && form.elements.objectId ? form.elements.objectId.value : "");
+        const asteroid = fueledMotorizedAsteroids("full").find((target) => String(target.id) === objectId);
+        const mode = String(form && form.elements.mode ? form.elements.mode.value : "");
+        if (mode === "sector_transfer") {
+            return 86400;
+        }
+        const speed = Number(form && form.elements.targetSpeedC ? form.elements.targetSpeedC.value : 0);
+        if (!asteroid || !Number.isFinite(speed) || speed <= 0 || speed > 0.5) {
+            return 0;
+        }
+        const massRatio = Math.max(0, Math.min(1, (Number(asteroid.mass) - 0.000001) / (0.02 - 0.000001)));
+        const acceleration = Math.max(1, Math.min(259200, Math.round((7200 + (252000 * massRatio)) * (speed / 0.5))));
+        return acceleration + 600;
+    }
+
+    function updateAsteroidLaunchEstimate(form) {
+        if (!form) return;
+        const output = form.querySelector(".manny-asteroid-launch-estimate");
+        const duration = asteroidLaunchDurationSeconds(form);
+        if (output) {
+            output.textContent = tr("asteroidEstimatedDuration", "Estimated duration") + " " + (duration > 0 ? window.VNG.duration(duration, tr) : "-");
+        }
+    }
+
+    function renderRefuelMotorizedAsteroidForm() {
+        const targets = fueledMotorizedAsteroids("empty");
+        return "<form class=\"manny-refuel-motorized-asteroid-form manny-form\">"
+            + "<label>" + escaped(tr("asteroidToRefuel", "Asteroid to refuel")) + "<select name=\"objectId\" required>" + asteroidOptionList(targets) + "</select></label>"
+            + "<button type=\"submit\"" + (targets.length ? "" : " disabled") + ">" + escaped(tr("refuelMotorizedAsteroid", "Refuel motor")) + "</button>"
+            + "<p>" + escaped(tr("asteroidRefuelHint", "Consumes 0.2 deuterium point; the Manny returns automatically.")) + "</p></form>";
+    }
+
+    function renderLaunchAsteroidForm() {
+        const targets = fueledMotorizedAsteroids("full");
+        const impactTargets = asteroidImpactTargets();
+        const initialMassRatio = targets.length ? Math.max(0, Math.min(1, (Number(targets[0].mass) - 0.000001) / (0.02 - 0.000001))) : 0;
+        const initialDuration = targets.length ? Math.max(1, Math.min(259200, Math.round((7200 + (252000 * initialMassRatio)) * 0.1))) + 600 : 0;
+        return "<form class=\"manny-launch-asteroid-form manny-form\">"
+            + "<label>" + escaped(tr("asteroidToLaunch", "Asteroid")) + "<select class=\"manny-asteroid-launch-input\" name=\"objectId\" required>" + asteroidOptionList(targets) + "</select></label>"
+            + "<label>" + escaped(tr("trajectoryMode", "Trajectory")) + "<select class=\"manny-asteroid-launch-input\" name=\"mode\"><option value=\"system_impact\">system impact</option><option value=\"sector_transfer\">sector transfer</option></select></label>"
+            + "<label>" + escaped(tr("impactTarget", "Impact target")) + "<select name=\"targetObjectId\" required>" + asteroidOptionList(impactTargets) + "</select></label>"
+            + "<label>" + escaped(tr("targetSpeedC", "Target speed (c)")) + "<input class=\"manny-asteroid-launch-input\" name=\"targetSpeedC\" type=\"number\" min=\"0.000001\" max=\"0.5\" step=\"0.000001\" value=\"0.05\"></label>"
+            + "<fieldset><legend>" + escaped(tr("neighborSector", "Neighbor sector")) + "</legend><input name=\"x\" type=\"number\" value=\"1\"><input name=\"y\" type=\"number\" value=\"1\"><input name=\"z\" type=\"number\" value=\"0\"></fieldset>"
+            + "<p class=\"manny-asteroid-launch-estimate\">" + escaped(tr("asteroidEstimatedDuration", "Estimated duration:") + " " + (initialDuration > 0 ? window.VNG.duration(initialDuration, tr) : "-")) + "</p>"
+            + "<button type=\"submit\"" + (targets.length ? "" : " disabled") + ">" + escaped(tr("launchAsteroid", "Launch asteroid")) + "</button></form>";
     }
 
     function bookmarkTargetOptions(selected) {
@@ -2990,6 +3059,8 @@
         ];
         if (hasDistributedThrustAnchoringBlueprint()) {
             actions.push({"id": "motorize-asteroid", "title": tr("motorizeAsteroidActionTitle", "Install propulsion on an asteroid"), "render": renderMotorizeAsteroidForm});
+            actions.push({"id": "refuel-motorized-asteroid", "title": tr("refuelMotorizedAsteroid", "Refuel a motorized asteroid"), "render": renderRefuelMotorizedAsteroidForm});
+            actions.push({"id": "launch-asteroid", "title": tr("launchAsteroid", "Launch a motorized asteroid"), "render": renderLaunchAsteroidForm});
         }
         if (sectorHasDeuteriumRefuelStation()) {
             actions.unshift({"id": "refill-deuterium", "title": tr("refillDeuteriumTankActionTitle", "Refill deuterium tank"), "render": renderDeuteriumRefillForm});
@@ -3092,6 +3163,8 @@
             "turn-on-relay": renderTurnOnRelayForm,
             "install-scut-transit-beacon": renderScutTransitBeaconInstallForm,
             "motorize-asteroid": renderMotorizeAsteroidForm,
+            "refuel-motorized-asteroid": renderRefuelMotorizedAsteroidForm,
+            "launch-asteroid": renderLaunchAsteroidForm,
             "improve-probe": renderImproveProbeForm,
             "assemble-probe": renderAssembleProbeForm,
             "transfer-deuterium": renderDeuteriumTransferForm,
@@ -4253,8 +4326,8 @@
             updateMotorizeAsteroidForms();
             const targetSelect = form.querySelector(".manny-motorize-asteroid-target");
             const availability = asteroidMotorizationAvailability();
-            if (!availability.hasEngine || !availability.hasSteelBars) {
-                setStatus(tr("missingAsteroidMotorizationComponents", "One deuterium engine and four steel bars are required in inventory."));
+            if (!availability.hasEngine || !availability.hasSteelBars || !availability.hasSteelPlates) {
+                setStatus(tr("missingAsteroidMotorizationComponents", "One deuterium engine, four steel bars and two steel plates are required in inventory."));
                 return null;
             }
             if (!targetSelect || !targetSelect.value) {
@@ -4265,6 +4338,24 @@
             return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/motorize-asteroid"), {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": String(formData.get("objectId") || "")}),
+            });
+        }
+        if (form.classList.contains("manny-refuel-motorized-asteroid-form")) {
+            const objectId = String(formData.get("objectId") || "");
+            if (!objectId) return null;
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refuel-motorized-asteroid"), {
+                "method": "POST", "body": JSON.stringify({"objectId": objectId}),
+            });
+        }
+        if (form.classList.contains("manny-launch-asteroid-form")) {
+            const objectId = String(formData.get("objectId") || "");
+            const mode = String(formData.get("mode") || "");
+            if (!objectId) return null;
+            const payload = mode === "sector_transfer"
+                ? {"mode": mode, "target": {"x": Number(formData.get("x")), "y": Number(formData.get("y")), "z": Number(formData.get("z"))}}
+                : {"mode": mode, "targetObjectId": String(formData.get("targetObjectId") || ""), "targetSpeedC": Number(formData.get("targetSpeedC"))};
+            return window.VNG.apiJson(window.VNG.probeApiPath("/asteroids/" + encodeURIComponent(objectId) + "/trajectories"), {
+                "method": "POST", "body": JSON.stringify(payload),
             });
         }
         if (form.classList.contains("manny-improve-probe-form")) {
@@ -4461,11 +4552,17 @@
             if (event.target.classList.contains("manny-transfer-probe-target")) {
                 updateMannyTransferForms();
             }
+            if (event.target.classList.contains("manny-asteroid-launch-input") || event.target.closest(".manny-launch-asteroid-form")) {
+                updateAsteroidLaunchEstimate(event.target.closest(".manny-launch-asteroid-form"));
+            }
         });
 
         mannyList.addEventListener("input", (event) => {
             if (event.target.classList.contains("manny-transfer-deuterium-amount")) {
                 updateDeuteriumTransferForms();
+            }
+            if (event.target.classList.contains("manny-asteroid-launch-input")) {
+                updateAsteroidLaunchEstimate(event.target.closest(".manny-launch-asteroid-form"));
             }
         });
 
