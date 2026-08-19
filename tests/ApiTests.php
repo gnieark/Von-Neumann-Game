@@ -611,6 +611,8 @@ $test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attac
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
+$test->assert(str_contains($openApi, 'summary: Delete a persistent probe alert'), 'OpenAPI documents persistent alert deletion');
+$test->assert(str_contains($openApi, 'summary: Delete a movement damage warning'), 'OpenAPI documents damage-warning deletion');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories:'), 'OpenAPI documents asteroid trajectory creation');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroid-trajectories/{trajectoryId}:'), 'OpenAPI documents local trajectory telemetry');
 $test->assert(str_contains($openApi, 'discriminator:') && str_contains($openApi, "propertyName: mode"), 'OpenAPI discriminates trajectory requests by mode');
@@ -806,6 +808,11 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'craftin
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'crafting_reservations_cannot_be_reassigned'), 'inventories JS explains impossible crafting reservation reassignment');
 $alertsScript = file_get_contents(__DIR__ . '/../public/assets/alerts.js');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'warning.risk.ruleStartsAtAdditionalContainers'), 'alerts JS reads the effective fragile-container threshold from each warning');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, 'sector-alert-delete'), 'alerts JS renders a delete icon for persistent alerts');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, '"method": "DELETE"'), 'alerts JS deletes persistent alerts through the API');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, '"/damage-warnings/"'), 'alerts JS uses the dedicated delete endpoint for damage warnings');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-alert-delete'), 'alerts CSS styles the persistent-alert delete icon');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'deleteAlert' => 'Supprimer l’alerte'"), 'French translations label the alert delete icon');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'à partir de {threshold} containers supplémentaires'), 'French fragile-storage warning interpolates the effective probe threshold');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'from {threshold} additional containers onward'), 'English fragile-storage warning interpolates the effective probe threshold');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'reservedStorageContainerDetach' => 'Ce container est réservé"), 'French translations explain reserved-container detach conflicts');
@@ -884,7 +891,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-motorization-cost-copy"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-alert-deletion"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1889,6 +1896,17 @@ $sameScutProbeUnreadAlertsAfterRead = $kernel->handle('GET', '/api/probe/' . $sa
 $test->assertEquals([], $sameScutProbeUnreadAlertsAfterRead->body['alerts'] ?? null, 'unread alert filter excludes alerts after they are marked read');
 $invalidAlertStatus = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts?status=read', $multiProbeHeaders);
 $test->assertEquals(400, $invalidAlertStatus->status, 'GET /api/probe/{probeId}/alerts rejects unsupported status filters');
+$primaryProbeAlert = $damageWarnings->createMannyReportAlert($primaryProbe->id, $primaryProbe->currentSector, 'primary-report', 'Primary report', 'Primary report ready.');
+$foreignProbeAlert = $damageWarnings->createMannyReportAlert($foreignProbe->id, $foreignProbe->currentSector, 'foreign-report', 'Foreign report', 'Foreign report ready.');
+$foreignProbeAlertDelete = $kernel->handle('DELETE', '/api/probe/alerts/' . $foreignProbeAlert->id, $multiProbeHeaders);
+$test->assertEquals(404, $foreignProbeAlertDelete->status, 'DELETE /api/probe/alerts/{alertId} hides alerts belonging to another player');
+$test->assert($damageWarnings->findById($foreignProbeAlert->id) !== null, 'an unauthorized alert deletion leaves the alert untouched');
+$legacyAlertDelete = $kernel->handle('DELETE', '/api/probe/alerts/' . $primaryProbeAlert->id, $multiProbeHeaders);
+$test->assertEquals(204, $legacyAlertDelete->status, 'DELETE /api/probe/alerts/{alertId} deletes an alert owned by the default probe');
+$test->assert($damageWarnings->findById($primaryProbeAlert->id) === null, 'legacy alert deletion removes the owned alert from storage');
+$scopedAlertDelete = $kernel->handle('DELETE', '/api/probe/' . $sameSectorProbe->id . '/alerts/' . $sameScutProbeAlert->id, $multiProbeHeaders);
+$test->assertEquals(204, $scopedAlertDelete->status, 'DELETE /api/probe/{probeId}/alerts/{alertId} deletes an alert owned by the selected probe');
+$test->assert($damageWarnings->findById($sameScutProbeAlert->id) === null, 'probe-scoped alert deletion removes the selected probe alert from storage');
 $nowForSameScutWarning = gmdate('c');
 $pdo->prepare(
     'INSERT INTO probe_damage_warnings
@@ -1917,6 +1935,12 @@ $sameScutProbeDamageWarnings = $kernel->handle('GET', '/api/probe/' . $sameSecto
 $test->assertEquals(200, $sameScutProbeDamageWarnings->status, 'GET /api/probe/{probeId}/damage-warnings lists same-SCUT owned probe damage warnings');
 $sameScutProbeReadDamageWarning = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings/' . $sameScutProbeWarningId, $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeReadDamageWarning->status, 'PATCH /api/probe/{probeId}/damage-warnings/{damageWarningId} marks same-SCUT owned probe damage warnings read');
+$wrongProbeDamageWarningDelete = $kernel->handle('DELETE', '/api/probe/damage-warnings/' . $sameScutProbeWarningId, $multiProbeHeaders);
+$test->assertEquals(404, $wrongProbeDamageWarningDelete->status, 'DELETE /api/probe/damage-warnings/{damageWarningId} cannot delete a warning belonging to another selected probe');
+$test->assert($damageWarnings->findById($sameScutProbeWarningId) !== null, 'a rejected damage-warning deletion leaves the warning untouched');
+$scopedDamageWarningDelete = $kernel->handle('DELETE', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings/' . $sameScutProbeWarningId, $multiProbeHeaders);
+$test->assertEquals(204, $scopedDamageWarningDelete->status, 'DELETE /api/probe/{probeId}/damage-warnings/{damageWarningId} deletes an owned warning');
+$test->assert($damageWarnings->findById($sameScutProbeWarningId) === null, 'probe-scoped damage-warning deletion removes the warning from storage');
 $primaryOnlyVisitedSector = new SectorCoordinates(26, 0, 0);
 $sameScutOnlyVisitedSector = new SectorCoordinates(28, 0, 0);
 $visitedSectors->markVisited($multiProbePlayer, $primaryProbe, $primaryOnlyVisitedSector);
@@ -1947,7 +1971,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(111, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(112, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 
@@ -4817,6 +4841,9 @@ if ($damageWarningProbe !== null) {
         $detachedByMovement = $sectorService->getOrCreateSector($warningSector)->findObjectById($warningObjectId);
         $test->assertEquals('detached_container', $detachedByMovement?->getType()->value, 'storage break persists the lost container as a drifting sector object');
     }
+    $deleteDamageWarning = $kernel->handle('DELETE', '/api/probe/damage-warnings/' . $warningId, $damageWarningHeaders);
+    $test->assertEquals(204, $deleteDamageWarning->status, 'DELETE /api/probe/damage-warnings/{damageWarningId} deletes an owned warning');
+    $test->assert($damageWarnings->findById($warningId) === null, 'damage-warning deletion removes the owned warning from storage');
 }
 
 $oraclePlayer = $auth->registerPlayerWithPassword('oracle-contact', 'secret', 'Oracle Contact', 'Oracle probe');
@@ -8446,6 +8473,10 @@ foreach ([
     'GET /api/probe/messages/sent',
     'GET /api/probe/1/logbook-pages',
     'POST /api/probe/1/logbook-page',
+    'DELETE /api/probe/alerts/1',
+    'DELETE /api/probe/1/alerts/1',
+    'DELETE /api/probe/damage-warnings/1',
+    'DELETE /api/probe/1/damage-warnings/1',
     'GET /api/visited-sectors',
     'GET /api/probe/visited-sectors',
     'GET /api/probe/sector',

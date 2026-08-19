@@ -55,7 +55,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 111;
+    public const API_VERSION = 112;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -179,10 +179,38 @@ final class ApiKernel
                 $ctx->intParam(0),
                 ['GET', 'PATCH', 'DELETE'],
             )),
-            ApiRoute::regex('#^/api/probe/(\d+)/alerts/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeAlertReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
-            ApiRoute::regex('#^/api/probe/alerts/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAlertReadResponse($player, $ctx->intParam(0)))),
-            ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeDamageWarningReadResponse($player, $ctx->intParam(1), $probe), $ctx->intParam(0), ['PATCH'])),
-            ApiRoute::regex('#^/api/probe/damage-warnings/(\d+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['PATCH'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeDamageWarningReadResponse($player, $ctx->intParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/alerts/(\d+)$#', ['PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => $ctx->method === 'DELETE'
+                    ? $this->probeAlertDeleteResponse($player, $ctx->intParam(1), $probe)
+                    : $this->probeAlertReadResponse($player, $ctx->intParam(1), $probe),
+                $ctx->intParam(0),
+                ['PATCH', 'DELETE'],
+            )),
+            ApiRoute::regex('#^/api/probe/alerts/(\d+)$#', ['PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute(
+                $ctx->method,
+                ['PATCH', 'DELETE'],
+                $ctx->headers,
+                fn(Player $player): ApiResponse => $ctx->method === 'DELETE'
+                    ? $this->probeAlertDeleteResponse($player, $ctx->intParam(0))
+                    : $this->probeAlertReadResponse($player, $ctx->intParam(0)),
+            )),
+            ApiRoute::regex('#^/api/probe/(\d+)/damage-warnings/(\d+)$#', ['PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute(
+                $ctx,
+                fn(Player $player, NeumannProbe $probe): ApiResponse => $ctx->method === 'DELETE'
+                    ? $this->probeDamageWarningDeleteResponse($player, $ctx->intParam(1), $probe)
+                    : $this->probeDamageWarningReadResponse($player, $ctx->intParam(1), $probe),
+                $ctx->intParam(0),
+                ['PATCH', 'DELETE'],
+            )),
+            ApiRoute::regex('#^/api/probe/damage-warnings/(\d+)$#', ['PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute(
+                $ctx->method,
+                ['PATCH', 'DELETE'],
+                $ctx->headers,
+                fn(Player $player): ApiResponse => $ctx->method === 'DELETE'
+                    ? $this->probeDamageWarningDeleteResponse($player, $ctx->intParam(0))
+                    : $this->probeDamageWarningReadResponse($player, $ctx->intParam(0)),
+            )),
             ApiRoute::regex('#^/api/forum/categories/(\d+)$#', ['GET', 'PATCH', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET', 'PATCH', 'DELETE'], $ctx->headers, fn(Player $player): ApiResponse => match ($ctx->method) {
                 'GET' => $this->forumController()->category($ctx->intParam(0)),
                 'PATCH' => $this->forumController()->updateCategory($player, $ctx->intParam(0), $ctx->body),
@@ -1139,6 +1167,19 @@ final class ApiKernel
         ]);
     }
 
+    private function probeAlertDeleteResponse(Player $player, int $alertId, ?NeumannProbe $probe = null): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
+        $alert = $this->damageWarnings->findByIdForProbe($alertId, $probe->id);
+        if ($alert === null) {
+            return ApiResponse::error(404, 'not_found', 'Alert not found.');
+        }
+
+        $this->damageWarnings->delete($alert);
+
+        return new ApiResponse(204, []);
+    }
+
     private function probeDamageWarningReadResponse(Player $player, int $warningId, ?NeumannProbe $probe = null): ApiResponse
     {
         $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
@@ -1150,6 +1191,19 @@ final class ApiKernel
         return new ApiResponse(200, [
             'damageWarning' => $this->probeAlertArray($player, $this->damageWarnings->markRead($warning)),
         ]);
+    }
+
+    private function probeDamageWarningDeleteResponse(Player $player, int $warningId, ?NeumannProbe $probe = null): ApiResponse
+    {
+        $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
+        $warning = $this->damageWarnings->findByIdForProbe($warningId, $probe->id);
+        if ($warning === null) {
+            return ApiResponse::error(404, 'not_found', 'Damage warning not found.');
+        }
+
+        $this->damageWarnings->delete($warning);
+
+        return new ApiResponse(204, []);
     }
 
     /**

@@ -5,6 +5,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ## 2026-08-19
 
 ### Changed
+- API v112 : ajout de `DELETE /api/probe/alerts/{alertId}` et `DELETE /api/probe/damage-warnings/{damageWarningId}`, ainsi que de leurs variantes ciblant explicitement une sonde. Une suppression n’est autorisée que pour une alerte appartenant à la sonde sélectionnée du joueur authentifié ; toute autre ressource répond `404`.
+- Interface : les alertes persistantes de `/alerts` disposent désormais d’une icône de suppression ; les avertissements de dégâts utilisent leur endpoint dédié.
 - API v111 : ajout des trajectoires persistantes d’astéroïdes motorisés. `POST /api/probe/{probeId}/asteroids/{asteroidId}/trajectories` lance soit un impact local relativiste, soit un transfert vers un voisin FCC, et `GET /api/probe/{probeId}/asteroid-trajectories/{trajectoryId}` expose uniquement la télémétrie détectable dans le secteur courant, sans coordonnée absolue. Les phases sont exécutées et rejouées de façon idempotente par le scheduler.
 - API v111 : l’alerte d’allumage d’une trajectoire `system_impact` indique désormais l’identifiant opaque de la cible et son type (`probe`, `asteroid`, `planet` ou `star`).
 - API v111 : les astéroïdes motorisés ont désormais un réservoir binaire explicite (`motorFuelStatus: full|empty`). La motorisation consomme aussi deux plaques d’acier et 0,2 point de deutérium, attribue un nouvel identifiant opaque, et `POST /api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid` permet à une Manny de refaire le plein avant son retour automatique.

@@ -94,6 +94,12 @@
         return 2;
     }
 
+    function persistentAlertDeletePath(alert) {
+        const resource = alert.type === "storage_container_break" ? "/damage-warnings/" : "/alerts/";
+
+        return window.VNG.probeApiPath(resource + encodeURIComponent(String(alert.id)));
+    }
+
     function renderAlerts(sector, persistentAlertList) {
         currentSector = sector || {};
         const sectorAlerts = window.VNG.sectorAlerts(currentSector, i18n).map((alert) => ({
@@ -122,9 +128,14 @@
         list.innerHTML = alerts.map((alert, index) => (
             "<article class=\"sector-alert " + window.VNG.escapeHtml(alert.className) + (alert.acknowledged ? " acknowledged" : "") + "\" data-alert-index=\"" + String(index) + "\">"
                 + "<span class=\"sector-alert-message\">" + alertMessageHtml(alert.message) + "</span>"
-                + "<button class=\"sector-alert-acknowledge\" type=\"button\"" + (alert.acknowledged ? " disabled aria-disabled=\"true\"" : " aria-disabled=\"false\"") + ">"
-                + window.VNG.escapeHtml(alert.acknowledged ? tr("acknowledgedAlert", "Acknowledged") : tr("acknowledgeAlert", "Acknowledge"))
-                + "</button>"
+                + "<span class=\"sector-alert-actions\">"
+                    + "<button class=\"sector-alert-acknowledge\" type=\"button\"" + (alert.acknowledged ? " disabled aria-disabled=\"true\"" : " aria-disabled=\"false\"") + ">"
+                    + window.VNG.escapeHtml(alert.acknowledged ? tr("acknowledgedAlert", "Acknowledged") : tr("acknowledgeAlert", "Acknowledge"))
+                    + "</button>"
+                    + (alert.kind === "persistent-alert"
+                        ? "<button class=\"sector-alert-delete\" type=\"button\" title=\"" + window.VNG.escapeHtml(tr("deleteAlert", "Delete alert")) + "\" aria-label=\"" + window.VNG.escapeHtml(tr("deleteAlert", "Delete alert")) + "\"><span aria-hidden=\"true\">&#128465;</span></button>"
+                        : "")
+                + "</span>"
             + "</article>"
         )).join("");
     }
@@ -196,13 +207,36 @@
     function bindEvents() {
         document.querySelector("[data-refresh=\"alerts\"]")?.addEventListener("click", refreshAlertsPage);
         document.getElementById("console-alerts-list")?.addEventListener("click", (event) => {
-            const button = event.target.closest(".sector-alert-acknowledge");
+            const deleteButton = event.target.closest(".sector-alert-delete");
+            const clickedAcknowledgeButton = event.target.closest(".sector-alert-acknowledge");
+            const button = deleteButton || clickedAcknowledgeButton;
             if (!button) {
                 return;
             }
             const alertNode = button.closest(".sector-alert");
             const alert = currentAlerts[Number.parseInt(alertNode && alertNode.dataset.alertIndex || "-1", 10)];
+            const acknowledgeButton = alertNode && alertNode.querySelector(".sector-alert-acknowledge");
             if (!alert) {
+                return;
+            }
+
+            if (deleteButton && alert.kind === "persistent-alert") {
+                deleteButton.disabled = true;
+                deleteButton.setAttribute("aria-disabled", "true");
+                if (acknowledgeButton) {
+                    acknowledgeButton.disabled = true;
+                    acknowledgeButton.setAttribute("aria-disabled", "true");
+                }
+                window.VNG.apiJson(persistentAlertDeletePath(alert), {
+                    "method": "DELETE",
+                }).then(refreshAlertsPage).then(window.VNG.syncNavigationWarnings).catch(() => {
+                    deleteButton.disabled = false;
+                    deleteButton.setAttribute("aria-disabled", "false");
+                    if (acknowledgeButton && !alert.acknowledged) {
+                        acknowledgeButton.disabled = false;
+                        acknowledgeButton.setAttribute("aria-disabled", "false");
+                    }
+                });
                 return;
             }
 

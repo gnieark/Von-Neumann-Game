@@ -2027,9 +2027,16 @@ button.account-menu-item {
     flex: 1 1 auto;
 }
 
+.sector-alert-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
 .sector-alert-acknowledge {
     flex: 0 0 auto;
-    margin-left: auto;
     padding: 6px 10px;
     border: 1px solid currentColor;
     border-radius: 6px;
@@ -2043,6 +2050,36 @@ button.account-menu-item {
 .sector-alert-acknowledge:disabled {
     cursor: default;
     opacity: .72;
+}
+
+.sector-alert-delete {
+    display: inline-grid;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid rgba(255, 124, 104, .72);
+    border-radius: 6px;
+    background: rgba(70, 16, 12, .68);
+    color: #ff9d8e;
+    cursor: pointer;
+}
+
+.sector-alert-delete:hover:not(:disabled),
+.sector-alert-delete:focus-visible {
+    border-color: #ffb3a8;
+    background: rgba(112, 24, 18, .82);
+    color: #ffe2dd;
+}
+
+.sector-alert-delete:disabled {
+    cursor: default;
+    opacity: .55;
+}
+
+.sector-alert-delete span {
+    font-size: 1.15rem;
+    line-height: 1;
 }
 
 .message-intro {

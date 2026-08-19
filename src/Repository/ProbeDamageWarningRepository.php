@@ -474,6 +474,17 @@ final class ProbeDamageWarningRepository
         return $this->findById($warning->id) ?? $warning;
     }
 
+    public function delete(ProbeDamageWarning $warning): void
+    {
+        $stmt = $this->pdo->prepare(
+            'DELETE FROM probe_damage_warnings WHERE id = :id AND probe_id = :probe_id'
+        );
+        $stmt->execute([
+            'id' => $warning->id,
+            'probe_id' => $warning->probeId,
+        ]);
+    }
+
     public function markResolved(int $id): void
     {
         $now = gmdate('c');

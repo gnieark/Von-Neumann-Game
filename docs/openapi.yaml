@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '111'
+  version: '112'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 111
+                apiVersion: 112
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1269,6 +1269,8 @@ paths:
       - $ref: '#/components/parameters/AlertId'
     patch:
       $ref: '#/paths/~1api~1probe~1alerts~1%7BalertId%7D/patch'
+    delete:
+      $ref: '#/paths/~1api~1probe~1alerts~1%7BalertId%7D/delete'
   /api/probe/{probeId}/damage-warnings:
     get:
       summary: List probe movement damage warnings
@@ -1294,6 +1296,8 @@ paths:
       - $ref: '#/components/parameters/DamageWarningId'
     patch:
       $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/patch'
+    delete:
+      $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/delete'
   /api/probe/{probeId}/visited-sectors:
     get:
       summary: List sectors already visited by the requested probe
@@ -2413,6 +2417,21 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a persistent probe alert
+      description: >
+        Permanently deletes the alert only when it belongs to the selected
+        probe owned by the authenticated player. An unknown alert or an alert
+        belonging to another probe returns `404`.
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '204':
+          description: Alert deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/damage-warnings:
     get:
       summary: List probe movement damage warnings
@@ -2473,6 +2492,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProbeDamageWarningResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a movement damage warning
+      description: >
+        Permanently deletes the warning only when it belongs to the selected
+        probe owned by the authenticated player. An unknown warning or a
+        warning belonging to another probe returns `404`.
+      parameters:
+        - $ref: '#/components/parameters/DamageWarningId'
+      responses:
+        '204':
+          description: Damage warning deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
