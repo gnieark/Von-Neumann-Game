@@ -672,6 +672,10 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspec
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-refuel-motorized-asteroid-form'), 'mannies JS renders the motorized asteroid refueling form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-asteroid-form'), 'mannies JS renders the asteroid trajectory launch form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/asteroids/') && str_contains($manniesScript, '/trajectories'), 'mannies JS posts asteroid trajectory orders');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'function explicitCurrentProbeApiPath'), 'mannies JS can build required explicit-probe asteroid action endpoints');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/motorize-asteroid")'), 'asteroid motorization uses the explicit current-probe endpoint on canonical /mannies pages');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refuel-motorized-asteroid")'), 'asteroid refueling uses the explicit current-probe endpoint on canonical /mannies pages');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'explicitCurrentProbeApiPath("/asteroids/" + encodeURIComponent(objectId) + "/trajectories")'), 'asteroid launch uses the explicit current-probe endpoint on canonical /mannies pages');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'asteroidLaunchDurationSeconds'), 'mannies JS computes the trajectory duration estimate before launch');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'miningTaskTargetContainerDetail'), 'mannies JS describes external mining storage in active Manny cards');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'withMannyStateHash'), 'mannies JS adds a stable state hash to each loaded Manny');
@@ -876,7 +880,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-sensors-asteroid-alert"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-explicit-asteroid-actions"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');

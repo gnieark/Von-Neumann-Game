@@ -61,6 +61,16 @@
         window.addEventListener("VNGReady", () => callback(window.VNG), {"once": true});
     }
 
+    function explicitCurrentProbeApiPath(suffix) {
+        const probeId = Number(state.currentProbeId);
+        if (!Number.isInteger(probeId) || probeId <= 0) {
+            throw new Error(tr("unknownProbe", "Unknown probe"));
+        }
+        const normalizedSuffix = suffix && String(suffix).startsWith("/") ? String(suffix) : "/" + String(suffix || "");
+
+        return "/api/probe/" + encodeURIComponent(String(probeId)) + normalizedSuffix;
+    }
+
     function loadCraftingRecipesOnce() {
         if (craftingRecipesLoadPromise === null) {
             craftingRecipesLoadPromise = window.VNG.apiJson("/api/crafting-recipes", {"method": "GET"})
@@ -4335,7 +4345,7 @@
                 return null;
             }
 
-            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/motorize-asteroid"), {
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/motorize-asteroid"), {
                 "method": "POST",
                 "body": JSON.stringify({"objectId": String(formData.get("objectId") || "")}),
             });
@@ -4343,7 +4353,7 @@
         if (form.classList.contains("manny-refuel-motorized-asteroid-form")) {
             const objectId = String(formData.get("objectId") || "");
             if (!objectId) return null;
-            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refuel-motorized-asteroid"), {
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/refuel-motorized-asteroid"), {
                 "method": "POST", "body": JSON.stringify({"objectId": objectId}),
             });
         }
@@ -4354,7 +4364,7 @@
             const payload = mode === "sector_transfer"
                 ? {"mode": mode, "target": {"x": Number(formData.get("x")), "y": Number(formData.get("y")), "z": Number(formData.get("z"))}}
                 : {"mode": mode, "targetObjectId": String(formData.get("targetObjectId") || ""), "targetSpeedC": Number(formData.get("targetSpeedC"))};
-            return window.VNG.apiJson(window.VNG.probeApiPath("/asteroids/" + encodeURIComponent(objectId) + "/trajectories"), {
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/asteroids/" + encodeURIComponent(objectId) + "/trajectories"), {
                 "method": "POST", "body": JSON.stringify(payload),
             });
         }

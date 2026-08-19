@@ -12,6 +12,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Migration obligatoire : ajout de `scripts/one-shot-scripts/migrate-asteroid-trajectories.php`. Worker arrêté, ce script convertit les anciens astéroïdes motorisés au format strict avec réservoir plein et installe la table SQL des trajectoires ; aucun fallback de lecture de l’ancien format n’est conservé.
 - Interface : `/mannies` propose le ravitaillement et le lancement des astéroïdes motorisés, affiche les prérequis complets et les estimations de durée.
 - Interface : `/sensors` met désormais en exergue tout astéroïde motorisé en mouvement détecté par le scan du secteur courant, avec le mode et la phase de trajectoire, la cible, la vitesse ou la progression, ainsi qu’un compte à rebours local jusqu’à l’impact ou au prochain franchissement de secteur.
+- Correction WebUI : depuis la route canonique `/mannies`, les actions de motorisation, de ravitaillement et de lancement ciblent désormais explicitement la sonde courante ; elles ne construisent plus une ancienne URL générique qui répondait `Endpoint not found`.
 
 - API v110 : les scans détaillés de `GET /api/probe/sector`, `GET /api/probe/{probeId}/sector` et `GET /api/sector` exposent désormais `motorized` sur les astéroïdes présents dans les listes générales `bookmarkTargets`, en plus de `minableTargets`. Ce champ reste absent des autres types d’objets.
 
