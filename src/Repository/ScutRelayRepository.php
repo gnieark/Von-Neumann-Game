@@ -85,7 +85,7 @@ final class ScutRelayRepository
         ]);
 
         return array_values(array_filter(
-            array_map(fn(array $row): ScutRelay => $this->hydrate($row), $stmt->fetchAll()),
+            array_map(fn(array $row): ScutRelay => $this->hydrate($row, includeCoverage: false), $stmt->fetchAll()),
             static fn(ScutRelay $relay): bool => max(
                 abs($relay->sector->getX() - $sector->getX()),
                 abs($relay->sector->getY() - $sector->getY()),
@@ -105,6 +105,24 @@ final class ScutRelayRepository
         $stmt->execute(['network_id' => $networkId]);
 
         return array_map(fn(array $row): ScutRelay => $this->hydrate($row), $stmt->fetchAll());
+    }
+
+    /**
+     * Returns relay metadata without hydrating each relay's sector coverage.
+     *
+     * @return array<ScutRelay>
+     */
+    public function findSummariesByNetworkId(int $networkId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM scut_relays WHERE network_id = :network_id ORDER BY activated_at ASC, id ASC'
+        );
+        $stmt->execute(['network_id' => $networkId]);
+
+        return array_map(
+            fn(array $row): ScutRelay => $this->hydrate($row, includeCoverage: false),
+            $stmt->fetchAll(),
+        );
     }
 
     /**
@@ -179,7 +197,7 @@ final class ScutRelayRepository
         $stmt->execute(['id' => $id]);
     }
 
-    private function hydrate(array $row): ScutRelay
+    private function hydrate(array $row, bool $includeCoverage = true): ScutRelay
     {
         return new ScutRelay(
             (int) $row['id'],
@@ -188,7 +206,7 @@ final class ScutRelayRepository
             (string) $row['status'],
             $row['network_id'] !== null ? (int) $row['network_id'] : null,
             (bool) ((int) ($row['is_transit_beacon'] ?? 0)),
-            $this->coverageForRelay((int) $row['id']),
+            $includeCoverage ? $this->coverageForRelay((int) $row['id']) : [],
             (string) $row['created_at'],
             $row['activated_at'] !== null ? (string) $row['activated_at'] : null,
             (string) $row['updated_at'],

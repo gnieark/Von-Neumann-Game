@@ -45,6 +45,18 @@ final class ScutNetworkRepository
     }
 
     /**
+     * Returns network metadata without hydrating its potentially large sector coverage.
+     */
+    public function findSummaryById(int $id): ?ScutNetwork
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM scut_networks WHERE id = :id');
+        $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+
+        return $row ? $this->hydrate($row, includeCoverage: false) : null;
+    }
+
+    /**
      * @param array<int> $ids
      * @return array<ScutNetwork>
      */
@@ -60,6 +72,43 @@ final class ScutNetworkRepository
         $stmt->execute($ids);
 
         return array_map(fn(array $row): ScutNetwork => $this->hydrate($row), $stmt->fetchAll());
+    }
+
+    /**
+     * @param array<int> $ids
+     * @return array<ScutNetwork>
+     */
+    public function findSummariesByIds(array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->pdo->prepare('SELECT * FROM scut_networks WHERE id IN (' . $placeholders . ') ORDER BY id ASC');
+        $stmt->execute($ids);
+
+        return array_map(
+            fn(array $row): ScutNetwork => $this->hydrate($row, includeCoverage: false),
+            $stmt->fetchAll(),
+        );
+    }
+
+    public function countCoveredSectors(int $networkId): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*)
+             FROM (
+                 SELECT 1
+                 FROM scut_covered_sectors
+                 WHERE scut_network_id = :network_id
+                 GROUP BY sector_x, sector_y, sector_z
+             ) covered_sectors'
+        );
+        $stmt->execute(['network_id' => $networkId]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     public function save(ScutNetwork $network): void
@@ -89,12 +138,12 @@ final class ScutNetworkRepository
         $stmt->execute(['id' => $id]);
     }
 
-    private function hydrate(array $row): ScutNetwork
+    private function hydrate(array $row, bool $includeCoverage = true): ScutNetwork
     {
         return new ScutNetwork(
             (int) $row['id'],
             (string) $row['name'],
-            $this->coverageForNetwork((int) $row['id']),
+            $includeCoverage ? $this->coverageForNetwork((int) $row['id']) : [],
             (string) $row['created_at'],
             (string) $row['updated_at'],
         );

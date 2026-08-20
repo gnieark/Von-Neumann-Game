@@ -113,7 +113,7 @@ final class ScutNetworkService
             static fn(?int $id): bool => $id !== null,
         )));
 
-        return $this->networks->findByIds($networkIds);
+        return $this->networks->findSummariesByIds($networkIds);
     }
 
     public function networkCoversSector(int $networkId, SectorCoordinates $sector): bool
@@ -189,6 +189,16 @@ final class ScutNetworkService
         return $this->networks->findById($id);
     }
 
+    public function networkSummaryById(int $id): ?ScutNetwork
+    {
+        return $this->networks->findSummaryById($id);
+    }
+
+    public function coveredSectorCount(int $networkId): int
+    {
+        return $this->networks->countCoveredSectors($networkId);
+    }
+
     public function deleteRelay(int $id): void
     {
         $this->relays->delete($id);
@@ -203,29 +213,21 @@ final class ScutNetworkService
     }
 
     /**
+     * @return array<ScutRelay>
+     */
+    public function relaySummariesForNetwork(int $networkId): array
+    {
+        return $this->relays->findSummariesByNetworkId($networkId);
+    }
+
+    /**
      * @return array<NeumannProbe>
      */
     public function probesCoveredByNetwork(int $networkId): array
     {
-        $network = $this->networks->findById($networkId);
-        if ($network === null) {
-            return [];
-        }
-
-        $covered = array_fill_keys(array_map([$this, 'sectorKeyFromArray'], $network->coveredSectors), true);
-        $found = [];
-        foreach ($this->relays->findByNetworkId($networkId) as $relay) {
-            foreach ($this->probes->findWithinRange($relay->sector, ScutRelay::RADIUS_SECTORS) as $probe) {
-                if (!isset($covered[$probe->currentSector->toKey()])) {
-                    continue;
-                }
-                $found[$probe->id] = $probe;
-            }
-        }
-
-        ksort($found);
-
-        return array_values($found);
+        return $this->networks->findSummaryById($networkId) === null
+            ? []
+            : $this->probes->findCoveredByScutNetworkId($networkId);
     }
 
     /**
@@ -266,7 +268,7 @@ final class ScutNetworkService
             }
         }
 
-        $networks = $this->networks->findByIds($networkIds);
+        $networks = $this->networks->findSummariesByIds($networkIds);
         usort(
             $networks,
             static fn(ScutNetwork $a, ScutNetwork $b): int => [-(int) ($relayCounts[$a->id] ?? 0), $a->createdAt, $a->id]

@@ -1774,7 +1774,7 @@ final class ApiKernel
     {
         $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
-        $network = $this->scut->networkById($networkId);
+        $network = $this->scut->networkSummaryById($networkId);
         if ($network === null) {
             return ApiResponse::error(404, 'not_found', 'SCUT network not found.');
         }
@@ -1784,8 +1784,14 @@ final class ApiKernel
 
         $frame = new PlayerReferenceFrame($player->homeSector);
         $relays = array_map(
-            fn(ScutRelay $relay): array => $this->scutRelayArray($player, $relay, includeSector: true, idAsString: false),
-            $this->scut->relaysForNetwork($network->id),
+            fn(ScutRelay $relay): array => $this->scutRelayArray(
+                $player,
+                $relay,
+                includeSector: true,
+                idAsString: false,
+                knownNetwork: $network,
+            ),
+            $this->scut->relaySummariesForNetwork($network->id),
         );
         $probes = array_map(
             static fn(NeumannProbe $coveredProbe): array => [
@@ -1801,7 +1807,7 @@ final class ApiKernel
         return new ApiResponse(200, [
             'network' => $this->scutNetworkArray($network) + [
                 'relayCount' => count($relays),
-                'coveredSectorCount' => count($network->coveredSectors),
+                'coveredSectorCount' => $this->scut->coveredSectorCount($network->id),
                 'relays' => $relays,
                 'probes' => $probes,
             ],
@@ -1893,9 +1899,17 @@ final class ApiKernel
         return $observation;
     }
 
-    private function scutRelayArray(Player $player, ScutRelay $relay, bool $includeSector, bool $idAsString): array
+    private function scutRelayArray(
+        Player $player,
+        ScutRelay $relay,
+        bool $includeSector,
+        bool $idAsString,
+        ?ScutNetwork $knownNetwork = null,
+    ): array
     {
-        $network = $relay->networkId !== null ? $this->scut->networkById($relay->networkId) : null;
+        $network = $knownNetwork !== null && $knownNetwork->id === $relay->networkId
+            ? $knownNetwork
+            : ($relay->networkId !== null ? $this->scut->networkSummaryById($relay->networkId) : null);
         $createdByProbeName = $this->scutRelayCreatorProbeName($relay);
         $payload = [
             'id' => $idAsString ? (string) $relay->id : $relay->id,

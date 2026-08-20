@@ -3180,6 +3180,11 @@ $scutNetworkId = (int) ($scutRelay->networkId ?? 0);
 $scutNetwork = $scutNetworks->findById($scutNetworkId);
 $test->assertEquals('Delta SCUT', $scutNetwork?->name, 'Isolated SCUT relay creates the requested network name');
 $test->assert(count($scutRelay->coveredSectors) > 1, 'SCUT relay persists covered sectors');
+$scutNetworkSummary = $scutNetworks->findSummaryById($scutNetworkId);
+$test->assertEquals([], $scutNetworkSummary?->coveredSectors, 'SCUT network summaries omit the potentially large sector coverage');
+$test->assertEquals(count($scutNetwork?->coveredSectors ?? []), $scutNetworks->countCoveredSectors($scutNetworkId), 'SCUT network coverage count is computed without hydrating sectors');
+$scutRelaySummaries = $scutRelays->findSummariesByNetworkId($scutNetworkId);
+$test->assertEquals([], $scutRelaySummaries[0]->coveredSectors ?? null, 'SCUT relay summaries omit their potentially large sector coverage');
 $scutSector = $kernel->handle('GET', '/api/probe/sector', $scutHeaders);
 $test->assertEquals(200, $scutSector->status, 'Current sector scan succeeds after SCUT activation');
 $scutRelayObjects = array_values(array_filter(
@@ -3231,6 +3236,7 @@ $test->assertEquals(true, $scutTransitBeaconRelayObjects[0]['isTransitBeacon'] ?
 $scutTransitBeaconNetwork = $kernel->handle('GET', '/api/probe/' . $scutProbe->id . '/scut-network/' . $scutNetworkId, $scutHeaders);
 $test->assertEquals(200, $scutTransitBeaconNetwork->status, 'probe-scoped SCUT network endpoint succeeds after transit beacon installation');
 $test->assertEquals(true, $scutTransitBeaconNetwork->body['network']['relays'][0]['isTransitBeacon'] ?? null, 'SCUT network endpoint exposes relay transit beacon state');
+$test->assertEquals($scutNetworks->countCoveredSectors($scutNetworkId), $scutTransitBeaconNetwork->body['network']['coveredSectorCount'] ?? null, 'SCUT network endpoint exposes the SQL-computed covered sector count');
 $secondScutTransitBeaconInstall = $kernel->handle('POST', '/api/probe/' . $scutProbe->id . '/mannies/' . rawurlencode($scutMannyId) . '/install-scut-transit-beacon', $scutHeaders, json_encode([
     'relayId' => $scutRelay->id,
 ], JSON_THROW_ON_ERROR));
@@ -3292,6 +3298,11 @@ $test->assertEquals(200, $scutNetworkResponse->status, 'Covered probes can inspe
 $test->assertEquals($scutNetworkId, $scutNetworkResponse->body['network']['id'] ?? null, 'SCUT network endpoint exposes the network id');
 $test->assertEquals(1, $scutNetworkResponse->body['network']['relayCount'] ?? null, 'SCUT network endpoint exposes relay count');
 $test->assert(count($scutNetworkResponse->body['network']['probes'] ?? []) >= 2, 'SCUT network endpoint lists probes in covered sectors');
+$coveredScutProbeIds = array_map(
+    static fn(NeumannProbe $probe): int => $probe->id,
+    $probes->findCoveredByScutNetworkId($scutNetworkId),
+);
+$test->assert(in_array($scutRemoteProbe->id, $coveredScutProbeIds, true), 'SCUT covered probes are resolved directly from relational coverage');
 
 $forumUser = $auth->registerPlayerWithPassword('forum-user', 'secret', 'Forum User');
 $forumUserSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'forum-user', 'password' => 'secret'], JSON_THROW_ON_ERROR));

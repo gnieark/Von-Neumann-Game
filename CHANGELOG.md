@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-20
+
+### Fixed
+
+- API : l’inspection d’un grand réseau SCUT ne charge plus en mémoire les couvertures détaillées du réseau et de chacun de ses relais. Le nombre de secteurs et les sondes couvertes sont désormais résolus directement en SQL, évitant les erreurs 500 par dépassement de la limite mémoire PHP-FPM.
+
 ## 2026-08-19
 
 ### Changed

@@ -179,6 +179,26 @@ final class NeumannProbeRepository
         ));
     }
 
+    /**
+     * @return array<NeumannProbe>
+     */
+    public function findCoveredByScutNetworkId(int $networkId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT DISTINCT neumann_probes.*
+             FROM neumann_probes
+             INNER JOIN scut_covered_sectors coverage
+                ON coverage.sector_x = neumann_probes.sector_x
+               AND coverage.sector_y = neumann_probes.sector_y
+               AND coverage.sector_z = neumann_probes.sector_z
+             WHERE coverage.scut_network_id = :network_id
+             ORDER BY neumann_probes.id ASC'
+        );
+        $stmt->execute(['network_id' => $networkId]);
+
+        return array_map(fn(array $row): NeumannProbe => $this->hydrate($row), $stmt->fetchAll());
+    }
+
     public function save(NeumannProbe $probe): void
     {
         $probe->updatedAt = gmdate('c');
