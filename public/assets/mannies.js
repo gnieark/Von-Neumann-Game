@@ -24,6 +24,7 @@
 
     const state = {
         currentCraftingRecipes: [],
+        craftingRecipesStatus: "idle",
         currentInventory: null,
         currentMannies: [],
         currentMannyMineTargets: [],
@@ -71,20 +72,44 @@
         return "/api/probe/" + encodeURIComponent(String(probeId)) + normalizedSuffix;
     }
 
-    function loadCraftingRecipesOnce() {
+    function loadCraftingRecipes(force = false) {
+        if (force && state.craftingRecipesStatus !== "loading") {
+            craftingRecipesLoadPromise = null;
+        }
         if (craftingRecipesLoadPromise === null) {
+            state.craftingRecipesStatus = "loading";
             craftingRecipesLoadPromise = window.VNG.apiJson("/api/crafting-recipes", {"method": "GET"})
                 .then((recipeData) => {
-                    state.currentCraftingRecipes = Array.isArray(recipeData && recipeData.recipes)
-                        ? recipeData.recipes
-                        : [];
+                    if (!Array.isArray(recipeData && recipeData.recipes)) {
+                        throw new Error(tr("craftingRecipesUnavailable", "Recipes unavailable."));
+                    }
+                    state.currentCraftingRecipes = recipeData.recipes;
+                    state.craftingRecipesStatus = "available";
                 })
-                .catch(() => {
+                .catch((error) => {
                     state.currentCraftingRecipes = [];
+                    state.craftingRecipesStatus = "unavailable";
+                    craftingRecipesLoadPromise = null;
+                    throw error;
                 });
         }
 
         return craftingRecipesLoadPromise;
+    }
+
+    async function retryCraftingRecipes() {
+        const loading = loadCraftingRecipes(true);
+        setStatus(tr("craftingRecipesLoading", "Loading recipes..."));
+        updateMannyCraftForms();
+        updatePrinterCraftForms();
+        try {
+            await loading;
+            setStatus(tr("craftingRecipesLoaded", "Recipe catalogue loaded."));
+        } catch (error) {
+            setStatus(tr("craftingRecipesUnavailable", "Recipes unavailable."));
+        }
+        updateMannyCraftForms();
+        updatePrinterCraftForms();
     }
 
     async function refreshProbeInventory() {
@@ -1114,23 +1139,8 @@
         ));
     }
 
-    function fallbackMannyCraftingRecipes() {
-        return [{
-            "id": "waypoint_bookmark",
-            "name": tr("waypointBookmark", "Waypoint bookmark"),
-            "craftableBy": ["manny"],
-            "description": "A transmitting beacon placed on an object such as an asteroid or planet, or set in orbit around a star or gas giant. Its message can be read by every Neumann probe present in the sector.",
-            "ingredients": [{
-                "type": "metals",
-                "quantity": 0.01,
-                "unit": "earth_container_equivalent",
-            }],
-        }];
-    }
-
     function mannyCraftingRecipes() {
-        const recipes = craftingRecipesForFabricator("manny");
-        return recipes.length > 0 ? recipes : fallbackMannyCraftingRecipes();
+        return craftingRecipesForFabricator("manny");
     }
 
     function atomicPrinterCraftingRecipes() {
@@ -1202,6 +1212,13 @@
     }
 
     function craftRecipeOptions(selected, fabricator) {
+        if (state.craftingRecipesStatus !== "available") {
+            const message = state.craftingRecipesStatus === "loading"
+                ? tr("craftingRecipesLoading", "Loading recipes...")
+                : tr("craftingRecipesUnavailable", "Recipes unavailable.");
+
+            return "<option value=\"\">" + escaped(message) + "</option>";
+        }
         const recipes = fabricator === "atomic_3d_printer" ? atomicPrinterCraftingRecipes() : mannyCraftingRecipes();
         if (recipes.length === 0) {
             return "<option value=\"\">" + escaped(tr("noCraftingRecipes", "No recipes available.")) + "</option>";
@@ -1215,6 +1232,23 @@
                 + escaped(craftingRecipeName(recipe))
                 + "</option>";
         }).join("");
+    }
+
+    function craftingRecipesStatusHtml() {
+        if (state.craftingRecipesStatus === "available") {
+            return "";
+        }
+        const loading = state.craftingRecipesStatus === "loading";
+        const message = loading
+            ? tr("craftingRecipesLoading", "Loading recipes...")
+            : tr("craftingRecipesUnavailable", "Recipes unavailable.");
+
+        return "<p class=\"manny-crafting-recipes-status\" role=\"status\">"
+            + "<span>" + escaped(message) + "</span>"
+            + "<button class=\"manny-crafting-recipes-retry\" type=\"button\"" + (loading ? " disabled" : "") + ">"
+            + escaped(tr("retryCraftingRecipes", "Try again"))
+            + "</button>"
+            + "</p>";
     }
 
     function inventoryResourceAmount(type) {
@@ -1693,6 +1727,7 @@
         const select = form.querySelector(".manny-craft-recipe");
         const descriptionNode = form.querySelector(".manny-craft-description");
         const ingredientsNode = form.querySelector(".manny-craft-ingredients");
+        const recipesStatusNode = form.querySelector(".manny-crafting-recipes-status");
         const button = form.querySelector(".manny-craft-button, .printer-craft-button");
         if (!select) {
             return;
@@ -1700,20 +1735,26 @@
 
         const selected = select.value;
         const fabricator = form.dataset.fabricator || "manny";
+        const recipesAvailable = state.craftingRecipesStatus === "available";
         select.innerHTML = craftRecipeOptions(selected, fabricator);
         const recipe = craftingRecipeById(select.value, fabricator);
         const canCraft = canCraftRecipe(recipe);
+        if (recipesStatusNode) {
+            recipesStatusNode.outerHTML = craftingRecipesStatusHtml();
+        }
         if (descriptionNode) {
-            const description = craftingRecipeDescription(recipe);
+            const description = recipesAvailable ? craftingRecipeDescription(recipe) : "";
             descriptionNode.textContent = description;
             descriptionNode.hidden = description === "";
         }
         if (ingredientsNode) {
-            ingredientsNode.innerHTML = renderCraftIngredients(recipe);
+            ingredientsNode.innerHTML = recipesAvailable ? renderCraftIngredients(recipe) : "";
         }
         if (button) {
             button.disabled = !canCraft;
-            button.title = canCraft ? "" : tr("missingCraftIngredients", "Insufficient ingredients.");
+            button.title = canCraft
+                ? ""
+                : (recipesAvailable ? tr("missingCraftIngredients", "Insufficient ingredients.") : tr("craftingRecipesUnavailable", "Recipes unavailable."));
             button.setAttribute("aria-disabled", canCraft ? "false" : "true");
         }
     }
@@ -2692,6 +2733,7 @@
             + "<p class=\"manny-craft-description\" aria-live=\"polite\"></p>"
             + "<div class=\"manny-craft-ingredients\" aria-live=\"polite\"></div>"
             + "</div>"
+            + craftingRecipesStatusHtml()
             + "<button class=\"manny-craft-button\" type=\"submit\">" + escaped(tr("craft", "Craft")) + "</button>"
             + "</form>";
     }
@@ -3208,9 +3250,11 @@
         const noAssistant = availableAtomicPrinterAssistants().length === 0;
         const noRecipes = !atomicPrinterHasRecipes();
         const disabled = noAssistant || noRecipes;
-        const hint = noRecipes
+        const hint = state.craftingRecipesStatus !== "available"
+            ? ""
+            : (noRecipes
             ? tr("noAtomicPrinterRecipes", "No atomic printer recipe available.")
-            : (noAssistant ? tr("noAvailableMannyForPrinter", "No available Manny can assist the printer.") : tr("atomicPrinterAssistantHint", "A free Manny aboard will handle loading and unloading."));
+            : (noAssistant ? tr("noAvailableMannyForPrinter", "No available Manny can assist the printer.") : tr("atomicPrinterAssistantHint", "A free Manny aboard will handle loading and unloading.")));
 
         return "<form class=\"printer-craft-form manny-form\" data-fabricator=\"atomic_3d_printer\">"
             + "<div class=\"manny-craft-picker\">"
@@ -3218,6 +3262,7 @@
             + "<p class=\"manny-craft-description\" aria-live=\"polite\"></p>"
             + "<div class=\"manny-craft-ingredients\" aria-live=\"polite\"></div>"
             + "</div>"
+            + craftingRecipesStatusHtml()
             + "<button class=\"printer-craft-button\" type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("craft", "Craft")) + "</button>"
             + "<p class=\"printer-craft-hint\">" + escaped(hint) + "</p>"
             + "</form>";
@@ -3984,6 +4029,7 @@
             const hint = form.querySelector(".printer-craft-hint");
             const noAssistant = availableAtomicPrinterAssistants().length === 0;
             const noRecipes = !atomicPrinterHasRecipes();
+            const recipesAvailable = state.craftingRecipesStatus === "available";
             const recipe = select ? craftingRecipeById(select.value, "atomic_3d_printer") : null;
             const canCraft = canCraftRecipe(recipe);
             if (button) {
@@ -3993,9 +4039,11 @@
                 button.title = !canCraft && !noAssistant && !noRecipes ? tr("missingCraftIngredients", "Insufficient ingredients.") : "";
             }
             if (hint) {
-                hint.textContent = noRecipes
+                hint.textContent = !recipesAvailable
+                    ? ""
+                    : (noRecipes
                     ? tr("noAtomicPrinterRecipes", "No atomic printer recipe available.")
-                    : (noAssistant ? tr("noAvailableMannyForPrinter", "No available Manny can assist the printer.") : tr("atomicPrinterAssistantHint", "A free Manny aboard will handle loading and unloading."));
+                    : (noAssistant ? tr("noAvailableMannyForPrinter", "No available Manny can assist the printer.") : tr("atomicPrinterAssistantHint", "A free Manny aboard will handle loading and unloading.")));
             }
         });
     }
@@ -4477,6 +4525,11 @@
             });
         }
         if (form.classList.contains("manny-craft-form")) {
+            if (state.craftingRecipesStatus !== "available") {
+                updateCraftForm(form);
+                setStatus(tr("craftingRecipesUnavailable", "Recipes unavailable."));
+                return null;
+            }
             const recipe = craftingRecipeById(String(formData.get("recipe") || ""), "manny");
             if (!canCraftRecipe(recipe)) {
                 updateCraftForm(form);
@@ -4490,6 +4543,12 @@
             });
         }
         if (form.classList.contains("printer-craft-form")) {
+            if (state.craftingRecipesStatus !== "available") {
+                updateCraftForm(form);
+                updatePrinterCraftForms();
+                setStatus(tr("craftingRecipesUnavailable", "Recipes unavailable."));
+                return null;
+            }
             const recipe = craftingRecipeById(String(formData.get("recipe") || ""), "atomic_3d_printer");
             if (!atomicPrinterHasRecipes()) {
                 updatePrinterCraftForms();
@@ -4644,6 +4703,12 @@
         });
 
         mannyList.addEventListener("click", async (event) => {
+            const craftingRecipesRetryButton = event.target.closest(".manny-crafting-recipes-retry");
+            if (craftingRecipesRetryButton) {
+                await retryCraftingRecipes();
+                return;
+            }
+
             const accordionButton = event.target.closest(".manny-accordion-trigger, .manny-action-accordion-trigger");
             if (accordionButton) {
                 const targetId = accordionButton.getAttribute("aria-controls");
@@ -4739,7 +4804,11 @@
         }
 
         i18n = await window.VNG.loadI18n();
-        await loadCraftingRecipesOnce();
+        try {
+            await loadCraftingRecipes();
+        } catch (error) {
+            setStatus(tr("craftingRecipesUnavailable", "Recipes unavailable."));
+        }
         syncMannyFilterStateFromControls();
         bindEvents();
         loadManniesPage();

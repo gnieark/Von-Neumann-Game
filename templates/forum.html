@@ -19,21 +19,4 @@
     <p id="forum-status" class="action-status" aria-live="polite"></p>
     <div id="forum-categories" class="forum-categories" aria-live="polite"></div>
     <p id="forum-empty" class="sector-context" hidden>{{t.forumNoCategories}}</p>
-
-    <section id="forum-thread" class="forum-thread" hidden aria-live="polite">
-        <div class="forum-thread-heading">
-            <div>
-                <p id="forum-thread-category" class="eyebrow"></p>
-                <h3 id="forum-thread-title"></h3>
-                <p id="forum-thread-meta" class="forum-muted"></p>
-            </div>
-            <button id="forum-thread-close" type="button">{{t.close}}</button>
-        </div>
-        <div id="forum-thread-messages" class="forum-thread-messages"></div>
-        <button id="forum-thread-load-more" type="button" hidden>{{t.forumOlderMessages}}</button>
-        <form id="forum-reply-form" class="forum-reply-form">
-            <label>{{t.forumReplyBody}}<textarea id="forum-reply-body" name="body" rows="4" maxlength="5000" required></textarea></label>
-            <button class="primary" type="submit">{{t.forumSendReply}}</button>
-        </form>
-    </section>
 </article>

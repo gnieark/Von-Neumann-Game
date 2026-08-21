@@ -310,14 +310,6 @@
         target?.scrollIntoView({"block": "end", "behavior": "smooth"});
     }
 
-    function renderThread() {
-        const legacyThread = document.getElementById("forum-thread");
-        if (legacyThread) {
-            legacyThread.hidden = true;
-        }
-        renderCategories();
-    }
-
     async function loadCategoryPosts(categoryId, offset) {
         const key = String(categoryId);
         const nextOffset = Math.max(0, Number(offset || 0));
@@ -367,7 +359,7 @@
         if (!settings.append) {
             state.editingMessageId = null;
         }
-        renderThread();
+        renderCategories();
         setStatus("");
         if (!settings.silent) {
             document.querySelector("[data-forum-category-id=\"" + escapedSelectorValue(state.currentPost?.categoryId || "") + "\"]")
@@ -447,7 +439,7 @@
             )));
         }
         state.editingMessageId = null;
-        renderThread();
+        renderCategories();
         setStatus(tr("forumMessageEdited", "Message edited."));
     }
 
@@ -493,13 +485,13 @@
             const editButton = event.target.closest("[data-forum-edit-message]");
             if (editButton) {
                 state.editingMessageId = editButton.dataset.forumEditMessage || "";
-                renderThread();
+                renderCategories();
                 return;
             }
 
             if (event.target.closest("[data-forum-cancel-edit]")) {
                 state.editingMessageId = null;
-                renderThread();
+                renderCategories();
                 return;
             }
 
@@ -551,47 +543,6 @@
             }
             event.preventDefault();
             createPost(form).catch((error) => setStatus(error.message || tr("requestDenied", "Request denied")));
-        });
-        document.getElementById("forum-thread-close")?.addEventListener("click", () => {
-            state.currentPost = null;
-            state.currentFirstMessage = null;
-            state.currentMessages = [];
-            state.currentMessagePagination = null;
-            renderThread();
-        });
-        document.getElementById("forum-thread-load-more")?.addEventListener("click", () => {
-            if (!state.currentPost) {
-                return;
-            }
-            openPost(state.currentPost.id, {
-                "append": true,
-                "offset": state.currentMessages.length,
-            }).catch((error) => setStatus(error.message || tr("requestDenied", "Request denied")));
-        });
-        document.getElementById("forum-thread-messages")?.addEventListener("click", (event) => {
-            const editButton = event.target.closest("[data-forum-edit-message]");
-            if (editButton) {
-                state.editingMessageId = editButton.dataset.forumEditMessage || "";
-                renderThread();
-                return;
-            }
-
-            if (event.target.closest("[data-forum-cancel-edit]")) {
-                state.editingMessageId = null;
-                renderThread();
-            }
-        });
-        document.getElementById("forum-thread-messages")?.addEventListener("submit", (event) => {
-            const form = event.target.closest("[data-forum-edit-form]");
-            if (!form) {
-                return;
-            }
-            event.preventDefault();
-            updateMessage(form).catch((error) => setStatus(error.message || tr("requestDenied", "Request denied")));
-        });
-        document.getElementById("forum-reply-form")?.addEventListener("submit", (event) => {
-            event.preventDefault();
-            replyToPost(event.currentTarget).catch((error) => setStatus(error.message || tr("requestDenied", "Request denied")));
         });
         window.addEventListener("resize", updateLastPostJumpButton);
     }

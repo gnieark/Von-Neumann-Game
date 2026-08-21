@@ -2426,7 +2426,6 @@ button.account-menu-item {
     width: 100%;
 }
 
-.forum-thread,
 .forum-inline-thread {
     display: grid;
     gap: 14px;
@@ -2434,10 +2433,6 @@ button.account-menu-item {
     padding: 14px;
     border: 1px solid rgba(32, 255, 132, .22);
     background: rgba(32, 255, 132, .05);
-}
-
-.forum-thread[hidden] {
-    display: none;
 }
 
 .forum-inline-thread {
@@ -3205,6 +3200,22 @@ button.account-menu-item {
     display: grid;
     gap: 8px;
     min-width: 0;
+}
+
+.manny-crafting-recipes-status {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    color: #ffd0d0;
+    font-size: .85rem;
+}
+
+.manny-crafting-recipes-status button {
+    min-height: 34px;
+    padding: 6px 12px;
 }
 
 .manny-craft-ingredients {

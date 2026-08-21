@@ -658,6 +658,10 @@ $test->assert(str_contains($openApi, 'enum: [covered, uncovered, unknown]'), 'Op
 $test->assert(str_contains($openApi, 'scutCoverageStatus: unknown'), 'OpenAPI includes an unknown SCUT coverage example');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'function chronologicalMessages'), 'forum JS can order thread replies chronologically');
 $test->assert(is_string($forumScript) && str_contains($forumScript, 'data-forum-jump-last'), 'forum JS exposes a jump-to-last-post button for long threads');
+$test->assert(is_string($forumTemplate) && !str_contains($forumTemplate, 'id="forum-thread"'), 'forum template no longer ships the hidden legacy thread interface');
+$test->assert(is_string($forumScript) && !str_contains($forumScript, 'function renderThread'), 'forum JS renders only the inline thread interface');
+$test->assert(is_string($forumScript) && !str_contains($forumScript, 'getElementById("forum-thread'), 'forum JS no longer binds legacy thread controls');
+$test->assert(is_string($forumScript) && str_contains($forumScript, 'forum-inline-thread'), 'forum JS keeps the active inline thread interface');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'forumJumpLastPost' => 'atteindre le dernier post'"), 'French translations include the forum last-post jump label');
 $test->assert(is_string($forumTemplate) && str_contains($forumTemplate, 'href="https://discord.gg/zGqyh9RSMr"'), 'forum notice links to the Neumann Probe Discord server');
 $test->assert(is_string($forumTemplate) && str_contains($forumTemplate, '{{t.forumBriefParagraphFive}}'), 'forum notice renders its fifth paragraph');
@@ -839,6 +843,14 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyAc
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupSector'), 'mannies JS renders the sector action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupContainers'), 'mannies JS renders the containers action group');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyActionGroupCraft'), 'mannies JS renders the craft action group');
+$test->assert(is_string($manniesScript) && !str_contains($manniesScript, 'fallbackMannyCraftingRecipes'), 'mannies JS no longer substitutes a hard-coded recipe catalogue');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'craftingRecipesStatus: "idle"'), 'mannies JS tracks recipe catalogue availability explicitly');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-crafting-recipes-retry'), 'mannies JS offers a recipe catalogue retry action');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'await retryCraftingRecipes();'), 'mannies JS reloads the recipe catalogue on retry');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'craftingRecipesUnavailable' => 'Recettes indisponibles.'"), 'French translations expose unavailable crafting recipes');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'retryCraftingRecipes' => 'Réessayer'"), 'French translations label the crafting recipe retry action');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'craftingRecipesUnavailable' => 'Recipes unavailable.'"), 'English translations expose unavailable crafting recipes');
+$test->assert(is_string($appCss) && str_contains($appCss, '.manny-crafting-recipes-status'), 'mannies CSS styles the unavailable recipe catalogue state');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'insufficientCraftStorage'), 'mannies JS translates cargo-capacity craft errors');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'storage_container_reserved'), 'mannies JS translates reserved-container detach errors');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'storage_container_reserved'), 'inventories JS translates reserved-container detach errors');
@@ -940,7 +952,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260819-duck-shaped-asteroids"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260821-crafting-recipes-retry"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
