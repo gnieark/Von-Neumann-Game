@@ -221,7 +221,7 @@ Routes principales:
 - `POST /api/probe/atomic-printer/craft`
 - `POST /api/probe/mannies/{mannyId}/salvage`
 - `POST /api/probe/mannies/{mannyId}/detach-storage-container`
-- `POST /api/probe/mannies/{mannyId}/inspect-asteroid`
+- `POST /api/probe/mannies/{mannyId}/inspect-sector-object`
 - `POST /api/probe/mannies/{mannyId}/recover-storage-container`
 - `POST /api/probe/mannies/{mannyId}/install-bookmark`
 - `POST /api/probe/mannies/{mannyId}/recall`

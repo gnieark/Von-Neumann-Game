@@ -351,7 +351,7 @@ final class ProbeManniesApiController
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);
         }
 
-        if ($action === 'inspect-sector-object' || $action === 'inspect-asteroid') {
+        if ($action === 'inspect-sector-object') {
             if (!isset($data['objectId']) || !is_string($data['objectId'])) {
                 return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
             }

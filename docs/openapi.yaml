@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '115'
+  version: '116'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 115
+                apiVersion: 116
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -3567,50 +3567,6 @@ paths:
         Dormant constructs generate a Manny report alert and unlock one probe
         improvement for the inspecting probe. The construct's selected recovery
         scenario is stored in sector data and is not exposed by the API.
-      parameters:
-        - $ref: '#/components/parameters/MannyId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MannyInspectSectorObjectRequest'
-            example:
-              objectId: asteroid-abc123
-      responses:
-        '202':
-          description: Inspection task accepted
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [manny]
-                properties:
-                  manny:
-                    $ref: '#/components/schemas/Manny'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '409':
-          description: Manny unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Target is not an inspectable sector object
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/probe/mannies/{mannyId}/inspect-asteroid:
-    post:
-      summary: Inspect a sector object with a Manny (deprecated alias)
-      deprecated: true
-      description: >
-        Deprecated alias of `/api/probe/mannies/{mannyId}/inspect-sector-object`.
-        New clients should call the generic endpoint.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:

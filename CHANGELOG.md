@@ -8,6 +8,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Gameplay : l’encombrement d’un `deuterium_engine` passe de 0,06 à 0,05 ECE. Un moteur à la dérive tient désormais dans la capacité d’emport d’une Manny et redevient donc récupérable avec l’action `salvage`.
 - Stockage : les ressources en métaux, glace et composés carbonés n’ont plus de totaux dupliqués dans `neumann_probes` ; les lignes des containers sont désormais l’unique source de vérité. Pour déployer sur une base existante : arrêter l’application et le scheduler, déployer ce code, vérifier avec `php scripts/one-shot-scripts/remove-legacy-probe-resource-stocks.php --dry-run --database-config=var/database-prod.json`, relancer sans `--dry-run`, puis seulement redémarrer les services.
+- Maintenance : ajout de `scripts/audit-deprecated-endpoints.py`, sans dépendance externe, pour extraire les opérations `deprecated: true` d’OpenAPI et compter leurs usages dans les journaux d’accès Nginx courants ou compressés, sans afficher les adresses IP.
+- API v116 : suppression de l’ancien alias `POST /api/probe/mannies/{mannyId}/inspect-asteroid` et de sa variante ciblant explicitement une sonde ; utiliser `inspect-sector-object`. L’audit des 9 817 900 lignes de journaux Nginx disponibles n’a relevé aucun appel à cet alias.
 
 
 ## 2026-08-20

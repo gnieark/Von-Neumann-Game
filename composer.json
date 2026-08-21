@@ -20,7 +20,8 @@
   "scripts": {
     "test": [
       "php tests/ApiTests.php",
-      "php tests/SectorTests.php"
+      "php tests/SectorTests.php",
+      "python3 tests/DeprecatedEndpointLogAuditTests.py"
     ],
     "init-db": "php scripts/init-db.php"
   }

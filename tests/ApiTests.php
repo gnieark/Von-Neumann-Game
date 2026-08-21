@@ -2199,9 +2199,15 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(115, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(116, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
+$removedInspectAsteroid = $kernel->handle('POST', '/api/probe/mannies/mny_missing/inspect-asteroid');
+$test->assertEquals(404, $removedInspectAsteroid->status, 'deprecated inspect-asteroid endpoint is removed');
+$test->assertEquals('Endpoint not found', $removedInspectAsteroid->body['error']['message'] ?? null, 'removed inspect-asteroid endpoint does not reach authentication or Manny lookup');
+$removedProbeInspectAsteroid = $kernel->handle('POST', '/api/probe/999999999/mannies/mny_missing/inspect-asteroid');
+$test->assertEquals(404, $removedProbeInspectAsteroid->status, 'deprecated probe-specific inspect-asteroid endpoint is removed');
+$test->assertEquals('Endpoint not found', $removedProbeInspectAsteroid->body['error']['message'] ?? null, 'removed probe-specific inspect-asteroid endpoint does not reach authentication or Manny lookup');
 
 $multiScanDbPath = $tmp . DIRECTORY_SEPARATOR . 'multi-scan.sqlite';
 $multiScanFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $multiScanDbPath), $root);
@@ -4506,11 +4512,11 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $test->assertEquals(0, count($scoutHiddenBefore), 'undiscovered hidden detached containers stay hidden from other players');
             $scoutMannies = $kernel->handle('GET', '/api/probe/mannies', $scoutHeaders);
             $scoutMannyId = (string) ($scoutMannies->body['mannies'][0]['id'] ?? '');
-            $scoutInspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scoutMannyId) . '/inspect-asteroid', $scoutHeaders, json_encode([
+            $scoutInspectHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scoutMannyId) . '/inspect-sector-object', $scoutHeaders, json_encode([
                 'objectId' => 'cache-rock',
             ], JSON_THROW_ON_ERROR));
-            $test->assertEquals(202, $scoutInspectHidden->status, 'deprecated asteroid inspection endpoint remains accepted');
-            $test->assertEquals('inspecting_sector_object', $scoutInspectHidden->body['manny']['currentTask'] ?? null, 'deprecated asteroid inspection endpoint starts the generic inspecting task');
+            $test->assertEquals(202, $scoutInspectHidden->status, 'sector-object inspection endpoint accepts asteroid inspection');
+            $test->assertEquals('inspecting_sector_object', $scoutInspectHidden->body['manny']['currentTask'] ?? null, 'sector-object inspection endpoint starts the generic inspecting task');
             $test->assertEquals($hiddenDetachedObjectId, $scoutInspectHidden->body['manny']['task']['artificialObjectDetected']['objectId'] ?? null, 'asteroid inspection by another player detects the hidden container');
             $scoutDiscoveredContainer = $sectorService->getOrCreateSector($detachProbe->currentSector)->findHiddenDetachedContainerById($hiddenDetachedObjectId);
             $test->assert($scoutDiscoveredContainer !== null && in_array($scoutPlayer->id, $scoutDiscoveredContainer->getDiscoveredByPlayerIds(), true), 'asteroid inspection records the discovering player');
@@ -6783,7 +6789,6 @@ if ($foreignMannyId !== '') {
         ['POST', $foreignMannyPath . '/drop-storage-container', ['containerId' => 'probe-core', 'planetId' => 'current-habitable-planet'], 'POST /api/probe/mannies/{id}/drop-storage-container'],
         ['POST', $foreignMannyPath . '/drop-manny-cargo', [], 'POST /api/probe/mannies/{id}/drop-manny-cargo'],
         ['POST', $foreignMannyPath . '/inspect-sector-object', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-sector-object'],
-        ['POST', $foreignMannyPath . '/inspect-asteroid', ['objectId' => 'mine-rock'], 'POST /api/probe/mannies/{id}/inspect-asteroid'],
         ['POST', $foreignMannyPath . '/recover-storage-container', ['objectId' => 'detached-container'], 'POST /api/probe/mannies/{id}/recover-storage-container'],
         ['POST', $foreignMannyPath . '/refill-deuterium-tank', [], 'POST /api/probe/mannies/{id}/refill-deuterium-tank'],
         ['POST', $foreignMannyPath . '/transfer-deuterium-to-probe', ['targetProbeId' => $createdProbe?->id ?? 1, 'amount' => 1], 'POST /api/probe/mannies/{id}/transfer-deuterium-to-probe'],
