@@ -11,6 +11,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Maintenance : ajout de `scripts/audit-deprecated-endpoints.py`, sans dépendance externe, pour extraire les opérations `deprecated: true` d’OpenAPI et compter leurs usages dans les journaux d’accès Nginx courants ou compressés, sans afficher les adresses IP.
 - API v116 : suppression de l’ancien alias `POST /api/probe/mannies/{mannyId}/inspect-asteroid` et de sa variante ciblant explicitement une sonde ; utiliser `inspect-sector-object`. L’audit des 9 817 900 lignes de journaux Nginx disponibles n’a relevé aucun appel à cet alias.
 - Ressources : suppression de toute compatibilité d’exécution avec l’ancien type `other` dans les compositions, astéroïdes, Mannys de secteur et tâches minières. `scripts/one-shot-scripts/cleanup-legacy-resources.php`, désormais fonctionnel et testé, réalise explicitement l’audit/migration de SQL, des payloads de tâches et événements, des règles de stockage et des fichiers de secteurs avant déploiement ; `SchemaInitializer` ne convertit plus silencieusement `cargo_other`.
+- Secteurs : `SectorFileRepository` refuse désormais explicitement les anciennes collections JSON de containers détachés et les objets `detached_container`, au lieu de les ignorer à chaque lecture. Le nouveau script idempotent `scripts/one-shot-scripts/cleanup-legacy-detached-container-json.php` retire uniquement ces références des fichiers, sans accès ni écriture SQL ; le filtrage lors des sauvegardes reste en place pour les containers agrégés depuis la base.
 
 
 ## 2026-08-20

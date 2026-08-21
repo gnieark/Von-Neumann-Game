@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Sector\Tests;
 
 require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../scripts/one-shot-scripts/cleanup-legacy-detached-container-json.php';
 
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
@@ -17,6 +18,7 @@ use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorManny;
+use VonNeumannGame\Sector\SectorStorageException;
 use VonNeumannGame\Sector\SolarSystem;
 use VonNeumannGame\Sector\Star;
 use VonNeumannGame\Sector\Planet;
@@ -597,6 +599,51 @@ $repository->save($mannySector);
 $loadedMannySector = $repository->load($coord000);
 $expectedLoadedMannySector = SectorContent::fromArray($mannySector->toArray(), 'loaded');
 $test->assertEquals($expectedLoadedMannySector->toArray(), $loadedMannySector->toArray(), 'sector storage preserves abandoned or forgotten Manny objects');
+
+$legacyDetachedCoordinates = new SectorCoordinates(-6, 0, 0);
+$legacyDetachedSector = new SectorContent($legacyDetachedCoordinates, [
+    new DormantConstruct('legacy-cleanup-kept-object'),
+]);
+$repository->save($legacyDetachedSector);
+$legacyDetachedPath = $repository->getPath($legacyDetachedCoordinates);
+$legacyDetachedData = json_decode((string) file_get_contents($legacyDetachedPath), true, 512, JSON_THROW_ON_ERROR);
+$legacyDetachedData['detachedContainers'] = [];
+$legacyDetachedData['hiddenDetachedContainers'] = [];
+$legacyDetachedData['planetDroppedContainers'] = [];
+$legacyDetachedData['objects'][] = ['id' => 'legacy-detached-object', 'type' => 'detached_container'];
+file_put_contents($legacyDetachedPath, json_encode($legacyDetachedData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+$legacyDetachedRejected = false;
+$legacyDetachedRejectionMessage = '';
+try {
+    $repository->load($legacyDetachedCoordinates);
+} catch (SectorStorageException $error) {
+    $legacyDetachedRejected = true;
+    $legacyDetachedRejectionMessage = $error->getMessage();
+}
+$test->assert($legacyDetachedRejected, 'sector storage rejects legacy detached-container JSON instead of ignoring it');
+$test->assert(str_contains($legacyDetachedRejectionMessage, 'cleanup-legacy-detached-container-json.php'), 'legacy detached-container rejection names the required cleanup script');
+$legacyDetachedDryRun = cleanupLegacyDetachedContainerJson($tmpBase, true);
+$test->assertEquals(1, $legacyDetachedDryRun['filesChanged'], 'legacy detached-container cleanup dry-run detects the affected sector');
+$test->assertEquals(3, $legacyDetachedDryRun['collectionsRemoved'], 'legacy detached-container cleanup detects empty historical collections');
+$test->assertEquals(1, $legacyDetachedDryRun['objectReferencesRemoved'], 'legacy detached-container cleanup detects object-list references');
+$test->assertThrows(
+    static fn() => $repository->load($legacyDetachedCoordinates),
+    SectorStorageException::class,
+    'legacy detached-container cleanup dry-run leaves the sector untouched',
+);
+$legacyDetachedCleanup = cleanupLegacyDetachedContainerJson($tmpBase);
+$test->assertEquals(1, $legacyDetachedCleanup['filesChanged'], 'legacy detached-container cleanup rewrites the affected sector');
+$cleanedLegacyDetachedData = json_decode((string) file_get_contents($legacyDetachedPath), true, 512, JSON_THROW_ON_ERROR);
+$test->assert(!array_key_exists('detachedContainers', $cleanedLegacyDetachedData), 'legacy detached-container cleanup removes detachedContainers');
+$test->assert(!array_key_exists('hiddenDetachedContainers', $cleanedLegacyDetachedData), 'legacy detached-container cleanup removes hiddenDetachedContainers');
+$test->assert(!array_key_exists('planetDroppedContainers', $cleanedLegacyDetachedData), 'legacy detached-container cleanup removes planetDroppedContainers');
+$test->assertEquals(0, count(array_filter(
+    $cleanedLegacyDetachedData['objects'] ?? [],
+    static fn(mixed $object): bool => is_array($object) && ($object['type'] ?? null) === 'detached_container',
+)), 'legacy detached-container cleanup removes detached_container objects');
+$test->assert($repository->load($legacyDetachedCoordinates)->findObjectById('legacy-cleanup-kept-object') instanceof DormantConstruct, 'cleaned sector remains readable and preserves ordinary objects');
+$legacyDetachedCleanupRerun = cleanupLegacyDetachedContainerJson($tmpBase);
+$test->assertEquals(0, $legacyDetachedCleanupRerun['filesChanged'], 'legacy detached-container cleanup is idempotent');
 
 $hiddenContainerA = new SectorDetachedContainer(
     'detached-container-cache-a',

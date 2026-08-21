@@ -49,18 +49,21 @@ final class SectorFileRepository
             throw SectorStorageException::invalidJson($path, 'root value must be an object');
         }
 
-        // Detached containers live exclusively in SQL. Legacy JSON collections
-        // are intentionally ignored until the explicit deployment migration runs.
-        unset(
-            $data['detachedContainers'],
-            $data['hiddenDetachedContainers'],
-            $data['planetDroppedContainers'],
-        );
+        $legacyReferences = [];
+        foreach (['detachedContainers', 'hiddenDetachedContainers', 'planetDroppedContainers'] as $collection) {
+            if (array_key_exists($collection, $data)) {
+                $legacyReferences[] = $collection;
+            }
+        }
         if (is_array($data['objects'] ?? null)) {
-            $data['objects'] = array_values(array_filter(
-                $data['objects'],
-                static fn(mixed $object): bool => !is_array($object) || ($object['type'] ?? null) !== 'detached_container',
-            ));
+            foreach ($data['objects'] as $index => $object) {
+                if (is_array($object) && ($object['type'] ?? null) === 'detached_container') {
+                    $legacyReferences[] = "objects[{$index}]";
+                }
+            }
+        }
+        if ($legacyReferences !== []) {
+            throw SectorStorageException::legacyDetachedContainerData($path, $legacyReferences);
         }
 
         return SectorContent::fromArray($data, 'loaded');

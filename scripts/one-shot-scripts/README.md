@@ -1,5 +1,28 @@
 Scripts de migration à exécuter explicitement lors des déploiements qui le demandent.
 
+## Nettoyage des anciennes références de containers détachés
+
+Après l’import des containers détachés dans SQL avec l’ancienne migration,
+`cleanup-legacy-detached-container-json.php` supprime uniquement des fichiers de
+secteurs les clés `detachedContainers`, `hiddenDetachedContainers`,
+`planetDroppedContainers` et les entrées `objects` de type
+`detached_container`. Ce script n’ouvre jamais la base et ne tente donc pas de
+réimporter les données supprimées.
+
+Application, scheduler et workers arrêtés, avec une sauvegarde du répertoire
+d’univers :
+
+```bash
+php scripts/one-shot-scripts/cleanup-legacy-detached-container-json.php --dry-run
+php scripts/one-shot-scripts/cleanup-legacy-detached-container-json.php
+php scripts/one-shot-scripts/cleanup-legacy-detached-container-json.php
+```
+
+Le dernier passage doit annoncer `filesChanged: 0`. Après ce déploiement, le
+chargement d’un secteur contenant encore une de ces références échoue
+explicitement au lieu de l’ignorer. Le filtrage à la sauvegarde reste actif afin
+de ne pas recopier dans le JSON les containers agrégés depuis SQL.
+
 ## Suppression de la ressource historique `other`
 
 `cleanup-legacy-resources.php` audite et migre les dernières représentations
