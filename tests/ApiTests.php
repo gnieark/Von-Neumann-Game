@@ -598,6 +598,7 @@ $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-s
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-furthest-podium-title'), 'stats view exposes the furthest-from-home podium');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'data-stats-podium-extra hidden'), 'stats route renders extra ranking rows as hidden by default');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topVisitedPlayers'), 'stats route reads player-based explorer podium rows');
+$test->assert(is_string($statsRoute) && !str_contains($statsRoute, 'topVisitedProbes'), 'stats route no longer falls back to the legacy visited-probe alias');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutRelayActivatorRows'), 'stats route renders SCUT relay activator rows');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutNetworkCoverageRows'), 'stats route renders SCUT network coverage rows');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'toutes sondes possédées confondues'), 'French translations describe the player-based explorer podium');
@@ -1152,9 +1153,8 @@ foreach ([
 }
 $rankingStats = (new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe'))->collect();
 $topRankingPlayers = $rankingStats['metrics']['topVisitedPlayers'] ?? [];
-$legacyTopRankingProbes = $rankingStats['metrics']['topVisitedProbes'] ?? [];
 $test->assertEquals(9, count($topRankingPlayers), 'public stats visited-sector ranking exposes the first nine rows');
-$test->assertEquals('Stats Ranking 1', $legacyTopRankingProbes[0]['probeName'] ?? null, 'public stats keeps the legacy visited-probe podium key as a player-name alias');
+$test->assert(!array_key_exists('topVisitedProbes', $rankingStats['metrics']), 'public stats no longer emits the legacy visited-probe podium alias');
 $test->assertEquals('Stats Ranking 1', $topRankingPlayers[0]['playerName'] ?? null, 'public stats top-nine ranking keeps the first-ranked player first');
 $test->assertEquals('Stats Ranking 9', $topRankingPlayers[8]['playerName'] ?? null, 'public stats top-nine ranking keeps the ninth-ranked player visible');
 $test->assertEquals(10, $topRankingPlayers[0]['visitedSectors'] ?? null, 'public stats explorer podium counts player visited sectors once across owned probes');

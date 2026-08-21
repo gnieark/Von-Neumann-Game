@@ -15,6 +15,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Base de données : `SchemaInitializer` est recompilé en schéma canonique actuel et ne contient plus l’historique des détections, `ALTER TABLE` et backfills déjà déployés. Les index jusque-là ajoutés uniquement par ces rattrapages font désormais partie du socle. Les futures évolutions structurelles continueront de passer par l’initializer ; les scripts one-shot sont réservés aux données et aux JSON de secteurs.
 - Interface : la page des Mannys ne remplace plus silencieusement un échec de `/api/crafting-recipes` par une recette de marque-page codée en dur. Les formulaires de fabrication indiquent désormais que les recettes sont indisponibles, restent désactivés et proposent de recharger explicitement le catalogue.
 - Interface : suppression de l’ancienne vue de discussion du forum, cachée au chargement depuis le passage aux fils intégrés dans les catégories, ainsi que de ses écouteurs JavaScript et styles résiduels.
+- Statistiques : suppression de l’ancien alias `topVisitedProbes` du JSON généré et du fallback WebUI associé ; le podium des explorateurs utilise exclusivement `topVisitedPlayers`.
 
 
 ## 2026-08-20

@@ -66,7 +66,6 @@ final class UniverseStatsService
                 'failedMissions' => $missionStats['failed'],
                 'topVisitedPlayers' => $topVisitedPlayers,
                 'topFurthestPlayersFromHome' => $topFurthestPlayers,
-                'topVisitedProbes' => $this->legacyTopVisitedProbeRows($topVisitedPlayers),
                 'topWaypointPlayers' => $waypointStats['topPlayers'],
                 'topIntelligentLifeDiscoverers' => $intelligentLifeStats['topDiscoverers'],
                 'topScutRelayActivators' => $scutStats['topActivators'],
@@ -239,19 +238,6 @@ final class UniverseStatsService
             array_slice($furthestByPlayer, 0, self::PUBLIC_RANKING_LIMIT),
             array_keys(array_slice($furthestByPlayer, 0, self::PUBLIC_RANKING_LIMIT)),
         );
-    }
-
-    /**
-     * @param array<int, array{rank: int, playerId: int, playerName: string, visitedSectors: int}> $players
-     * @return array<int, array{rank: int, probeName: string, visitedSectors: int}>
-     */
-    private function legacyTopVisitedProbeRows(array $players): array
-    {
-        return array_map(static fn(array $row): array => [
-            'rank' => $row['rank'],
-            'probeName' => $row['playerName'],
-            'visitedSectors' => $row['visitedSectors'],
-        ], $players);
     }
 
     /**

@@ -20,7 +20,7 @@ class FrontRouteStats extends FrontRoute{
         $tpl->addVars([
             'generatedAt' => self::e($this->formatGeneratedAt($stats['generatedAt'], $translator)),
         ]);
-        $podium = $this->topVisitedProbeRows($stats['metrics'], $translator);
+        $podium = $this->topVisitedPlayerRows($stats['metrics'], $translator);
         if ($podium === []) {
             $tpl->addSubBlock(new TplBlock('emptyPodium'));
         } else {
@@ -183,7 +183,6 @@ class FrontRouteStats extends FrontRoute{
             'failedMissions' => 0,
             'topVisitedPlayers' => [],
             'topFurthestPlayersFromHome' => [],
-            'topVisitedProbes' => [],
             'topIntelligentLifeDiscoverers' => [],
             'topWaypointPlayers' => [],
             'topScutRelayActivators' => [],
@@ -215,12 +214,9 @@ class FrontRouteStats extends FrontRoute{
      * @param array<string, mixed> $metrics
      * @return array<int, array{rank: string, name: string, visitedSectors: string, visitedSectorsLabel: string}>
      */
-    private function topVisitedProbeRows(array $metrics, Translator $translator): array
+    private function topVisitedPlayerRows(array $metrics, Translator $translator): array
     {
         $rows = is_array($metrics['topVisitedPlayers'] ?? null) ? $metrics['topVisitedPlayers'] : [];
-        if ($rows === []) {
-            $rows = is_array($metrics['topVisitedProbes'] ?? null) ? $metrics['topVisitedProbes'] : [];
-        }
         $podium = [];
         foreach ($rows as $index => $row) {
             if (!is_array($row)) {
@@ -229,9 +225,7 @@ class FrontRouteStats extends FrontRoute{
             $visitedSectors = max(0, (int) ($row['visitedSectors'] ?? 0));
             $podium[] = [
                 'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
-                'name' => trim((string) ($row['playerName'] ?? '')) !== ''
-                    ? (string) $row['playerName']
-                    : (trim((string) ($row['probeName'] ?? '')) !== '' ? (string) $row['probeName'] : $translator->get('unknownPlayer')),
+                'name' => trim((string) ($row['playerName'] ?? '')) !== '' ? (string) $row['playerName'] : $translator->get('unknownPlayer'),
                 'visitedSectors' => $this->formatNumber($visitedSectors),
                 'visitedSectorsLabel' => $translator->get($visitedSectors > 1 ? 'statsVisitedSectorsPodiumPlural' : 'statsVisitedSectorsPodiumSingular'),
             ];
