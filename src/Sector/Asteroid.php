@@ -12,7 +12,6 @@ final class Asteroid extends UniverseObject
     public const MOTOR_FUEL_FULL = 'full';
     public const MOTOR_FUEL_EMPTY = 'empty';
     private const RESOURCE_CONTAINERS_PER_EARTH_MASS = 1000000.0;
-    private const LEGACY_OTHER = 'other';
     private const NAME_PARTS = [
         ResourceComposition::ICE => 'Ice',
         ResourceComposition::DEUTERIUM => 'Deut',
@@ -45,7 +44,7 @@ final class Asteroid extends UniverseObject
         parent::__construct($id, $name, UniverseObjectType::Asteroid, $mass, $radius, $description, $waypointBookmarks);
         $this->resourceAmounts = $resourceAmounts === null
             ? self::initialResourceAmounts($estimatedResources, $mass, $resourceContainersPerEarthMass ?? self::RESOURCE_CONTAINERS_PER_EARTH_MASS)
-            : self::normalizeResourceAmounts($resourceAmounts, $estimatedResources);
+            : self::normalizeResourceAmounts($resourceAmounts);
     }
 
     /**
@@ -343,19 +342,13 @@ final class Asteroid extends UniverseObject
 
     /**
      * @param array<string, mixed> $amounts
-     * @param array<mixed> $estimatedResources
      * @return array<string, float>
      */
-    private static function normalizeResourceAmounts(array $amounts, array $estimatedResources): array
+    private static function normalizeResourceAmounts(array $amounts): array
     {
-        if (isset($amounts[self::LEGACY_OTHER])) {
-            $total = 0.0;
-            foreach (ResourceComposition::TYPES as $type) {
-                $total += max(0.0, (float) ($amounts[$type] ?? 0.0));
-            }
-            $total += max(0.0, (float) $amounts[self::LEGACY_OTHER]);
-
-            return self::resourceAmountsForTotal($total, ResourceComposition::fromHints($estimatedResources));
+        $unsupportedTypes = array_diff(array_keys($amounts), ResourceComposition::TYPES);
+        if ($unsupportedTypes !== []) {
+            throw new \InvalidArgumentException('Asteroid resourceAmounts contains unsupported resource types; run the legacy resource migration first.');
         }
 
         $normalized = array_fill_keys(ResourceComposition::TYPES, 0.0);

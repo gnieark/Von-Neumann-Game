@@ -11,7 +11,6 @@ final class ResourceComposition
     public const ICE = 'ice';
     public const CARBON_COMPOUNDS = 'carbon_compounds';
     public const TYPES = [self::DEUTERIUM, self::METALS, self::ICE, self::CARBON_COMPOUNDS];
-    private const LEGACY_OTHER = 'other';
 
     public static function typeForHint(string $hint): string
     {
@@ -82,9 +81,9 @@ final class ResourceComposition
      */
     public static function fromAmounts(array $amounts): array
     {
-        if (isset($amounts[self::LEGACY_OTHER])) {
-            $amounts[self::CARBON_COMPOUNDS] = (float) ($amounts[self::CARBON_COMPOUNDS] ?? 0.0)
-                + (float) $amounts[self::LEGACY_OTHER];
+        $unsupportedTypes = array_diff(array_keys($amounts), self::TYPES);
+        if ($unsupportedTypes !== []) {
+            throw new \InvalidArgumentException('Resource amounts contain unsupported resource types.');
         }
 
         $normalized = [];
@@ -168,7 +167,7 @@ final class ResourceComposition
             self::DEUTERIUM => self::DEUTERIUM,
             self::METALS, 'metal' => self::METALS,
             self::ICE, 'water', 'water_ice', 'volatile', 'volatiles' => self::ICE,
-            self::CARBON_COMPOUNDS, 'carbon', 'organic', 'organics', 'organic_compounds', 'organiccompounds', self::LEGACY_OTHER => self::CARBON_COMPOUNDS,
+            self::CARBON_COMPOUNDS, 'carbon', 'organic', 'organics', 'organic_compounds', 'organiccompounds' => self::CARBON_COMPOUNDS,
             default => $type,
         };
     }

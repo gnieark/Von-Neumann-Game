@@ -1,5 +1,29 @@
 Scripts de migration à exécuter explicitement lors des déploiements qui le demandent.
 
+## Suppression de la ressource historique `other`
+
+`cleanup-legacy-resources.php` audite et migre les dernières représentations
+`other` dans SQL, les événements/tâches Manny et les fichiers de secteurs. Il
+fusionne les quantités dans `carbon_compounds`, sauf l’ancien cargo Manny qui
+est réparti selon son profil minier lorsqu’il permet encore de distinguer glace
+et composés carbonés. Il supprime enfin `other_stock` et `cargo_other` si ces
+colonnes existent encore.
+
+Arrêtez l’application, le scheduler et les workers, sauvegardez la base et le
+répertoire d’univers, puis exécutez :
+
+```bash
+php scripts/one-shot-scripts/cleanup-legacy-resources.php --dry-run --database-config=var/database-prod.json
+php scripts/one-shot-scripts/cleanup-legacy-resources.php --database-config=var/database-prod.json
+php scripts/one-shot-scripts/cleanup-legacy-resources.php --database-config=var/database-prod.json
+```
+
+Le dernier passage doit annoncer zéro ligne, payload, règle, projection et
+fichier modifié. Utilisez `--universe-path=/chemin/vers/univers` si nécessaire,
+ou `--database-only` / `--sectors-only` pour séparer les contrôles. Le code de
+l’application ne lit plus aucun format `other` : ne redémarrez pas les services
+avant un second passage vierge.
+
 ## Encombrement des moteurs au deutérium
 
 `migrate-deuterium-engine-container-space.php` applique le passage de 0,06 à

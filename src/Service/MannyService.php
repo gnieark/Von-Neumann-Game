@@ -2761,32 +2761,24 @@ final class MannyService implements MannyTaskRuntime
     private function miningResourceProfile(Manny $manny): array
     {
         $profile = $manny->taskPayload['resourceProfile'] ?? null;
-        if (is_array($profile)) {
-            $normalized = array_fill_keys(ResourceComposition::TYPES, 0.0);
-            foreach (ResourceComposition::TYPES as $type) {
-                $normalized[$type] = round(max(0.0, (float) ($profile[$type] ?? 0.0)), 4);
-            }
-            $normalized[ResourceComposition::CARBON_COMPOUNDS] = round(
-                $normalized[ResourceComposition::CARBON_COMPOUNDS] + max(0.0, (float) ($profile['other'] ?? 0.0)),
-                4,
-            );
-
-            if (array_sum($normalized) > 0.0) {
-                return $normalized;
-            }
+        if (!is_array($profile)) {
+            throw new \RuntimeException('Mining task payload is missing its resourceProfile.');
         }
 
-        $resourceType = (string) ($manny->taskPayload['resourceType'] ?? 'metals');
-        try {
-            $resourceType = ResourceComposition::normalizeSelection($resourceType)[0];
-        } catch (\InvalidArgumentException) {
-            $resourceType = 'metals';
+        $unsupportedTypes = array_diff(array_keys($profile), ResourceComposition::TYPES);
+        if ($unsupportedTypes !== []) {
+            throw new \RuntimeException('Mining task resourceProfile contains unsupported resource types.');
         }
 
-        $legacyProfile = array_fill_keys(ResourceComposition::TYPES, 0.0);
-        $legacyProfile[$resourceType] = 1.0;
+        $normalized = array_fill_keys(ResourceComposition::TYPES, 0.0);
+        foreach (ResourceComposition::TYPES as $type) {
+            $normalized[$type] = round(max(0.0, (float) ($profile[$type] ?? 0.0)), 4);
+        }
+        if (array_sum($normalized) <= 0.0) {
+            throw new \RuntimeException('Mining task resourceProfile must contain a positive resource share.');
+        }
 
-        return $legacyProfile;
+        return $normalized;
     }
 
     private function miningTaskTargetContainerId(Manny $manny): ?string

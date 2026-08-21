@@ -81,18 +81,20 @@ final class SectorManny extends UniverseObject
 
     private static function normalizeCargo(array $cargo): array
     {
+        $unsupportedKeys = array_diff(
+            array_keys($cargo),
+            ['capacity', 'deuterium', 'metals', 'ice', 'organicCompounds', 'capacityUnit'],
+        );
+        if ($unsupportedKeys !== []) {
+            throw new \InvalidArgumentException('Sector Manny cargo contains unsupported keys; run the legacy resource migration first.');
+        }
+
         return [
             'capacity' => (float) ($cargo['capacity'] ?? 0.3),
             'deuterium' => (float) ($cargo['deuterium'] ?? 0.0),
             'metals' => (float) ($cargo['metals'] ?? 0.0),
             'ice' => (float) ($cargo['ice'] ?? 0.0),
-            'organicCompounds' => (float) (
-                $cargo['organicCompounds']
-                ?? $cargo['organic_compounds']
-                ?? $cargo['carbon_compounds']
-                ?? $cargo['other']
-                ?? 0.0
-            ),
+            'organicCompounds' => (float) ($cargo['organicCompounds'] ?? 0.0),
             'capacityUnit' => (string) ($cargo['capacityUnit'] ?? 'earth_container_equivalent'),
         ];
     }

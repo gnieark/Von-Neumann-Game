@@ -1352,6 +1352,104 @@ $test->assert(!in_array('organic_compounds_stock', $legacyStorageColumnsAfterMig
 $legacyStorageRerun = removeLegacyProbeResourceStocks($legacyStorageMigrationPdo, false);
 $test->assert($legacyStorageRerun['alreadyMigrated'], 'legacy probe resource-stock migration is idempotent');
 
+$test->assertThrows(
+    static fn() => ResourceComposition::normalizeSelection('other'),
+    'resource selection rejects the removed other resource type',
+);
+$test->assertThrows(
+    static fn() => ResourceComposition::fromAmounts(['other' => 1.0]),
+    'resource compositions reject persisted legacy other amounts',
+);
+$test->assertThrows(
+    static fn() => Asteroid::fromArray([
+        'id' => 'legacy-other-rock',
+        'composition' => 'carbonaceous',
+        'estimatedResources' => ['carbon'],
+        'sizeCategory' => 'small',
+        'mass' => 0.01,
+        'radius' => 0.01,
+        'resourceAmounts' => ['other' => 1.0],
+    ]),
+    'asteroid deserialization rejects legacy other resource amounts',
+);
+$test->assertThrows(
+    static fn() => SectorManny::fromArray([
+        'id' => 'manny-legacy-other',
+        'mannyUid' => 'legacy-other',
+        'cargo' => ['other' => 0.1],
+    ]),
+    'sector Manny deserialization rejects legacy other cargo',
+);
+
+require_once $root . '/scripts/one-shot-scripts/cleanup-legacy-resources.php';
+$legacyOtherPdo = new PDO('sqlite::memory:');
+$legacyOtherPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$legacyOtherPdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+$legacyOtherPdo->exec('CREATE TABLE neumann_probes (id INTEGER PRIMARY KEY, organic_compounds_stock REAL NOT NULL, other_stock REAL NOT NULL)');
+$legacyOtherPdo->exec('CREATE TABLE mannies (id INTEGER PRIMARY KEY, task_scheduled_event_id INTEGER NULL, cargo_other REAL NOT NULL, cargo_ice REAL NOT NULL, cargo_organic_compounds REAL NOT NULL)');
+$legacyOtherPdo->exec('CREATE TABLE scheduled_events (id INTEGER PRIMARY KEY, payload_json TEXT NOT NULL)');
+$legacyOtherPdo->exec('CREATE TABLE storage_containers (id INTEGER PRIMARY KEY, priority_filter_json TEXT NOT NULL, exclusion_filter_json TEXT NOT NULL, strict_exclusion_filter_json TEXT NOT NULL)');
+$legacyOtherPdo->exec('CREATE TABLE storage_container_resources (container_id INTEGER NOT NULL, resource_type TEXT NOT NULL, amount REAL NOT NULL, UNIQUE(container_id, resource_type))');
+$legacyOtherPdo->exec('CREATE TABLE detached_storage_container_resources (container_object_id TEXT NOT NULL, resource_type TEXT NOT NULL, amount REAL NOT NULL, PRIMARY KEY(container_object_id, resource_type))');
+$legacyOtherPdo->exec('CREATE TABLE detached_storage_container_resource_rules (container_object_id TEXT NOT NULL, rule_kind TEXT NOT NULL, resource_type TEXT NOT NULL, sort_order INTEGER NOT NULL, PRIMARY KEY(container_object_id, rule_kind, resource_type))');
+$legacyOtherPdo->exec('CREATE TABLE manny_tasks (id INTEGER PRIMARY KEY, resource_type TEXT NULL)');
+$legacyOtherPdo->exec("INSERT INTO neumann_probes VALUES (1, 0.2, 0.3)");
+$legacyMiningPayload = json_encode([
+    'resourceType' => 'other',
+    'resourceTypes' => ['ice', 'other'],
+    'resourceProfile' => ['ice' => 0.25, 'other' => 0.75],
+], JSON_THROW_ON_ERROR);
+$legacyOtherInsertEvent = $legacyOtherPdo->prepare('INSERT INTO scheduled_events VALUES (1, :payload)');
+$legacyOtherInsertEvent->execute(['payload' => $legacyMiningPayload]);
+$legacyOtherPdo->exec('INSERT INTO mannies VALUES (1, 1, 1.0, 0, 0)');
+$legacyOtherPdo->exec("INSERT INTO storage_containers VALUES (1, '[\"other\"]', '[]', '[]')");
+$legacyOtherPdo->exec("INSERT INTO storage_container_resources VALUES (1, 'other', 0.2), (1, 'carbon_compounds', 0.3)");
+$legacyOtherPdo->exec("INSERT INTO detached_storage_container_resources VALUES ('detached-a', 'other', 0.4)");
+$legacyOtherPdo->exec("INSERT INTO detached_storage_container_resource_rules VALUES ('detached-a', 'priority', 'other', 0), ('detached-a', 'priority', 'carbon_compounds', 1)");
+$legacyOtherPdo->exec("INSERT INTO manny_tasks VALUES (1, 'other')");
+$legacyOtherDryRun = cleanupLegacyOtherDatabase($legacyOtherPdo, true);
+$test->assertEquals(1, $legacyOtherDryRun['probeRows'], 'legacy other migration dry-run detects probe stocks');
+$test->assertEquals(1, $legacyOtherDryRun['mannyRows'], 'legacy other migration dry-run detects Manny cargo');
+$test->assertEquals(1, $legacyOtherDryRun['scheduledPayloads'], 'legacy other migration dry-run detects scheduled task payloads');
+$test->assertEquals(2, $legacyOtherDryRun['resourceRows'], 'legacy other migration dry-run detects normalized resource rows');
+$test->assert(in_array('other_stock', array_column($legacyOtherPdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(), 'name'), true), 'legacy other migration dry-run preserves database columns');
+$legacyOtherReport = cleanupLegacyOtherDatabase($legacyOtherPdo, false);
+$test->assertEquals(2, $legacyOtherReport['columnsDropped'], 'legacy other migration drops both historical columns');
+$test->assertEquals(0.5, (float) $legacyOtherPdo->query('SELECT organic_compounds_stock FROM neumann_probes WHERE id = 1')->fetchColumn(), 'legacy probe other stock migrates to carbon compounds');
+$legacyOtherCargo = $legacyOtherPdo->query('SELECT cargo_ice, cargo_organic_compounds FROM mannies WHERE id = 1')->fetch();
+$test->assertEquals(0.25, (float) ($legacyOtherCargo['cargo_ice'] ?? -1), 'legacy Manny other cargo follows the mining ice profile');
+$test->assertEquals(0.75, (float) ($legacyOtherCargo['cargo_organic_compounds'] ?? -1), 'legacy Manny other cargo follows the mining carbon profile');
+$migratedLegacyMiningPayload = json_decode((string) $legacyOtherPdo->query('SELECT payload_json FROM scheduled_events WHERE id = 1')->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+$test->assertEquals('carbon_compounds', $migratedLegacyMiningPayload['resourceType'] ?? null, 'legacy mining task scalar resource is migrated');
+$test->assert(!array_key_exists('other', $migratedLegacyMiningPayload['resourceProfile'] ?? []), 'legacy mining task profile no longer contains other');
+$test->assertEquals(0.5, (float) $legacyOtherPdo->query("SELECT amount FROM storage_container_resources WHERE container_id = 1 AND resource_type = 'carbon_compounds'")->fetchColumn(), 'legacy normalized resource rows are merged without loss');
+$test->assertEquals(0, (int) $legacyOtherPdo->query("SELECT COUNT(*) FROM detached_storage_container_resource_rules WHERE resource_type = 'other'")->fetchColumn(), 'legacy detached-container resource rules are removed');
+$test->assertEquals('carbon_compounds', (string) $legacyOtherPdo->query('SELECT resource_type FROM manny_tasks WHERE id = 1')->fetchColumn(), 'legacy Manny task projection is migrated');
+$legacyOtherRerun = cleanupLegacyOtherDatabase($legacyOtherPdo, false);
+$test->assertEquals(0, array_sum($legacyOtherRerun), 'legacy other database migration is idempotent');
+
+$legacyOtherUniverse = $tmp . DIRECTORY_SEPARATOR . 'legacy-other-universe';
+$legacyOtherSectors = $legacyOtherUniverse . DIRECTORY_SEPARATOR . 'sectors';
+mkdir($legacyOtherSectors, 0775, true);
+$legacyOtherSectorPath = $legacyOtherSectors . DIRECTORY_SEPARATOR . 'legacy.json';
+file_put_contents($legacyOtherSectorPath, json_encode([
+    'objects' => [
+        ['id' => 'legacy-rock', 'type' => 'asteroid', 'estimatedResources' => ['carbon'], 'resourceAmounts' => ['other' => 2.0]],
+        ['id' => 'manny-legacy', 'type' => 'manny', 'cargo' => ['capacity' => 0.3, 'other' => 0.1]],
+    ],
+], JSON_THROW_ON_ERROR));
+$legacyOtherSectorDryRun = cleanupLegacyOtherSectorFiles($legacyOtherUniverse, true);
+$test->assertEquals(1, $legacyOtherSectorDryRun['filesChanged'], 'legacy other sector migration dry-run detects affected files');
+$test->assert(str_contains((string) file_get_contents($legacyOtherSectorPath), '"other"'), 'legacy other sector dry-run does not write files');
+$legacyOtherSectorReport = cleanupLegacyOtherSectorFiles($legacyOtherUniverse, false);
+$test->assertEquals(1, $legacyOtherSectorReport['filesChanged'], 'legacy other sector migration rewrites affected files');
+$migratedLegacySector = json_decode((string) file_get_contents($legacyOtherSectorPath), true, 512, JSON_THROW_ON_ERROR);
+$test->assert(!str_contains((string) file_get_contents($legacyOtherSectorPath), '"other"'), 'legacy other sector migration removes every resource marker');
+$test->assertEquals(2.0, (float) ($migratedLegacySector['objects'][0]['resourceAmounts']['carbon_compounds'] ?? 0), 'legacy asteroid resources migrate according to estimated composition');
+$test->assertEquals(0.1, (float) ($migratedLegacySector['objects'][1]['cargo']['organicCompounds'] ?? 0), 'legacy sector Manny cargo migrates to canonical casing');
+$legacyOtherSectorRerun = cleanupLegacyOtherSectorFiles($legacyOtherUniverse, false);
+$test->assertEquals(0, $legacyOtherSectorRerun['filesChanged'], 'legacy other sector migration is idempotent');
+
 $mannySchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC),

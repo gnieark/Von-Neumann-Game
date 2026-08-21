@@ -5,447 +5,556 @@ declare(strict_types=1);
 use VonNeumannGame\AppFactory;
 use VonNeumannGame\Domain\ResourceComposition;
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
 
-$options = parseOptions($argv);
-if ($options['help']) {
-    echo usage();
-    exit(0);
+if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
+    exit(cleanupLegacyResourcesMain($argv));
 }
 
-$root = dirname(__DIR__);
-$factory = new AppFactory($root);
-$dryRun = $options['dryRun'];
-
-if (!$options['sectorsOnly']) {
-    $pdo = $factory->pdo(initializeSchema: true);
-    $stats = cleanupDatabase($pdo, $dryRun);
-
-    echo ($dryRun ? '[dry-run] ' : '') . "Database cleanup:\n";
-    echo '- probe other_stock rows: ' . $stats['probeRows'] . ' (' . formatAmount($stats['probeAmount']) . " containers)\n";
-    echo '- Manny cargo_other rows: ' . $stats['mannyRows'] . ' (' . formatAmount($stats['mannyAmount']) . " containers)\n";
-    echo '- Manny task payloads migrated: ' . $stats['payloadRows'] . "\n";
-}
-
-if (!$options['databaseOnly']) {
-    $appConfig = $factory->appConfig();
-    $universePath = $options['universePath']
-        ?? absolutePath($root, (string) ($appConfig['universePath'] ?? 'data/universe'));
-    $stats = cleanupSectorFiles($universePath, $dryRun);
-
-    echo ($dryRun ? '[dry-run] ' : '') . "Sector JSON cleanup:\n";
-    echo '- files scanned: ' . $stats['filesScanned'] . "\n";
-    echo '- files updated: ' . $stats['filesUpdated'] . "\n";
-    echo '- resource maps migrated: ' . $stats['resourceMapsMigrated'] . "\n";
-    echo '- asteroid resource maps resynced: ' . $stats['asteroidMapsResynced'] . "\n";
-}
-
-/**
- * @param array<int, string> $argv
- * @return array{dryRun: bool, databaseOnly: bool, sectorsOnly: bool, universePath: ?string, help: bool}
- */
-function parseOptions(array $argv): array
+/** @param array<int, string> $arguments */
+function cleanupLegacyResourcesMain(array $arguments): int
 {
-    $options = [
-        'dryRun' => false,
-        'databaseOnly' => false,
-        'sectorsOnly' => false,
-        'universePath' => null,
-        'help' => false,
-    ];
+    $databaseConfig = null;
+    $universePath = null;
+    $dryRun = false;
+    $databaseOnly = false;
+    $sectorsOnly = false;
+    foreach (array_slice($arguments, 1) as $argument) {
+        if ($argument === '--dry-run') {
+            $dryRun = true;
+        } elseif ($argument === '--database-only') {
+            $databaseOnly = true;
+        } elseif ($argument === '--sectors-only') {
+            $sectorsOnly = true;
+        } elseif (str_starts_with($argument, '--database-config=')) {
+            $databaseConfig = substr($argument, strlen('--database-config='));
+        } elseif (str_starts_with($argument, '--universe-path=')) {
+            $universePath = substr($argument, strlen('--universe-path='));
+        } elseif ($argument === '--help' || $argument === '-h') {
+            echo "Usage: php scripts/one-shot-scripts/cleanup-legacy-resources.php [--dry-run] [--database-only|--sectors-only] [--database-config=PATH] [--universe-path=PATH]\n";
+            echo "The application, scheduler and workers must be stopped while the migration writes.\n";
 
-    foreach (array_slice($argv, 1) as $arg) {
-        if ($arg === '--dry-run') {
-            $options['dryRun'] = true;
-            continue;
-        }
-        if ($arg === '--database-only') {
-            $options['databaseOnly'] = true;
-            continue;
-        }
-        if ($arg === '--sectors-only') {
-            $options['sectorsOnly'] = true;
-            continue;
-        }
-        if ($arg === '--help' || $arg === '-h') {
-            $options['help'] = true;
-            continue;
-        }
-        if (str_starts_with($arg, '--universe=')) {
-            $options['universePath'] = substr($arg, strlen('--universe='));
-            continue;
-        }
+            return 0;
+        } else {
+            fwrite(STDERR, "Unknown argument: {$argument}\n");
 
-        fwrite(STDERR, "Unknown option: $arg\n\n" . usage());
-        exit(1);
+            return 2;
+        }
+    }
+    if ($databaseOnly && $sectorsOnly) {
+        fwrite(STDERR, "--database-only and --sectors-only cannot be combined.\n");
+
+        return 2;
     }
 
-    if ($options['databaseOnly'] && $options['sectorsOnly']) {
-        fwrite(STDERR, "--database-only and --sectors-only cannot be combined.\n\n" . usage());
-        exit(1);
-    }
-
-    return $options;
-}
-
-function usage(): string
-{
-    return <<<TEXT
-Usage: php scripts/cleanup-legacy-resources.php [--dry-run] [--database-only|--sectors-only] [--universe=path]
-
-Removes legacy probe/Manny inventory "other" amounts from the database and rewrites
-legacy sector JSON resourceAmounts.other into the current resource categories.
-
-TEXT;
-}
-
-/**
- * @return array{probeRows: int, probeAmount: float, mannyRows: int, mannyAmount: float, payloadRows: int}
- */
-function cleanupDatabase(PDO $pdo, bool $dryRun): array
-{
-    $hasProbeOtherStock = tableColumnExists($pdo, 'neumann_probes', 'other_stock');
-    $hasMannyCargoOther = tableColumnExists($pdo, 'mannies', 'cargo_other');
-    $stats = [
-        'probeRows' => $hasProbeOtherStock ? countRows($pdo, 'SELECT COUNT(*) FROM neumann_probes WHERE other_stock <> 0') : 0,
-        'probeAmount' => $hasProbeOtherStock ? sumAmount($pdo, 'SELECT COALESCE(SUM(other_stock), 0) FROM neumann_probes WHERE other_stock <> 0') : 0.0,
-        'mannyRows' => $hasMannyCargoOther ? countRows($pdo, 'SELECT COUNT(*) FROM mannies WHERE cargo_other <> 0') : 0,
-        'mannyAmount' => $hasMannyCargoOther ? sumAmount($pdo, 'SELECT COALESCE(SUM(cargo_other), 0) FROM mannies WHERE cargo_other <> 0') : 0.0,
-        'payloadRows' => 0,
-    ];
-
-    $payloadUpdates = mannyTaskPayloadUpdates($pdo);
-    $stats['payloadRows'] = count($payloadUpdates);
-
-    if ($dryRun) {
-        return $stats;
-    }
-
-    $pdo->beginTransaction();
     try {
-        if ($hasProbeOtherStock) {
-            $pdo->exec('UPDATE neumann_probes SET other_stock = 0 WHERE other_stock <> 0');
-        }
-        if ($hasMannyCargoOther) {
-            $pdo->exec('UPDATE mannies SET cargo_other = 0 WHERE cargo_other <> 0');
+        $root = dirname(__DIR__, 2);
+        $factory = new AppFactory($root);
+        if (!$sectorsOnly) {
+            $pdo = $factory->pdo($databaseConfig, initializeSchema: false);
+            $database = cleanupLegacyOtherDatabase($pdo, $dryRun);
+            printf(
+                "Legacy other database: probe_rows=%d manny_rows=%d manny_payloads=%d scheduled_payloads=%d filter_payloads=%d resource_rows=%d resource_rules=%d task_projections=%d columns_dropped=%d dry_run=%s\n",
+                $database['probeRows'],
+                $database['mannyRows'],
+                $database['mannyPayloads'],
+                $database['scheduledPayloads'],
+                $database['filterPayloads'],
+                $database['resourceRows'],
+                $database['resourceRules'],
+                $database['taskProjections'],
+                $database['columnsDropped'],
+                $dryRun ? 'yes' : 'no',
+            );
         }
 
-        if ($payloadUpdates !== []) {
-            $update = $pdo->prepare('UPDATE mannies SET task_payload_json = :payload WHERE id = :id');
-            foreach ($payloadUpdates as $row) {
-                $update->execute([
-                    'id' => $row['id'],
-                    'payload' => $row['payload'],
-                ]);
+        if (!$databaseOnly) {
+            $appConfig = $factory->appConfig();
+            $configuredPath = $universePath ?? (string) ($appConfig['universePath'] ?? 'data/universe');
+            $absolutePath = str_starts_with($configuredPath, DIRECTORY_SEPARATOR)
+                ? $configuredPath
+                : $root . DIRECTORY_SEPARATOR . $configuredPath;
+            $sectors = cleanupLegacyOtherSectorFiles($absolutePath, $dryRun);
+            printf(
+                "Legacy other sectors: files_scanned=%d files_changed=%d resource_maps=%d asteroid_maps=%d dry_run=%s\n",
+                $sectors['filesScanned'],
+                $sectors['filesChanged'],
+                $sectors['resourceMaps'],
+                $sectors['asteroidMaps'],
+                $dryRun ? 'yes' : 'no',
+            );
+        }
+
+        return 0;
+    } catch (Throwable $error) {
+        fwrite(STDERR, 'Legacy other resource migration failed: ' . $error->getMessage() . "\n");
+
+        return 1;
+    }
+}
+
+/**
+ * @return array{probeRows:int,mannyRows:int,mannyPayloads:int,scheduledPayloads:int,filterPayloads:int,resourceRows:int,resourceRules:int,taskProjections:int,columnsDropped:int}
+ */
+function cleanupLegacyOtherDatabase(PDO $pdo, bool $dryRun): array
+{
+    $report = [
+        'probeRows' => 0,
+        'mannyRows' => 0,
+        'mannyPayloads' => 0,
+        'scheduledPayloads' => 0,
+        'filterPayloads' => 0,
+        'resourceRows' => 0,
+        'resourceRules' => 0,
+        'taskProjections' => 0,
+        'columnsDropped' => 0,
+    ];
+    if (!legacyOtherTableExists($pdo, 'mannies')) {
+        throw new RuntimeException('Required table mannies is absent.');
+    }
+
+    $probeOther = legacyOtherColumnExists($pdo, 'neumann_probes', 'other_stock');
+    if ($probeOther) {
+        if (!legacyOtherColumnExists($pdo, 'neumann_probes', 'organic_compounds_stock')) {
+            throw new RuntimeException('neumann_probes.other_stock exists without organic_compounds_stock; run the historical resource-stock migration first.');
+        }
+        $report['probeRows'] = legacyOtherCount($pdo, 'SELECT COUNT(*) FROM neumann_probes WHERE ABS(other_stock) > 0.00001');
+    }
+
+    $mannyOther = legacyOtherColumnExists($pdo, 'mannies', 'cargo_other');
+    $mannyRows = [];
+    if ($mannyOther) {
+        $columns = ['id', 'cargo_other'];
+        foreach (['cargo_ice', 'cargo_organic_compounds', 'task_payload_json', 'task_scheduled_event_id'] as $column) {
+            if (legacyOtherColumnExists($pdo, 'mannies', $column)) {
+                $columns[] = $column;
             }
         }
-
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
+        $mannyRows = $pdo->query('SELECT ' . implode(', ', $columns) . ' FROM mannies ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+        $report['mannyRows'] = count(array_filter(
+            $mannyRows,
+            static fn(array $row): bool => abs((float) ($row['cargo_other'] ?? 0.0)) > 0.00001,
+        ));
     }
 
-    return $stats;
-}
+    $mannyPayloadUpdates = legacyOtherJsonUpdates($pdo, 'mannies', 'task_payload_json');
+    $scheduledPayloadUpdates = legacyOtherJsonUpdates($pdo, 'scheduled_events', 'payload_json');
+    $filterUpdates = [];
+    foreach (['priority_filter_json', 'exclusion_filter_json', 'strict_exclusion_filter_json'] as $column) {
+        foreach (legacyOtherJsonUpdates($pdo, 'storage_containers', $column, true) as $update) {
+            $filterUpdates[] = ['column' => $column] + $update;
+        }
+    }
+    $report['mannyPayloads'] = count($mannyPayloadUpdates);
+    $report['scheduledPayloads'] = count($scheduledPayloadUpdates);
+    $report['filterPayloads'] = count($filterUpdates);
 
-function tableColumnExists(PDO $pdo, string $table, string $column): bool
-{
-    $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
-    if ($driver === 'sqlite') {
-        $quotedTable = str_replace("'", "''", $table);
-        $columns = $pdo->query("PRAGMA table_info('$quotedTable')")?->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-        return in_array($column, array_map(static fn(array $row): string => (string) $row['name'], $columns), true);
+    $amountTables = [
+        ['storage_container_resources', 'container_id'],
+        ['detached_storage_container_resources', 'container_object_id'],
+    ];
+    foreach ($amountTables as [$table, $ownerColumn]) {
+        if (legacyOtherColumnExists($pdo, $table, 'resource_type')) {
+            $report['resourceRows'] += legacyOtherCount(
+                $pdo,
+                "SELECT COUNT(*) FROM {$table} WHERE resource_type = 'other'",
+            );
+        }
+    }
+    if (legacyOtherColumnExists($pdo, 'detached_storage_container_resource_rules', 'resource_type')) {
+        $report['resourceRules'] = legacyOtherCount(
+            $pdo,
+            "SELECT COUNT(*) FROM detached_storage_container_resource_rules WHERE resource_type = 'other'",
+        );
+    }
+    if (legacyOtherColumnExists($pdo, 'manny_tasks', 'resource_type')) {
+        $report['taskProjections'] = legacyOtherCount($pdo, "SELECT COUNT(*) FROM manny_tasks WHERE resource_type = 'other'");
     }
 
-    $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` WHERE Field = :column");
-    $stmt->execute(['column' => $column]);
+    if ($dryRun) {
+        return $report;
+    }
 
-    return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
+    $transactionalDdl = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
+    if ($transactionalDdl) {
+        $pdo->beginTransaction();
+    }
+    try {
+        if ($probeOther) {
+            $nonNegativeOther = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? 'MAX(other_stock, 0)'
+                : 'GREATEST(other_stock, 0)';
+            $pdo->exec("UPDATE neumann_probes SET organic_compounds_stock = organic_compounds_stock + {$nonNegativeOther} WHERE ABS(other_stock) > 0.00001");
+            legacyOtherDropColumn($pdo, 'neumann_probes', 'other_stock');
+            $report['columnsDropped']++;
+        }
+
+        if ($mannyOther) {
+            if (!legacyOtherColumnExists($pdo, 'mannies', 'cargo_ice')) {
+                legacyOtherAddMannyCargoColumn($pdo, 'cargo_ice');
+            }
+            if (!legacyOtherColumnExists($pdo, 'mannies', 'cargo_organic_compounds')) {
+                legacyOtherAddMannyCargoColumn($pdo, 'cargo_organic_compounds');
+            }
+            $eventPayloads = legacyOtherScheduledPayloadsById($pdo, $mannyRows);
+            $updateCargo = $pdo->prepare(
+                'UPDATE mannies SET cargo_ice = :ice, cargo_organic_compounds = :organic WHERE id = :id'
+            );
+            foreach ($mannyRows as $row) {
+                $payload = [];
+                $eventId = isset($row['task_scheduled_event_id']) ? (int) $row['task_scheduled_event_id'] : 0;
+                $payloadJson = $eventPayloads[$eventId] ?? ($row['task_payload_json'] ?? '{}');
+                if (is_string($payloadJson) && $payloadJson !== '') {
+                    $decoded = json_decode($payloadJson, true, 512, JSON_THROW_ON_ERROR);
+                    $payload = is_array($decoded) ? $decoded : [];
+                }
+                $cargo = legacyOtherMannyCargoAmounts($row, $payload);
+                $updateCargo->execute(['id' => (int) $row['id'], 'ice' => $cargo['ice'], 'organic' => $cargo['organic']]);
+            }
+            legacyOtherDropColumn($pdo, 'mannies', 'cargo_other');
+            $report['columnsDropped']++;
+        }
+
+        legacyOtherApplyJsonUpdates($pdo, 'mannies', 'task_payload_json', $mannyPayloadUpdates);
+        legacyOtherApplyJsonUpdates($pdo, 'scheduled_events', 'payload_json', $scheduledPayloadUpdates);
+        foreach ($filterUpdates as $update) {
+            legacyOtherApplyJsonUpdates($pdo, 'storage_containers', (string) $update['column'], [$update]);
+        }
+        foreach ($amountTables as [$table, $ownerColumn]) {
+            legacyOtherMergeResourceRows($pdo, $table, $ownerColumn);
+        }
+        legacyOtherMigrateRules($pdo);
+        if (legacyOtherColumnExists($pdo, 'manny_tasks', 'resource_type')) {
+            $pdo->exec("UPDATE manny_tasks SET resource_type = 'carbon_compounds' WHERE resource_type = 'other'");
+        }
+        if ($transactionalDdl) {
+            $pdo->commit();
+        }
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
+
+    return $report;
 }
 
-function countRows(PDO $pdo, string $query): int
+/** @return array<int, array{id:int,payload:string}> */
+function legacyOtherJsonUpdates(PDO $pdo, string $table, string $column, bool $replaceEveryString = false): array
 {
-    $value = $pdo->query($query)?->fetchColumn();
-
-    return (int) ($value ?: 0);
-}
-
-function sumAmount(PDO $pdo, string $query): float
-{
-    $value = $pdo->query($query)?->fetchColumn();
-
-    return round((float) ($value ?: 0), 4);
-}
-
-/**
- * @return array<int, array{id: int, payload: string}>
- */
-function mannyTaskPayloadUpdates(PDO $pdo): array
-{
-    $stmt = $pdo->query("SELECT id, task_payload_json FROM mannies WHERE task_payload_json LIKE '%other%'");
-    if ($stmt === false) {
+    if (!legacyOtherColumnExists($pdo, $table, $column)) {
         return [];
     }
-
+    $statement = $pdo->prepare("SELECT id, {$column} FROM {$table} WHERE {$column} LIKE :needle ORDER BY id");
+    $statement->execute(['needle' => '%other%']);
     $updates = [];
-    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $payload = json_decode((string) $row['task_payload_json'], true);
-        if (!is_array($payload)) {
-            continue;
+    foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $payload = json_decode((string) $row[$column], true, 512, JSON_THROW_ON_ERROR);
+        $stats = ['resourceMaps' => 0];
+        $changed = $replaceEveryString
+            ? legacyOtherReplaceEveryString($payload)
+            : migrateLegacyOtherResource($payload, null, $stats);
+        if ($changed) {
+            $updates[] = [
+                'id' => (int) $row['id'],
+                'payload' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            ];
         }
-
-        $stats = ['resourceMapsMigrated' => 0];
-        if (!migrateLegacyOtherResource($payload, null, $stats)) {
-            continue;
-        }
-
-        $updates[] = [
-            'id' => (int) $row['id'],
-            'payload' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-        ];
     }
 
     return $updates;
 }
 
-/**
- * @return array{filesScanned: int, filesUpdated: int, resourceMapsMigrated: int, asteroidMapsResynced: int}
- */
-function cleanupSectorFiles(string $universePath, bool $dryRun): array
+/** @param array<int, array{id:int,payload:string}> $updates */
+function legacyOtherApplyJsonUpdates(PDO $pdo, string $table, string $column, array $updates): void
 {
-    $stats = [
-        'filesScanned' => 0,
-        'filesUpdated' => 0,
-        'resourceMapsMigrated' => 0,
-        'asteroidMapsResynced' => 0,
-    ];
+    if ($updates === [] || !legacyOtherColumnExists($pdo, $table, $column)) {
+        return;
+    }
+    $update = $pdo->prepare("UPDATE {$table} SET {$column} = :payload WHERE id = :id");
+    foreach ($updates as $row) {
+        $update->execute(['id' => $row['id'], 'payload' => $row['payload']]);
+    }
+}
+
+/** @param array<int, array<string, mixed>> $mannyRows @return array<int, string> */
+function legacyOtherScheduledPayloadsById(PDO $pdo, array $mannyRows): array
+{
+    if (!legacyOtherColumnExists($pdo, 'scheduled_events', 'payload_json')) {
+        return [];
+    }
+    $ids = array_values(array_unique(array_filter(array_map(
+        static fn(array $row): int => (int) ($row['task_scheduled_event_id'] ?? 0),
+        $mannyRows,
+    ))));
+    if ($ids === []) {
+        return [];
+    }
+    $rows = $pdo->query('SELECT id, payload_json FROM scheduled_events WHERE id IN (' . implode(',', $ids) . ')')->fetchAll(PDO::FETCH_ASSOC);
+
+    return array_column($rows, 'payload_json', 'id');
+}
+
+/** @param array<string, mixed> $row @param array<string, mixed> $payload @return array{ice:float,organic:float} */
+function legacyOtherMannyCargoAmounts(array $row, array $payload): array
+{
+    $ice = round(max(0.0, (float) ($row['cargo_ice'] ?? 0.0)), 4);
+    $organic = round(max(0.0, (float) ($row['cargo_organic_compounds'] ?? 0.0)), 4);
+    $other = round(max(0.0, (float) ($row['cargo_other'] ?? 0.0)), 4);
+    if ($ice + $organic > 0.0 || $other <= 0.0) {
+        return ['ice' => $ice, 'organic' => $organic];
+    }
+    $profile = is_array($payload['resourceProfile'] ?? null) ? $payload['resourceProfile'] : [];
+    $iceShare = max(0.0, (float) ($profile['ice'] ?? 0.0));
+    $organicShare = max(0.0, (float) ($profile['carbon_compounds'] ?? 0.0))
+        + max(0.0, (float) ($profile['other'] ?? 0.0));
+    $total = $iceShare + $organicShare;
+    if ($total <= 0.0) {
+        $resourceType = strtolower(str_replace(['-', ' '], '_', (string) ($payload['resourceType'] ?? '')));
+
+        return $resourceType === 'ice' || $resourceType === 'water' || $resourceType === 'water_ice'
+            ? ['ice' => $other, 'organic' => 0.0]
+            : ['ice' => 0.0, 'organic' => $other];
+    }
+    $ice = round($other * ($iceShare / $total), 4);
+
+    return ['ice' => $ice, 'organic' => round($other - $ice, 4)];
+}
+
+function legacyOtherMergeResourceRows(PDO $pdo, string $table, string $ownerColumn): void
+{
+    if (!legacyOtherColumnExists($pdo, $table, 'resource_type')) {
+        return;
+    }
+    $rows = $pdo->query("SELECT {$ownerColumn}, amount FROM {$table} WHERE resource_type = 'other'")->fetchAll(PDO::FETCH_ASSOC);
+    $find = $pdo->prepare("SELECT amount FROM {$table} WHERE {$ownerColumn} = :owner AND resource_type = 'carbon_compounds'");
+    $update = $pdo->prepare("UPDATE {$table} SET amount = :amount WHERE {$ownerColumn} = :owner AND resource_type = 'carbon_compounds'");
+    $rename = $pdo->prepare("UPDATE {$table} SET resource_type = 'carbon_compounds', amount = :amount WHERE {$ownerColumn} = :owner AND resource_type = 'other'");
+    $delete = $pdo->prepare("DELETE FROM {$table} WHERE {$ownerColumn} = :owner AND resource_type = 'other'");
+    foreach ($rows as $row) {
+        $owner = $row[$ownerColumn];
+        $find->execute(['owner' => $owner]);
+        $existing = $find->fetchColumn();
+        $legacyAmount = max(0.0, (float) $row['amount']);
+        if ($existing === false) {
+            $rename->execute(['owner' => $owner, 'amount' => $legacyAmount]);
+        } else {
+            $update->execute(['owner' => $owner, 'amount' => round(max(0.0, (float) $existing) + $legacyAmount, 4)]);
+            $delete->execute(['owner' => $owner]);
+        }
+    }
+}
+
+function legacyOtherMigrateRules(PDO $pdo): void
+{
+    $table = 'detached_storage_container_resource_rules';
+    if (!legacyOtherColumnExists($pdo, $table, 'resource_type')) {
+        return;
+    }
+    $rows = $pdo->query("SELECT container_object_id, rule_kind FROM {$table} WHERE resource_type = 'other'")->fetchAll(PDO::FETCH_ASSOC);
+    $exists = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE container_object_id = :container AND rule_kind = :kind AND resource_type = 'carbon_compounds'");
+    $rename = $pdo->prepare("UPDATE {$table} SET resource_type = 'carbon_compounds' WHERE container_object_id = :container AND rule_kind = :kind AND resource_type = 'other'");
+    $delete = $pdo->prepare("DELETE FROM {$table} WHERE container_object_id = :container AND rule_kind = :kind AND resource_type = 'other'");
+    foreach ($rows as $row) {
+        $params = ['container' => $row['container_object_id'], 'kind' => $row['rule_kind']];
+        $exists->execute($params);
+        ((int) $exists->fetchColumn() > 0 ? $delete : $rename)->execute($params);
+    }
+}
+
+/** @return array{filesScanned:int,filesChanged:int,resourceMaps:int,asteroidMaps:int} */
+function cleanupLegacyOtherSectorFiles(string $universePath, bool $dryRun): array
+{
+    $report = ['filesScanned' => 0, 'filesChanged' => 0, 'resourceMaps' => 0, 'asteroidMaps' => 0];
     $sectorsPath = rtrim($universePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'sectors';
     if (!is_dir($sectorsPath)) {
-        return $stats;
+        throw new RuntimeException("Sector directory not found: {$sectorsPath}");
     }
-
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($sectorsPath, FilesystemIterator::SKIP_DOTS),
-    );
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sectorsPath, FilesystemIterator::SKIP_DOTS));
     foreach ($iterator as $file) {
         if (!$file instanceof SplFileInfo || !$file->isFile() || $file->getExtension() !== 'json') {
             continue;
         }
-
-        $stats['filesScanned']++;
-        $path = $file->getPathname();
-        $json = file_get_contents($path);
+        $report['filesScanned']++;
+        $json = file_get_contents($file->getPathname());
         if ($json === false) {
-            throw new RuntimeException("Unable to read sector file '$path'.");
+            throw new RuntimeException('Unable to read ' . $file->getPathname());
         }
-
-        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($data)) {
-            continue;
-        }
-
-        $fileStats = ['resourceMapsMigrated' => 0, 'asteroidMapsResynced' => 0];
-        $changed = migrateLegacyAsteroidResources($data, $fileStats);
-        $changed = migrateLegacyOtherResource($data, null, $fileStats) || $changed;
+        $payload = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        $stats = ['resourceMaps' => 0, 'asteroidMaps' => 0];
+        $changed = migrateLegacyAsteroidResources($payload, $stats);
+        $changed = migrateLegacyOtherResource($payload, null, $stats) || $changed;
         if (!$changed) {
             continue;
         }
-
-        $stats['filesUpdated']++;
-        $stats['resourceMapsMigrated'] += $fileStats['resourceMapsMigrated'];
-        $stats['asteroidMapsResynced'] += $fileStats['asteroidMapsResynced'];
-        if ($dryRun) {
-            continue;
-        }
-
-        $updatedJson = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-        $temporaryPath = $path . '.tmp.' . bin2hex(random_bytes(6));
-        if (file_put_contents($temporaryPath, $updatedJson, LOCK_EX) === false) {
-            throw new RuntimeException("Unable to write temporary sector file '$temporaryPath'.");
-        }
-        if (!rename($temporaryPath, $path)) {
-            @unlink($temporaryPath);
-            throw new RuntimeException("Unable to replace sector file '$path'.");
+        $report['filesChanged']++;
+        $report['resourceMaps'] += $stats['resourceMaps'];
+        $report['asteroidMaps'] += $stats['asteroidMaps'];
+        if (!$dryRun) {
+            $encoded = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            $temporary = $file->getPathname() . '.tmp.' . bin2hex(random_bytes(6));
+            if (file_put_contents($temporary, $encoded, LOCK_EX) === false || !rename($temporary, $file->getPathname())) {
+                @unlink($temporary);
+                throw new RuntimeException('Unable to replace ' . $file->getPathname());
+            }
         }
     }
 
-    return $stats;
+    return $report;
 }
 
-/**
- * @param mixed $value
- * @param array{resourceMapsMigrated: int, asteroidMapsResynced: int} $stats
- */
+/** @param array{resourceMaps:int,asteroidMaps:int} $stats */
 function migrateLegacyAsteroidResources(mixed &$value, array &$stats): bool
 {
     if (!is_array($value)) {
         return false;
     }
-
     $changed = false;
-    if (
-        ($value['type'] ?? null) === 'asteroid'
-        && isset($value['resourceAmounts']) && is_array($value['resourceAmounts'])
-        && isset($value['estimatedResources']) && is_array($value['estimatedResources'])
-    ) {
+    if (($value['type'] ?? null) === 'asteroid' && is_array($value['resourceAmounts'] ?? null) && array_key_exists('other', $value['resourceAmounts'])) {
         $amounts = $value['resourceAmounts'];
-        $composition = ResourceComposition::fromHints($value['estimatedResources']);
-        $normalized = normalizedResourceAmounts($amounts);
-        $total = array_sum($normalized) + max(0.0, (float) ($amounts['other'] ?? 0.0));
-        $shouldResync = array_key_exists('other', $amounts);
-
+        $total = max(0.0, (float) ($amounts['other'] ?? 0.0));
         foreach (ResourceComposition::TYPES as $type) {
-            if ((float) ($normalized[$type] ?? 0.0) > 0.0 && (float) ($composition[$type] ?? 0.0) <= 0.0) {
-                $shouldResync = true;
-                break;
-            }
+            $total += max(0.0, (float) ($amounts[$type] ?? 0.0));
         }
-
-        if ($total > 0.0 && $shouldResync) {
-            $value['resourceAmounts'] = resourceAmountsForTotal((float) $total, $composition);
-            $stats['asteroidMapsResynced']++;
-            $changed = true;
-        }
+        $value['resourceAmounts'] = legacyOtherAmountsForTotal($total, ResourceComposition::fromHints((array) ($value['estimatedResources'] ?? [])));
+        $stats['asteroidMaps']++;
+        $changed = true;
     }
-
-    foreach ($value as &$childValue) {
-        if (migrateLegacyAsteroidResources($childValue, $stats)) {
-            $changed = true;
-        }
+    foreach ($value as &$child) {
+        $changed = migrateLegacyAsteroidResources($child, $stats) || $changed;
     }
-    unset($childValue);
+    unset($child);
 
     return $changed;
 }
 
-/**
- * @param mixed $value
- * @param array{resourceMapsMigrated: int, asteroidMapsResynced?: int} $stats
- */
+/** @param array{resourceMaps:int,asteroidMaps?:int} $stats */
 function migrateLegacyOtherResource(mixed &$value, ?string $key, array &$stats): bool
 {
-    $changed = false;
-
-    if (is_string($value) && $key === 'resourceType' && $value === 'other') {
+    if (is_string($value) && in_array($key, ['resourceType', 'reservedCargoType'], true) && $value === 'other') {
         $value = 'carbon_compounds';
 
         return true;
     }
-
     if (!is_array($value)) {
         return false;
     }
-
-    if ($key === 'cargo') {
-        $organic = (float) (
-            $value['organicCompounds']
-            ?? $value['organic_compounds']
-            ?? $value['carbon_compounds']
-            ?? 0
+    $changed = false;
+    if ($key === 'cargo' && (array_key_exists('other', $value) || array_key_exists('organic_compounds', $value) || array_key_exists('carbon_compounds', $value))) {
+        $value['organicCompounds'] = round(
+            (float) ($value['organicCompounds'] ?? $value['organic_compounds'] ?? $value['carbon_compounds'] ?? 0.0)
+            + (float) ($value['other'] ?? 0.0),
+            4,
         );
-        $legacy = (float) ($value['other'] ?? 0);
-        if (array_key_exists('other', $value) || array_key_exists('organic_compounds', $value) || array_key_exists('carbon_compounds', $value)) {
-            $value['organicCompounds'] = round($organic + $legacy, 4);
-            unset($value['other'], $value['organic_compounds'], $value['carbon_compounds']);
-            $stats['resourceMapsMigrated']++;
-            $changed = true;
-        }
+        unset($value['other'], $value['organic_compounds'], $value['carbon_compounds']);
+        $stats['resourceMaps']++;
+        $changed = true;
     }
-
-    if (in_array($key, ['resourceAmounts', 'resourceComposition', 'resourceProfile', 'extractedResources', 'depositedResources'], true)) {
-        if (array_key_exists('other', $value)) {
-            $value['carbon_compounds'] = round(
-                (float) ($value['carbon_compounds'] ?? 0)
-                + (float) $value['other'],
-                4,
-            );
-            unset($value['other']);
-            $stats['resourceMapsMigrated']++;
-            $changed = true;
-        }
+    if (in_array($key, ['resourceAmounts', 'resources', 'resourceComposition', 'resourceProfile', 'extractedResources', 'depositedResources'], true) && array_key_exists('other', $value)) {
+        $value['carbon_compounds'] = round((float) ($value['carbon_compounds'] ?? 0.0) + (float) $value['other'], 4);
+        unset($value['other']);
+        $stats['resourceMaps']++;
+        $changed = true;
     }
-
     if (in_array($key, ['resourceTypes', 'availableResources'], true) && array_is_list($value)) {
-        foreach ($value as $index => $item) {
+        foreach ($value as &$item) {
             if ($item === 'other') {
-                $value[$index] = 'carbon_compounds';
+                $item = 'carbon_compounds';
                 $changed = true;
             }
         }
+        unset($item);
         if ($changed) {
             $value = array_values(array_unique($value));
         }
     }
-
-    foreach ($value as $childKey => &$childValue) {
-        if (migrateLegacyOtherResource($childValue, is_string($childKey) ? $childKey : null, $stats)) {
-            $changed = true;
-        }
+    foreach ($value as $childKey => &$child) {
+        $changed = migrateLegacyOtherResource($child, is_string($childKey) ? $childKey : null, $stats) || $changed;
     }
-    unset($childValue);
+    unset($child);
 
     return $changed;
 }
 
-/**
- * @param array<string, mixed> $amounts
- * @return array<string, float>
- */
-function normalizedResourceAmounts(array $amounts): array
+function legacyOtherReplaceEveryString(mixed &$value): bool
 {
-    $normalized = array_fill_keys(ResourceComposition::TYPES, 0.0);
-    foreach (ResourceComposition::TYPES as $type) {
-        $normalized[$type] = round(max(0.0, (float) ($amounts[$type] ?? 0.0)), 4);
-    }
+    if (is_string($value)) {
+        if ($value !== 'other') {
+            return false;
+        }
+        $value = 'carbon_compounds';
 
-    return $normalized;
+        return true;
+    }
+    if (!is_array($value)) {
+        return false;
+    }
+    $changed = false;
+    foreach ($value as &$child) {
+        $changed = legacyOtherReplaceEveryString($child) || $changed;
+    }
+    unset($child);
+
+    return $changed;
 }
 
-/**
- * @param array<string, float> $composition
- * @return array<string, float>
- */
-function resourceAmountsForTotal(float $amount, array $composition): array
+/** @param array<string, float> $composition @return array<string, float> */
+function legacyOtherAmountsForTotal(float $amount, array $composition): array
 {
-    $amount = round(max(0.0, $amount), 4);
     $amounts = array_fill_keys(ResourceComposition::TYPES, 0.0);
-    $positiveTypes = array_values(array_filter(
-        ResourceComposition::TYPES,
-        static fn(string $type): bool => (float) ($composition[$type] ?? 0.0) > 0.0,
-    ));
-
-    if ($positiveTypes === []) {
-        return $amounts;
-    }
-
-    $remaining = $amount;
-    $lastIndex = count($positiveTypes) - 1;
-    foreach ($positiveTypes as $index => $type) {
-        if ($index === $lastIndex) {
-            $amounts[$type] = round(max(0.0, $remaining), 4);
-            break;
-        }
-
-        $resourceAmount = round($amount * (float) ($composition[$type] ?? 0.0), 4);
-        $amounts[$type] = $resourceAmount;
-        $remaining = round($remaining - $resourceAmount, 4);
+    $types = array_values(array_filter(ResourceComposition::TYPES, static fn(string $type): bool => ($composition[$type] ?? 0.0) > 0.0));
+    $remaining = round(max(0.0, $amount), 4);
+    foreach ($types as $index => $type) {
+        $amounts[$type] = $index === count($types) - 1
+            ? $remaining
+            : round($amount * (float) $composition[$type], 4);
+        $remaining = round($remaining - $amounts[$type], 4);
     }
 
     return $amounts;
 }
 
-function absolutePath(string $root, string $path): string
+function legacyOtherTableExists(PDO $pdo, string $table): bool
 {
-    if (str_starts_with($path, DIRECTORY_SEPARATOR)) {
-        return $path;
-    }
+    if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+        $statement = $pdo->prepare("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = :table");
+        $statement->execute(['table' => $table]);
 
-    return rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $path;
+        return (int) $statement->fetchColumn() === 1;
+    }
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table');
+    $statement->execute(['table' => $table]);
+
+    return (int) $statement->fetchColumn() === 1;
 }
 
-function formatAmount(float $amount): string
+function legacyOtherColumnExists(PDO $pdo, string $table, string $column): bool
 {
-    return rtrim(rtrim(number_format($amount, 4, '.', ''), '0'), '.');
+    if (!legacyOtherTableExists($pdo, $table)) {
+        return false;
+    }
+    if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+        return in_array($column, array_column($pdo->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC), 'name'), true);
+    }
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column');
+    $statement->execute(['table' => $table, 'column' => $column]);
+
+    return (int) $statement->fetchColumn() === 1;
+}
+
+function legacyOtherCount(PDO $pdo, string $sql): int
+{
+    return (int) $pdo->query($sql)->fetchColumn();
+}
+
+function legacyOtherDropColumn(PDO $pdo, string $table, string $column): void
+{
+    $pdo->exec("ALTER TABLE {$table} DROP COLUMN {$column}");
+}
+
+function legacyOtherAddMannyCargoColumn(PDO $pdo, string $column): void
+{
+    $type = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? 'REAL' : 'DOUBLE';
+    $pdo->exec("ALTER TABLE mannies ADD COLUMN {$column} {$type} NOT NULL DEFAULT 0");
 }
