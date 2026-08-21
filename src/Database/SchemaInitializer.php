@@ -86,9 +86,6 @@ final class SchemaInitializer
                 integrity_percent $decimal NOT NULL DEFAULT 100,
                 energy_stored $decimal NOT NULL DEFAULT 0,
                 deuterium_stock $decimal NOT NULL DEFAULT 100,
-                metals_stock $decimal NOT NULL DEFAULT 0,
-                ice_stock $decimal NOT NULL DEFAULT 0,
-                organic_compounds_stock $decimal NOT NULL DEFAULT 0,
                 internal_clock_rate $decimal NOT NULL DEFAULT 1,
                 current_task $nullableText,
                 entered_current_sector_at $text NOT NULL,
@@ -675,14 +672,10 @@ final class SchemaInitializer
             if (!in_array('deuterium_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock REAL NOT NULL DEFAULT 100');
             }
-            if (!in_array('metals_stock', $names, true)) {
-                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock REAL NOT NULL DEFAULT 0');
-            }
             if (in_array('damage_percent', $names, true)) {
                 $pdo->exec('UPDATE neumann_probes SET integrity_percent = min(100.0, max(0.0, 100.0 - damage_percent))');
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
-            $this->ensureSqliteProbeResourceStockColumns($pdo);
             $this->ensureProbePlayerOneToManySchema($pdo);
             $this->ensureSqliteColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'INTEGER NOT NULL DEFAULT 0');
             $this->ensureSqliteColumn($pdo, 'neumann_probes', 'model', "TEXT NOT NULL DEFAULT 'generic'");
@@ -717,14 +710,10 @@ final class SchemaInitializer
             if (!in_array('deuterium_stock', $names, true)) {
                 $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN deuterium_stock DOUBLE NOT NULL DEFAULT 100 AFTER energy_stored');
             }
-            if (!in_array('metals_stock', $names, true)) {
-                $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN metals_stock DOUBLE NOT NULL DEFAULT 0 AFTER deuterium_stock');
-            }
             if (in_array('damage_percent', $names, true)) {
                 $pdo->exec('UPDATE neumann_probes SET integrity_percent = LEAST(100.0, GREATEST(0.0, 100.0 - damage_percent))');
                 $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN damage_percent');
             }
-            $this->ensureMysqlProbeResourceStockColumns($pdo);
             $this->ensureProbePlayerOneToManySchema($pdo);
             $this->ensureMysqlColumn($pdo, 'neumann_probes', 'exclude_from_stats', 'BOOLEAN NOT NULL DEFAULT FALSE AFTER updated_at');
             $this->ensureMysqlColumn($pdo, 'neumann_probes', 'model', "VARCHAR(255) NOT NULL DEFAULT 'generic' AFTER name");
@@ -1479,104 +1468,6 @@ final class SchemaInitializer
         $pdo->exec('ALTER TABLE ' . $table . ' MODIFY ' . $column . ' ' . $definition);
     }
 
-    private function ensureSqliteProbeResourceStockColumns(PDO $pdo): void
-    {
-        $columns = $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
-        $names = array_map(static fn(array $row): string => (string) $row['name'], $columns);
-        if (
-            in_array('ice_stock', $names, true)
-            && in_array('organic_compounds_stock', $names, true)
-            && !in_array('other_stock', $names, true)
-        ) {
-            return;
-        }
-
-        $rows = $pdo->query('SELECT * FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
-        $pdo->exec('PRAGMA foreign_keys=OFF');
-        $pdo->beginTransaction();
-        try {
-            $pdo->exec('ALTER TABLE neumann_probes RENAME TO neumann_probes_resource_backup');
-            $pdo->exec(
-                "CREATE TABLE neumann_probes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    player_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    sector_x INTEGER NOT NULL,
-                    sector_y INTEGER NOT NULL,
-                    sector_z INTEGER NOT NULL,
-                    velocity_c REAL NOT NULL DEFAULT 0,
-                    acceleration_c_per_day REAL NOT NULL DEFAULT 0,
-                    direction_x REAL NOT NULL DEFAULT 0,
-                    direction_y REAL NOT NULL DEFAULT 0,
-                    direction_z REAL NOT NULL DEFAULT 0,
-                    status TEXT NOT NULL,
-                    integrity_percent REAL NOT NULL DEFAULT 100,
-                    energy_stored REAL NOT NULL DEFAULT 0,
-                    deuterium_stock REAL NOT NULL DEFAULT 100,
-                    metals_stock REAL NOT NULL DEFAULT 0,
-                    ice_stock REAL NOT NULL DEFAULT 0,
-                    organic_compounds_stock REAL NOT NULL DEFAULT 0,
-                    internal_clock_rate REAL NOT NULL DEFAULT 1,
-                    current_task TEXT NULL,
-                    entered_current_sector_at TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    exclude_from_stats INTEGER NOT NULL DEFAULT 0,
-                    FOREIGN KEY(player_id) REFERENCES players(id)
-                )"
-            );
-
-            $insert = $pdo->prepare(
-                'INSERT INTO neumann_probes
-                 (id, player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at, exclude_from_stats)
-                 VALUES (:id, :player_id, :name, :sector_x, :sector_y, :sector_z, :velocity_c, :acceleration_c_per_day, :direction_x, :direction_y, :direction_z, :status, :integrity_percent, :energy_stored, :deuterium_stock, :metals_stock, :ice_stock, :organic_compounds_stock, :internal_clock_rate, :current_task, :entered_current_sector_at, :created_at, :updated_at, :exclude_from_stats)'
-            );
-            foreach ($rows as $row) {
-                $insert->execute([
-                    'id' => (int) $row['id'],
-                    'player_id' => (int) $row['player_id'],
-                    'name' => (string) $row['name'],
-                    'sector_x' => (int) $row['sector_x'],
-                    'sector_y' => (int) $row['sector_y'],
-                    'sector_z' => (int) $row['sector_z'],
-                    'velocity_c' => (float) ($row['velocity_c'] ?? 0.0),
-                    'acceleration_c_per_day' => (float) ($row['acceleration_c_per_day'] ?? 0.0),
-                    'direction_x' => (float) ($row['direction_x'] ?? 0.0),
-                    'direction_y' => (float) ($row['direction_y'] ?? 0.0),
-                    'direction_z' => (float) ($row['direction_z'] ?? 0.0),
-                    'status' => (string) $row['status'],
-                    'integrity_percent' => max(0.0, min(100.0, (float) ($row['integrity_percent'] ?? 100.0))),
-                    'energy_stored' => (float) ($row['energy_stored'] ?? 0.0),
-                    'deuterium_stock' => (float) ($row['deuterium_stock'] ?? 100.0),
-                    'metals_stock' => (float) ($row['metals_stock'] ?? 0.0),
-                    'ice_stock' => round(max(0.0, (float) ($row['ice_stock'] ?? 0.0)), 4),
-                    'organic_compounds_stock' => round(
-                        max(0.0, (float) ($row['organic_compounds_stock'] ?? 0.0))
-                        + max(0.0, (float) ($row['other_stock'] ?? 0.0)),
-                        4,
-                    ),
-                    'internal_clock_rate' => (float) ($row['internal_clock_rate'] ?? 1.0),
-                    'current_task' => $row['current_task'] !== null ? (string) $row['current_task'] : null,
-                    'entered_current_sector_at' => (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
-                    'created_at' => (string) $row['created_at'],
-                    'updated_at' => (string) $row['updated_at'],
-                    'exclude_from_stats' => (int) ($row['exclude_from_stats'] ?? 0) === 1 ? 1 : 0,
-                ]);
-            }
-
-            $pdo->exec('DROP TABLE neumann_probes_resource_backup');
-            $pdo->commit();
-        } catch (\Throwable $e) {
-            $pdo->rollBack();
-            $pdo->exec('PRAGMA foreign_keys=ON');
-            throw $e;
-        }
-
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_sector ON neumann_probes(sector_x, sector_y, sector_z)');
-        $pdo->exec('PRAGMA foreign_keys=ON');
-    }
-
     private function rebuildSqliteNeumannProbesWithoutUniquePlayerId(PDO $pdo): void
     {
         $rows = $pdo->query('SELECT * FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
@@ -1601,9 +1492,6 @@ final class SchemaInitializer
                     integrity_percent REAL NOT NULL DEFAULT 100,
                     energy_stored REAL NOT NULL DEFAULT 0,
                     deuterium_stock REAL NOT NULL DEFAULT 100,
-                    metals_stock REAL NOT NULL DEFAULT 0,
-                    ice_stock REAL NOT NULL DEFAULT 0,
-                    organic_compounds_stock REAL NOT NULL DEFAULT 0,
                     internal_clock_rate REAL NOT NULL DEFAULT 1,
                     current_task TEXT NULL,
                     entered_current_sector_at TEXT NOT NULL,
@@ -1616,8 +1504,8 @@ final class SchemaInitializer
 
             $insert = $pdo->prepare(
                 'INSERT INTO neumann_probes
-                 (id, player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, metals_stock, ice_stock, organic_compounds_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at, exclude_from_stats)
-                 VALUES (:id, :player_id, :name, :sector_x, :sector_y, :sector_z, :velocity_c, :acceleration_c_per_day, :direction_x, :direction_y, :direction_z, :status, :integrity_percent, :energy_stored, :deuterium_stock, :metals_stock, :ice_stock, :organic_compounds_stock, :internal_clock_rate, :current_task, :entered_current_sector_at, :created_at, :updated_at, :exclude_from_stats)'
+                 (id, player_id, name, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at, exclude_from_stats)
+                 VALUES (:id, :player_id, :name, :sector_x, :sector_y, :sector_z, :velocity_c, :acceleration_c_per_day, :direction_x, :direction_y, :direction_z, :status, :integrity_percent, :energy_stored, :deuterium_stock, :internal_clock_rate, :current_task, :entered_current_sector_at, :created_at, :updated_at, :exclude_from_stats)'
             );
             foreach ($rows as $row) {
                 $insert->execute([
@@ -1636,9 +1524,6 @@ final class SchemaInitializer
                     'integrity_percent' => max(0.0, min(100.0, (float) ($row['integrity_percent'] ?? 100.0))),
                     'energy_stored' => (float) ($row['energy_stored'] ?? 0.0),
                     'deuterium_stock' => (float) ($row['deuterium_stock'] ?? 100.0),
-                    'metals_stock' => (float) ($row['metals_stock'] ?? 0.0),
-                    'ice_stock' => (float) ($row['ice_stock'] ?? 0.0),
-                    'organic_compounds_stock' => (float) ($row['organic_compounds_stock'] ?? 0.0),
                     'internal_clock_rate' => (float) ($row['internal_clock_rate'] ?? 1.0),
                     'current_task' => $row['current_task'] !== null ? (string) $row['current_task'] : null,
                     'entered_current_sector_at' => (string) ($row['entered_current_sector_at'] ?? $row['created_at']),
@@ -1659,26 +1544,6 @@ final class SchemaInitializer
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_player_id ON neumann_probes(player_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_neumann_probes_sector ON neumann_probes(sector_x, sector_y, sector_z)');
         $pdo->exec('PRAGMA foreign_keys=ON');
-    }
-
-    private function ensureMysqlProbeResourceStockColumns(PDO $pdo): void
-    {
-        $columns = $pdo->query('SHOW COLUMNS FROM neumann_probes')->fetchAll(PDO::FETCH_ASSOC);
-        $names = array_map(static fn(array $row): string => (string) $row['Field'], $columns);
-        if (!in_array('ice_stock', $names, true)) {
-            $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN ice_stock DOUBLE NOT NULL DEFAULT 0 AFTER metals_stock');
-            $names[] = 'ice_stock';
-        }
-        if (!in_array('organic_compounds_stock', $names, true)) {
-            $pdo->exec('ALTER TABLE neumann_probes ADD COLUMN organic_compounds_stock DOUBLE NOT NULL DEFAULT 0 AFTER ice_stock');
-            $names[] = 'organic_compounds_stock';
-        }
-        if (!in_array('other_stock', $names, true)) {
-            return;
-        }
-
-        $pdo->exec('UPDATE neumann_probes SET organic_compounds_stock = organic_compounds_stock + other_stock WHERE other_stock <> 0');
-        $pdo->exec('ALTER TABLE neumann_probes DROP COLUMN other_stock');
     }
 
     private function ensureSqliteMannyCargoColumns(PDO $pdo): void

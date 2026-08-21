@@ -7,7 +7,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - Gameplay : l’encombrement d’un `deuterium_engine` passe de 0,06 à 0,05 ECE. Un moteur à la dérive tient désormais dans la capacité d’emport d’une Manny et redevient donc récupérable avec l’action `salvage`.
-- Migration : après arrêt de l’application et du scheduler, exécuter `php scripts/one-shot-scripts/migrate-deuterium-engine-container-space.php --database-config=config/database.json`. Le script idempotent met à jour les items SQL, les tâches actives et les objets dérivants des fichiers de secteurs; `--dry-run` permet de contrôler le plan avant écriture.
+- Stockage : les ressources en métaux, glace et composés carbonés n’ont plus de totaux dupliqués dans `neumann_probes` ; les lignes des containers sont désormais l’unique source de vérité. Pour déployer sur une base existante : arrêter l’application et le scheduler, déployer ce code, vérifier avec `php scripts/one-shot-scripts/remove-legacy-probe-resource-stocks.php --dry-run --database-config=var/database-prod.json`, relancer sans `--dry-run`, puis seulement redémarrer les services.
+
 
 ## 2026-08-20
 

@@ -231,16 +231,22 @@ function setProbeTestStoredResources(
 ): NeumannProbe {
     $storage->ensureProbeStorage($probe);
     $storageContainers->clearResourcesForProbe($probe->id);
-    $probe = $probes->findById($probe->id) ?? $probe;
-    $probe->metalsStock = 0.0;
-    $probe->iceStock = 0.0;
-    $probe->organicCompoundsStock = 0.0;
-    $probes->save($probe);
     foreach ($resources as $type => $amount) {
         $storage->addResource($probe, (string) $type, (float) $amount);
     }
 
     return $probes->findById($probe->id) ?? $probe;
+}
+
+function probeTestStoredResource(
+    ProbeStorageService $storage,
+    NeumannProbeRepository $probes,
+    int $playerId,
+    string $type,
+): float {
+    $probe = $probes->findByPlayerId($playerId) ?? throw new RuntimeException('Expected test probe.');
+
+    return $storage->resourceStock($probe, $type);
 }
 
 /**
@@ -1288,10 +1294,64 @@ $probeSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC),
 );
-$test->assert(in_array('ice_stock', $probeSchemaColumns, true), 'Probe table stores ice stock explicitly');
-$test->assert(in_array('organic_compounds_stock', $probeSchemaColumns, true), 'Probe table stores organic-compound stock explicitly');
+$test->assert(!in_array('metals_stock', $probeSchemaColumns, true), 'Probe table no longer duplicates metal stocks');
+$test->assert(!in_array('ice_stock', $probeSchemaColumns, true), 'Probe table no longer duplicates ice stocks');
+$test->assert(!in_array('organic_compounds_stock', $probeSchemaColumns, true), 'Probe table no longer duplicates carbon-compound stocks');
 $test->assert(in_array('exclude_from_stats', $probeSchemaColumns, true), 'Probe table can exclude probes from public stats');
 $test->assert(!in_array('other_stock', $probeSchemaColumns, true), 'Probe table no longer stores generic other_stock');
+
+require_once $root . '/scripts/one-shot-scripts/remove-legacy-probe-resource-stocks.php';
+$legacyStorageMigrationPdo = new PDO('sqlite::memory:');
+$legacyStorageMigrationPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$legacyStorageMigrationPdo->exec(
+    'CREATE TABLE neumann_probes (
+        id INTEGER PRIMARY KEY,
+        metals_stock REAL NOT NULL,
+        ice_stock REAL NOT NULL,
+        organic_compounds_stock REAL NOT NULL
+    )'
+);
+$legacyStorageMigrationPdo->exec(
+    'CREATE TABLE storage_containers (
+        id INTEGER PRIMARY KEY,
+        probe_id INTEGER NOT NULL,
+        uid TEXT NOT NULL
+    )'
+);
+$legacyStorageMigrationPdo->exec(
+    'CREATE TABLE storage_container_resources (
+        id INTEGER PRIMARY KEY,
+        container_id INTEGER NOT NULL,
+        resource_type TEXT NOT NULL,
+        amount REAL NOT NULL
+    )'
+);
+$legacyStorageMigrationPdo->exec("INSERT INTO neumann_probes VALUES (1, 0.2, 0.1, 0.3)");
+$legacyStorageMigrationPdo->exec("INSERT INTO storage_containers VALUES (1, 1, 'probe-core')");
+$legacyStorageMigrationPdo->exec("INSERT INTO storage_container_resources VALUES (1, 1, 'metals', 0.1)");
+$legacyStorageMigrationPdo->exec("INSERT INTO storage_container_resources VALUES (2, 1, 'ice', 0.1)");
+$legacyStorageMigrationPdo->exec("INSERT INTO storage_container_resources VALUES (3, 1, 'carbon_compounds', 0.3)");
+$legacyStorageMismatchRejected = false;
+try {
+    removeLegacyProbeResourceStocks($legacyStorageMigrationPdo, true);
+} catch (RuntimeException) {
+    $legacyStorageMismatchRejected = true;
+}
+$test->assert($legacyStorageMismatchRejected, 'legacy probe resource-stock migration rejects divergent normalized totals');
+$legacyStorageMigrationPdo->exec("UPDATE storage_container_resources SET amount = 0.2 WHERE resource_type = 'metals'");
+$legacyStorageDryRun = removeLegacyProbeResourceStocks($legacyStorageMigrationPdo, true);
+$legacyStorageColumnsAfterDryRun = array_column($legacyStorageMigrationPdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assertEquals(0, $legacyStorageDryRun['mismatches'], 'legacy probe resource-stock dry run validates normalized totals');
+$test->assert(in_array('metals_stock', $legacyStorageColumnsAfterDryRun, true), 'legacy probe resource-stock dry run keeps legacy columns');
+$legacyStorageMigration = removeLegacyProbeResourceStocks($legacyStorageMigrationPdo, false);
+$legacyStorageColumnsAfterMigration = array_column($legacyStorageMigrationPdo->query('PRAGMA table_info(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assertEquals(3, $legacyStorageMigration['columnsDropped'], 'legacy probe resource-stock migration drops all duplicated columns');
+$test->assert(!in_array('metals_stock', $legacyStorageColumnsAfterMigration, true), 'legacy probe resource-stock migration drops metals_stock');
+$test->assert(!in_array('ice_stock', $legacyStorageColumnsAfterMigration, true), 'legacy probe resource-stock migration drops ice_stock');
+$test->assert(!in_array('organic_compounds_stock', $legacyStorageColumnsAfterMigration, true), 'legacy probe resource-stock migration drops organic_compounds_stock');
+$legacyStorageRerun = removeLegacyProbeResourceStocks($legacyStorageMigrationPdo, false);
+$test->assert($legacyStorageRerun['alreadyMigrated'], 'legacy probe resource-stock migration is idempotent');
+
 $mannySchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],
     $pdo->query('PRAGMA table_info(mannies)')->fetchAll(PDO::FETCH_ASSOC),
@@ -2277,7 +2337,7 @@ $sectorRepository->save(new SectorContent($privacySector, [
 ]));
 $privacyObservation = (new SectorObservationService($sectorService, $visitedSectors))->observe(
     new Player(424242, 'privacy-observer', 'Privacy Observer', null, $privacyHome, gmdate('c'), gmdate('c')),
-    new NeumannProbe(424242, 424242, 'Privacy probe', $privacySector, 0.0, 0.0, new ProbeDirection(), ProbeStatus::Idle, 100.0, 0.0, 100.0, 0.0, 0.0, 0.0, 1.0, null, gmdate('c'), gmdate('c'), gmdate('c'), false),
+    new NeumannProbe(424242, 424242, 'Privacy probe', $privacySector, 0.0, 0.0, new ProbeDirection(), ProbeStatus::Idle, 100.0, 0.0, 100.0, 1.0, null, gmdate('c'), gmdate('c'), gmdate('c'), false),
     $privacySector,
 )->toArray();
 $privacyJson = json_encode($privacyObservation, JSON_THROW_ON_ERROR);
@@ -3526,7 +3586,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals('additional_container', $rawContainerCraft->body['manny']['task']['recipe'] ?? null, 'additional-container task stores its recipe');
     $test->assertEquals(0.54, $rawContainerCraft->body['manny']['task']['metalsCost'] ?? null, 'raw additional-container craft consumes all component metal costs');
     $test->assertEquals(8280, $rawContainerCraft->body['manny']['task']['durationSeconds'] ?? null, 'raw additional-container craft includes virtual component fabrication time');
-    $test->assertEquals(0.0, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'raw additional-container craft commits the raw metals immediately');
+    $test->assertEquals(0.0, probeTestStoredResource($storage, $probes, $craftPlayer->id, ResourceComposition::METALS), 'raw additional-container craft commits the raw metals immediately');
 
     $craftMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $craftMannyRow->execute(['uid' => $craftMannyId]);
@@ -3871,7 +3931,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $steelBarCraft->status, 'Manny can start a steel-bar craft');
     $test->assertEquals(300, $steelBarCraft->body['manny']['task']['durationSeconds'] ?? null, 'steel-bar craft task lasts five minutes');
-    $test->assertEquals(0.0, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'steel-bar craft commits its metals immediately');
+    $test->assertEquals(0.0, probeTestStoredResource($storage, $probes, $craftPlayer->id, ResourceComposition::METALS), 'steel-bar craft commits its metals immediately');
     $craftReservation = $pdo->prepare('SELECT reserved_cargo_type, reserved_cargo_space, reserved_storage_container_id FROM mannies WHERE id = :id');
     $craftReservation->execute(['id' => $craftMannyDbId]);
     $craftReservationRow = $craftReservation->fetch(PDO::FETCH_ASSOC);
@@ -4063,7 +4123,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $test->assertEquals(200, $jettisonContainerMetals->status, 'POST /api/probe/inventory/{itemId}/jettison can target a resource container');
         $test->assertEquals(0.2, $storageContainers->resourceAmounts($coreStorageContainer->id)['metals'] ?? null, 'container-targeted jettison keeps the core stock untouched');
         $test->assertEquals(0.2, $storageContainers->resourceAmounts($additionalStorageContainerEntity->id)['metals'] ?? null, 'container-targeted jettison consumes the selected container stock');
-        $test->assertEquals(0.4, $probes->findByPlayerId($craftPlayer->id)?->metalsStock, 'container-targeted jettison syncs the global resource total');
+        $test->assertEquals(0.4, probeTestStoredResource($storage, $probes, $craftPlayer->id, ResourceComposition::METALS), 'container-targeted jettison updates the normalized resource total');
 
         setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, []);
         $storageContainers->setResourceAmount($additionalStorageContainerEntity->id, 'carbon_compounds', 0.3);
@@ -4075,7 +4135,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         ], JSON_THROW_ON_ERROR));
         $test->assertEquals(200, $jettisonContainerCarbonCompounds->status, 'POST /api/probe/inventory/{itemId}/jettison accepts exposed carbon-compound stock ids');
         $test->assertEquals(0.2, $storageContainers->resourceAmounts($additionalStorageContainerEntity->id)['carbon_compounds'] ?? null, 'container-targeted carbon-compound jettison consumes the selected container stock');
-        $test->assertEquals(0.2, $probes->findByPlayerId($craftPlayer->id)?->organicCompoundsStock, 'carbon-compound jettison syncs the global organic-compound total');
+        $test->assertEquals(0.2, probeTestStoredResource($storage, $probes, $craftPlayer->id, ResourceComposition::CARBON_COMPOUNDS), 'carbon-compound jettison updates the normalized resource total');
     }
 }
 
@@ -4173,7 +4233,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $detachedObjectId = (string) ($detachDrifting->body['manny']['task']['objectId'] ?? '');
         $test->assert($storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId) === null, 'accepted detach removes the storage container from probe inventory immediately');
         $test->assert($items->findByUidForProbe($detachProbe->id, $storedBar->uid) === null, 'accepted detach removes stored items with the container immediately');
-        $test->assertEquals(0.0, $probes->findByPlayerId($detachPlayer->id)?->metalsStock, 'accepted detach removes stored resources from probe totals');
+        $test->assertEquals(0.0, probeTestStoredResource($storage, $probes, $detachPlayer->id, ResourceComposition::METALS), 'accepted detach removes stored resources from probe totals');
 
         $detachRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
         $detachRow->execute(['uid' => $detachMannyId]);
@@ -4263,7 +4323,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(0.99, $driftingMinedContainer?->toArray()['payload']['resources']['metals'] ?? null, 'mining fills only the remaining capacity of a drifting detached container');
         $test->assertEquals(0.005, round($driftingMineMetalsBeforeCompletion - $driftingMineMetalsAfterCompletion, 4), 'drifting-container overflow remains in the asteroid stock');
         $test->assertEquals(null, $completedDriftingManny['currentTask'] ?? null, 'Manny returns after partially filling a drifting detached container');
-        $test->assertEquals(0.0, $probes->findByPlayerId($detachPlayer->id)?->metalsStock, 'mining into a detached container does not add mined resources to the probe inventory');
+        $test->assertEquals(0.0, probeTestStoredResource($storage, $probes, $detachPlayer->id, ResourceComposition::METALS), 'mining into a detached container does not add mined resources to the probe inventory');
         if ($driftingMinedContainer instanceof SectorDetachedContainer) {
             $restoredDriftingPayload = $driftingMinedContainer->getPayload();
             $restoredDriftingPayload['resources'] = ['metals' => 0.21];
@@ -5049,7 +5109,7 @@ if ($damageWarningProbe !== null) {
     $test->assert($storedWarning !== null && str_contains($storedWarning->message, 'relative sector'), 'stored movement damage warning message avoids absolute sector coordinates');
     $test->assert($storedWarning === null || !str_contains($storedWarning->message, ' near sector '), 'stored movement damage warning message does not use raw sector keys');
     $test->assert($storageContainers->findByUidForProbe($damageWarningProbe->id, $warningContainerId) === null, 'storage break removes the selected container from probe storage');
-    $test->assertEquals(0.0, $probes->findByPlayerId($damageWarningPlayer->id)?->metalsStock, 'storage break removes selected container resources from probe totals');
+    $test->assertEquals(0.0, probeTestStoredResource($storage, $probes, $damageWarningPlayer->id, ResourceComposition::METALS), 'storage break removes selected container resources from probe totals');
     if ($storedWarning !== null) {
         $warningSector = new SectorCoordinates($storedWarning->sectorX, $storedWarning->sectorY, $storedWarning->sectorZ);
         $detachedByMovement = $sectorService->getOrCreateSector($warningSector)->findObjectById($warningObjectId);
@@ -5457,9 +5517,6 @@ if ($intelligentLifeProbe !== null) {
             $storage->addItem($intelligentLifeProbeForDrop, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT, ProbeItem::ATMOSPHERIC_DROP_KIT_NAME, 0.08);
             $storageContainers->setResourceAmount($missionDropContainer->id, 'metals', 0.5);
             $storageContainers->setResourceAmount($missionDropContainer->id, 'carbon_compounds', 0.4);
-            $intelligentLifeProbeForDrop->metalsStock = 0.5;
-            $intelligentLifeProbeForDrop->organicCompoundsStock = 0.4;
-            $probes->save($intelligentLifeProbeForDrop);
             $missionDropManny = array_values(array_filter(
                 $mannies->findByProbeId($intelligentLifeProbeForDrop->id),
                 static fn($manny): bool => $manny->isOnProbe() && $manny->currentTask === null,
@@ -5548,9 +5605,6 @@ if ($intelligentLifeProbe !== null) {
                     $storage->addItem($intelligentLifeProbeForFinalDrop, ProbeItem::TYPE_ATMOSPHERIC_DROP_KIT, ProbeItem::ATMOSPHERIC_DROP_KIT_NAME, 0.08);
                     $storageContainers->setResourceAmount($finalDropContainer->id, ResourceComposition::METALS, 0.5);
                     $storageContainers->setResourceAmount($finalDropContainer->id, ResourceComposition::CARBON_COMPOUNDS, 0.1);
-                    $intelligentLifeProbeForFinalDrop->metalsStock = 0.5;
-                    $intelligentLifeProbeForFinalDrop->organicCompoundsStock = 0.1;
-                    $probes->save($intelligentLifeProbeForFinalDrop);
                     $finalDropManny = array_values(array_filter(
                         $mannies->findByProbeId($intelligentLifeProbeForFinalDrop->id),
                         static fn($manny): bool => $manny->isOnProbe() && $manny->currentTask === null,
@@ -6573,8 +6627,8 @@ $test->assert(
 $test->assert(
     is_string($probeStorageServiceSource)
         && str_contains($probeStorageServiceSource, 'public function repairProbeStorage(')
-        && str_contains($probeStorageServiceSource, 'run the explicit storage repair script'),
-    'regular storage access delegates inconsistent legacy state to explicit maintenance',
+        && str_contains($probeStorageServiceSource, 'repair-storage-containers.php'),
+    'regular storage access delegates inconsistent normalized state to explicit maintenance',
 );
 $test->assert(
     is_string($storageContainerRepositorySource)
@@ -6768,7 +6822,7 @@ if ($createdProbe !== null) {
     $repairEndsAt = new DateTimeImmutable((string) ($repairManny->body['manny']['taskEstimatedEndTime'] ?? 'now'));
     $expectedRepairDelay = max(0, ($repairEndsAt->getTimestamp() - (new DateTimeImmutable('now', new DateTimeZone('UTC')))->getTimestamp()) * 1000);
     $test->assert(is_int($repairRefreshDelay) && abs($repairRefreshDelay - $expectedRepairDelay) <= 1000, 'GET /api/probe/mannies recommends refreshing at the next active Manny task end');
-    $test->assertEquals(0.03, $probes->findByPlayerId($player->id)?->metalsStock, 'repair consumes 0.01 containers of metals per integrity percent');
+    $test->assertEquals(0.03, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'repair consumes 0.01 containers of metals per integrity percent');
     $test->assertEquals(2, $repairManny->body['manny']['task']['integrityPercent'] ?? null, 'repair task stores planned integrity restoration');
     $repairRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $repairRow->execute(['uid' => $firstMannyId]);
@@ -7097,7 +7151,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $improveCouplings->status, 'POST /api/probe/mannies/{id}/improve-probe starts reinforced container couplings');
     $test->assertEquals(0.4, $improveCouplings->body['manny']['task']['resourceCosts']['carbon_compounds'] ?? null, 'reinforced container couplings reserve carbon compounds');
     $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $couplingsCircuit->uid), 'reinforced container couplings consume an integrated circuit');
-    $test->assertEquals(0.0, $probes->findByPlayerId($improvementPlayer->id)?->organicCompoundsStock, 'reinforced container couplings consume 0.4 ECE of carbon compounds');
+    $test->assertEquals(0.0, probeTestStoredResource($storage, $probes, $improvementPlayer->id, ResourceComposition::CARBON_COMPOUNDS), 'reinforced container couplings consume 0.4 ECE of carbon compounds');
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
         'id' => $improvementMannyDbId,
         'ended' => gmdate('c', time() - 1),
@@ -7350,8 +7404,7 @@ if ($createdProbe !== null) {
     ]);
     $processScheduledMannyNow($mineMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
-    $minedProbe = $probes->findByPlayerId($player->id);
-    $test->assertEquals(0.04, $minedProbe?->metalsStock, 'completed Manny mining transfers metals to the probe inventory');
+    $test->assertEquals(0.04, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'completed Manny mining transfers metals to the probe inventory');
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'completed mining returns the Manny to the probe');
     $depletedSector = $sectorRepository->load($createdProbe->currentSector);
     $depletedAsteroid = $depletedSector->getObjects()[0] ?? null;
@@ -7373,7 +7426,7 @@ if ($createdProbe !== null) {
     ]);
     $processScheduledMannyNow($mineMannyDbId);
     $processScheduledMannyNow($mineMannyDbId);
-    $test->assertEquals(0.08, $probes->findByPlayerId($player->id)?->metalsStock, 'duplicate stale mining refreshes do not deliver regular mining twice');
+    $test->assertEquals(0.08, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'duplicate stale mining refreshes do not deliver regular mining twice');
     $staleMinedAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('stale-mine-rock');
     $test->assertEquals(0.96, $staleMinedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'duplicate stale mining refreshes do not deplete regular mining twice');
 
@@ -7404,7 +7457,7 @@ if ($createdProbe !== null) {
     }
     $processScheduledMannyNow($mineMannyDbId);
     $processScheduledMannyNow($parallelThirdMannyDbId);
-    $test->assertEquals(0.16, $probes->findByPlayerId($player->id)?->metalsStock, 'parallel Manny mining deliveries preserve both metal additions');
+    $test->assertEquals(0.16, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'parallel Manny mining deliveries preserve both metal additions');
     $parallelMetalAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-metal-rock');
     $test->assertEquals(0.12, $parallelMetalAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'parallel Manny mining depletes both metal deliveries');
     $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.08]);
@@ -7573,10 +7626,9 @@ if ($createdProbe !== null) {
     ]);
     $processScheduledMannyNow($mixedMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
-    $mixedProbe = $probes->findByPlayerId($player->id);
-    $test->assertEquals(0.09, $mixedProbe?->metalsStock, 'completed multi-resource mining transfers the metals share');
-    $test->assertEquals(0.01, $mixedProbe?->iceStock, 'completed multi-resource mining transfers the ice share');
-    $test->assertEquals(0.01, $mixedProbe?->organicCompoundsStock, 'completed multi-resource mining transfers the organic-compound share');
+    $test->assertEquals(0.09, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'completed multi-resource mining transfers the metals share');
+    $test->assertEquals(0.01, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::ICE), 'completed multi-resource mining transfers the ice share');
+    $test->assertEquals(0.01, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::CARBON_COMPOUNDS), 'completed multi-resource mining transfers the organic-compound share');
     $mixedSector = $sectorRepository->load($createdProbe->currentSector);
     $mixedAsteroid = $mixedSector->getObjects()[0] ?? null;
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'multi-resource mining subtracts the metals share from the asteroid');
@@ -7652,7 +7704,7 @@ if ($createdProbe !== null) {
     $cancelRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/recall', $headers, json_encode([], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $cancelRepair->status, 'POST /api/probe/mannies/{id}/recall cancels an active repair task');
     $test->assertEquals(null, $cancelRepair->body['manny']['currentTask'] ?? null, 'cancelled repair returns the Manny to idle');
-    $test->assertEquals(0.2, $probes->findByPlayerId($player->id)?->metalsStock, 'cancelled repair refunds committed metals when capacity is available');
+    $test->assertEquals(0.2, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'cancelled repair refunds committed metals when capacity is available');
 
     $craftManny = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/craft', $headers, json_encode([
         'recipe' => 'waypoint_bookmark',
@@ -7660,7 +7712,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $craftManny->status, 'POST /api/probe/mannies/{id}/craft starts a crafting task');
     $test->assertEquals('crafting', $craftManny->body['manny']['currentTask'] ?? null, 'crafting task is exposed on Manny');
     $test->assertEquals('waypoint_bookmark', $craftManny->body['manny']['task']['recipe'] ?? null, 'crafting task stores its recipe');
-    $test->assertEquals(0.19, $probes->findByPlayerId($player->id)?->metalsStock, 'waypoint bookmark crafting consumes 0.01 metal containers');
+    $test->assertEquals(0.19, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'waypoint bookmark crafting consumes 0.01 metal containers');
 
     $craftRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $craftRow->execute(['uid' => $firstMannyId]);
@@ -7776,7 +7828,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('probe', $dropMannyCargo->body['manny']['location']['type'] ?? null, 'dropping cargo lets a waiting Manny retry docking immediately');
     $test->assertEquals(null, $dropMannyCargo->body['manny']['currentTask'] ?? null, 'Manny is idle after dropping cargo and docking');
     $test->assertEquals(0.0, $dropMannyCargo->body['manny']['cargo']['metals'] ?? null, 'dropped Manny cargo is cleared');
-    $test->assertEquals(0.45, $probes->findByPlayerId($player->id)?->metalsStock, 'dropped Manny cargo is not transferred into probe storage');
+    $test->assertEquals(0.45, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'dropped Manny cargo is not transferred into probe storage');
 
     $storageContainers->clearResourcesForProbe($createdProbe->id);
     if ($createdCoreContainer !== null) {
@@ -7820,7 +7872,7 @@ if ($createdProbe !== null) {
         'amount' => 0.05,
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $jettisonMetals->status, 'POST /api/probe/inventory/{itemId}/jettison discards stored resources');
-    $test->assertEquals(0.5, $probes->findByPlayerId($player->id)?->metalsStock, 'jettisoning metals lowers the probe stock');
+    $test->assertEquals(0.5, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'jettisoning metals lowers the probe stock');
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->locationType, 'freeing storage lets a waiting Manny enter the probe');
     $test->assertEquals(null, $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->currentTask, 'Manny waiting for storage returns to idle after docking');
 

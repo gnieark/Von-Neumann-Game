@@ -412,7 +412,6 @@ function userinfosBuildReport(PDO $pdo, object $player, object $probe, array $ow
                 'energyStored' => $probe->energyStored,
                 'internalClockRate' => $probe->internalClockRate,
             ],
-            'legacyResourceTotals' => userinfosLegacyTotals($probe),
             'excludeFromStats' => $probe->excludeFromStats,
             'createdAt' => $probe->createdAt,
             'updatedAt' => $probe->updatedAt,
@@ -489,7 +488,6 @@ function userinfosProbeOverview(PDO $pdo, object $player, object $probe, PlayerR
             'energyStored' => $probe->energyStored,
             'internalClockRate' => $probe->internalClockRate,
         ],
-        'legacyResourceTotals' => userinfosLegacyTotals($probe),
         'counts' => [
             'containers' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probe->id]),
             'items' => userinfosScalar($pdo, 'SELECT COUNT(*) FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probe->id]),
@@ -595,7 +593,6 @@ function userinfosInventoryReport(object $probe, array $gameplayConfig, array $c
     }
 
     return [
-        'legacyResourceTotals' => userinfosLegacyTotals($probe),
         'resourceTotalsByContainers' => $resourceTotalsByContainers,
         'containers' => $containersReport,
         'rawItems' => array_map('userinfosItemSummary', $items),
@@ -603,7 +600,6 @@ function userinfosInventoryReport(object $probe, array $gameplayConfig, array $c
         'suspicions' => [
             'itemsWithoutKnownContainer' => array_map('userinfosItemSummary', $itemsWithoutKnownContainer),
             'onboardManniesWithoutKnownContainer' => array_map('userinfosMannySummary', $manniesWithoutKnownContainer),
-            'legacyVsContainerResourceDiffs' => userinfosResourceDiffs(userinfosLegacyTotals($probe), $resourceTotalsByContainers),
         ],
     ];
 }
@@ -624,9 +620,6 @@ function userinfosDiagnostics(object $probe, ?array $visitedCurrent, int $visite
     }
     if ($visitedCurrent === null) {
         $flags[] = 'current_sector_not_marked_visited';
-    }
-    if ($inventory['suspicions']['legacyVsContainerResourceDiffs'] !== []) {
-        $flags[] = 'probe_resource_totals_differ_from_container_rows';
     }
     if ($inventory['suspicions']['itemsWithoutKnownContainer'] !== []) {
         $flags[] = 'items_without_known_container';
@@ -814,7 +807,6 @@ function userinfosRenderReport(array $report): string
             . ' pendingEvents=' . $probeOverview['counts']['pendingScheduledEvents']
             . ' unreadWarnings=' . $probeOverview['counts']['unreadWarnings']
             . ' messages=' . $probeOverview['counts']['receivedMessages'] . '/' . $probeOverview['counts']['sentMessages'];
-        $out[] = '    legacy totals: ' . userinfosFormatResourceMap($probeOverview['legacyResourceTotals']);
     }
     $out[] = '';
     $out[] = 'Focused probe';
@@ -830,7 +822,6 @@ function userinfosRenderReport(array $report): string
     $out[] = '  integrity=' . $report['probe']['health']['integrityPercent'] . '%'
         . ' energy=' . $report['probe']['health']['energyStored']
         . ' clockRate=' . $report['probe']['health']['internalClockRate'];
-    $out[] = '  legacy totals: ' . userinfosFormatResourceMap($report['probe']['legacyResourceTotals']);
     $out[] = '  created: ' . $report['probe']['createdAt'] . ' updated: ' . $report['probe']['updatedAt'];
     $out[] = '';
     $out[] = 'Diagnostics';
@@ -860,9 +851,6 @@ function userinfosRenderReport(array $report): string
             $out[] = '    manny #' . $manny['id'] . ' ' . $manny['uid'] . ' name=' . $manny['name']
                 . ' task=' . userinfosValue($manny['currentTask']);
         }
-    }
-    if ($report['inventory']['suspicions']['legacyVsContainerResourceDiffs'] !== []) {
-        $out[] = '  resource diffs: ' . userinfosFormatResourceMap($report['inventory']['suspicions']['legacyVsContainerResourceDiffs']);
     }
     if ($report['inventory']['suspicions']['itemsWithoutKnownContainer'] !== []) {
         $out[] = '  items without known container: ' . count($report['inventory']['suspicions']['itemsWithoutKnownContainer']);
@@ -982,29 +970,6 @@ function userinfosColumn(PDO $pdo, string $sql, array $params = []): array
 function userinfosCoordinatesArray(SectorCoordinates $coordinates): array
 {
     return ['x' => $coordinates->getX(), 'y' => $coordinates->getY(), 'z' => $coordinates->getZ()];
-}
-
-function userinfosLegacyTotals(object $probe): array
-{
-    return [
-        ResourceComposition::DEUTERIUM => round((float) $probe->deuteriumStock, 4),
-        ResourceComposition::METALS => round((float) $probe->metalsStock, 4),
-        ResourceComposition::ICE => round((float) $probe->iceStock, 4),
-        ResourceComposition::CARBON_COMPOUNDS => round((float) $probe->organicCompoundsStock, 4),
-    ];
-}
-
-function userinfosResourceDiffs(array $legacyTotals, array $containerTotals): array
-{
-    $diffs = [];
-    foreach ([ResourceComposition::METALS, ResourceComposition::ICE, ResourceComposition::CARBON_COMPOUNDS] as $type) {
-        $diff = round((float) ($legacyTotals[$type] ?? 0.0) - (float) ($containerTotals[$type] ?? 0.0), 4);
-        if (abs($diff) > 0.0001) {
-            $diffs[$type] = $diff;
-        }
-    }
-
-    return $diffs;
 }
 
 function userinfosJsonList(mixed $json): array

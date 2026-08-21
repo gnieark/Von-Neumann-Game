@@ -63,8 +63,8 @@ final class ProbeStorageService
                     break;
                 }
             }
-            if ($hasPreviouslyPlacedInventory || $this->resourceRowsDifferFromProbeTotals($probe)) {
-                throw new \RuntimeException('Probe storage is not initialized or is inconsistent; run the explicit storage repair script.');
+            if ($hasPreviouslyPlacedInventory) {
+                throw new \RuntimeException('Probe storage is not initialized or is inconsistent; run scripts/one-shot-scripts/repair-storage-containers.php.');
             }
 
             $core = $this->containers->ensureCoreContainer($probe);
@@ -78,7 +78,7 @@ final class ProbeStorageService
         }
 
         if ($this->containerByUid($existingContainers, StorageContainer::CORE_UID) === null) {
-            throw new \RuntimeException('Probe core storage container is missing; run the explicit storage repair script.');
+            throw new \RuntimeException('Probe core storage container is missing; run scripts/one-shot-scripts/repair-storage-containers.php.');
         }
     }
 
@@ -106,43 +106,6 @@ final class ProbeStorageService
         $knownContainerIds = $this->knownContainerIds($probe);
         $this->assignUnplacedItems($probe, $core, $knownContainerIds);
         $this->assignUnplacedMannies($probe, $core, $knownContainerIds);
-        if ($this->resourceRowsDifferFromProbeTotals($probe)) {
-            if ($existingContainers === []) {
-                $this->migrateLegacyProbe($probe);
-                return;
-            }
-
-            $this->syncLegacyResourceTotals($probe);
-        }
-    }
-
-    public function migrateLegacyProbe(NeumannProbe $probe): void
-    {
-        $existingContainers = $this->containers->findByProbeId($probe->id);
-        $containerUids = array_fill_keys(
-            array_map(static fn(StorageContainer $container): string => $container->uid, $existingContainers),
-            true,
-        );
-        if (!isset($containerUids[StorageContainer::CORE_UID])) {
-            $core = $this->containers->ensureCoreContainer($probe);
-            $containerUids[$core->uid] = true;
-        }
-        foreach ($this->items->findByProbeId($probe->id) as $item) {
-            if ($item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
-                $containerUid = StorageContainerRepository::uidForItem($item->uid);
-                if (!isset($containerUids[$containerUid])) {
-                    $container = $this->containers->ensureContainerForItem($probe->id, $item->uid);
-                    $containerUids[$container->uid] = true;
-                }
-            }
-        }
-        $this->containers->clearResourcesForProbe($probe->id);
-        foreach ($this->legacyResourceTotals($probe) as $type => $amount) {
-            if ($amount > 0.0) {
-                $this->placeResourceAmount($probe, $type, $amount);
-            }
-        }
-        $this->syncLegacyResourceTotals($probe);
     }
 
     /**
@@ -462,9 +425,6 @@ final class ProbeStorageService
 
         $this->ensureProbeStorage($probe);
         $accepted = $this->placeResourceAmount($probe, $type, $amount);
-        if ($accepted > 0.0) {
-            $this->syncLegacyResourceTotals($probe);
-        }
 
         return $accepted;
     }
@@ -523,12 +483,7 @@ final class ProbeStorageService
                 break;
             }
         }
-        $consumed = round($amount - max(0.0, $remaining), 4);
-        if ($consumed > 0.0) {
-            $this->syncLegacyResourceTotals($probe);
-        }
-
-        return $consumed;
+        return round($amount - max(0.0, $remaining), 4);
     }
 
     public function consumeResourceFromContainer(NeumannProbe $probe, string $type, float $amount, string $containerUid): float
@@ -552,7 +507,6 @@ final class ProbeStorageService
         }
 
         $this->containers->setResourceAmount($container->id, $type, round($available - $consumed, 4));
-        $this->syncLegacyResourceTotals($probe);
 
         return round($consumed, 4);
     }
@@ -814,8 +768,6 @@ final class ProbeStorageService
             $this->items->delete($containerItem);
             $this->containers->delete($container);
         }
-        $this->syncLegacyResourceTotals($probe);
-
         return $consumed;
     }
 
@@ -892,7 +844,6 @@ final class ProbeStorageService
         }
         $this->items->delete($containerItem);
         $this->containers->delete($container);
-        $this->syncLegacyResourceTotals($probe);
 
         return $snapshot;
     }
@@ -976,7 +927,6 @@ final class ProbeStorageService
             );
         }
 
-        $this->syncLegacyResourceTotals($probe);
     }
 
     /**
@@ -1039,7 +989,6 @@ final class ProbeStorageService
         $targetResources = $this->containers->resourceAmounts($move['to']->id);
         $this->containers->setResourceAmount($move['from']->id, $move['type'], round($move['available'] - $move['amount'], 4));
         $this->containers->setResourceAmount($move['to']->id, $move['type'], round((float) ($targetResources[$move['type']] ?? 0.0) + $move['amount'], 4));
-        $this->syncLegacyResourceTotals($probe);
     }
 
     public function moveItem(NeumannProbe $probe, string $itemUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
@@ -1327,59 +1276,6 @@ final class ProbeStorageService
         }
 
         return $known;
-    }
-
-    private function resourceRowsDifferFromProbeTotals(NeumannProbe $probe): bool
-    {
-        $storageTotals = [
-            ResourceComposition::METALS => 0.0,
-            ResourceComposition::ICE => 0.0,
-            ResourceComposition::CARBON_COMPOUNDS => 0.0,
-        ];
-        foreach ($this->containers->resourceAmountsByContainer($probe->id) as $resources) {
-            foreach ($storageTotals as $type => $_amount) {
-                $storageTotals[$type] = round($storageTotals[$type] + (float) ($resources[$type] ?? 0.0), 4);
-            }
-        }
-
-        foreach ($this->legacyResourceTotals($probe) as $type => $legacyAmount) {
-            if (abs($storageTotals[$type] - $legacyAmount) > 0.0001) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @return array<string, float>
-     */
-    private function legacyResourceTotals(NeumannProbe $probe): array
-    {
-        return [
-            ResourceComposition::METALS => round(max(0.0, $probe->metalsStock), 4),
-            ResourceComposition::ICE => round(max(0.0, $probe->iceStock), 4),
-            ResourceComposition::CARBON_COMPOUNDS => round(max(0.0, $probe->organicCompoundsStock), 4),
-        ];
-    }
-
-    private function syncLegacyResourceTotals(NeumannProbe $probe): void
-    {
-        $totals = [
-            ResourceComposition::METALS => 0.0,
-            ResourceComposition::ICE => 0.0,
-            ResourceComposition::CARBON_COMPOUNDS => 0.0,
-        ];
-        foreach ($this->containers->resourceAmountsByContainer($probe->id) as $resources) {
-            foreach ($totals as $type => $_amount) {
-                $totals[$type] = round($totals[$type] + (float) ($resources[$type] ?? 0.0), 4);
-            }
-        }
-
-        $probe->metalsStock = $totals[ResourceComposition::METALS];
-        $probe->iceStock = $totals[ResourceComposition::ICE];
-        $probe->organicCompoundsStock = $totals[ResourceComposition::CARBON_COMPOUNDS];
-        $this->probes->save($probe);
     }
 
     /**
