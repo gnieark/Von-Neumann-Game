@@ -966,13 +966,11 @@ $test->assert(
     ),
     'HTTP routes and runtime service factories do not initialize the database schema',
 );
-$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnNullable(\$pdo, 'probe_messages', 'sender_probe_id'"), 'MySQL message migration checks sender probe nullability before altering the table');
-$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnNullable(\$pdo, 'probe_messages', 'recipient_probe_id'"), 'MySQL message migration checks recipient probe nullability before altering the table');
-$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, "\$pdo->exec('ALTER TABLE probe_messages MODIFY sender_probe_id INTEGER NULL')"), 'MySQL message migration no longer unconditionally alters sender_probe_id');
-$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, "\$pdo->exec('ALTER TABLE probe_messages MODIFY recipient_probe_id INTEGER NULL')"), 'MySQL message migration no longer unconditionally alters recipient_probe_id');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'applyLightweightMigrations'), 'schema initializer no longer runs historical schema migrations');
+$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'UPDATE '), 'compiled schema initializer never transforms existing data');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'recipient_type(32), recipient_id(191), status(32), created_at(32)'), 'MySQL probe message endpoint index stays within utf8mb4 key length limits');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'username $caseSensitiveText NOT NULL UNIQUE'), 'MySQL usernames are created with case-sensitive uniqueness like SQLite');
-$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "ensureMysqlColumnCollation(\$pdo, 'players', 'username', 'utf8mb4_bin'"), 'MySQL schema initialization repairs username collation on existing tables');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, "VARCHAR(255) COLLATE utf8mb4_bin"), 'MySQL usernames use the canonical case-sensitive collation');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'default_probe_id INTEGER NULL'), 'Player table stores a default probe id for future multi-probe ownership');
 $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'player_id INTEGER NOT NULL UNIQUE'), 'Probe table allows several probes for the same player');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS scut_covered_sectors'), 'SCUT coverage sectors are stored in a relational table');
@@ -981,7 +979,10 @@ $test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer,
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'ENGINE=InnoDB'), 'MySQL schema creation declares InnoDB explicitly');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_movements_one_active_per_probe'), 'schema enforces one active movement per probe');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'active_probe_id INTEGER GENERATED ALWAYS'), 'MySQL active movement uniqueness uses a generated indexed column');
-$test->assert(is_string($schemaInitializer) && !str_contains($schemaInitializer, 'CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)'), 'MySQL active movement index waits for the generated-column migration');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)'), 'MySQL active movement uniqueness is part of the canonical schema');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_players_default_probe_id'), 'canonical schema indexes the selected default probe');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_mannies_task_scheduled_event_id'), 'canonical schema indexes Manny scheduled events');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_items_storage_container_id'), 'canonical schema indexes item storage containers');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_missions_player_status'), 'schema indexes missions by player and status');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_blueprints'), 'schema stores probe improvement blueprints by player');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_installations'), 'schema stores completed probe improvements by probe');
@@ -1001,6 +1002,21 @@ $movementConstraintDbPath = $tmp . DIRECTORY_SEPARATOR . 'movement-constraint.sq
 $movementConstraintFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $movementConstraintDbPath), $root);
 $movementConstraintPdo = $movementConstraintFactory->create();
 $movementConstraintFactory->initializeSchema($movementConstraintPdo);
+$movementConstraintFactory->initializeSchema($movementConstraintPdo);
+$test->assert(true, 'canonical SQLite schema initialization is idempotent');
+$canonicalIndexNames = $movementConstraintPdo
+    ->query("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'")
+    ->fetchAll(PDO::FETCH_COLUMN);
+foreach ([
+    'idx_players_default_probe_id',
+    'idx_mannies_storage_container_id',
+    'idx_mannies_task_scheduled_event_id',
+    'idx_probe_items_storage_container_id',
+    'idx_probe_messages_recipient_endpoint',
+    'idx_probe_messages_sender_endpoint',
+] as $canonicalIndexName) {
+    $test->assert(in_array($canonicalIndexName, $canonicalIndexNames, true), "canonical SQLite schema creates {$canonicalIndexName}");
+}
 $movementConstraintIndexes = $movementConstraintPdo->query('PRAGMA index_list(probe_movements)')->fetchAll(PDO::FETCH_ASSOC);
 $movementConstraintIndex = null;
 foreach ($movementConstraintIndexes as $index) {
@@ -1022,124 +1038,6 @@ $test->assertThrows(
     'database rejects a second active movement for the same probe'
 );
 
-$legacySingleProbeDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-single-probe.sqlite';
-$legacySingleProbeFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacySingleProbeDbPath), $root);
-$legacySingleProbePdo = $legacySingleProbeFactory->create();
-$legacySingleProbePdo->exec(
-    'CREATE TABLE players (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE,
-        display_name TEXT NULL,
-        password_hash TEXT NULL,
-        home_sector_x INTEGER NOT NULL DEFAULT 0,
-        home_sector_y INTEGER NOT NULL DEFAULT 0,
-        home_sector_z INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )'
-);
-$legacySingleProbePdo->exec(
-    'CREATE TABLE neumann_probes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER NOT NULL UNIQUE,
-        name TEXT NOT NULL,
-        sector_x INTEGER NOT NULL,
-        sector_y INTEGER NOT NULL,
-        sector_z INTEGER NOT NULL,
-        velocity_c REAL NOT NULL DEFAULT 0,
-        acceleration_c_per_day REAL NOT NULL DEFAULT 0,
-        direction_x REAL NOT NULL DEFAULT 0,
-        direction_y REAL NOT NULL DEFAULT 0,
-        direction_z REAL NOT NULL DEFAULT 0,
-        status TEXT NOT NULL,
-        integrity_percent REAL NOT NULL DEFAULT 100,
-        energy_stored REAL NOT NULL DEFAULT 0,
-        deuterium_stock REAL NOT NULL DEFAULT 100,
-        metals_stock REAL NOT NULL DEFAULT 0,
-        internal_clock_rate REAL NOT NULL DEFAULT 1,
-        current_task TEXT NULL,
-        entered_current_sector_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(player_id) REFERENCES players(id)
-    )'
-);
-$legacySingleProbePdo->exec(
-    "INSERT INTO players
-     (username, display_name, password_hash, home_sector_x, home_sector_y, home_sector_z, created_at, updated_at)
-     VALUES ('legacy-single-probe-owner', 'Legacy Single Probe Owner', NULL, 0, 0, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
-);
-$legacySingleProbePdo->exec(
-    "INSERT INTO neumann_probes
-     (player_id, name, sector_x, sector_y, sector_z, status, entered_current_sector_at, created_at, updated_at)
-     VALUES (1, 'Legacy primary probe', 0, 0, 0, 'idle', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
-);
-$legacySingleProbeFactory->initializeSchema($legacySingleProbePdo);
-$legacySingleProbePlayerColumns = array_map(
-    static fn(array $row): string => (string) $row['name'],
-    $legacySingleProbePdo->query('PRAGMA table_info(players)')->fetchAll(PDO::FETCH_ASSOC),
-);
-$test->assert(in_array('default_probe_id', $legacySingleProbePlayerColumns, true), 'legacy player schema gains default_probe_id');
-$test->assertEquals(1, (int) $legacySingleProbePdo->query('SELECT default_probe_id FROM players WHERE id = 1')->fetchColumn(), 'legacy player default probe is backfilled');
-$legacySingleProbeIndexes = $legacySingleProbePdo->query('PRAGMA index_list(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
-$legacyUniqueProbePlayerIndexes = [];
-foreach ($legacySingleProbeIndexes as $index) {
-    if ((int) ($index['unique'] ?? 0) !== 1) {
-        continue;
-    }
-    $columns = array_map(
-        static fn(array $row): string => (string) $row['name'],
-        $legacySingleProbePdo->query('PRAGMA index_info(' . $legacySingleProbePdo->quote((string) $index['name']) . ')')->fetchAll(PDO::FETCH_ASSOC),
-    );
-    if ($columns === ['player_id']) {
-        $legacyUniqueProbePlayerIndexes[] = (string) $index['name'];
-    }
-}
-$test->assertEquals([], $legacyUniqueProbePlayerIndexes, 'legacy probe schema drops the one-probe-per-player uniqueness');
-$legacySingleProbePlayers = new PlayerRepository($legacySingleProbePdo);
-$legacySingleProbeProbes = new NeumannProbeRepository($legacySingleProbePdo);
-$legacySingleProbeOwner = $legacySingleProbePlayers->findById(1) ?? throw new RuntimeException('Legacy single-probe owner missing.');
-$legacySecondProbe = $legacySingleProbeProbes->createForPlayer($legacySingleProbeOwner->id, 'Legacy second probe', new SectorCoordinates(2, 0, 0));
-$test->assertEquals(2, count($legacySingleProbeProbes->findAllByPlayerId($legacySingleProbeOwner->id)), 'migrated legacy schema accepts a second probe for the same player');
-$test->assertEquals(1, $legacySingleProbePlayers->findById($legacySingleProbeOwner->id)?->defaultProbeId, 'second probe creation does not overwrite a valid migrated default probe');
-$test->assertEquals(2, $legacySecondProbe->id, 'second probe is inserted after legacy migration');
-
-$legacyMessageDbPath = $tmp . DIRECTORY_SEPARATOR . 'legacy-message-schema.sqlite';
-$legacyMessageFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $legacyMessageDbPath), $root);
-$legacyMessagePdo = $legacyMessageFactory->create();
-$legacyMessagePdo->exec(
-    "CREATE TABLE probe_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sender_probe_id INTEGER NOT NULL,
-        recipient_probe_id INTEGER NOT NULL,
-        sector_x INTEGER NOT NULL,
-        sector_y INTEGER NOT NULL,
-        sector_z INTEGER NOT NULL,
-        body TEXT NOT NULL,
-        status TEXT NOT NULL,
-        read_at TEXT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )"
-);
-$legacyMessagePdo->exec(
-    "INSERT INTO probe_messages
-     (sender_probe_id, recipient_probe_id, sector_x, sector_y, sector_z, body, status, read_at, created_at, updated_at)
-     VALUES (1, 2, 0, 0, 0, 'Legacy hello', 'unread', NULL, '2026-06-18T00:00:00+00:00', '2026-06-18T00:00:00+00:00')"
-);
-$legacyMessageFactory->initializeSchema($legacyMessagePdo);
-$legacyMessageColumns = array_map(
-    static fn(array $row): string => (string) $row['name'],
-    $legacyMessagePdo->query('PRAGMA table_info(probe_messages)')->fetchAll(PDO::FETCH_ASSOC),
-);
-$test->assert(in_array('recipient_type', $legacyMessageColumns, true), 'legacy probe message schema migrates recipient_type before endpoint indexes');
-$legacyEndpointIndexes = array_map(
-    static fn(array $row): string => (string) $row['name'],
-    $legacyMessagePdo->query('PRAGMA index_list(probe_messages)')->fetchAll(PDO::FETCH_ASSOC),
-);
-$test->assert(in_array('idx_probe_messages_recipient_endpoint', $legacyEndpointIndexes, true), 'legacy probe message schema creates endpoint recipient index after migration');
-$legacyMessage = $legacyMessagePdo->query('SELECT sender_type, sender_id, recipient_type, recipient_id FROM probe_messages')->fetch(PDO::FETCH_ASSOC);
-$test->assertEquals(['sender_type' => 'probe', 'sender_id' => '1', 'recipient_type' => 'probe', 'recipient_id' => '2'], $legacyMessage, 'legacy probe message migration backfills typed endpoints');
 
 $statsRankingDbPath = $tmp . DIRECTORY_SEPARATOR . 'stats-ranking.sqlite';
 $statsRankingFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $statsRankingDbPath), $root);

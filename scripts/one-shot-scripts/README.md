@@ -1,4 +1,7 @@
-Scripts de migration à exécuter explicitement lors des déploiements qui le demandent.
+Scripts historiques de migration à exécuter explicitement lors des déploiements
+qui le demandent. Pour les évolutions nouvelles, les changements purement
+structurels de la base restent du ressort de `SchemaInitializer` ; un script
+one-shot est réservé aux transformations de données ou de fichiers.
 
 ## Nettoyage des anciennes références de containers détachés
 

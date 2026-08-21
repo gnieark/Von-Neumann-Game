@@ -257,8 +257,10 @@ au joueur et stockees uniquement sous forme de hash.
 
 ## Base De Donnees
 
-Le schema est initialise par `src/Database/SchemaInitializer.php`. Les tables
-actuelles couvrent:
+Le schema canonique est defini par `src/Database/SchemaInitializer.php`. Sur
+une base neuve, il cree directement toutes les tables et tous les index dans
+leur forme actuelle. Il ne contient aucun rattrapage d'anciens schemas et ne
+transforme aucune donnee. Les tables actuelles couvrent notamment:
 
 - `players`
 - `player_auth_methods`
@@ -270,11 +272,15 @@ actuelles couvrent:
 - `sessions`
 - `api_keys`
 
-Les migrations sont legeres et codees dans l'initializer pour SQLite et MySQL.
-Elles couvrent seulement les colonnes ajoutees pendant les iterations recentes.
-Elles ne sont pas executees par les requetes HTTP ni par le scheduler. Apres un
-deploiement qui modifie le schema, les appliquer explicitement avant de remettre
-le trafic en service:
+Les futurs changements purement structurels restent codes dans cet initializer
+pour SQLite et MySQL, puis sont executes par `scripts/init-db.php` au
+deploiement. Une fois le changement deploye, sa structure est repliee dans les
+declarations canoniques : l'initializer ne conserve pas l'historique des anciens
+paliers. Les transformations de donnees ou de fichiers de secteurs utilisent,
+elles, un script one-shot explicite. Ni les requetes HTTP ni le scheduler
+n'initialisent le schema.
+
+Pour initialiser manuellement une base neuve:
 
 ```bash
 php scripts/init-db.php
