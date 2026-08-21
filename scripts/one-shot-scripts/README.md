@@ -1,5 +1,23 @@
 Scripts de migration à exécuter explicitement lors des déploiements qui le demandent.
 
+## Encombrement des moteurs au deutérium
+
+`migrate-deuterium-engine-container-space.php` applique le passage de 0,06 à
+0,05 ECE aux moteurs existants dans SQL, aux tâches actives et aux piles à la
+dérive conservées dans les fichiers de secteurs.
+
+Arrêtez l’application, le scheduler et les workers, puis sauvegardez la base et
+le répertoire d’univers avant d’exécuter :
+
+```bash
+php scripts/one-shot-scripts/migrate-deuterium-engine-container-space.php --dry-run --database-config=config/database.json
+php scripts/one-shot-scripts/migrate-deuterium-engine-container-space.php --database-config=config/database.json
+php scripts/one-shot-scripts/migrate-deuterium-engine-container-space.php --database-config=config/database.json
+```
+
+Le dernier passage doit annoncer zéro ligne et zéro fichier modifiés. Utilisez
+`--universe-path=/chemin/vers/univers` si le chemin diffère de `config/app.json`.
+
 ## Images d’illustration des alertes
 
 `migrate-alert-illustration-images.php` est obligatoire avant de déployer la

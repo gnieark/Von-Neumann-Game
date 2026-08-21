@@ -3447,7 +3447,7 @@ $test->assertEquals(1, $deuteriumEngineIngredients['integrated_circuit']['quanti
 $test->assertEquals(2, $deuteriumEngineIngredients['electric_motor']['quantity'] ?? null, 'deuterium engines require two electric motors');
 $test->assertEquals(0.5, $deuteriumEngineIngredients['deuterium']['quantity'] ?? null, 'deuterium engines directly consume 0.5 ECE of deuterium');
 $test->assert($recipesById['deuterium_engine']['durationSeconds'] <= 86400, 'deuterium engine assembly stays under twenty-four hours');
-$test->assertEquals(0.06, $recipesById['deuterium_engine']['output']['containerSpace'] ?? null, 'deuterium engines occupy 0.06 containers');
+$test->assertEquals(0.05, $recipesById['deuterium_engine']['output']['containerSpace'] ?? null, 'deuterium engines fit within one Manny cargo load');
 $test->assert(isset($recipesById['solar_panel']), 'crafting recipes expose solar panels');
 $test->assertEquals(['manny'], $recipesById['solar_panel']['craftableBy'] ?? null, 'solar panels are assembled by Manny');
 $test->assertEquals('micro_conductor', $recipesById['solar_panel']['ingredients'][0]['type'] ?? null, 'solar panel requires micro conductors');
@@ -7142,7 +7142,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('insufficient_probe_assembly_components', $missingAssemblyComponents->body['error']['code'] ?? null, 'missing probe assembly components return an explicit error');
 
     $assemblyComponents = [
-        [ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::DEUTERIUM_ENGINE_NAME, 0.06, 1],
+        [ProbeItem::TYPE_DEUTERIUM_ENGINE, ProbeItem::DEUTERIUM_ENGINE_NAME, 0.05, 1],
         [ProbeItem::TYPE_SCUT_RELAY, ProbeItem::SCUT_RELAY_NAME, 0.12, 1],
         [ProbeItem::TYPE_ELECTRIC_MOTOR, ProbeItem::ELECTRIC_MOTOR_NAME, 0.006, 5],
         [ProbeItem::TYPE_ATOMIC_PRINTER_PART, ProbeItem::ATOMIC_PRINTER_PART_NAME, 0.01, 2],
@@ -7910,6 +7910,24 @@ if ($createdProbe !== null) {
     ));
     $test->assertEquals(1, count($legacyDriftingRelays), 'current-sector scan can expose legacy drifting SCUT relay item stacks');
     $test->assertEquals(false, $legacyDriftingRelays[0]['salvageable'] ?? null, 'oversized drifting SCUT relay item stacks are not exposed as salvageable');
+
+    $sectorWithDriftingEngine = $sectorRepository->load($createdProbe->currentSector);
+    $sectorWithDriftingEngine->addObject(new SectorDriftingItem(
+        SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_DEUTERIUM_ENGINE),
+        ProbeItem::DEUTERIUM_ENGINE_NAME,
+        ProbeItem::TYPE_DEUTERIUM_ENGINE,
+        1,
+        CraftingRecipeCatalog::DEUTERIUM_ENGINE_CONTAINER_SPACE,
+    ));
+    $sectorRepository->save($sectorWithDriftingEngine);
+    $scanWithDriftingEngine = $kernel->handle('GET', '/api/probe/sector', $headers);
+    $driftingEngines = array_values(array_filter(
+        $scanWithDriftingEngine->body['sector']['objects'] ?? [],
+        static fn(array $object): bool => ($object['type'] ?? null) === 'drifting_item'
+            && ($object['itemType'] ?? null) === ProbeItem::TYPE_DEUTERIUM_ENGINE,
+    ));
+    $test->assertEquals(0.05, $driftingEngines[0]['containerSpace'] ?? null, 'drifting deuterium engines expose their reduced container space');
+    $test->assertEquals(true, $driftingEngines[0]['salvageable'] ?? null, 'drifting deuterium engines fit in Manny cargo and are salvageable');
 
     $salvageSteelBars = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
         'objectId' => $driftingObjectId,

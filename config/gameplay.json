@@ -312,7 +312,7 @@
       "linearActuatorCount": 1,
       "steelPlateCount": 4,
       "deuteriumCost": 0.5,
-      "containerSpace": 0.06,
+      "containerSpace": 0.05,
       "durationSeconds": 7200
     },
     "solar_panel": {

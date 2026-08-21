@@ -23,6 +23,7 @@ use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Service\DetachedContainerJsonAuditService;
+use VonNeumannGame\Service\DeuteriumEngineContainerSpaceMigration;
 use VonNeumannGame\Sector\DeterministicRandom;
 use VonNeumannGame\Service\AsteroidTrajectory\CaptureCalculator;
 use VonNeumannGame\Service\AsteroidTrajectory\ImpactDamageResolver;
@@ -814,10 +815,54 @@ $test->assertThrows(
     'application deserialization rejects legacy motorized asteroids instead of applying a fallback',
 );
 
+$engineMigrationBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_engine_space_migration_' . bin2hex(random_bytes(4));
+$engineMigrationDirectory = $engineMigrationBase . '/sectors/x_p0/y_p0/z_p0';
+mkdir($engineMigrationDirectory, 0775, true);
+$engineMigrationPath = $engineMigrationDirectory . '/sector_p0_p0_p0.json';
+$legacyEnginePayload = [
+    'objects' => [
+        [
+            'id' => 'drifting-item-deuterium_engine',
+            'type' => 'drifting_item',
+            'itemType' => 'deuterium_engine',
+            'containerSpace' => 0.06,
+        ],
+        [
+            'id' => 'drifting-item-steel_bar',
+            'type' => 'drifting_item',
+            'itemType' => 'steel_bar',
+            'containerSpace' => 0.01,
+        ],
+    ],
+];
+file_put_contents($engineMigrationPath, json_encode($legacyEnginePayload, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+$engineSpaceMigration = new DeuteriumEngineContainerSpaceMigration();
+$engineDryRun = $engineSpaceMigration->migrateSectorFiles($engineMigrationBase, true);
+$test->assertEquals(1, $engineDryRun['driftingItemsChanged'], 'deuterium engine migration dry-run detects legacy drifting engines');
+$enginePayloadAfterDryRun = json_decode((string) file_get_contents($engineMigrationPath), true, 512, JSON_THROW_ON_ERROR);
+$test->assertEquals(0.06, $enginePayloadAfterDryRun['objects'][0]['containerSpace'] ?? null, 'deuterium engine migration dry-run does not write sector files');
+$engineMigrationReport = $engineSpaceMigration->migrateSectorFiles($engineMigrationBase);
+$test->assertEquals(1, $engineMigrationReport['filesChanged'], 'deuterium engine migration rewrites the affected sector file');
+$migratedEnginePayload = json_decode((string) file_get_contents($engineMigrationPath), true, 512, JSON_THROW_ON_ERROR);
+$test->assertEquals(0.05, $migratedEnginePayload['objects'][0]['containerSpace'] ?? null, 'deuterium engine migration lowers legacy drifting-item space');
+$test->assertEquals(0.01, $migratedEnginePayload['objects'][1]['containerSpace'] ?? null, 'deuterium engine migration preserves other drifting items');
+$test->assertEquals(0, $engineSpaceMigration->migrateSectorFiles($engineMigrationBase)['filesChanged'], 'deuterium engine sector migration is idempotent');
+$activeTaskPayload = [
+    'output' => ['type' => 'deuterium_engine', 'containerSpace' => 0.06],
+    'target' => ['type' => 'drifting_item', 'itemType' => 'deuterium_engine', 'containerSpace' => 0.06],
+    'reservedCargoType' => 'deuterium_engine',
+    'reservedCargoSpace' => 0.06,
+];
+$test->assertEquals(3, $engineSpaceMigration->normalizeJsonPayload($activeTaskPayload), 'deuterium engine migration updates active-task JSON values');
+$test->assertEquals(0.05, $activeTaskPayload['output']['containerSpace'] ?? null, 'deuterium engine migration updates active-task output space');
+$test->assertEquals(0.05, $activeTaskPayload['target']['containerSpace'] ?? null, 'deuterium engine migration updates drifting-item task targets');
+$test->assertEquals(0.05, $activeTaskPayload['reservedCargoSpace'] ?? null, 'deuterium engine migration updates active-task reservation space');
+
 removeDirectory($tmpBase);
 removeDirectory($serviceBase);
 removeDirectory($auditBase);
 removeDirectory($migrationBase);
+removeDirectory($engineMigrationBase);
 
 // Print summary
 $test->printSummary();

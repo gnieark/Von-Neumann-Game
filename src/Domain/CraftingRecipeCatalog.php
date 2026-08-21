@@ -81,7 +81,7 @@ final class CraftingRecipeCatalog
     public const DEUTERIUM_ENGINE_LINEAR_ACTUATORS = 1;
     public const DEUTERIUM_ENGINE_STEEL_PLATES = 4;
     public const DEUTERIUM_ENGINE_DEUTERIUM_COST = 0.5;
-    public const DEUTERIUM_ENGINE_CONTAINER_SPACE = 0.06;
+    public const DEUTERIUM_ENGINE_CONTAINER_SPACE = 0.05;
     public const DEUTERIUM_ENGINE_CRAFTING_SECONDS = 7200;
     public const SOLAR_PANEL_MICRO_CONDUCTORS = 2;
     public const SOLAR_PANEL_CRYSTAL_SUBSTRATES = 1;

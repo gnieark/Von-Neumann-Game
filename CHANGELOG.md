@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-21
+
+### Changed
+
+- Gameplay : l’encombrement d’un `deuterium_engine` passe de 0,06 à 0,05 ECE. Un moteur à la dérive tient désormais dans la capacité d’emport d’une Manny et redevient donc récupérable avec l’action `salvage`.
+- Migration : après arrêt de l’application et du scheduler, exécuter `php scripts/one-shot-scripts/migrate-deuterium-engine-container-space.php --database-config=config/database.json`. Le script idempotent met à jour les items SQL, les tâches actives et les objets dérivants des fichiers de secteurs; `--dry-run` permet de contrôler le plan avant écriture.
+
 ## 2026-08-20
 
 ### Fixed

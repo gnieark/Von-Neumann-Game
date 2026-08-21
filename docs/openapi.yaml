@@ -252,7 +252,7 @@ paths:
                     output:
                       type: deuterium_engine
                       name: Deuterium engine
-                      containerSpace: 0.06
+                      containerSpace: 0.05
                       containerSpaceUnit: earth_container_equivalent
                   - id: scut_relay
                     name: SCUT relay
