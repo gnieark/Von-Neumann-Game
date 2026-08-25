@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-25
+
+### Changed
+
+- API v117 / scheduler : les lectures et commandes Manny ne finalisent plus opportunément les tâches échues. Seul le worker scheduler applique désormais les transitions temporelles de toutes les familles de tâches ; les GET exposent le dernier état persisté et conservent leur délai de polling pour laisser le worker se stabiliser.
+- Stockage : le container cœur et l’affectation initiale des Mannys sont créés avec la sonde (inscription, réinstanciation, assemblage et outils de création), au lieu d’être initialisés paresseusement par un GET. Les accès ordinaires valident désormais le stockage sans l’écrire ; avant redémarrage sur une base contenant des sondes non initialisées ou incohérentes, exécuter explicitement `php scripts/one-shot-scripts/repair-storage-containers.php --database-config=var/database-prod.json`.
+
 ## 2026-08-21
 
 ### Changed

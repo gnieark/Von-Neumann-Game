@@ -19,6 +19,7 @@ use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorService;
+use VonNeumannGame\Service\ProbeStorageService;
 
 final class AuthService
 {
@@ -32,6 +33,7 @@ final class AuthService
         private readonly NeumannProbeRepository $probes,
         private readonly SessionRepository $sessions,
         private readonly VisitedSectorRepository $visitedSectors,
+        private readonly ProbeStorageService $storage,
         private readonly int $sessionTtlDays = 7,
         private readonly ?MannyRepository $mannies = null,
         private readonly ?ApiKeyRepository $apiKeys = null,
@@ -55,9 +57,10 @@ final class AuthService
         $this->authMethods->addPasswordAuth($player->id, $passwordHash);
         $probe = $this->probes->createForPlayer($player->id, $probeName ?? 'Probe of ' . $username, $home);
         $this->mannies?->ensureDefaultsForProbe($probe);
+        $this->storage->initializeProbeStorage($probe);
         $this->visitedSectors->markVisited($player, $probe, $home);
 
-        return $player;
+        return $this->players->findById($player->id) ?? $player;
     }
 
     public function registerPlayerWithExternalAuth(string $pseudonym, string $provider, string $providerUserId): Player
@@ -77,9 +80,10 @@ final class AuthService
         $this->authMethods->addExternalAuth($player->id, $provider, $providerUserId);
         $probe = $this->probes->createForPlayer($player->id, 'Sonde de ' . $pseudonym, $home);
         $this->mannies?->ensureDefaultsForProbe($probe);
+        $this->storage->initializeProbeStorage($probe);
         $this->visitedSectors->markVisited($player, $probe, $home);
 
-        return $player;
+        return $this->players->findById($player->id) ?? $player;
     }
 
     public function authenticateWithPassword(string $username, string $password): ?Player

@@ -35,6 +35,7 @@ final class ProbeReinstantiationService
         private readonly NeumannProbeRepository $probes,
         private readonly MannyRepository $mannies,
         private readonly VisitedSectorRepository $visitedSectors,
+        private readonly ProbeStorageService $storage,
         private readonly ?SectorService $sectors = null,
         private readonly ?ProbeDamageWarningRepository $damageWarnings = null,
         ?SectorGrid $grid = null,
@@ -74,6 +75,7 @@ final class ProbeReinstantiationService
 
             $newProbe = $this->probes->createForPlayer($player->id, 'Probe of ' . $player->username, $newHome);
             $this->mannies->ensureDefaultsForProbe($newProbe);
+            $this->storage->initializeProbeStorage($newProbe);
             $this->visitedSectors->markVisited($player, $newProbe, $newHome);
 
             $updatedPlayer = $this->players->findById($player->id) ?? $player;

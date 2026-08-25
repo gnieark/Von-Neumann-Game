@@ -63,6 +63,7 @@ function addDroneProbeRun(array $argv): int
         $probe = $probes->createForPlayer($player->id, 'drone', $player->homeSector);
         $probe->excludeFromStats = true;
         $probes->save($probe);
+        $storage->initializeProbeStorage($probe);
 
         $manny = $mannies->createForProbe($probe->id, 'manny-drone');
         if (!$storage->placeMannyOnProbe($probe, $manny)) {

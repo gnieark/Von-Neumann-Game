@@ -229,7 +229,7 @@ function setProbeTestStoredResources(
     NeumannProbe $probe,
     array $resources,
 ): NeumannProbe {
-    $storage->ensureProbeStorage($probe);
+    $storage->initializeProbeStorage($probe);
     $storageContainers->clearResourcesForProbe($probe->id);
     foreach ($resources as $type => $amount) {
         $storage->addResource($probe, (string) $type, (float) $amount);
@@ -1706,10 +1706,10 @@ $visitedSectors = new VisitedSectorRepository($pdo);
 $detachedStorageContainers = new DetachedStorageContainerRepository($pdo);
 $sectorRepository = new SectorFileRepository($universePath);
 $sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers);
-$auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, 7, $mannies, $apiKeys, $sectorService);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
+$auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, 7, $mannies, $apiKeys, $sectorService);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
-$reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings);
+$reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings);
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world');
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories);
@@ -1729,7 +1729,23 @@ $testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTraject
     new BlackHoleOrbitPhaseHandler($asteroidTrajectories, $sectorService),
 ]));
 $scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $testTrajectoryProcessor);
-$processScheduledMannyNow = static function (int $mannyId) use ($pdo, $scheduler): array {
+$processScheduledMannyNow = static function (int|string $mannyId) use ($pdo, $scheduler, $mannies): array {
+    if (is_string($mannyId)) {
+        $mannyId = $mannies->findByUid($mannyId)?->id ?? 0;
+    }
+    $eventIdStatement = $pdo->prepare('SELECT task_scheduled_event_id FROM mannies WHERE id = :id');
+    $eventIdStatement->execute(['id' => $mannyId]);
+    $eventId = (int) $eventIdStatement->fetchColumn();
+    $otherDueStatement = $pdo->prepare(
+        "SELECT id, run_at FROM scheduled_events
+         WHERE status = 'pending' AND run_at <= :now AND id <> :event_id"
+    );
+    $otherDueStatement->execute(['now' => gmdate('c'), 'event_id' => $eventId]);
+    $otherDueEvents = $otherDueStatement->fetchAll(PDO::FETCH_ASSOC);
+    $deferOther = $pdo->prepare('UPDATE scheduled_events SET run_at = :run_at WHERE id = :id AND status = :status');
+    foreach ($otherDueEvents as $otherDueEvent) {
+        $deferOther->execute(['id' => $otherDueEvent['id'], 'status' => 'pending', 'run_at' => '9999-12-31T23:59:59+00:00']);
+    }
     $pdo->prepare(
         "UPDATE scheduled_events
          SET run_at = :run_at
@@ -1739,7 +1755,12 @@ $processScheduledMannyNow = static function (int $mannyId) use ($pdo, $scheduler
         'run_at' => gmdate('c', time() - 1),
     ]);
 
-    return $scheduler->processDueEvents(100);
+    $stats = $scheduler->processDueEvents(100);
+    foreach ($otherDueEvents as $otherDueEvent) {
+        $deferOther->execute(['id' => $otherDueEvent['id'], 'status' => 'pending', 'run_at' => $otherDueEvent['run_at']]);
+    }
+
+    return $stats;
 };
 $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
     $sectorService,
@@ -1799,6 +1820,8 @@ $test->assert($asteroidTrajectories->create([
 $multiProbePlayer = $players->createPlayer('multi-probe-owner', 'Multi Probe Owner', null, new SectorCoordinates(20, 0, 0));
 $primaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Primary future probe', $multiProbePlayer->homeSector);
 $secondaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Secondary future probe', new SectorCoordinates(22, 0, 0));
+$storage->initializeProbeStorage($primaryProbe);
+$storage->initializeProbeStorage($secondaryProbe);
 $multiProbePlayer = $players->findById($multiProbePlayer->id) ?? throw new RuntimeException('Multi-probe player not found.');
 $test->assertEquals($primaryProbe->id, $multiProbePlayer->defaultProbeId, 'first created probe becomes the player default probe');
 $test->assertEquals(2, count($probes->findAllByPlayerId($multiProbePlayer->id)), 'repository allows several probes for one player');
@@ -1807,6 +1830,7 @@ $multiProbePlayer->defaultProbeId = $secondaryProbe->id;
 $players->save($multiProbePlayer);
 $test->assertEquals($secondaryProbe->id, $probes->findByPlayerId($multiProbePlayer->id)?->id, 'legacy player probe lookup follows the player default probe');
 $tertiaryProbe = $probes->createForPlayer($multiProbePlayer->id, 'Tertiary future probe', new SectorCoordinates(24, 0, 0));
+$storage->initializeProbeStorage($tertiaryProbe);
 $test->assertEquals(3, count($probes->findAllByPlayerId($multiProbePlayer->id)), 'creating a later probe keeps the one-to-many relationship open');
 $test->assertEquals($secondaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'creating another probe does not overwrite an existing valid default');
 $test->assert($tertiaryProbe->id > $secondaryProbe->id, 'third future probe is persisted normally');
@@ -1816,6 +1840,7 @@ foreach ([$primaryProbe, $secondaryProbe, $tertiaryProbe] as $futureProbe) {
 }
 $foreignProbeOwner = $players->createPlayer('foreign-probe-owner', 'Foreign Probe Owner', null, new SectorCoordinates(30, 0, 0));
 $foreignProbe = $probes->createForPlayer($foreignProbeOwner->id, 'Foreign future probe', $foreignProbeOwner->homeSector);
+$storage->initializeProbeStorage($foreignProbe);
 $foreignProbe->excludeFromStats = true;
 $probes->save($foreignProbe);
 $multiProbeHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($multiProbePlayer)['token']];
@@ -1852,6 +1877,8 @@ $test->assertEquals(422, $unreachableDefaultProbe->status, 'PATCH /api/probe/{pr
 $test->assertEquals('probe_not_in_same_sector', $unreachableDefaultProbe->body['error']['code'] ?? null, 'PATCH /api/probe/{probeId} returns an explicit reachability error');
 $test->assertEquals($secondaryProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'refused default probe switch keeps the existing default probe');
 $sameSectorProbe = $probes->createForPlayer($multiProbePlayer->id, 'Same sector future probe', $secondaryProbe->currentSector);
+$mannies->ensureDefaultsForProbe($sameSectorProbe);
+$storage->initializeProbeStorage($sameSectorProbe);
 $sameSectorProbe->excludeFromStats = true;
 $probes->save($sameSectorProbe);
 $sameSectorDefaultProbe = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->id, $multiProbeHeaders, json_encode(['isDefault' => true], JSON_THROW_ON_ERROR));
@@ -1893,6 +1920,7 @@ $test->assertEquals(200, $renameAndDefault->status, 'PATCH /api/probe/{probeId} 
 $test->assertEquals('Renamed And Default', $probes->findById($sameSectorProbe->id)?->name ?? null, 'Combined PATCH persists the new probe name');
 $test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'Combined PATCH persists default probe selection when permitted');
 $farOwnedProbe = $probes->createForPlayer($multiProbePlayer->id, 'Far future probe', new SectorCoordinates(100, 0, 0));
+$storage->initializeProbeStorage($farOwnedProbe);
 $farOwnedProbe->excludeFromStats = true;
 $probes->save($farOwnedProbe);
 $unreachableProbeStorage = $kernel->handle('GET', '/api/probe/' . $farOwnedProbe->id . '/storage-containers', $multiProbeHeaders);
@@ -1900,7 +1928,6 @@ $test->assertEquals(422, $unreachableProbeStorage->status, 'probe-scoped endpoin
 $test->assertEquals('probe_not_in_same_sector', $unreachableProbeStorage->body['error']['code'] ?? null, 'probe-scoped endpoints return the SCUT reachability error');
 $foreignProbeStorage = $kernel->handle('GET', '/api/probe/' . $foreignProbe->id . '/storage-containers', $multiProbeHeaders);
 $test->assertEquals(404, $foreignProbeStorage->status, 'probe-scoped endpoints hide probes owned by another player');
-$mannies->ensureDefaultsForProbe($sameSectorProbe);
 $sameSectorProbeManny = $mannies->findByProbeId($sameSectorProbe->id)[0] ?? throw new RuntimeException('Expected same-SCUT probe Manny.');
 $sameScutProbeStorage = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/storage-containers', $multiProbeHeaders);
 $test->assertEquals(200, $sameScutProbeStorage->status, 'GET /api/probe/{probeId}/storage-containers lists a same-SCUT owned probe storage containers');
@@ -2036,6 +2063,7 @@ $invalidAlertStatus = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->i
 $test->assertEquals(400, $invalidAlertStatus->status, 'GET /api/probe/{probeId}/alerts rejects unsupported status filters');
 $blueprintRecipientPlayer = $players->createPlayer('blueprint-recipient', 'Blueprint Recipient', null, $sameSectorProbe->currentSector);
 $blueprintRecipientProbe = $probes->createForPlayer($blueprintRecipientPlayer->id, 'Blueprint receiver', $blueprintRecipientPlayer->homeSector);
+$storage->initializeProbeStorage($blueprintRecipientProbe);
 $blueprintRecipientProbe->excludeFromStats = true;
 $probes->save($blueprintRecipientProbe);
 $blueprintRecipientHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($blueprintRecipientPlayer)['token']];
@@ -2092,10 +2120,12 @@ $test->assertEquals(400, $invalidBlueprintShareBody->status, 'blueprint share re
 $isolatedShareSector = new SectorCoordinates(10000, 0, 0);
 $isolatedShareSender = $players->createPlayer('isolated-blueprint-sender', 'Isolated sender', null, $isolatedShareSector);
 $isolatedShareSenderProbe = $probes->createForPlayer($isolatedShareSender->id, 'Isolated sender probe', $isolatedShareSector);
+$storage->initializeProbeStorage($isolatedShareSenderProbe);
 $isolatedShareSenderProbe->excludeFromStats = true;
 $probes->save($isolatedShareSenderProbe);
 $isolatedShareRecipient = $players->createPlayer('isolated-blueprint-recipient', 'Isolated recipient', null, $isolatedShareSector);
 $isolatedShareRecipientProbe = $probes->createForPlayer($isolatedShareRecipient->id, 'Isolated recipient probe', $isolatedShareSector);
+$storage->initializeProbeStorage($isolatedShareRecipientProbe);
 $isolatedShareRecipientProbe->excludeFromStats = true;
 $probes->save($isolatedShareRecipientProbe);
 $probeImprovements->markAvailable($isolatedShareSenderProbe->id, $sharedBlueprintId);
@@ -2207,7 +2237,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(116, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(117, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 $removedInspectAsteroid = $kernel->handle('POST', '/api/probe/mannies/mny_missing/inspect-asteroid');
@@ -2245,10 +2275,10 @@ $multiScanDetachedStorageContainers = new DetachedStorageContainerRepository($mu
 $multiScanUniversePath = $tmp . DIRECTORY_SEPARATOR . 'multi-scan-universe';
 $multiScanSectorRepository = new SectorFileRepository($multiScanUniversePath);
 $multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world', detachedContainers: $multiScanDetachedStorageContainers);
-$multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $multiScanProbes, $multiScanSessions, $multiScanVisited, 7, $multiScanMannies, $multiScanApiKeys, $multiScanSectorService);
 $multiScanStorage = new ProbeStorageService($multiScanStorageContainers, $multiScanItems, $multiScanMannies, $multiScanProbes, improvements: $multiScanProbeImprovements);
+$multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $multiScanProbes, $multiScanSessions, $multiScanVisited, $multiScanStorage, 7, $multiScanMannies, $multiScanApiKeys, $multiScanSectorService);
 $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMessages, [], 'multi-scan-world', $multiScanSectorService, $multiScanProbes, $multiScanPlayers);
-$multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanSectorService, $multiScanWarnings);
+$multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanStorage, $multiScanSectorService, $multiScanWarnings);
 $multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, scut: $multiScanScut, worldSeed: 'multi-scan-world');
 $multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
 $multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents, movements: $multiScanMovements);
@@ -2475,6 +2505,7 @@ if ($createdProbe !== null) {
         'Userinfos auxiliary',
         new SectorCoordinates($userinfosMultiPlayer->homeSector->getX() + 2, $userinfosMultiPlayer->homeSector->getY(), $userinfosMultiPlayer->homeSector->getZ()),
     );
+    $storage->initializeProbeStorage($userinfosAuxProbe);
     $pdo->prepare('UPDATE neumann_probes SET exclude_from_stats = 1 WHERE id IN (:default_probe_id, :aux_probe_id)')->execute([
         'default_probe_id' => $userinfosDefaultProbe->id,
         'aux_probe_id' => $userinfosAuxProbe->id,
@@ -2637,6 +2668,7 @@ if ($createdProbe !== null) {
     $cliInventoryProbe = $probes->findByPlayerId($cliInventoryPlayer->id);
     if ($cliInventoryProbe !== null) {
         $cliInventoryAuxProbe = $probes->createForPlayer($cliInventoryPlayer->id, 'CLI Inventory aux probe', $cliInventoryProbe->currentSector);
+        $storage->initializeProbeStorage($cliInventoryAuxProbe);
         $pdo->prepare('UPDATE neumann_probes SET exclude_from_stats = 1 WHERE id IN (:default_probe_id, :aux_probe_id)')->execute([
             'default_probe_id' => $cliInventoryProbe->id,
             'aux_probe_id' => $cliInventoryAuxProbe->id,
@@ -2841,14 +2873,14 @@ if ($createdProbe !== null) {
 
     $storageRepairSession = $auth->createSessionForPlayer($player);
     $storageRepairHeaders = ['Authorization' => 'Bearer ' . $storageRepairSession['token']];
-    $initialMannyStorageRepair = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
-    $test->assertEquals(200, $initialMannyStorageRepair->status, 'GET /api/probe/mannies initializes storage for a newly created probe');
-    $test->assertEquals(30000, $initialMannyStorageRepair->body['nextUsefulRefreshDelayMs'] ?? null, 'GET /api/probe/mannies recommends a 30s refresh delay when no Manny task is planned');
     $coreContainer = $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core');
-    $test->assert($coreContainer !== null, 'Manny list repair creates the probe core storage container');
+    $test->assert($coreContainer !== null, 'probe registration initializes the core storage container before any read');
+    $initialMannyStorageRepair = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
+    $test->assertEquals(200, $initialMannyStorageRepair->status, 'GET /api/probe/mannies reads storage initialized at probe creation');
+    $test->assertEquals(30000, $initialMannyStorageRepair->body['nextUsefulRefreshDelayMs'] ?? null, 'GET /api/probe/mannies recommends a 30s refresh delay when no Manny task is planned');
     if ($coreContainer !== null) {
         foreach ($mannies->findByProbeId($createdProbe->id) as $manny) {
-            $test->assertEquals($coreContainer->id, $manny->storageContainerId, 'Manny list repair assigns onboard Mannys to the core container');
+            $test->assertEquals($coreContainer->id, $manny->storageContainerId, 'probe registration assigns onboard Mannys to the core container');
         }
     }
 
@@ -2860,9 +2892,12 @@ if ($createdProbe !== null) {
     $pdo->prepare('DELETE FROM storage_container_resources WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)')->execute(['probe_id' => $createdProbe->id]);
     $pdo->prepare('DELETE FROM storage_containers WHERE probe_id = :probe_id')->execute(['probe_id' => $createdProbe->id]);
 
+    $unrepairedStorageRead = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
+    $test->assertEquals(500, $unrepairedStorageRead->status, 'GET /api/probe/mannies refuses inconsistent storage without repairing it');
+    $test->assertEquals(null, $storageContainers->findByUidForProbe($createdProbe->id, 'probe-core'), 'failed storage GET leaves the missing core container untouched');
     $test->assertThrows(
         fn() => $storage->ensureProbeStorage($createdProbe),
-        'regular storage initialization refuses to repair orphaned inventory',
+        'regular storage validation refuses to repair orphaned inventory',
     );
     $storage->repairProbeStorage($createdProbe);
     $orphanedStorageRepair = $kernel->handle('GET', '/api/probe/mannies', $storageRepairHeaders);
@@ -3246,8 +3281,9 @@ $test->assertEquals(0, count($scutCircuitStillStored), 'SCUT relay turn-on consu
 $scutManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT Manny task missing.');
 $scutManny->taskEndsAt = gmdate('c', time() - 5);
 $mannies->save($scutManny);
+$processScheduledMannyNow($scutManny->id);
 $scutRefresh = $kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
-$test->assertEquals(200, $scutRefresh->status, 'SCUT Manny refresh completes due relay tasks');
+$test->assertEquals(200, $scutRefresh->status, 'SCUT Manny list exposes the relay task completed by the scheduler');
 $scutRelay = $scutRelays->findById($scutRelay->id) ?? throw new RuntimeException('SCUT relay missing after activation.');
 $test->assertEquals('on', $scutRelay->status, 'SCUT relay is switched on after task completion');
 $scutNetworkId = (int) ($scutRelay->networkId ?? 0);
@@ -3297,8 +3333,9 @@ $test->assertEquals(0, count($scutTransitBeaconStillStored), 'SCUT transit beaco
 $scutManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT transit beacon Manny task missing.');
 $scutManny->taskEndsAt = gmdate('c', time() - 5);
 $mannies->save($scutManny);
+$processScheduledMannyNow($scutManny->id);
 $scutTransitBeaconRefresh = $kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
-$test->assertEquals(200, $scutTransitBeaconRefresh->status, 'SCUT Manny refresh completes due transit beacon installation tasks');
+$test->assertEquals(200, $scutTransitBeaconRefresh->status, 'SCUT Manny list exposes the transit beacon task completed by the scheduler');
 $scutRelay = $scutRelays->findById($scutRelay->id) ?? throw new RuntimeException('SCUT relay missing after transit beacon installation.');
 $test->assertEquals(true, $scutRelay->isTransitBeacon, 'SCUT relay stores transit beacon installation state after task completion');
 $scutTransitBeaconSector = $kernel->handle('GET', '/api/probe/' . $scutProbe->id . '/sector', $scutHeaders);
@@ -3345,6 +3382,7 @@ if ($secondScutSalvageManny !== null) {
 $scutSalvageManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT salvage Manny task missing.');
 $scutSalvageManny->taskEndsAt = gmdate('c', time() - 5);
 $mannies->save($scutSalvageManny);
+$processScheduledMannyNow($scutSalvageManny->id);
 $kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
 $test->assertEquals(null, $scutRelays->findById($scutSalvageRelay->id), 'salvaged inactive SCUT relay is removed from sector relays');
 $scutRecoveredRelayItems = array_values(array_filter(
@@ -3611,6 +3649,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ]);
     $staleContainerCraftA = $mannies->findById($craftMannyDbId);
     $staleContainerCraftB = $mannies->findById($craftMannyDbId);
+    $processScheduledMannyNow($craftMannyDbId);
     $craftProbeForStaleRefresh = $probes->findByPlayerId($craftPlayer->id);
     if ($staleContainerCraftA !== null && $staleContainerCraftB !== null && $craftProbeForStaleRefresh !== null) {
         $mannyService->refreshMannyState($staleContainerCraftA, $craftProbeForStaleRefresh);
@@ -3710,6 +3749,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
     $scutRelayProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $scutRelayItems = array_values(array_filter(
@@ -3739,6 +3779,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
     $scutTransitBeaconProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $scutTransitBeaconItems = array_values(array_filter(
@@ -3780,6 +3821,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ]);
     $staleMannyCraftA = $mannies->findById($craftMannyDbId);
     $staleMannyCraftB = $mannies->findById($craftMannyDbId);
+    $processScheduledMannyNow($craftMannyDbId);
     $craftProbeForStaleMannyRefresh = $probes->findByPlayerId($craftPlayer->id);
     if ($staleMannyCraftA !== null && $staleMannyCraftB !== null && $craftProbeForStaleMannyRefresh !== null) {
         $mannyService->refreshMannyState($staleMannyCraftA, $craftProbeForStaleMannyRefresh);
@@ -3826,7 +3868,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         $storageContainers->delete($invalidReservationContainer);
         $items->delete($invalidReservationContainerItem);
 
-        $mannyService->refreshMannyState($invalidReservationManny, $craftProbeEntity);
+        $processScheduledMannyNow($invalidReservationManny->id);
         $failedReservationManny = $mannies->findById($craftMannyDbId);
         $test->assertEquals(null, $failedReservationManny?->currentTask, 'craft completion clears a task whose reserved container disappeared');
         $test->assertEquals(null, $failedReservationManny?->taskScheduledEventId, 'failed reserved-container craft unlinks its scheduled event');
@@ -3872,6 +3914,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $craftProbeEntity->id]);
@@ -3910,6 +3953,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $printerAssistantDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($printerAssistantDbId);
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
     $circuitProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $integratedCircuits = array_values(array_filter(
@@ -3931,6 +3975,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
     $linearProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $linearActuators = array_values(array_filter(
@@ -3960,6 +4005,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $crowdedCraftRefresh = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
     $test->assertEquals(200, $crowdedCraftRefresh->status, 'completed craft waiting for storage does not break Manny refresh');
     $crowdedCraftManny = array_values(array_filter(
@@ -4001,6 +4047,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
     $afterStorageMoveProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
     $movedSteelBars = array_values(array_filter(
@@ -4027,6 +4074,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
             'id' => $craftMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($craftMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemA->uid)?->storageContainerId, 'completed batch move updates the first item container');
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $batchItemB->uid)?->storageContainerId, 'completed batch move updates the second item container');
@@ -4063,6 +4111,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
             'id' => $craftMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($craftMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals($additionalStorageContainerEntity->id, $items->findByUidForProbe($craftProbeEntity->id, $reservedMoveItemA->uid)?->storageContainerId, 'completed reserved storage move uses the last free destination capacity');
         $test->assertEquals($coreStorageContainer->id, $items->findByUidForProbe($craftProbeEntity->id, $reservedMoveItemB->uid)?->storageContainerId, 'rejected reserved storage move leaves the second item in its source container');
@@ -4078,6 +4127,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
                 'resourceType' => 'ice', 'amount' => 0.3, 'durationSeconds' => 60,
             ];
             $mannies->save($failedMoveSetup);
+            $processScheduledMannyNow($failedMoveSetup->id);
         }
         $failedStorageMoveRefresh = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals(200, $failedStorageMoveRefresh->status, 'expired impossible storage moves do not break Manny refresh');
@@ -4116,6 +4166,7 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
             'id' => $craftMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($craftMannyDbId);
         $craftedMannyList = $kernel->handle('GET', '/api/probe/mannies', $craftHeaders);
         $test->assertEquals($mannyCountBeforeCraft + 1, count($craftedMannyList->body['mannies'] ?? []), 'completed Manny craft creates a real Manny entity');
         $craftedMannyProbe = $kernel->handle('GET', '/api/probe', $craftHeaders);
@@ -4256,6 +4307,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $driftingContainerSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $driftingDetachedContainer = $driftingContainerSector->findObjectById($detachedObjectId);
@@ -4358,6 +4410,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachThirdMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachThirdMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $containerReportAlerts = $kernel->handle('GET', '/api/probe/alerts', $detachHeaders);
         $driftingReports = array_values(array_filter(
@@ -4409,6 +4462,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachMannyDbId);
         $completedRecoverDriftingList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $completedRecoverDriftingManny = array_values(array_filter(
             $completedRecoverDriftingList->body['mannies'] ?? [],
@@ -4449,6 +4503,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachMannyDbId);
         $completedHiddenDetachList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $completedHiddenDetachManny = array_values(array_filter(
             $completedHiddenDetachList->body['mannies'] ?? [],
@@ -4543,6 +4598,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         }
 
         $attachTargetProbe = $probes->createForPlayer($detachPlayer->id, 'Container receiver drone', $detachProbe->currentSector);
+        $storage->initializeProbeStorage($attachTargetProbe);
         $attachContainerItem = $storage->addItem($detachProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
         $attachContainerId = 'container-' . $attachContainerItem->uid;
         $attachContainer = $storageContainers->findByUidForProbe($detachProbe->id, $attachContainerId);
@@ -4577,6 +4633,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 'id' => $attachMannyDbId,
                 'ended' => gmdate('c', time() - 1),
             ]);
+            $processScheduledMannyNow($attachMannyDbId);
             $completedAttachList = $kernel->handle('GET', '/api/probe/' . $detachProbe->id . '/mannies', $detachHeaders);
             $completedAttachManny = array_values(array_filter(
                 $completedAttachList->body['mannies'] ?? [],
@@ -4758,6 +4815,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $remoteProbeTransferManny->storageContainerId = null;
         $mannies->save($remoteProbeTransferManny);
         $remoteProbeTransferTarget = $probes->createForPlayer($detachPlayer->id, 'Remote Manny receiver', $remoteTransferSector);
+        $storage->initializeProbeStorage($remoteProbeTransferTarget);
         $remoteMannyProbeTransfer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($remoteProbeTransferManny->uid) . '/transfer-to-probe', $detachHeaders, json_encode([
             'targetProbeId' => $remoteProbeTransferTarget->id,
         ], JSON_THROW_ON_ERROR));
@@ -4769,6 +4827,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'uid' => $remoteProbeTransferManny->uid,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($remoteProbeTransferManny->uid);
         $remoteTargetMannies = $kernel->handle('GET', '/api/probe/' . $remoteProbeTransferTarget->id . '/mannies', $detachHeaders);
         $remoteCompletedTransfer = array_values(array_filter(
             $remoteTargetMannies->body['mannies'] ?? [],
@@ -4829,6 +4888,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'started' => gmdate('c', time() - 2000),
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($remoteScutInspectMannyDbId);
         $remoteScutInspectCompletedList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $remoteScutInspectCompletedManny = array_values(array_filter(
             $remoteScutInspectCompletedList->body['mannies'] ?? [],
@@ -4865,6 +4925,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachFourthMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachFourthMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $restoredHiddenContainer = $storageContainers->findByUidForProbe($detachProbe->id, $detachContainerId);
         $test->assert($restoredHiddenContainer !== null, 'recovering a hidden detached container restores the container');
@@ -4917,6 +4978,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                         'uid' => $multiDetachMannyId,
                         'ended' => gmdate('c', time() - 1),
                     ]);
+                    $processScheduledMannyNow($multiDetachMannyId);
                 }
                 $kernel->handle('GET', '/api/probe/mannies', $multiHiddenHeaders);
                 $multiHiddenStoredSector = $sectorService->getOrCreateSector($multiHiddenProbe->currentSector);
@@ -4962,6 +5024,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                         'uid' => $multiRecoverMannyId,
                         'ended' => gmdate('c', time() - 1),
                     ]);
+                    $processScheduledMannyNow($multiRecoverMannyId);
                 }
                 $kernel->handle('GET', '/api/probe/mannies', $multiHiddenHeaders);
                 $multiRestoredContainerA = $storageContainers->findByUidForProbe($multiHiddenProbe->id, $multiHiddenContainerIdA);
@@ -5022,6 +5085,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
+        $processScheduledMannyNow($detachMannyDbId);
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $planetDropSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $planetDroppedContainers = $planetDropSector->planetDroppedContainersForObject('drop-target-planet');
@@ -5177,6 +5241,7 @@ if ($oracleProbe !== null) {
     $oracleDestinationPlanet = new Planet('oracle-destination', 'Future biosphere', 'terrestrial', 1.0, 1.0, true, 0.8, ['water', 'carbon']);
     $oracleDestinationContent = new SectorContent($oracleDestinationSector, [$oracleDestinationPlanet]);
     $oracleSecondProbe = $probes->createForPlayer($oraclePlayer->id, 'Oracle cargo relay', $oracleDestinationSector);
+    $storage->initializeProbeStorage($oracleSecondProbe);
     $archiveItem = [
         'uid' => 'oracle-archive-one',
         'type' => ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
@@ -5545,6 +5610,7 @@ if ($intelligentLifeProbe !== null) {
                     'id' => $missionDropManny->id,
                     'ended' => gmdate('c', time() - 1),
                 ]);
+                $processScheduledMannyNow($missionDropManny->id);
                 $kernel->handle('GET', '/api/probe/mannies', $intelligentLifeHeaders);
                 $materialCounterAfterDrop = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
                 $test->assertEquals(0.5, $materialCounterAfterDrop['totals']['metals'] ?? null, 'material drop counter adds dropped metals');
@@ -5633,6 +5699,7 @@ if ($intelligentLifeProbe !== null) {
                             'id' => $finalDropManny->id,
                             'ended' => gmdate('c', time() - 1),
                         ]);
+                        $processScheduledMannyNow($finalDropManny->id);
                         $kernel->handle('GET', '/api/probe/mannies', $intelligentLifeHeaders);
 
                         $materialCounterAfterFinalDrop = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
@@ -5904,6 +5971,7 @@ if ($dormantInspectionProbe !== null) {
         'id' => $dormantInspectionMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($dormantInspectionMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
     $dormantDeuteriumAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
     $dormantDeuteriumReports = array_values(array_filter(
@@ -5924,6 +5992,7 @@ if ($dormantInspectionProbe !== null) {
         'id' => $dormantInspectionMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($dormantInspectionMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
     $dormantCouplingsAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
     $dormantCouplingsReports = array_values(array_filter(
@@ -5943,6 +6012,7 @@ if ($dormantInspectionProbe !== null) {
         'id' => $dormantInspectionMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($dormantInspectionMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
     $dormantThrustAnchoringAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
     $dormantThrustAnchoringReports = array_values(array_filter(
@@ -5964,6 +6034,7 @@ if ($dormantInspectionProbe !== null) {
         'id' => $dormantInspectionMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($dormantInspectionMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
     $dormantAnatiformAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
     $dormantAnatiformReports = array_values(array_filter(
@@ -5985,6 +6056,7 @@ if ($dormantInspectionProbe !== null) {
         'id' => $dormantInspectionMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($dormantInspectionMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
     $storedRandomConstruct = $sectorRepository->load($dormantInspectionProbe->currentSector)->findObjectById('dormant-report-random');
     $storedRandomScenario = $storedRandomConstruct instanceof DormantConstruct ? $storedRandomConstruct->toArray()['inspectionScenario'] ?? null : null;
@@ -6059,6 +6131,7 @@ if ($duckSculptingProbe !== null) {
         'uid' => $completedSculptMannyId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($completedSculptMannyId);
     $kernel->handle('GET', '/api/probe/mannies', $duckSculptingHeaders);
     $completedDuckAsteroid = $sectorRepository->load($duckSculptingProbe->currentSector)->findObjectById('completed-duck-rock');
     $test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, $completedDuckAsteroid instanceof Asteroid ? $completedDuckAsteroid->getDistinctiveFeature() : null, 'task completion sculpts the persisted asteroid into a duck shape');
@@ -6168,6 +6241,7 @@ if ($motorizeProbe !== null) {
         'id' => $motorizeMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($motorizeMannyDbId);
     $completedMotorization = $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
     $returningMotorizationManny = array_values(array_filter(
         $completedMotorization->body['mannies'] ?? [],
@@ -6205,10 +6279,12 @@ if ($motorizeProbe !== null) {
     $test->assertEquals(round((float) $refuelFuelBefore - 0.2, 4), $probes->findById($motorizeProbe->id)?->deuteriumStock, 'asteroid refueling consumes 0.2 deuterium point when launched');
     $refuelMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
     $refuelMannyRow->execute(['uid' => $motorizeRefuelMannyId]);
+    $refuelMannyDbId = (int) $refuelMannyRow->fetchColumn();
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
-        'id' => (int) $refuelMannyRow->fetchColumn(),
+        'id' => $refuelMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($refuelMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
     $refueledAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
     $test->assertEquals(Asteroid::MOTOR_FUEL_FULL, $refueledAsteroid instanceof Asteroid ? $refueledAsteroid->getMotorFuelStatus() : null, 'refueling completion fills the asteroid tank exactly once');
@@ -6335,7 +6411,9 @@ $movingNeighbor = $auth->registerPlayerWithPassword('moving-neighbor', 'secret',
 $stationaryNeighborProbe = $probes->findByPlayerId($stationaryNeighbor->id);
 $movingNeighborProbe = $probes->findByPlayerId($movingNeighbor->id);
 if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighborProbe !== null) {
+    $test->assertEquals($createdProbe->id, $players->findById($player->id)?->defaultProbeId, 'main probe remains selected before creating an owned sibling probe');
     $ownedNeighborProbe = $probes->createForPlayer($player->id, 'Owned sector drone', $createdProbe->currentSector);
+    $storage->initializeProbeStorage($ownedNeighborProbe);
     $stationaryNeighborProbe->currentSector = $createdProbe->currentSector;
     $probes->save($stationaryNeighborProbe);
     $movingNeighborProbe->currentSector = $createdProbe->currentSector;
@@ -6623,8 +6701,10 @@ $probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorag
 $storageContainerRepositorySource = file_get_contents($root . '/src/Repository/StorageContainerRepository.php');
 $apiKernelSource = file_get_contents($root . '/src/Http/ApiKernel.php');
 $probeManniesControllerSource = file_get_contents($root . '/src/Http/Controller/ProbeManniesApiController.php');
+$mannyTaskRefresherSource = file_get_contents($root . '/src/Service/Manny/MannyTaskRefresher.php');
 $test->assert(is_string($probeManniesControllerSource) && str_contains($probeManniesControllerSource, '$this->mannies->withPreparedBatch('), 'Manny task batches delegate their transaction and preparation to the Manny service');
-$test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->refreshAllMannyStates($probe);'), 'Manny task batches refresh pre-existing tasks once before assigning orders');
+$test->assert(is_string($mannyServiceSource) && !str_contains($mannyServiceSource, 'refreshAllMannyStates'), 'Manny task batches do not complete pre-existing tasks opportunistically');
+$test->assert(is_string($mannyTaskRefresherSource) && str_contains($mannyTaskRefresherSource, 'if (!$this->allowOutOfRangeTasks)'), 'only scheduler-authorized Manny refreshes apply time-based transitions');
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, 'if ($this->preparedBatchProbeId === $probe->id)'), 'Manny task batch assignments skip repeated peer refreshes and nested probe locks');
 $test->assert(
     is_string($probeStorageServiceSource)
@@ -6653,14 +6733,14 @@ $test->assert(
     is_string($probeStorageServiceSource)
         && str_contains($probeStorageServiceSource, 'bool $storageAlreadyEnsured = false')
         && str_contains($probeStorageServiceSource, 'if (!$storageAlreadyEnsured)'),
-    'inventory construction keeps storage repair by default and can explicitly reuse prior preparation',
+    'inventory construction validates storage by default and can explicitly reuse prior validation',
 );
 $test->assert(
     is_string($apiKernelSource)
         && str_contains($apiKernelSource, 'storageAlreadyEnsured: true')
         && is_string($probeManniesControllerSource)
         && str_contains($probeManniesControllerSource, 'storageAlreadyEnsured: true'),
-    'API inventory helpers avoid a second storage repair after preparing Mannies',
+    'API inventory helpers avoid a second storage validation after preparing Mannies',
 );
 
 $batchRollback = $kernel->handle('POST', '/api/probe/' . $batchProbe->id . '/mannies/tasks', $batchHeaders, json_encode([
@@ -6711,9 +6791,16 @@ $hintFutureManny->taskPayload = ['integrityPercent' => 1.0, 'metalsCost' => 0.01
 $mannies->save($hintFutureManny);
 
 $firstHintRefresh = $kernel->handle('GET', '/api/probe/' . $hintProbe->id . '/mannies', $hintHeaders);
-$test->assertEquals(200, $firstHintRefresh->status, 'Manny list hint succeeds with more than ten overdue tasks');
-$test->assertEquals(16, count($firstHintRefresh->body['mannies'] ?? []), 'Manny list hint still returns every Manny');
-$test->assertEquals(60.0, $probes->findById($hintProbe->id)?->integrityPercent, 'Manny list hint refreshes at most ten overdue tasks');
+$test->assertEquals(200, $firstHintRefresh->status, 'Manny list succeeds with more than ten overdue tasks');
+$test->assertEquals(16, count($firstHintRefresh->body['mannies'] ?? []), 'Manny list still returns every persisted Manny');
+$test->assertEquals(50.0, $probes->findById($hintProbe->id)?->integrityPercent, 'Manny list does not complete overdue tasks');
+$test->assertEquals(11, count(array_filter(
+    $mannies->findByProbeId($hintProbe->id),
+    static fn(Manny $manny): bool => str_starts_with($manny->name, 'hint-overdue-') && $manny->currentTask !== null,
+)), 'Manny list leaves every overdue task pending');
+$firstHintScheduler = $scheduler->processDueEvents(10);
+$test->assertEquals(10, $firstHintScheduler['processed'], 'scheduler processes a bounded batch of overdue Manny tasks');
+$test->assertEquals(60.0, $probes->findById($hintProbe->id)?->integrityPercent, 'scheduler applies the first ten overdue repairs');
 $remainingAfterFirstHint = array_values(array_filter(
     $mannies->findByProbeId($hintProbe->id),
     static fn(Manny $manny): bool => $manny->currentTask !== null,
@@ -6721,13 +6808,13 @@ $remainingAfterFirstHint = array_values(array_filter(
 $test->assertEquals(
     ['hint-future', 'hint-overdue-11'],
     array_map(static fn(Manny $manny): string => $manny->name, $remainingAfterFirstHint),
-    'Manny list hint refreshes the ten oldest overdue tasks and leaves future tasks untouched',
+    'scheduler processes the ten oldest overdue tasks and leaves future tasks untouched',
 );
 
-$secondHintRefresh = $kernel->handle('GET', '/api/probe/' . $hintProbe->id . '/mannies', $hintHeaders);
-$test->assertEquals(200, $secondHintRefresh->status, 'a later Manny list hint absorbs the remaining overdue task');
-$test->assertEquals(61.0, $probes->findById($hintProbe->id)?->integrityPercent, 'successive Manny list hints continue processing overdue tasks');
-$test->assertEquals(Manny::TASK_REPAIR, $mannies->findById($hintFutureManny->id)?->currentTask, 'Manny list hints do not refresh tasks before their deadline');
+$secondHintScheduler = $scheduler->processDueEvents(10);
+$test->assert($secondHintScheduler['processed'] >= 1, 'a later scheduler batch absorbs the remaining overdue task');
+$test->assertEquals(61.0, $probes->findById($hintProbe->id)?->integrityPercent, 'successive scheduler batches continue processing overdue tasks');
+$test->assertEquals(Manny::TASK_REPAIR, $mannies->findById($hintFutureManny->id)?->currentTask, 'scheduler does not refresh tasks before their deadline');
 
 for ($index = 1; $index <= 11; $index++) {
     $hintManny = $mannies->createForProbe($hintProbe->id, sprintf('probe-inventory-overdue-%02d', $index));
@@ -6777,6 +6864,8 @@ $test->assertEquals(array_map(
     static fn(Manny $manny): string => $manny->name,
     $remainingSectorInventoryHints,
 ), 'lightweight sector inventory leaves every overdue Manny task untouched');
+$inventorySchedulerStats = $scheduler->processDueEvents(100);
+$test->assertEquals(22, $inventorySchedulerStats['processed'], 'scheduler later processes every overdue task left untouched by inventory GETs');
 
 $foreignMannyOwner = $auth->registerPlayerWithPassword('foreign-manny-owner', 'secret', 'Foreign Manny Owner', 'Foreign Manny probe');
 $foreignMannyHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($foreignMannyOwner)['token']];
@@ -6863,11 +6952,15 @@ if ($createdProbe !== null) {
         'ended' => gmdate('c', time() - 1),
     ]);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
-    $repairedProbe = $probes->findByPlayerId($player->id);
-    $test->assertEquals(97.0, $repairedProbe?->integrityPercent, 'completed Manny repair restores probe integrity');
+    $test->assertEquals(95.0, $probes->findByPlayerId($player->id)?->integrityPercent, 'Manny GET leaves an overdue repair pending for the scheduler');
     $repairEventStatus = $pdo->prepare('SELECT status FROM scheduled_events WHERE id = :id');
     $repairEventStatus->execute(['id' => $repairEventId]);
-    $test->assertEquals('done', $repairEventStatus->fetchColumn(), 'API refresh marks the completed Manny scheduled event done');
+    $test->assertEquals('pending', $repairEventStatus->fetchColumn(), 'Manny GET leaves the overdue scheduled event pending');
+    $processScheduledMannyNow($repairMannyDbId);
+    $repairedProbe = $probes->findByPlayerId($player->id);
+    $test->assertEquals(97.0, $repairedProbe?->integrityPercent, 'scheduler completion restores probe integrity');
+    $repairEventStatus->execute(['id' => $repairEventId]);
+    $test->assertEquals('done', $repairEventStatus->fetchColumn(), 'scheduler marks the completed Manny scheduled event done');
 
     $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 90 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $cronRepair = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/repair', $headers, json_encode(['integrityPercent' => 1], JSON_THROW_ON_ERROR));
@@ -6936,12 +7029,15 @@ if ($createdProbe !== null) {
         'id' => $repairMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($repairMannyDbId);
     $refillAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals(null, $refillAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed deuterium refill clears the Manny task');
     $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed deuterium refill fills the probe tank');
 
     $transferTargetProbe = $probes->createForPlayer($player->id, 'Deuterium receiver drone', $createdProbe->currentSector);
     $transferFarProbe = $probes->createForPlayer($player->id, 'Far deuterium receiver', new SectorCoordinates(992, 0, 0));
+    $storage->initializeProbeStorage($transferTargetProbe);
+    $storage->initializeProbeStorage($transferFarProbe);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 50 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 95 WHERE id = :id')->execute(['id' => $transferTargetProbe->id]);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 25 WHERE id = :id')->execute(['id' => $transferFarProbe->id]);
@@ -6971,6 +7067,7 @@ if ($createdProbe !== null) {
         'id' => $repairMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($repairMannyDbId);
     $transferAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals(null, $transferAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed deuterium transfer clears the Manny task');
     $test->assertEquals('success', $transferAfterCompletion->body['mannies'][0]['task']['result'] ?? null, 'completed deuterium transfer records a success result');
@@ -6986,6 +7083,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(100.0, $staleTransferTarget?->deuteriumStock, 'atomic deuterium adjustments do not rely on a stale probe snapshot');
 
     $movingTransferTarget = $probes->createForPlayer($player->id, 'Moving transfer target', $createdProbe->currentSector);
+    $storage->initializeProbeStorage($movingTransferTarget);
     $movingTimeline = (new MovementDurationCalculator())->timeline(new DateTimeImmutable('now', new DateTimeZone('UTC')), 1);
     $movements->create(
         $movingTransferTarget->id,
@@ -7023,6 +7121,7 @@ if ($createdProbe !== null) {
         'uid' => $probeTransferManny->uid,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($probeTransferManny->uid);
     $transferTargetMannies = $kernel->handle('GET', '/api/probe/' . $transferTargetProbe->id . '/mannies', $headers);
     $completedProbeTransfer = null;
     foreach ($transferTargetMannies->body['mannies'] ?? [] as $mannyPayload) {
@@ -7038,6 +7137,7 @@ if ($createdProbe !== null) {
 
     $foreignTransferPlayer = $auth->registerPlayerWithPassword('foreign-deuterium-receiver', 'secret', 'Foreign Deuterium Receiver');
     $foreignTransferProbe = $probes->createForPlayer($foreignTransferPlayer->id, 'Foreign receiver probe', $createdProbe->currentSector);
+    $storage->initializeProbeStorage($foreignTransferProbe);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 60 WHERE id = :id')->execute(['id' => $createdProbe->id]);
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 80 WHERE id = :id')->execute(['id' => $foreignTransferProbe->id]);
     $sectorWithForeignProbe = $kernel->handle('GET', '/api/probe/sector', $headers);
@@ -7059,6 +7159,7 @@ if ($createdProbe !== null) {
         'id' => $repairMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($repairMannyDbId);
     $foreignTransferAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals('success', $foreignTransferAfterCompletion->body['mannies'][0]['task']['result'] ?? null, 'foreign-probe deuterium transfer records a success result');
     $test->assertEquals(55.0, $probes->findById($createdProbe->id)?->deuteriumStock, 'foreign-probe deuterium transfer consumes source fuel');
@@ -7068,6 +7169,7 @@ if ($createdProbe !== null) {
     $improvementHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($improvementPlayer)['token']];
     $improvementProbe = $probes->findByPlayerId($improvementPlayer->id) ?? throw new RuntimeException('Expected improvement probe.');
     $improvementSecondProbe = $probes->createForPlayer($improvementPlayer->id, 'Probe Improvement Sibling', $improvementProbe->currentSector);
+    $storage->initializeProbeStorage($improvementSecondProbe);
     $improvementMannyList = $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
     $improvementMannyId = (string) ($improvementMannyList->body['mannies'][0]['id'] ?? '');
     $improvementMannyRow = $pdo->prepare('SELECT id FROM mannies WHERE uid = :uid');
@@ -7123,6 +7225,7 @@ if ($createdProbe !== null) {
         'id' => $improvementMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($improvementMannyDbId);
     $improvementAfterCompletion = $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
     $test->assertEquals(null, $improvementAfterCompletion->body['mannies'][0]['currentTask'] ?? null, 'completed probe improvement clears the Manny task');
     $completedImprovements = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
@@ -7169,6 +7272,7 @@ if ($createdProbe !== null) {
         'id' => $improvementMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($improvementMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
     $completedCouplingsProbe = $probes->findByPlayerId($improvementPlayer->id) ?? throw new RuntimeException('Expected completed couplings probe.');
     $riskMethod = new ReflectionMethod(ProbeMovementService::class, 'fragileContainerLossRisk');
@@ -7187,6 +7291,7 @@ if ($createdProbe !== null) {
         'id' => $improvementMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($improvementMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $improvementHeaders);
     $test->assertEquals(200.0, $probes->findByPlayerId($improvementPlayer->id)?->deuteriumStock, 'completed improved tank refill fills the probe to 200 percent');
 
@@ -7256,6 +7361,7 @@ if ($createdProbe !== null) {
         'id' => $assemblyMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($assemblyMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $assemblyHeaders);
     $assemblyProbes = $probes->findAllByPlayerId($assemblyPlayer->id);
     $assemblyDrones = array_values(array_filter(
@@ -7303,6 +7409,7 @@ if ($createdProbe !== null) {
         'id' => $tankerMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($tankerMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $tankerHeaders);
     $tankerProbe = array_values(array_filter(
         $probes->findAllByPlayerId($tankerPlayer->id),
@@ -7707,6 +7814,7 @@ if ($createdProbe !== null) {
         'uid' => $secondMannyId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($secondMannyId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'quick recalled Manny returns to the probe after its shortened return');
 
@@ -7734,6 +7842,7 @@ if ($createdProbe !== null) {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $craftedProbe = $kernel->handle('GET', '/api/probe', $headers);
     $craftedItems = array_values(array_filter(
@@ -7772,6 +7881,7 @@ if ($createdProbe !== null) {
         'id' => $craftMannyDbId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($craftMannyDbId);
     $completedBookmarkMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $completedBookmarkManny = array_values(array_filter(
         $completedBookmarkMannies->body['mannies'] ?? [],
@@ -7813,6 +7923,7 @@ if ($createdProbe !== null) {
              current_task = :current_task,
              task_started_at = :started,
              task_ends_at = :ended,
+             task_scheduled_event_id = NULL,
              cargo_deuterium = 0,
              cargo_metals = 0.45,
              cargo_ice = 0,
@@ -7828,6 +7939,11 @@ if ($createdProbe !== null) {
         'started' => gmdate('c', time() - 1800),
         'ended' => gmdate('c', time() - 1),
     ]);
+    $waitingMannySetup = $mannies->findById($fourthMannyDbId);
+    if ($waitingMannySetup !== null) {
+        $mannies->save($waitingMannySetup);
+        $processScheduledMannyNow($waitingMannySetup->id);
+    }
     $waitingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $waitingFourth = array_values(array_filter(
         $waitingMannies->body['mannies'] ?? [],
@@ -7859,6 +7975,7 @@ if ($createdProbe !== null) {
              current_task = :current_task,
              task_started_at = :started,
              task_ends_at = :ended,
+             task_scheduled_event_id = NULL,
              cargo_deuterium = 0,
              cargo_metals = 0,
              cargo_ice = 0,
@@ -7874,6 +7991,11 @@ if ($createdProbe !== null) {
         'started' => gmdate('c', time() - 1800),
         'ended' => gmdate('c', time() - 1),
     ]);
+    $waitingMannySetup = $mannies->findById($fourthMannyDbId);
+    if ($waitingMannySetup !== null) {
+        $mannies->save($waitingMannySetup);
+        $processScheduledMannyNow($waitingMannySetup->id);
+    }
     $waitingMannies = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $waitingFourth = array_values(array_filter(
         $waitingMannies->body['mannies'] ?? [],
@@ -7886,6 +8008,7 @@ if ($createdProbe !== null) {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $jettisonMetals->status, 'POST /api/probe/inventory/{itemId}/jettison discards stored resources');
     $test->assertEquals(0.5, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'jettisoning metals lowers the probe stock');
+    $processScheduledMannyNow($fourthMannyDbId);
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->locationType, 'freeing storage lets a waiting Manny enter the probe');
     $test->assertEquals(null, $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->currentTask, 'Manny waiting for storage returns to idle after docking');
 
@@ -8003,6 +8126,7 @@ if ($createdProbe !== null) {
         'uid' => $firstMannyId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($firstMannyId);
     $afterSteelBarSalvage = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $steelBarInventory = $kernel->handle('GET', '/api/probe', $headers);
     $recoveredSteelBars = array_values(array_filter(
@@ -8051,6 +8175,7 @@ if ($createdProbe !== null) {
         'uid' => $firstMannyId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($firstMannyId);
     $afterSalvageList = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $recoveredManny = $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId);
     $test->assert($recoveredManny !== null, 'salvaged abandoned Manny is attached to the recovering probe');
@@ -8142,11 +8267,13 @@ if ($createdProbe !== null) {
         'uid' => $firstMannyId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($firstMannyId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
         'uid' => $secondMannyId,
         'ended' => gmdate('c', time() - 1),
     ]);
+    $processScheduledMannyNow($secondMannyId);
     $afterFailedRace = $kernel->handle('GET', '/api/probe/mannies', $headers);
     $failedRaceActor = array_values(array_filter(
         $afterFailedRace->body['mannies'] ?? [],
@@ -8617,6 +8744,8 @@ $instanceSwitchProbe = $probes->findByPlayerId($instanceSwitchPlayer->id);
 if ($instanceSwitchProbe !== null && $createdProbe !== null) {
     $farInstanceSwitchDrone = $probes->createForPlayer($instanceSwitchPlayer->id, 'Far collision fallback drone', $instanceSwitchProbe->currentSector->add(120, 0, 0));
     $instanceSwitchDrone = $probes->createForPlayer($instanceSwitchPlayer->id, 'Collision fallback drone', $instanceSwitchProbe->currentSector->add(80, 0, 0));
+    $storage->initializeProbeStorage($farInstanceSwitchDrone);
+    $storage->initializeProbeStorage($instanceSwitchDrone);
     $instanceSwitchMission = $missionService->startMission($instanceSwitchProbe, 'instance_switch_collision', 'Instance switch collision', steps: [['title' => 'Keep player mission']]);
     $instanceSwitchCategory = $forum->createCategory('Instance switch collision');
     $instanceSwitchPost = $forum->createPost($instanceSwitchPlayer, $instanceSwitchCategory->id, 'Mind backup report', 'Please keep this forum post.');
@@ -8682,6 +8811,7 @@ $secondaryLossHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForP
 $secondaryLossDefaultProbe = $probes->findByPlayerId($secondaryLossPlayer->id);
 if ($secondaryLossDefaultProbe !== null) {
     $secondaryLossProbe = $probes->createForPlayer($secondaryLossPlayer->id, 'Expendable drone', $secondaryLossDefaultProbe->currentSector);
+    $storage->initializeProbeStorage($secondaryLossProbe);
     $secondaryLossOutsideManny = $mannies->createForProbe($secondaryLossProbe->id, 'outside-loss-manny');
     $pdo->prepare(
         'UPDATE mannies
@@ -8827,6 +8957,7 @@ $blackHoleSwitchHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionFo
 $blackHoleSwitchProbe = $probes->findByPlayerId($blackHoleSwitchPlayer->id);
 if ($blackHoleSwitchProbe !== null) {
     $blackHoleSwitchDrone = $probes->createForPlayer($blackHoleSwitchPlayer->id, 'Black hole fallback drone', new SectorCoordinates(82, 0, 0));
+    $storage->initializeProbeStorage($blackHoleSwitchDrone);
     $blackHoleSwitchMission = $missionService->startMission($blackHoleSwitchProbe, 'instance_switch_black_hole', 'Instance switch black hole', steps: [['title' => 'Keep black-hole mission']]);
     $sectorRepository->save(new SectorContent($blackHoleSwitchProbe->currentSector, [
         new BlackHole('switch-black-hole', null, 9.0, 24.0, true, 180.0),

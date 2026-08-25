@@ -8,12 +8,16 @@ use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
+use VonNeumannGame\Repository\ProbeItemRepository;
+use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Service\ProbeReinstantiationService;
+use VonNeumannGame\Service\ProbeStorageService;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -54,6 +58,14 @@ function deleteProbeRun(array $argv): int
     $mannies = new MannyRepository($pdo, $gameplayConfig);
     $visitedSectors = new VisitedSectorRepository($pdo);
     $damageWarnings = new ProbeDamageWarningRepository($pdo);
+    $storage = new ProbeStorageService(
+        new StorageContainerRepository($pdo, $gameplayConfig),
+        new ProbeItemRepository($pdo),
+        $mannies,
+        $probes,
+        $gameplayConfig,
+        new ProbeImprovementRepository($pdo),
+    );
     $sectorService = new SectorService(
         new SectorFileRepository(deleteProbeAbsolutePath($root, (string) ($appConfig['universePath'] ?? 'data/universe'))),
         new SectorContentGenerator($universeConfig),
@@ -65,6 +77,7 @@ function deleteProbeRun(array $argv): int
         $probes,
         $mannies,
         $visitedSectors,
+        $storage,
         $sectorService,
         $damageWarnings,
         gameplayConfig: $gameplayConfig,

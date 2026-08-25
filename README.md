@@ -178,10 +178,11 @@ mouvement réserve dès son départ son coût fixe complet, décélération comp
 et ne peut pas démarrer si le stock de deutérium est insuffisant. Son coût et sa
 durée suivent les paramètres `movement` de `config/gameplay.json`.
 
-L'etat courant est derive des timestamps a chaque lecture. Le scheduler CLI
-ponctuel (`php scripts/scheduler.php`) ou son worker permanent
-(`php scripts/scheduler-worker.php`) traite aussi les evenements planifies utiles
-aux transitions et aux pieges de trous noirs. Pendant un mouvement, les capteurs sont
+Les lectures API exposent le dernier état persisté sans appliquer de transition
+temporelle Manny. Le scheduler CLI ponctuel (`php scripts/scheduler.php`) ou son
+worker permanent (`php scripts/scheduler-worker.php`) traite les événements
+planifiés, notamment les tâches Manny, les transitions de mouvement et les
+pièges de trous noirs. Pendant un mouvement, les capteurs sont
 `normal`, `degraded` ou `blind` selon la phase. La croisiere longue peut detruire
 la sonde, et l'arrivee applique des degats de poussiere intersectorielle.
 
@@ -314,9 +315,9 @@ php scripts/scheduler.php
 php scripts/scheduler.php --limit=25
 ```
 
-Le scheduler est l'unique responsable des transitions intermédiaires du
-minage (trajets, ticks d'extraction, retours et dépôts). Les endpoints API Manny
-consultent le dernier état persisté sans faire avancer le minage. Lors du
+Le scheduler est l'unique responsable de toutes les transitions temporelles
+Manny. Les endpoints API consultent le dernier état persisté sans terminer de
+tâche par effet de lecture ou lors de la préparation d’un nouvel ordre. Lors du
 déploiement initial de ce fonctionnement, après avoir arrêté le worker, réveiller
 les minages déjà actifs avec :
 

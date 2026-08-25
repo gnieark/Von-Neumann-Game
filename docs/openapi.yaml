@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '116'
+  version: '117'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -26,7 +26,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 116
+                apiVersion: 117
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1457,7 +1457,9 @@ paths:
         Active Manny task details are exposed when the Manny is in the probe
         current sector or when the Manny sector and probe sector are covered
         by the same SCUT network. Active tasks outside that range are reported
-        as currentTask unknown_too_far with an empty task payload.
+        as currentTask unknown_too_far with an empty task payload. This read
+        returns the last persisted state and never completes a task; only the
+        scheduler worker applies time-based Manny transitions.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       responses:
@@ -1527,8 +1529,10 @@ paths:
     get:
       summary: Get one persisted Manny robot
       description: >
-        Refreshes and returns the selected Manny with the same visibility and
-        task-detail rules as the Manny list endpoint.
+        Returns the selected Manny's last persisted state with the same
+        visibility and task-detail rules as the Manny list endpoint. The read
+        never completes a task; only the scheduler worker applies time-based
+        Manny transitions.
       responses:
         '200':
           description: Manny robot
@@ -3029,7 +3033,9 @@ paths:
         Active Manny task details are exposed when the Manny is in the probe
         current sector or when the Manny sector and probe sector are covered
         by the same SCUT network. Active tasks outside that range are reported
-        as currentTask unknown_too_far with an empty task payload.
+        as currentTask unknown_too_far with an empty task payload. This read
+        returns the last persisted state and never completes a task; only the
+        scheduler worker applies time-based Manny transitions.
       responses:
         '200':
           description: Manny robots

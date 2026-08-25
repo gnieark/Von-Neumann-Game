@@ -112,14 +112,14 @@ final class AppFactory
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
         $asteroidTrajectoryService = new AsteroidTrajectoryService($asteroidTrajectoryRepository, $probes, $scheduledEvents, $sectorService, $gameplayConfig, $universeConfig, $damageWarnings);
-        $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
+        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
+        $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig, mannies: $mannies, asteroidTrajectories: $asteroidTrajectoryRepository, asteroidTrajectoryService: $asteroidTrajectoryService);
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
-        $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players, $damageWarnings);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectoryRepository);
-        $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
+        $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $redisConfig = $this->redisConfig();
         $rateLimitConfig = Config::getArray($redisConfig, 'rateLimit');
@@ -164,7 +164,7 @@ final class AppFactory
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players, $damageWarnings);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories);
-        $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
+        $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
         $trajectoryConfig = Config::getArray($gameplayConfig, 'asteroidTrajectories');
         $impactConfig = Config::getArray($trajectoryConfig, 'impact');
@@ -211,15 +211,26 @@ final class AppFactory
         $universeConfig = $this->universeConfig();
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
+        $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
+        $mannies = new MannyRepository($pdo, $gameplayConfig);
+        $storage = new ProbeStorageService(
+            new StorageContainerRepository($pdo, $gameplayConfig),
+            new ProbeItemRepository($pdo),
+            $mannies,
+            $probes,
+            $gameplayConfig,
+            new ProbeImprovementRepository($pdo),
+        );
 
         return new AuthService(
             new PlayerRepository($pdo),
             new PlayerAuthRepository($pdo),
-            new NeumannProbeRepository($pdo, $gameplayConfig),
+            $probes,
             new SessionRepository($pdo),
             new VisitedSectorRepository($pdo),
+            $storage,
             (int) ($appConfig['sessionTtlDays'] ?? 7),
-            new MannyRepository($pdo, $gameplayConfig),
+            $mannies,
             new ApiKeyRepository($pdo),
             $sectorService,
             gameplayConfig: $gameplayConfig,

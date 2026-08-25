@@ -86,7 +86,6 @@ final class MannyService implements MannyTaskRuntime
     public const TASK_VISIBILITY_LOCAL = 'local';
     public const TASK_VISIBILITY_SCUT_NETWORK = 'scut_network';
     public const TASK_VISIBILITY_TOO_FAR = 'too_far';
-    private const API_HINT_REFRESH_LIMIT = 10;
 
     private readonly WaypointBookmarkService $bookmarks;
     private readonly MannyCraftingService $crafting;
@@ -469,7 +468,7 @@ final class MannyService implements MannyTaskRuntime
             fn(int $playerId): string => $this->nextDroneProbeName($playerId),
             fn(int $playerId, string $name, SectorCoordinates $sector, string $model): NeumannProbe => $this->probes->createForPlayer($playerId, $name, $sector, $model),
             function (NeumannProbe $probe): void {
-                $this->storage->ensureProbeStorage($probe);
+                $this->storage->initializeProbeStorage($probe);
             },
             fn(NeumannProbe $probe, Manny $manny): bool => $this->storage->placeMannyOnProbe($probe, $manny),
             function (Manny $manny, array $payload): void {
@@ -835,8 +834,8 @@ final class MannyService implements MannyTaskRuntime
     }
 
     /**
-     * Runs a Manny task batch under one probe lock after refreshing pre-existing
-     * tasks once. Tasks started by the batch are too recent to need refreshing.
+     * Runs a Manny task batch under one probe lock. Pre-existing tasks remain
+     * authoritative until their scheduled events are processed by the worker.
      *
      * @template T
      * @param callable(NeumannProbe): T $callback
@@ -847,8 +846,6 @@ final class MannyService implements MannyTaskRuntime
         if ($this->preparedBatchProbeId !== null) {
             throw new \LogicException('A Manny task batch is already being prepared.');
         }
-
-        $this->refreshAllMannyStates($probe);
 
         return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($callback): mixed {
             $this->preparedBatchProbeId = $lockedProbe->id;
@@ -881,30 +878,10 @@ final class MannyService implements MannyTaskRuntime
         );
     }
 
-    /**
-     * Refreshes a bounded number of due tasks for a Manny-list API hint.
-     *
-     * @return array<Manny>
-     */
+    /** @return array<Manny> Persisted states; only the scheduler advances tasks. */
     public function manniesForProbeApiHint(NeumannProbe $probe): array
     {
         $this->storage->ensureProbeStorage($probe);
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $dueMannies = array_values(array_filter(
-            $this->mannies->findByProbeId($probe->id),
-            static fn(Manny $manny): bool => $manny->currentTask !== null
-                && $manny->taskEndsAt !== null
-                && new \DateTimeImmutable($manny->taskEndsAt) <= $now,
-        ));
-        usort(
-            $dueMannies,
-            static fn(Manny $left, Manny $right): int => [$left->taskEndsAt, $left->id] <=> [$right->taskEndsAt, $right->id],
-        );
-
-        foreach (array_slice($dueMannies, 0, self::API_HINT_REFRESH_LIMIT) as $manny) {
-            $this->refreshMannyState($manny, $probe);
-        }
-        $this->recoverForgottenManniesInCurrentSector($probe);
 
         return $this->mannies->findByProbeId($probe->id);
     }
@@ -913,7 +890,7 @@ final class MannyService implements MannyTaskRuntime
     {
         $this->storage->ensureProbeStorage($probe);
 
-        return $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        return $this->requiredManny($probe, $uid);
     }
 
     public function recoverForgottenManniesForProbe(NeumannProbe $probe): void
@@ -2114,15 +2091,6 @@ final class MannyService implements MannyTaskRuntime
             }
 
             $this->refreshMannyState($manny, $probe);
-        }
-    }
-
-    private function refreshAllMannyStates(NeumannProbe $probe): void
-    {
-        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
-            if ($manny->currentTask !== null) {
-                $this->refreshMannyState($manny, $probe);
-            }
         }
     }
 

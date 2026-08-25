@@ -50,7 +50,8 @@ final class ProbeStorageService
         });
     }
 
-    public function ensureProbeStorage(NeumannProbe $probe): void
+    /** Creates the canonical storage of a newly created, still empty probe. */
+    public function initializeProbeStorage(NeumannProbe $probe): void
     {
         $existingContainers = $this->containers->findByProbeId($probe->id);
         if ($existingContainers === []) {
@@ -77,6 +78,16 @@ final class ProbeStorageService
             return;
         }
 
+        $this->ensureProbeStorage($probe);
+    }
+
+    /** Read-only consistency check used by regular storage access. */
+    public function ensureProbeStorage(NeumannProbe $probe): void
+    {
+        $existingContainers = $this->containers->findByProbeId($probe->id);
+        if ($existingContainers === []) {
+            throw new \RuntimeException('Probe storage is not initialized; run scripts/one-shot-scripts/repair-storage-containers.php.');
+        }
         if ($this->containerByUid($existingContainers, StorageContainer::CORE_UID) === null) {
             throw new \RuntimeException('Probe core storage container is missing; run scripts/one-shot-scripts/repair-storage-containers.php.');
         }
