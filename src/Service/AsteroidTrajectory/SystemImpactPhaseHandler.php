@@ -9,6 +9,8 @@ use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
+use VonNeumannGame\Repository\OthersRepository;
+use VonNeumannGame\Service\OthersService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeterministicRandom;
 use VonNeumannGame\Sector\Planet;
@@ -26,6 +28,8 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         private readonly NeumannProbeRepository $probes,
         private readonly ProbeMovementRepository $movements,
         private readonly ImpactDamageResolver $damage,
+        private readonly ?OthersRepository $others = null,
+        private readonly ?OthersService $othersService = null,
     ) {
         $this->distribution = new MaterialDistributionCalculator();
     }
@@ -46,10 +50,21 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
 
         $targetProbe = $trajectory->targetProbeId !== null ? $this->probes->findById($trajectory->targetProbeId) : null;
         $target = $targetProbe ?? ($trajectory->targetObjectId !== null ? $sector->findObjectById($trajectory->targetObjectId) : null);
-        if ($target === null || ($targetProbe !== null && !$targetProbe->currentSector->equals($trajectory->currentSector))) {
+        $targetOthers = $target === null && $trajectory->targetObjectId !== null ? $this->others?->findShipByPublicId($trajectory->targetObjectId) : null;
+        $othersPresent = $targetOthers !== null && $targetOthers['destroyed_at'] === null
+            && !in_array((string)$targetOthers['status'], ['transit','removed','destroyed'], true)
+            && [(int)$targetOthers['sector_x'],(int)$targetOthers['sector_y'],(int)$targetOthers['sector_z']] === [$trajectory->currentSector->getX(),$trajectory->currentSector->getY(),$trajectory->currentSector->getZ()];
+        if (($target === null && !$othersPresent) || ($targetProbe !== null && !$targetProbe->currentSector->equals($trajectory->currentSector))) {
             $this->destroyObject($sector, $source->getId());
             $this->sectors->saveSector($sector);
             return $this->terminal($trajectory, AsteroidTrajectory::STATUS_MISSED, 'target_missing', 'target_missing');
+        }
+        if ($othersPresent) {
+            $this->destroyObject($sector, $source->getId());
+            $this->sectors->saveSector($sector);
+            $relativistic = (float)$trajectory->targetSpeedC >= 0.05;
+            $this->othersService?->damageShip((string)$targetOthers['public_id'], $relativistic ? (int)$targetOthers['integrity'] : 10, 'asteroid-impact:'.$trajectory->uid, $relativistic);
+            return $this->terminal($trajectory, $relativistic ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED, $relativistic ? 'destroyed' : 'damaged', null);
         }
         $targetMovement = $targetProbe !== null ? $this->movements->findActiveByProbeId($targetProbe->id) : null;
         if (

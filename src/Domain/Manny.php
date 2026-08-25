@@ -35,6 +35,7 @@ final class Manny
     public const TASK_SCULPTING_DUCK_ASTEROID = 'sculpting_duck_asteroid';
     public const TASK_TRANSFERRING_DEUTERIUM_TO_PROBE = 'transferring_deuterium_to_probe';
     public const TASK_TRANSFERRING_TO_PROBE = 'transferring_to_probe';
+    public const TASK_PREPARING_MISSILE = 'preparing_missile';
     public const CARGO_CAPACITY = 0.05;
     public const CONTAINER_SPACE = 0.05;
 

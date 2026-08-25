@@ -64,6 +64,20 @@ final class MannyRepository
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Manny creation failed.');
     }
 
+    /** @return array<array<string, mixed>> */
+    public function findDeployedBySector(SectorCoordinates $sector): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT m.uid, m.probe_id, m.location_type, m.current_task, m.reserved_storage_container_id,
+                    p.id AS carrier_public_id
+             FROM mannies m JOIN neumann_probes p ON p.id = m.probe_id
+             WHERE m.location_type = :location_type AND m.sector_x = :x AND m.sector_y = :y AND m.sector_z = :z
+             ORDER BY m.uid"
+        );
+        $stmt->execute(['location_type' => Manny::LOCATION_SECTOR, 'x' => $sector->getX(), 'y' => $sector->getY(), 'z' => $sector->getZ()]);
+        return $stmt->fetchAll();
+    }
+
     private function defaultMannyCount(): int
     {
         return max(0, Config::int($this->config, 'probe.initialMannyCount', 4));

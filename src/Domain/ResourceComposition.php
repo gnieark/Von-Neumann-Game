@@ -115,6 +115,28 @@ final class ResourceComposition
         return $composition;
     }
 
+    /** Public coarse proportions expressed as percentages in ten-point steps. */
+    public static function publicDecilesFromAmounts(array $amounts): array
+    {
+        $composition = self::fromAmounts($amounts);
+        if (array_sum($composition) <= 0.0) { return array_fill_keys(self::TYPES, 0); }
+        $result = []; $remainders = []; $assigned = 0;
+        foreach (self::TYPES as $type) {
+            $exactDeciles = $composition[$type] * 10;
+            $base = (int) floor($exactDeciles);
+            $result[$type] = $base * 10;
+            $remainders[$type] = $exactDeciles - $base;
+            $assigned += $base;
+        }
+        $missing = 10 - $assigned;
+        uksort($remainders, static fn(string $a, string $b): int => [$remainders[$b], array_search($a, self::TYPES, true)] <=> [$remainders[$a], array_search($b, self::TYPES, true)]);
+        foreach (array_keys($remainders) as $type) {
+            if ($missing-- <= 0) { break; }
+            $result[$type] += 10;
+        }
+        return array_replace(array_fill_keys(self::TYPES, 0), $result);
+    }
+
     /**
      * @param array<string, float|int> $composition
      * @return array<string>

@@ -34,6 +34,7 @@ use VonNeumannGame\Service\AsteroidTrajectory\RelativisticEnergyCalculator;
 use VonNeumannGame\Service\AsteroidTrajectory\RevolutionCalculator;
 use VonNeumannGame\Service\AsteroidTrajectory\SectorAsteroidFormatMigration;
 use VonNeumannGame\Service\AsteroidTrajectory\TrajectoryKinematicsCalculator;
+use VonNeumannGame\Domain\PlanetResourceStockCalculator;
 
 /**
  * Simple test runner with assertions.
@@ -742,8 +743,19 @@ $test->assert($createdOrigin->getCoordinates()->equals($loadedExisting->getCoord
 
 echo "\n>>> Testing asteroid trajectory calculators\n\n";
 
-$gameplayConfig = json_decode((string) file_get_contents(__DIR__ . '/../config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR);
 $universeConfig = json_decode((string) file_get_contents(__DIR__ . '/../config/universe.json'), true, 512, JSON_THROW_ON_ERROR);
+$calibrationStocks = (new PlanetResourceStockCalculator($universeConfig))->calculate(
+    '374af15d3c5787eeeff1', 'ocean', 1.710731, 1.122441, true, 0.495065, [],
+);
+$test->assertEquals(4, count($calibrationStocks), 'planet stock calculator emits the four canonical resources');
+$test->assert(abs(array_sum($calibrationStocks) - 301780.0589) < 0.00011, 'planet stock calibration preserves the exact recoverable volume after rounding');
+$dormantAuxiliary = DormantConstruct::fromOthersAuxiliary('aux_test');
+$test->assertEquals(5.0, $dormantAuxiliary->getResourceAmounts()['metals'] ?? null, 'dormant Others auxiliary contains exactly 5 ECE of metals');
+$test->assertEquals(0.01, $dormantAuxiliary->getResourceAmounts()['deuterium'] ?? null, 'dormant Others auxiliary contains exactly 0.01 ECE of deuterium');
+$destroyedAuxiliary = DormantConstruct::fromOthersAuxiliary('aux_test', true);
+$test->assertEquals(0.02, $destroyedAuxiliary->getResourceAmounts()['deuterium'] ?? null, 'destroyed Others auxiliary wreck contains exactly 0.02 ECE of deuterium');
+
+$gameplayConfig = json_decode((string) file_get_contents(__DIR__ . '/../config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR);
 $trajectoryConfig = $gameplayConfig['asteroidTrajectories'];
 [$minimumAsteroidMass, $maximumAsteroidMass] = $universeConfig['asteroids']['massRange'];
 $kinematics = new TrajectoryKinematicsCalculator(

@@ -604,7 +604,9 @@ final class SectorObservationService
             return ResourceComposition::fromAmounts($object->getResourceAmounts());
         }
 
-        return ResourceComposition::fromHints($this->objectResourceHints($object));
+        return $object instanceof Planet
+            ? ResourceComposition::publicDecilesFromAmounts($object->getResourceAmounts())
+            : ResourceComposition::fromHints($this->objectResourceHints($object));
     }
 
     private function isMannyMineable(UniverseObject $object): bool

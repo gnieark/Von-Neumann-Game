@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '117'
+  version: '118'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -14,6 +14,56 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /api/others:
+    $ref: './openapi-others.json#/paths/~1api~1others'
+  /api/others/fleets:
+    $ref: './openapi-others.json#/paths/~1api~1others~1fleets'
+  /api/others/fleets/{fleetId}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1fleets~1{fleetId}'
+  /api/others/fleets/{fleetId}/move:
+    $ref: './openapi-others.json#/paths/~1api~1others~1fleets~1{fleetId}~1move'
+  /api/others/ships/{shipId}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}'
+  /api/others/ships/{shipId}/move:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1move'
+  /api/others/ships/{shipId}/auxiliaries:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries'
+  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1{auxiliaryId}'
+  /api/others/ships/{shipId}/auxiliaries/tasks:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1tasks'
+  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/{task}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1{auxiliaryId}~1{task}'
+  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/transfer-deuterium:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1{auxiliaryId}~1transfer-deuterium'
+  /api/others/ships/{shipId}/sector/autonomous-units:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1sector~1autonomous-units'
+  /api/others/ships/{shipId}/inventory:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1inventory'
+  /api/others/ships/{shipId}/inventory-transfers:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1inventory-transfers'
+  /api/others/inventory-transfers/{transferId}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1inventory-transfers~1{transferId}'
+  /api/others/ships/{shipId}/harvest:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1harvest'
+  /api/others/crafting/recipes:
+    $ref: './openapi-others.json#/paths/~1api~1others~1crafting~1recipes'
+  /api/others/ships/{shipId}/crafts:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1crafts'
+  /api/others/crafts/{craftId}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1crafts~1{craftId}'
+  /api/others/actions/{actionId}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1actions~1{actionId}'
+  /api/others/ships/{shipId}/weapons/laser:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1weapons~1laser'
+  /api/others/ships/{shipId}/missiles:
+    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1missiles'
+  /api/others/missiles/{missileId}:
+    $ref: './openapi-others.json#/paths/~1api~1others~1missiles~1{missileId}'
+  /api/probe/{probeId}/missiles:
+    $ref: './openapi-others.json#/paths/~1api~1probe~1{probeId}~1missiles'
+  /api/probe/{probeId}/missiles/{missileId}:
+    $ref: './openapi-others.json#/paths/~1api~1probe~1{probeId}~1missiles~1{missileId}'
   /api/version:
     get:
       security: []
@@ -26,7 +76,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 117
+                apiVersion: 118
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -4034,12 +4084,18 @@ paths:
         the sector is current, visited, or only passively scanned from a reachable
         probe. When another owned probe is reachable from the default probe and
         is closer to the requested sector, its scan is used if it has enough
-        sensor data. For backward compatibility, `sector.distance` remains the
-        distance from the default probe; `sector.distances` lists the distance
+        sensor data. `sector.distance` is measured from the default probe;
+        `sector.distances` lists the distance
         from every owned probe and marks the probe whose sensors produced the
         scan. During blind cruise, only already visited sectors can be consulted
         as historical cartography.
       parameters:
+        - name: shipId
+          in: query
+          required: false
+          description: Owned Others ship used as the private BOB-equivalent scan source; requires can_control_others.
+          schema:
+            type: string
         - name: x
           in: query
           required: true

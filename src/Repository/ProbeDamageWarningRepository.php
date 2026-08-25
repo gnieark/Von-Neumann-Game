@@ -55,6 +55,19 @@ final class ProbeDamageWarningRepository
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Damage warning creation failed.');
     }
 
+    public function createOthersAlert(int $probeId, ?int $movementId, string $type, string $eventKey, SectorCoordinates $sector, string $message, string $phase = 'detection', ?string $scheduledAt = null): ProbeDamageWarning
+    {
+        if (!in_array($type, [ProbeDamageWarning::TYPE_OTHERS_PRESENCE, ProbeDamageWarning::TYPE_OTHERS_WEAPON, ProbeDamageWarning::TYPE_OTHERS_HARVEST_TRACES], true)) {
+            throw new \InvalidArgumentException('Unsupported Others alert type.');
+        }
+        $existing = $this->findByProbeMovementTypeAndObject($probeId, $movementId, $type, $eventKey);
+        if ($existing !== null) { return $existing; }
+        $now = gmdate('c'); $scheduledAt ??= $now;
+        $stmt = $this->pdo->prepare('INSERT INTO probe_damage_warnings (probe_id,movement_id,type,status,phase,scheduled_at,sector_x,sector_y,sector_z,container_id,container_label,object_id,risk_percent,additional_container_count,message,read_at,resolved_at,created_at,updated_at) VALUES (:probe_id,:movement_id,:type,:status,:phase,:scheduled_at,:x,:y,:z,\'\',\'\',:object_id,0,0,:message,NULL,NULL,:created_at,:updated_at)');
+        $stmt->execute(['probe_id' => $probeId, 'movement_id' => $movementId, 'type' => $type, 'status' => ProbeDamageWarning::STATUS_UNREAD, 'phase' => $phase, 'scheduled_at' => $scheduledAt, 'x' => $sector->getX(), 'y' => $sector->getY(), 'z' => $sector->getZ(), 'object_id' => $eventKey, 'message' => $message, 'created_at' => $now, 'updated_at' => $now]);
+        return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Others alert creation failed.');
+    }
+
     public function createIntelligentLifeAlert(
         int $probeId,
         int $movementId,

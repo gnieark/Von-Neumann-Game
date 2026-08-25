@@ -27,6 +27,10 @@ final class DormantConstruct extends UniverseObject
         ?string $description = 'A non-natural structure of unknown origin drifting through space. It appears inactive, and its observed shape does not reveal whether it was a vessel, a factory, or something else.',
         array $waypointBookmarks = [],
         private readonly ?string $inspectionScenario = null,
+        private readonly ?string $subtype = null,
+        private readonly array $resourceAmounts = [],
+        private readonly bool $identified = false,
+        private readonly ?string $originalAuxiliaryId = null,
     ) {
         parent::__construct($id, $name, UniverseObjectType::DormantConstruct, $mass, $radius, $description, $waypointBookmarks);
     }
@@ -64,6 +68,10 @@ final class DormantConstruct extends UniverseObject
             $this->getDescription(),
             $this->getWaypointBookmarks(),
             self::normalizeInspectionScenario($scenario),
+            $this->subtype,
+            $this->resourceAmounts,
+            $this->identified,
+            $this->originalAuxiliaryId,
         );
     }
 
@@ -76,6 +84,12 @@ final class DormantConstruct extends UniverseObject
         ];
         if ($this->getInspectionScenario() !== null) {
             $data['inspectionScenario'] = $this->getInspectionScenario();
+        }
+        if ($this->subtype !== null) {
+            $data['subtype'] = $this->subtype;
+            $data['resourceAmounts'] = $this->resourceAmounts;
+            $data['identified'] = $this->identified;
+            if ($this->originalAuxiliaryId !== null) { $data['originalAuxiliaryId'] = $this->originalAuxiliaryId; }
         }
 
         return $data;
@@ -91,7 +105,38 @@ final class DormantConstruct extends UniverseObject
             $data['description'] ?? null,
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
             self::normalizeInspectionScenario($data['inspectionScenario'] ?? null),
+            isset($data['subtype']) ? (string) $data['subtype'] : null,
+            is_array($data['resourceAmounts'] ?? null) ? $data['resourceAmounts'] : [],
+            (bool) ($data['identified'] ?? false),
+            isset($data['originalAuxiliaryId']) ? (string) $data['originalAuxiliaryId'] : null,
         );
+    }
+
+    public static function fromOthersAuxiliary(string $auxiliaryId, bool $destroyed = false): self
+    {
+        return new self(
+            ($destroyed ? 'others-auxiliary-wreck-' : 'dormant-others-auxiliary-') . $auxiliaryId,
+            $destroyed ? 'Destroyed Others auxiliary' : 'Dormant construct',
+            description: $destroyed ? 'A destroyed artificial auxiliary drifting through space.' : 'An inactive artificial auxiliary deprived of its carrier.',
+            subtype: $destroyed ? 'others_auxiliary_wreck' : 'others_auxiliary',
+            resourceAmounts: ['deuterium' => $destroyed ? 0.02 : 0.01, 'metals' => 5.0, 'ice' => 0.0, 'carbon_compounds' => 0.0],
+            identified: false,
+            originalAuxiliaryId: $auxiliaryId,
+        );
+    }
+
+    public function getSubtype(): ?string { return $this->subtype; }
+    public function getResourceAmounts(): array { return $this->resourceAmounts; }
+    public function isIdentified(): bool { return $this->identified; }
+    public function getOriginalAuxiliaryId(): ?string { return $this->originalAuxiliaryId; }
+    public function withResourceAmounts(array $amounts): self
+    {
+        return new self($this->getId(), $this->getName(), $this->getMass(), $this->getRadius(), $this->getDescription(), $this->getWaypointBookmarks(), $this->inspectionScenario, $this->subtype, $amounts, $this->identified, $this->originalAuxiliaryId);
+    }
+
+    public function withIdentification(bool $identified, ?array $resourceAmounts = null): self
+    {
+        return new self($this->getId(), $this->getName(), $this->getMass(), $this->getRadius(), $this->getDescription(), $this->getWaypointBookmarks(), $this->inspectionScenario, $this->subtype, $resourceAmounts ?? $this->resourceAmounts, $identified, $this->originalAuxiliaryId);
     }
 
     private static function normalizeInspectionScenario(mixed $scenario): ?string

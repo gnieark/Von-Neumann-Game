@@ -19,6 +19,8 @@ final class SchedulerService
     public const PROBE_STORAGE_CONTAINER_BREAK = 'probe.storage_container.break';
     public const MANNY_TASK = 'manny.task';
     public const ASTEROID_TRAJECTORY_PHASE = 'asteroid.trajectory.phase';
+    public const OTHERS_ACTION = 'others.action';
+    public const MISSILE_PROJECTILE = 'missile.projectile';
 
     public function __construct(
         private readonly ScheduledEventRepository $events,
@@ -27,6 +29,7 @@ final class SchedulerService
         private readonly ProbeMovementService $movementService,
         private readonly ?MannyService $mannyService = null,
         private readonly ?AsteroidTrajectoryPhaseProcessor $asteroidTrajectoryProcessor = null,
+        private readonly ?OthersService $othersService = null,
     ) {}
 
     /**
@@ -86,6 +89,8 @@ final class SchedulerService
             self::PROBE_STORAGE_CONTAINER_BREAK => $this->processProbeStorageContainerBreak($event),
             self::MANNY_TASK => $this->processMannyTask($event),
             self::ASTEROID_TRAJECTORY_PHASE => $this->processAsteroidTrajectoryPhase($event),
+            self::OTHERS_ACTION => $this->processOthersAction($event),
+            self::MISSILE_PROJECTILE => $this->processMissileProjectile($event),
             default => throw new \RuntimeException('Unsupported scheduled event type: ' . $event->type),
         };
     }
@@ -140,6 +145,9 @@ final class SchedulerService
 
     private function processMannyTask(ScheduledEvent $event): bool
     {
+        if ($this->othersService?->processScheduledMannyMissile($event) === true) {
+            return true;
+        }
         if ($this->mannyService === null) {
             throw new \RuntimeException('Manny scheduler is unavailable.');
         }
@@ -177,6 +185,24 @@ final class SchedulerService
         }
         $this->asteroidTrajectoryProcessor->process($event->entityId, $expectedStatus, $expectedSectorsCrossed);
 
+        return true;
+    }
+
+    private function processOthersAction(ScheduledEvent $event): bool
+    {
+        if ($event->entityType !== 'others_action' || $this->othersService === null) {
+            throw new \RuntimeException('Others action scheduler is unavailable.');
+        }
+        $this->othersService->processScheduledAction($event);
+        return true;
+    }
+
+    private function processMissileProjectile(ScheduledEvent $event): bool
+    {
+        if ($event->entityType !== 'missile_projectile' || $this->othersService === null) {
+            throw new \RuntimeException('Missile projectile scheduler is unavailable.');
+        }
+        $this->othersService->processScheduledProjectile($event);
         return true;
     }
 }

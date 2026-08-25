@@ -26,6 +26,9 @@ use VonNeumannGame\Http\Controller\ForumApiController;
 use VonNeumannGame\Http\Controller\ProbeManniesApiController;
 use VonNeumannGame\Http\Controller\ProbeManniesApiPresenter;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\OthersAuditRepository;
+use VonNeumannGame\Repository\OthersIdempotencyRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
@@ -38,6 +41,8 @@ use VonNeumannGame\Service\MannyActionException;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\ObservationAccessException;
+use VonNeumannGame\Service\OthersActionException;
+use VonNeumannGame\Service\OthersService;
 use VonNeumannGame\Service\ProbeMovementException;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeReinstantiationException;
@@ -47,6 +52,7 @@ use VonNeumannGame\Service\ScutNetworkService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryException;
 use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryService;
+use VonNeumannGame\Service\AutonomousUnitObservationService;
 use VonNeumannGame\Sector\InvalidSectorCoordinatesException;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
 use VonNeumannGame\Sector\SectorCoordinates;
@@ -55,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 117;
+    public const API_VERSION = 118;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -82,6 +88,11 @@ final class ApiKernel
         private readonly ?ProbeImprovementRepository $improvements = null,
         private readonly ?TokenRateLimiter $rateLimiter = null,
         private readonly ?AsteroidTrajectoryService $asteroidTrajectories = null,
+        private readonly ?OthersRepository $others = null,
+        private readonly ?OthersIdempotencyRepository $othersIdempotency = null,
+        private readonly ?OthersAuditRepository $othersAudit = null,
+        private readonly ?OthersService $othersService = null,
+        private readonly ?AutonomousUnitObservationService $autonomousUnits = null,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -105,6 +116,8 @@ final class ApiKernel
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage(), $e->details);
         } catch (AsteroidTrajectoryException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
+        } catch (OthersActionException $e) {
+            return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (InvalidSectorCoordinatesException|\InvalidArgumentException $e) {
             return ApiResponse::error(400, 'bad_request', $e->getMessage());
         } catch (\Throwable) {
@@ -123,6 +136,32 @@ final class ApiKernel
     private function routes(): array
     {
         return [
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersMissileCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->missileResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->probeMissileCreateResponse($player, $probe, $ctx->body)), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $_probe): ApiResponse => $this->missileResponse($player, $ctx->stringParam(1)), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/weapons/laser$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersLaserResponse($player, $ctx->stringParam(0), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/crafts$#', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersCraftCreateResponse($player, $ctx->stringParam(0), $ctx->body)) : $this->othersCraftsResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/others/crafts/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCraftResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/harvest$#', ['POST', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $ctx->method === 'POST' ? $this->othersHarvestCreateResponse($player, $ctx->stringParam(0), $ctx->body) : $this->othersHarvestCancelResponse($player, $ctx->stringParam(0))))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/tasks$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryBatchResponse($player, $ctx->stringParam(0), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/(mine|recall|recover-dormant-auxiliary)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryTaskResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->stringParam(2), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory-transfers$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersInventoryTransferCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/inventory-transfers/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersInventoryTransferResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/transfer-deuterium$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersDeuteriumTransferResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->body)))),
+            ApiRoute::regex('#^/api/probe/(\d+)/sector/autonomous-units$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAutonomousUnitsResponse($player, $ctx->intParam(0), $ctx->query))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/sector/autonomous-units$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAutonomousUnitsResponse($player, $ctx->stringParam(0), $ctx->query))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/move$#', ['POST', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $ctx->method === 'POST' ? $this->othersShipMoveResponse($player, $ctx->stringParam(0), $ctx->body) : $this->othersShipMoveCancelResponse($player, $ctx->stringParam(0))))),
+            ApiRoute::regex('#^/api/others/fleets/([^/]+)/move$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersFleetMoveResponse($player, $ctx->stringParam(0), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAuxiliaryResponse($player, $ctx->stringParam(0), $ctx->stringParam(1)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAuxiliariesResponse($player, $ctx->stringParam(0), $ctx->query))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersInventoryResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersShipResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/others/fleets/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersFleetResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/others/actions/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersActionResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::path('/api/others/crafting/recipes', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersRecipesResponse())),
+            ApiRoute::path('/api/others/fleets', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersFleetsResponse($player))),
+            ApiRoute::path('/api/others', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersOverviewResponse($player))),
             ApiRoute::regex('#^/api/probe/(\d+)/asteroids/([^/]+)/trajectories$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->asteroidTrajectoryCreateResponse($player, $probe, $ctx->stringParam(1), $ctx->body), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/asteroid-trajectories/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->asteroidTrajectoryResponse($probe, $ctx->stringParam(1)), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/storage-containers/([^/]+)/crafting-reservations/reassign$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeStorageCraftingReservationsReassignResponse($player, $ctx->stringParam(1), $probe), $ctx->intParam(0), ['POST'])),
@@ -402,6 +441,469 @@ final class ApiKernel
         $response = $handler($player);
 
         return new ApiResponse($response->status, $response->body, array_merge($response->headers, $headers));
+    }
+
+    private function protectedOthersRoute(ApiRouteContext $ctx, callable $handler): ApiResponse
+    {
+        return $this->protectedRoute($ctx->method, [$ctx->method], $ctx->headers, function (Player $player) use ($handler): ApiResponse {
+            if (!$player->canControlOthers) {
+                return ApiResponse::error(403, 'others_permission_required', 'This account is not allowed to control Others fleets.');
+            }
+            if ($this->others === null) {
+                return ApiResponse::error(503, 'others_unavailable', 'Others operations are unavailable.');
+            }
+
+            return $handler($player);
+        });
+    }
+
+    private function othersOverviewResponse(Player $player): ApiResponse
+    {
+        $fleets = $this->others?->findFleetSummariesByPlayerId($player->id) ?? [];
+        return new ApiResponse(200, ['others' => [
+            'fleetCount' => count($fleets),
+            'shipCount' => array_sum(array_map(static fn(array $row): int => (int) $row['ship_count'], $fleets)),
+            'auxiliaryCount' => array_sum(array_map(static fn(array $row): int => (int) $row['auxiliary_count'], $fleets)),
+            'activeActionCount' => array_sum(array_map(static fn(array $row): int => (int) $row['active_action_count'], $fleets)),
+        ]]);
+    }
+
+    private function othersFleetsResponse(Player $player): ApiResponse
+    {
+        $rows = $this->others?->findFleetSummariesByPlayerId($player->id) ?? [];
+        return new ApiResponse(200, ['fleets' => array_map(fn(array $row): array => $this->presentOthersFleetSummary($row), $rows)]);
+    }
+
+    private function othersFleetResponse(Player $player, string $fleetId): ApiResponse
+    {
+        $fleet = $this->others?->findFleetForPlayer($fleetId, $player->id);
+        if ($fleet === null) {
+            return ApiResponse::error(404, 'others_fleet_not_found', 'Others fleet not found.');
+        }
+        $ships = $this->others?->findShipsByFleetId((int) $fleet['id']) ?? [];
+        $actions = $this->others?->findActiveAuxiliaryTasksByFleetId((int) $fleet['id']) ?? [];
+        return new ApiResponse(200, ['fleet' => [
+            'id' => (string) $fleet['public_id'],
+            'status' => (string) $fleet['status'],
+            'ships' => array_map(fn(array $ship): array => $this->presentOthersShip($ship), $ships),
+            'activeActions' => array_map(fn(array $action): array => $this->presentOthersAction($action), $actions),
+            'createdAt' => (string) $fleet['created_at'],
+            'updatedAt' => (string) $fleet['updated_at'],
+        ]]);
+    }
+
+    private function othersShipResponse(Player $player, string $shipId): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        return $ship === null
+            ? ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.')
+            : new ApiResponse(200, ['ship' => $this->presentOthersShip($ship)]);
+    }
+
+    private function othersAuxiliariesResponse(Player $player, string $shipId, array $query): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) {
+            return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
+        }
+        $limit = isset($query['limit']) && is_numeric($query['limit']) ? (int) $query['limit'] : 100;
+        if ($limit < 1 || $limit > 500) {
+            return ApiResponse::error(400, 'bad_request', 'limit must be between 1 and 500.');
+        }
+        $cursor = null;
+        if (isset($query['cursor'])) {
+            $decoded = base64_decode((string) $query['cursor'], true);
+            if ($decoded === false || !preg_match('/^aux_[a-f0-9]{20}$/', $decoded)) {
+                return ApiResponse::error(400, 'bad_request', 'cursor is invalid.');
+            }
+            $cursor = $decoded;
+        }
+        $page = $this->others?->findAuxiliariesPageByShipId((int) $ship['id'], $cursor, $limit) ?? ['rows' => [], 'nextCursor' => null];
+        $response = ['auxiliaries' => array_map(fn(array $row): array => $this->presentOthersAuxiliary($row), $page['rows'])];
+        if ($page['nextCursor'] !== null) {
+            $response['nextCursor'] = base64_encode((string) $page['nextCursor']);
+        }
+        return new ApiResponse(200, $response);
+    }
+
+    private function othersAuxiliaryResponse(Player $player, string $shipId, string $auxiliaryId): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) {
+            return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
+        }
+        $auxiliary = $this->others?->findAuxiliaryForShip($auxiliaryId, (int) $ship['id']);
+        return $auxiliary === null
+            ? ApiResponse::error(404, 'others_auxiliary_not_found', 'Others auxiliary not found.')
+            : new ApiResponse(200, ['auxiliary' => $this->presentOthersAuxiliary($auxiliary)]);
+    }
+
+    private function othersAuxiliaryTaskResponse(Player $player, string $shipId, string $auxiliaryId, string $task, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $auxiliary = $this->others?->findAuxiliaryForShip($auxiliaryId, (int) $ship['id']);
+        if ($auxiliary === null) { return ApiResponse::error(404, 'others_auxiliary_not_found', 'Others auxiliary not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $action = $this->othersService?->startAuxiliaryTask($ship, $auxiliary, $task, $payload) ?? throw new \RuntimeException('Others auxiliary task service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function othersAuxiliaryBatchResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body); $tasks = is_array($payload) ? ($payload['tasks'] ?? null) : null;
+        if (!is_array($tasks) || $tasks === []) { return ApiResponse::error(400, 'bad_request', 'tasks must be a non-empty array.'); }
+        $seen = [];
+        foreach ($tasks as $task) {
+            if (!is_array($task) || !is_string($task['auxiliaryId'] ?? null) || !is_string($task['task'] ?? null) || !is_array($task['payload'] ?? null) || isset($seen[$task['auxiliaryId']])) { return ApiResponse::error(400, 'bad_request', 'Each auxiliary may appear exactly once with task and payload.'); }
+            $seen[$task['auxiliaryId']] = true;
+        }
+        $actions = $this->others?->transaction(function () use ($ship, $tasks): array {
+            $result = [];
+            foreach ($tasks as $task) {
+                $auxiliary = $this->others?->findAuxiliaryForShip($task['auxiliaryId'], (int) $ship['id']);
+                if ($auxiliary === null) { throw new OthersActionException(404, 'others_auxiliary_not_found', 'Others auxiliary not found.'); }
+                $result[] = $this->othersService?->startAuxiliaryTask($ship, $auxiliary, $task['task'], $task['payload']) ?? throw new \RuntimeException('Others auxiliary task service is unavailable.');
+            }
+            return $result;
+        }) ?? [];
+        return new ApiResponse(202, ['actions' => array_map(fn(array $action): array => $this->presentOthersAction($action), $actions)]);
+    }
+
+    private function othersInventoryResponse(Player $player, string $shipId): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) {
+            return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
+        }
+        $inventory = $this->others?->inventory((int) $ship['id']) ?? ['resources' => [], 'items' => []];
+        $used = array_sum(array_map(static fn(array $resource): float => (float) $resource['amount'], $inventory['resources']))
+            + array_sum(array_map(static fn(array $item): float => (float) $item['container_space'], $inventory['items']));
+        return new ApiResponse(200, ['inventory' => [
+            'shipId' => (string) $ship['public_id'],
+            'capacityEce' => (float) $ship['inventory_capacity'],
+            'usedEce' => round($used, 4),
+            'reservedEce' => (float) $ship['inventory_reserved'],
+            'resources' => $inventory['resources'],
+            'items' => array_map(static fn(array $item): array => ['id' => (string) $item['public_id'], 'type' => (string) $item['type'], 'containerSpaceEce' => (float) $item['container_space']], $inventory['items']),
+        ]]);
+    }
+
+    private function othersInventoryTransferCreateResponse(Player $player, string $sourceShipId, ?string $body): ApiResponse
+    {
+        $source = $this->others?->findShipForPlayer($sourceShipId, $player->id);
+        if ($source === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $created = $this->othersService?->createInventoryTransfer($source, $payload) ?? throw new \RuntimeException('Others transfer service is unavailable.');
+        return new ApiResponse(202, ['transfer' => $this->presentInventoryTransfer($created['transfer']), 'action' => $this->presentOthersAction($created['action'])]);
+    }
+
+    private function othersInventoryTransferResponse(Player $player, string $transferId): ApiResponse
+    {
+        $transfer = $this->others?->findInventoryTransferForPlayer($transferId, $player->id);
+        return $transfer === null
+            ? ApiResponse::error(404, 'others_inventory_transfer_not_found', 'Others inventory transfer not found.')
+            : new ApiResponse(200, ['transfer' => $this->presentInventoryTransfer($transfer)]);
+    }
+
+    private function othersDeuteriumTransferResponse(Player $player, string $shipId, string $auxiliaryId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $auxiliary = $this->others?->findAuxiliaryForShip($auxiliaryId, (int) $ship['id']);
+        if ($auxiliary === null) { return ApiResponse::error(404, 'others_auxiliary_not_found', 'Others auxiliary not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $action = $this->othersService?->transferDeuterium($ship, $auxiliary, $payload) ?? throw new \RuntimeException('Others transfer service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function presentInventoryTransfer(array $transfer): array
+    {
+        $result = ['id' => (string) $transfer['public_id'], 'kind' => (string) $transfer['kind'], 'status' => (string) ($transfer['action_status'] ?? $transfer['status']), 'actionId' => (string) ($transfer['action_public_id'] ?? '')];
+        if ($transfer['resource_type'] !== null) { $result['resourceType'] = (string) $transfer['resource_type']; $result['amount'] = (float) $transfer['amount']; }
+        else { $result['itemIds'] = json_decode((string) $transfer['item_ids_json'], true); }
+        if (($transfer['ends_at'] ?? null) !== null) { $result['endsAt'] = (string) $transfer['ends_at']; }
+        if (($transfer['result_json'] ?? null) !== null) { $result['result'] = json_decode((string) $transfer['result_json'], true); }
+        if (($transfer['error_json'] ?? null) !== null) { $result['error'] = json_decode((string) $transfer['error_json'], true); }
+        return $result;
+    }
+
+    private function othersActionResponse(Player $player, string $actionId): ApiResponse
+    {
+        $action = $this->others?->findActionForPlayer($actionId, $player->id);
+        return $action === null
+            ? ApiResponse::error(404, 'others_action_not_found', 'Others action not found.')
+            : new ApiResponse(200, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function othersRecipesResponse(): ApiResponse
+    {
+        return new ApiResponse(200, ['recipes' => [
+            ['id' => 'standard_ship', 'durationSeconds' => 604800, 'ingredients' => ['metals' => 6000.0, 'ice' => 1000.0, 'carbon_compounds' => 2000.0, 'deuterium' => 100.0], 'output' => ['kind' => 'standard_ship', 'quantity' => 1]],
+            ['id' => 'others_auxiliary', 'durationSeconds' => 3600, 'ingredients' => ['metals' => 5.0, 'ice' => 0.5, 'carbon_compounds' => 1.0, 'deuterium' => 0.05], 'output' => ['kind' => 'others_auxiliary', 'quantity' => 1]],
+            ['id' => 'missile', 'durationSeconds' => 1800, 'ingredients' => ['metals' => 20.0, 'ice' => 2.0, 'carbon_compounds' => 5.0, 'deuterium' => 1.0], 'output' => ['kind' => 'missile', 'quantity' => 1, 'containerSpaceEce' => 2.0]],
+        ]]);
+    }
+
+    private function othersCraftCreateResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $created = $this->othersService?->startCraft($ship, $payload) ?? throw new \RuntimeException('Others crafting service is unavailable.');
+        return new ApiResponse(202, ['craft' => $this->presentOthersCraft($created['craft']), 'action' => $this->presentOthersAction($created['action'])]);
+    }
+
+    private function othersCraftsResponse(Player $player, string $shipId): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $rows = $this->others?->findCraftsByShipForPlayer((int) $ship['id'], $player->id) ?? [];
+        return new ApiResponse(200, ['crafts' => array_map(fn(array $craft): array => $this->presentOthersCraft($craft), $rows)]);
+    }
+
+    private function othersCraftResponse(Player $player, string $craftId): ApiResponse
+    {
+        $craft = $this->others?->findCraftForPlayer($craftId, $player->id);
+        return $craft === null ? ApiResponse::error(404, 'others_craft_not_found', 'Others craft not found.') : new ApiResponse(200, ['craft' => $this->presentOthersCraft($craft)]);
+    }
+
+    private function presentOthersCraft(array $craft): array
+    {
+        $result = ['id' => (string) $craft['public_id'], 'recipeId' => (string) $craft['recipe_id'], 'status' => (string) ($craft['action_status'] ?? $craft['status']), 'actionId' => (string) ($craft['action_public_id'] ?? ''), 'createdAt' => (string) $craft['created_at'], 'updatedAt' => (string) $craft['updated_at']];
+        if (($craft['ends_at'] ?? null) !== null) { $result['endsAt'] = (string) $craft['ends_at']; }
+        if (($craft['result_json'] ?? null) !== null) { $result['result'] = json_decode((string) $craft['result_json'], true); }
+        if (($craft['error_json'] ?? null) !== null) { $result['error'] = json_decode((string) $craft['error_json'], true); }
+        return $result;
+    }
+
+    private function othersShipMoveResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) {
+            return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
+        }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) {
+            return ApiResponse::error(400, 'bad_request', 'A JSON object is required.');
+        }
+        $action = $this->othersService?->moveShip($ship, $payload) ?? throw new \RuntimeException('Others movement service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function othersHarvestCreateResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $action = $this->othersService?->startHarvest($ship, $payload) ?? throw new \RuntimeException('Others harvest service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function othersLaserResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $action = $this->othersService?->startLaser($ship, $payload) ?? throw new \RuntimeException('Others laser service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function othersMissileCreateResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $created = $this->othersService?->launchOthersMissile($ship, $payload) ?? throw new \RuntimeException('Others missile service is unavailable.');
+        return new ApiResponse(202, ['missile' => $this->presentMissile($created['missile']), 'action' => $this->presentOthersAction($created['action'])]);
+    }
+
+    private function probeMissileCreateResponse(Player $player, NeumannProbe $probe, ?string $body): ApiResponse
+    {
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $missile = $this->othersService?->prepareProbeMissile($probe, $player->id, $payload) ?? throw new \RuntimeException('Probe missile service is unavailable.');
+        return new ApiResponse(202, ['missile' => $this->presentMissile($missile)]);
+    }
+
+    private function missileResponse(Player $player, string $missileId): ApiResponse
+    {
+        $missile = $this->othersService?->findMissileForPlayer($missileId, $player->id);
+        return $missile === null ? ApiResponse::error(404, 'missile_not_found', 'Missile not found.') : new ApiResponse(200, ['missile' => $this->presentMissile($missile)]);
+    }
+
+    /** @return array<string,mixed> */
+    private function presentMissile(array $missile): array
+    {
+        $result = ['id'=>(string)$missile['public_id'],'launcherKind'=>(string)$missile['launcher_kind'],'launcherId'=>(string)$missile['launcher_public_id'],'targetId'=>(string)$missile['target_public_id'],'status'=>(string)$missile['status'],'launchAt'=>(string)$missile['launch_at'],'createdAt'=>(string)$missile['created_at'],'updatedAt'=>(string)$missile['updated_at']];
+        if (($missile['impact_at'] ?? null) !== null) { $result['impactAt'] = (string)$missile['impact_at']; }
+        if (($missile['result'] ?? null) !== null) { $result['result'] = (string)$missile['result']; }
+        if (is_string($missile['action_public_id'] ?? null)) { $result['actionId'] = $missile['action_public_id']; }
+        if (($missile['details_json'] ?? null) !== null) { $result['details'] = json_decode((string)$missile['details_json'], true); }
+        return $result;
+    }
+
+    private function othersHarvestCancelResponse(Player $player, string $shipId): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $action = $this->othersService?->cancelHarvest($ship) ?? throw new \RuntimeException('Others harvest service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function othersShipMoveCancelResponse(Player $player, string $shipId): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) {
+            return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
+        }
+        $action = $this->othersService?->cancelMove($ship) ?? throw new \RuntimeException('Others movement service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
+    private function othersFleetMoveResponse(Player $player, string $fleetId, ?string $body): ApiResponse
+    {
+        $fleet = $this->others?->findFleetForPlayer($fleetId, $player->id);
+        if ($fleet === null) {
+            return ApiResponse::error(404, 'others_fleet_not_found', 'Others fleet not found.');
+        }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) {
+            return ApiResponse::error(400, 'bad_request', 'A JSON object is required.');
+        }
+        $result = $this->othersService?->moveFleet($fleet, $payload) ?? throw new \RuntimeException('Others movement service is unavailable.');
+        return new ApiResponse(202, [
+            'actions' => array_map(fn(array $entry): array => ['shipId' => $entry['shipId'], 'action' => $this->presentOthersAction($entry['action'])], $result['created']),
+            'ignored' => $result['ignored'], 'blocked' => $result['blocked'],
+        ]);
+    }
+
+    private function othersCommand(ApiRouteContext $ctx, Player $player, callable $command): ApiResponse
+    {
+        $key = $this->headerValue($ctx->headers, 'Idempotency-Key');
+        if ($key === null) {
+            $response = $command();
+            $this->othersAudit?->record($player->id, 'http', $ctx->method . ' ' . $ctx->path, $response->status < 400 ? 'accepted' : 'refused');
+            return $response;
+        }
+        if (!preg_match('/^[\x21-\x7E]{1,128}$/', $key)) {
+            return ApiResponse::error(400, 'bad_request', 'Idempotency-Key must contain 1 to 128 visible ASCII characters.');
+        }
+        if ($this->othersIdempotency === null || $this->others === null) {
+            return ApiResponse::error(503, 'others_unavailable', 'Others idempotency storage is unavailable.');
+        }
+        $hash = hash('sha256', $this->canonicalJsonBody($ctx->body));
+        return $this->others->transaction(function () use ($ctx, $player, $command, $key, $hash): ApiResponse {
+            // Commands sharing an account also share the idempotency namespace.
+            // Lock that account so the first lookup and insert are serialized.
+            $pdo = $this->others?->pdo() ?? throw new \RuntimeException('Others storage is unavailable.');
+            $lockSql = 'SELECT id FROM players WHERE id = :player_id';
+            if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
+                $lockSql .= ' FOR UPDATE';
+            }
+            $lock = $pdo->prepare($lockSql);
+            $lock->execute(['player_id' => $player->id]);
+            if ($lock->fetchColumn() === false) {
+                throw new \RuntimeException('Unable to lock the idempotency account.');
+            }
+            $existing = $this->othersIdempotency?->find($player->id, $key);
+            if ($existing !== null) {
+                if ($existing['request_method'] !== $ctx->method || $existing['request_path'] !== $ctx->path || !hash_equals((string) $existing['request_body_hash'], $hash)) {
+                    return ApiResponse::error(409, 'idempotency_key_conflict', 'This idempotency key is already bound to another command.');
+                }
+                return $this->othersIdempotency?->responseFrom($existing) ?? throw new \RuntimeException('Stored idempotent response is unavailable.');
+            }
+            $response = $command();
+            $this->othersIdempotency?->store($player->id, $key, $ctx->method, $ctx->path, $hash, $response);
+            $this->othersAudit?->record($player->id, 'http', $ctx->method . ' ' . $ctx->path, $response->status < 400 ? 'accepted' : 'refused', details: ['idempotencyKeyHash' => hash('sha256', $key)]);
+            return $response;
+        });
+    }
+
+    private function headerValue(array $headers, string $wanted): ?string
+    {
+        foreach ($headers as $name => $value) {
+            if (strcasecmp((string) $name, $wanted) === 0) {
+                return trim(is_array($value) ? (string) reset($value) : (string) $value);
+            }
+        }
+        return null;
+    }
+
+    private function canonicalJsonBody(?string $body): string
+    {
+        if ($body === null || trim($body) === '') { return '{}'; }
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded)) { return $body; }
+        $sort = function (mixed $value) use (&$sort): mixed {
+            if (!is_array($value)) { return $value; }
+            if (!array_is_list($value)) { ksort($value); }
+            foreach ($value as $key => $child) { $value[$key] = $sort($child); }
+            return $value;
+        };
+        return json_encode($sort($decoded), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
+    private function presentOthersFleetSummary(array $fleet): array
+    {
+        return ['id' => (string) $fleet['public_id'], 'status' => (string) $fleet['status'], 'shipCount' => (int) $fleet['ship_count'], 'standardShipCount' => (int) $fleet['standard_ship_count'], 'auxiliaryCount' => (int) $fleet['auxiliary_count'], 'deployedAuxiliaryCount' => (int) $fleet['deployed_auxiliary_count'], 'activeActionCount' => (int) $fleet['active_action_count']];
+    }
+
+    private function presentOthersShip(array $ship): array
+    {
+        $result = [
+            'id' => (string) $ship['public_id'], 'fleetId' => (string) ($ship['fleet_public_id'] ?? ''),
+            'type' => (string) $ship['type'], 'status' => (string) $ship['status'],
+            'integrity' => (int) $ship['integrity'], 'maxIntegrity' => (int) $ship['max_integrity'],
+            'deuterium' => ['amount' => (float) $ship['deuterium_stock'], 'capacity' => (float) $ship['deuterium_capacity']],
+            'inventoryCapacityEce' => (float) $ship['inventory_capacity'],
+            'location' => ['state' => in_array((string) $ship['status'], ['transit', 'removed', 'destroyed'], true) ? (string) $ship['status'] : 'in_sector'],
+            'createdAt' => (string) $ship['created_at'], 'updatedAt' => (string) $ship['updated_at'],
+        ];
+        if (isset($ship['auxiliary_count'])) {
+            $result['auxiliaryCount'] = (int) $ship['auxiliary_count'];
+            $result['deployedAuxiliaryCount'] = (int) $ship['deployed_auxiliary_count'];
+        }
+        return $result;
+    }
+
+    private function presentOthersAuxiliary(array $auxiliary): array
+    {
+        $result = [
+            'id' => (string) $auxiliary['public_id'], 'status' => (string) $auxiliary['status'],
+            'locationType' => (string) $auxiliary['location_type'], 'spatialState' => (string) $auxiliary['spatial_state'],
+            'capacityEce' => 2.0,
+            'cargo' => ['deuterium' => (float) $auxiliary['cargo_deuterium'], 'metals' => (float) $auxiliary['cargo_metals'], 'ice' => (float) $auxiliary['cargo_ice'], 'carbon_compounds' => (float) $auxiliary['cargo_carbon_compounds']],
+        ];
+        if (!empty($auxiliary['action_public_id'])) {
+            $result['action'] = ['id' => (string) $auxiliary['action_public_id'], 'type' => (string) $auxiliary['action_type'], 'status' => (string) $auxiliary['action_status'], 'endsAt' => (string) $auxiliary['action_ends_at']];
+        }
+        return $result;
+    }
+
+    private function presentOthersAction(array $action): array
+    {
+        $result = [
+            'id' => (string) $action['public_id'], 'type' => (string) $action['type'], 'status' => $action['status'] === 'cancel_requested' ? 'queued' : (string) $action['status'],
+            'createdAt' => (string) $action['created_at'], 'updatedAt' => (string) $action['updated_at'],
+            'actor' => ['kind' => (string) $action['actor_kind'], 'id' => (string) $action['actor_public_id']],
+        ];
+        foreach (['ends_at' => 'endsAt', 'cancelable_until' => 'cancelableUntil', 'completed_at' => 'completedAt'] as $column => $field) {
+            if (($action[$column] ?? null) !== null) { $result[$field] = (string) $action[$column]; }
+        }
+        foreach (['result_json' => 'result', 'error_json' => 'error'] as $column => $field) {
+            if (($action[$column] ?? null) !== null) { $result[$field] = json_decode((string) $action[$column], true); }
+        }
+        return $result;
     }
 
     private function protectedProbeRoute(ApiRouteContext $ctx, callable $handler, int $probeId, array $allowedMethods): ApiResponse
@@ -1584,13 +2086,114 @@ final class ApiKernel
             return $this->invalidRelativeCoordinateResponse();
         }
 
+        if (isset($query['shipId'])) {
+            return $this->othersSectorResponse($player, (string) $query['shipId'], (int) $query['x'], (int) $query['y'], (int) $query['z']);
+        }
+
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
         $this->movements->ensureProbeOperational($probe);
         $target = $this->observations->relativeToAbsolute($player, (int) $query['x'], (int) $query['y'], (int) $query['z']);
 
         return new ApiResponse(200, [
-            'sector' => $this->bestSectorObservation($player, $probe, $target),
+            'sector' => $this->addObservedOthersEntities($this->bestSectorObservation($player, $probe, $target), $target),
         ]);
+    }
+
+    private function othersSectorResponse(Player $player, string $shipId, int $x, int $y, int $z): ApiResponse
+    {
+        if (!$player->canControlOthers) {
+            return ApiResponse::error(403, 'others_permission_required', 'This account is not allowed to control Others fleets.');
+        }
+        $designated = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($designated === null) {
+            return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
+        }
+        try {
+            $origin = new SectorCoordinates((int) $designated['sector_x'], (int) $designated['sector_y'], (int) $designated['sector_z']);
+            $target = $origin->add($x, $y, $z);
+        } catch (\Throwable) {
+            return ApiResponse::error(422, 'invalid_destination', 'The relative sector coordinates are invalid.');
+        }
+        $grid = new SectorGrid();
+        $candidates = $this->others?->findActiveShipsByFleetId((int) $designated['fleet_id']) ?? [];
+        $candidates = array_values(array_filter($candidates, static fn(array $ship): bool => $ship['status'] !== 'transit'));
+        if ($candidates === []) {
+            return ApiResponse::error(409, 'others_scan_source_unavailable', 'No active ship in this fleet can provide the scan.');
+        }
+        usort($candidates, static function (array $a, array $b) use ($target, $grid): int {
+            $aDistance = $grid->getDistance(new SectorCoordinates((int) $a['sector_x'], (int) $a['sector_y'], (int) $a['sector_z']), $target);
+            $bDistance = $grid->getDistance(new SectorCoordinates((int) $b['sector_x'], (int) $b['sector_y'], (int) $b['sector_z']), $target);
+            return [$aDistance, (string) $a['public_id']] <=> [$bDistance, (string) $b['public_id']];
+        });
+        $source = $candidates[0];
+        $sourceSector = new SectorCoordinates((int) $source['sector_x'], (int) $source['sector_y'], (int) $source['sector_z']);
+        $syntheticPlayer = new Player($player->id, $player->username, $player->displayName, $player->defaultProbeId, $origin, $player->createdAt, $player->updatedAt, $player->forumAdmin, $player->forumModerator, true);
+        $syntheticProbe = new NeumannProbe(
+            -(int) $source['id'], $player->id, (string) $source['public_id'], $sourceSector, 0.0, 0.0,
+            new \VonNeumannGame\Domain\ProbeDirection(0.0, 0.0, 0.0), ProbeStatus::Idle, 100.0, 0.0,
+            (float) $source['deuterium_stock'], 1.0, null, (string) $source['created_at'], (string) $source['created_at'], (string) $source['updated_at'], true,
+        );
+        $sector = $this->observations->observe($syntheticPlayer, $syntheticProbe, $target)->toArray();
+        $sector['scan']['source'] = ['kind' => 'others_ship', 'id' => (string) $source['public_id']];
+        $sector['relativeCoordinates'] = ['x' => $x, 'y' => $y, 'z' => $z];
+        $sector = $this->addObservedOthersEntities($sector, $target);
+        return new ApiResponse(200, ['sector' => $sector]);
+    }
+
+    private function addObservedOthersEntities(array $sector, SectorCoordinates $target): array
+    {
+        $entities = $this->others?->observableEntitiesBySector($target->getX(), $target->getY(), $target->getZ()) ?? ['ships' => [], 'projectiles' => []];
+        if (($sector['knowledgeLevel'] ?? null) === 'detailed') {
+            $sector['objects'] ??= [];
+            foreach ($entities['ships'] as $ship) {
+                $sector['objects'][] = ['id' => (string) $ship['public_id'], 'observedClass' => $ship['type'] === 'mothership' ? 'large_ship' : 'ship', 'estimated' => false];
+            }
+            foreach ($entities['projectiles'] as $projectile) {
+                $sector['objects'][] = ['id' => (string) $projectile['public_id'], 'observedClass' => 'suspected_missile', 'estimated' => false];
+            }
+        } elseif (($sector['knowledgeLevel'] ?? null) === 'neighbor_scan') {
+            foreach ($entities['ships'] as $ship) {
+                if ($ship['type'] === 'mothership') {
+                    $sector['signals'] = ['unclassified_disturbance'];
+                    break;
+                }
+            }
+        }
+        return $sector;
+    }
+
+    private function probeAutonomousUnitsResponse(Player $player, int $probeId, array $query): ApiResponse
+    {
+        $probe = $this->probes->findById($probeId);
+        if ($probe === null || $probe->playerId !== $player->id || in_array($probe->status, [ProbeStatus::Dead, ProbeStatus::Accelerating, ProbeStatus::Cruising, ProbeStatus::Decelerating], true)) {
+            return ApiResponse::error(404, 'not_found', 'Observer probe not found.');
+        }
+        return $this->autonomousUnitsResponse($probe->currentSector, $query);
+    }
+
+    private function othersAutonomousUnitsResponse(Player $player, string $shipId, array $query): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null || $ship['status'] === 'transit') {
+            return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
+        }
+        return $this->autonomousUnitsResponse(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']), $query);
+    }
+
+    private function autonomousUnitsResponse(SectorCoordinates $sector, array $query): ApiResponse
+    {
+        if ($this->autonomousUnits === null) { return ApiResponse::error(503, 'autonomous_units_unavailable', 'Autonomous-unit observation is unavailable.'); }
+        $limit = isset($query['limit']) && is_numeric($query['limit']) ? (int) $query['limit'] : 100;
+        if ($limit < 1 || $limit > 500) { return ApiResponse::error(400, 'bad_request', 'limit must be between 1 and 500.'); }
+        $cursor = null;
+        if (isset($query['cursor'])) {
+            $cursor = base64_decode((string) $query['cursor'], true);
+            if ($cursor === false || !str_contains($cursor, "\0")) { return ApiResponse::error(400, 'bad_request', 'cursor is invalid.'); }
+        }
+        $page = $this->autonomousUnits->page($sector, $cursor, $limit);
+        $response = ['autonomousUnits' => $page['units']];
+        if ($page['nextCursor'] !== null) { $response['nextCursor'] = base64_encode($page['nextCursor']); }
+        return new ApiResponse(200, $response);
     }
 
     /**

@@ -64,7 +64,7 @@ final class PlayerRepository
     {
         $player->updatedAt = gmdate('c');
         $stmt = $this->pdo->prepare(
-            'UPDATE players SET username = :username, display_name = :display_name, default_probe_id = :default_probe_id, home_sector_x = :x, home_sector_y = :y, home_sector_z = :z, forum_admin = :forum_admin, forum_moderator = :forum_moderator, updated_at = :updated_at WHERE id = :id'
+            'UPDATE players SET username = :username, display_name = :display_name, default_probe_id = :default_probe_id, home_sector_x = :x, home_sector_y = :y, home_sector_z = :z, forum_admin = :forum_admin, forum_moderator = :forum_moderator, can_control_others = :can_control_others, updated_at = :updated_at WHERE id = :id'
         );
         $stmt->execute([
             'id' => $player->id,
@@ -76,6 +76,7 @@ final class PlayerRepository
             'z' => $player->homeSector->getZ(),
             'forum_admin' => $player->forumAdmin ? 1 : 0,
             'forum_moderator' => $player->forumModerator ? 1 : 0,
+            'can_control_others' => $player->canControlOthers ? 1 : 0,
             'updated_at' => $player->updatedAt,
         ]);
     }
@@ -92,6 +93,15 @@ final class PlayerRepository
             (string) $row['updated_at'],
             (bool) ($row['forum_admin'] ?? false),
             (bool) ($row['forum_moderator'] ?? false),
+            (bool) ($row['can_control_others'] ?? false),
         );
+    }
+
+    public function setOthersControl(int $playerId, bool $enabled): bool
+    {
+        $stmt = $this->pdo->prepare('UPDATE players SET can_control_others = :enabled, updated_at = :updated_at WHERE id = :id');
+        $stmt->execute(['id' => $playerId, 'enabled' => $enabled ? 1 : 0, 'updated_at' => gmdate('c')]);
+
+        return $stmt->rowCount() === 1 || $this->findById($playerId) !== null;
     }
 }

@@ -15,6 +15,9 @@ final class ProbeDamageWarning
     public const TYPE_PROBE_DESTROYED = 'probe_destroyed';
     public const TYPE_ASTEROID_TRAJECTORY = 'asteroid_trajectory';
     public const TYPE_BLUEPRINT_SHARED = 'blueprint_shared';
+    public const TYPE_OTHERS_PRESENCE = 'others_presence';
+    public const TYPE_OTHERS_WEAPON = 'others_weapon';
+    public const TYPE_OTHERS_HARVEST_TRACES = 'others_harvest_traces';
     public const STATUS_UNREAD = 'unread';
     public const STATUS_READ = 'read';
 

@@ -370,6 +370,12 @@ $test->assertEquals(['local'], $loadedGameplayConfig['listValues'] ?? null, 'loc
 $configuredSteelBar = CraftingRecipeCatalog::find('steel_bar', $loadedGameplayConfig['crafting'] ?? []);
 $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafting recipes consume gameplay config overrides');
 $test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
+$probeMissileRecipe = CraftingRecipeCatalog::find('missile');
+$test->assertEquals(['manny'], $probeMissileRecipe['craftableBy'] ?? null, 'missile recipe is craftable by Manny');
+$test->assertEquals(0.20, $probeMissileRecipe['ingredients'][0]['quantity'] ?? null, 'missile recipe consumes exactly 0.20 ECE of metals');
+$test->assertEquals(0.10, $probeMissileRecipe['ingredients'][1]['quantity'] ?? null, 'missile recipe consumes exactly 0.10 ECE of carbon compounds');
+$test->assertEquals(3600, $probeMissileRecipe['durationSeconds'] ?? null, 'missile recipe takes exactly one hour');
+$test->assertEquals(0.05, $probeMissileRecipe['output']['containerSpace'] ?? null, 'probe missile occupies exactly 0.05 ECE');
 $configuredProbeImprovement = ProbeImprovementCatalog::find('deuterium-compression', $loadedGameplayConfig['probeImprovements'] ?? []);
 $test->assertEquals(300, $configuredProbeImprovement['durationSeconds'] ?? null, 'probe improvements expose default gameplay definitions');
 $configuredContainerCouplingsImprovement = ProbeImprovementCatalog::find('reinforced-container-couplings', $loadedGameplayConfig['probeImprovements'] ?? []);
@@ -2237,7 +2243,10 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(117, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(118, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
+$test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
+$test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 $removedInspectAsteroid = $kernel->handle('POST', '/api/probe/mannies/mny_missing/inspect-asteroid');
@@ -9018,6 +9027,10 @@ foreach ([
     'POST /api/probe/1/mannies/mny_missing/sculpt-duck-asteroid',
     'POST /api/probe/1/asteroids/mtr_missing/trajectories',
     'GET /api/probe/1/asteroid-trajectories/atr_missing',
+    'POST /api/probe/1/missiles',
+    'GET /api/probe/1/missiles/missile_missing',
+    'GET /api/others',
+    'POST /api/others/ships/ship_missing/missiles',
     'GET /api/probe/messages',
     'GET /api/probe/messages/sent',
     'GET /api/probe/1/logbook-pages',

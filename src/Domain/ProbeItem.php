@@ -28,6 +28,7 @@ final class ProbeItem
     public const TYPE_DESCENT_GUIDANCE_MODULE = 'descent_guidance_module';
     public const TYPE_ATMOSPHERIC_DROP_KIT = 'atmospheric_drop_kit';
     public const TYPE_BIOLOGICAL_ARCHIVE = 'biological_archive';
+    public const TYPE_MISSILE = 'missile';
     public const WAYPOINT_BOOKMARK_NAME = 'Waypoint bookmark';
     public const STEEL_BAR_NAME = 'Steel bar';
     public const STEEL_PLATE_NAME = 'Steel plate';
@@ -50,6 +51,7 @@ final class ProbeItem
     public const DESCENT_GUIDANCE_MODULE_NAME = 'Descent guidance module';
     public const ATMOSPHERIC_DROP_KIT_NAME = 'Atmospheric drop kit';
     public const BIOLOGICAL_ARCHIVE_NAME = 'Biological archive';
+    public const MISSILE_NAME = 'Missile';
 
     /**
      * @return array<string, string>
@@ -79,6 +81,7 @@ final class ProbeItem
             self::TYPE_DESCENT_GUIDANCE_MODULE => self::DESCENT_GUIDANCE_MODULE_NAME,
             self::TYPE_ATMOSPHERIC_DROP_KIT => self::ATMOSPHERIC_DROP_KIT_NAME,
             self::TYPE_BIOLOGICAL_ARCHIVE => self::BIOLOGICAL_ARCHIVE_NAME,
+            self::TYPE_MISSILE => self::MISSILE_NAME,
         ];
     }
 

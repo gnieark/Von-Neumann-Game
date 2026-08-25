@@ -11,9 +11,11 @@ use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeDirection;
+use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\MannyRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
@@ -59,6 +61,7 @@ final class ProbeMovementService
         private readonly string $worldSeed = 'default-world',
         ?SectorGrid $grid = null,
         array $gameplayConfig = [],
+        private readonly ?OthersRepository $others = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->gameplayConfig = $gameplayConfig;
@@ -202,6 +205,7 @@ final class ProbeMovementService
             $this->missions?->completeReadyOracleMissions($probe);
             $this->createIntelligentLifeAlerts($probe, $movement);
             $this->createDormantConstructAlerts($probe, $movement);
+            $this->createOthersArrivalAlerts($probe, $movement);
             if (!$alreadyVisited) {
                 $this->startIntelligentLifeScenarios($probe, $movement);
             }
@@ -547,6 +551,37 @@ final class ProbeMovementService
                 'A dormant construct has been detected in this sector. Its origin and purpose are unknown; dispatching a Manny to inspect it is recommended.',
             );
         }
+    }
+
+    private function createOthersArrivalAlerts(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->damageWarnings === null) { return; }
+        if ($this->others !== null) {
+            $entities = $this->others->observableEntitiesBySector($movement->target->getX(), $movement->target->getY(), $movement->target->getZ());
+            $auxiliaryCount = count($this->others->deployedAuxiliariesBySector($movement->target->getX(), $movement->target->getY(), $movement->target->getZ()));
+            if ($entities['ships'] !== [] || $auxiliaryCount > 0) {
+                $states = []; foreach ($entities['ships'] as $ship) { $states[$ship['status']] = ($states[$ship['status']] ?? 0) + 1; }
+                $this->damageWarnings->createOthersAlert($probe->id, $movement->id, ProbeDamageWarning::TYPE_OTHERS_PRESENCE, 'others-presence', $movement->target, 'Artificial vessels detected: ' . count($entities['ships']) . ' ship(s), states ' . json_encode($states, JSON_UNESCAPED_SLASHES) . ', and ' . $auxiliaryCount . ' deployed auxiliary unit(s). Do not deploy Mannys: their transmissions are immediately detectable.', 'arrival');
+            }
+        }
+        if ($this->sectors !== null) {
+            $sector = $this->sectors->getOrCreateSector($movement->target);
+            foreach ($this->allPlanets($sector->getObjects()) as $planet) {
+                if ($planet->wasHarvestedByOthers()) {
+                    $this->damageWarnings->createOthersAlert($probe->id, $movement->id, ProbeDamageWarning::TYPE_OTHERS_HARVEST_TRACES, 'harvest-traces-' . $planet->getId(), $movement->target, 'Artificial mining traces are visible on planet ' . $planet->getId() . ': constitutive material is missing.', 'arrival');
+                }
+            }
+        }
+    }
+
+    private function allPlanets(array $objects): array
+    {
+        $planets = [];
+        foreach ($objects as $object) {
+            if ($object instanceof Planet) { $planets[] = $object; }
+            if ($object instanceof SolarSystem) { foreach ($object->getOrbitalBodies() as $body) { if ($body->getObject() instanceof Planet) { $planets[] = $body->getObject(); } } }
+        }
+        return $planets;
     }
 
     /**
