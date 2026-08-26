@@ -8,7 +8,11 @@ class FrontRouteApiDocs extends FrontRoute{
     public function handle(string $method, string $routePath, ?string $bearer, string $language): void
     {
         if ($routePath === '/openapi.yaml') {
-            $this->renderOpenApiSpec($method);
+            $this->renderOpenApiDocument($method, 'openapi.yaml', 'application/yaml');
+            return;
+        }
+        if ($routePath === '/openapi-others.yaml') {
+            $this->renderOpenApiDocument($method, 'openapi-others.yaml', 'application/yaml');
             return;
         }
 
@@ -20,6 +24,12 @@ class FrontRouteApiDocs extends FrontRoute{
         $projectRoot = dirname(__DIR__, 2);
         $translator = new Translator(Translator::normalize($language));
         $tpl = new TplBlock();
+        $openApiUrl = $routePath === '/api-docs-others'
+            ? '/openapi-others.yaml'
+            : '/openapi.yaml';
+        $tpl->addVars([
+            'openApiUrl' => self::e($openApiUrl),
+        ]);
         $tpl->addPrefixedVars('t', $translator->allEscaped());
 
         return $tpl->applyTplFile($projectRoot . '/templates/api-docs.html');
@@ -50,9 +60,9 @@ class FrontRouteApiDocs extends FrontRoute{
         return self::e($translator->get('apiDocsMetaDescription'));
     }
 
-    private function renderOpenApiSpec(string $method): void
+    private function renderOpenApiDocument(string $method, string $filename, string $contentType): void
     {
-        $path = dirname(__DIR__, 2) . '/docs/openapi.yaml';
+        $path = dirname(__DIR__, 2) . '/docs/' . $filename;
         if (!is_file($path)) {
             http_response_code(404);
             header('Content-Type: text/plain; charset=utf-8');
@@ -60,7 +70,7 @@ class FrontRouteApiDocs extends FrontRoute{
             return;
         }
 
-        header('Content-Type: application/yaml; charset=utf-8');
+        header('Content-Type: ' . $contentType . '; charset=utf-8');
         header('Cache-Control: no-store');
         if ($method !== 'HEAD') {
             readfile($path);

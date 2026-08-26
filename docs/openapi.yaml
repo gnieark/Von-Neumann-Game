@@ -14,56 +14,6 @@ servers:
 security:
   - bearerAuth: []
 paths:
-  /api/others:
-    $ref: './openapi-others.json#/paths/~1api~1others'
-  /api/others/fleets:
-    $ref: './openapi-others.json#/paths/~1api~1others~1fleets'
-  /api/others/fleets/{fleetId}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1fleets~1{fleetId}'
-  /api/others/fleets/{fleetId}/move:
-    $ref: './openapi-others.json#/paths/~1api~1others~1fleets~1{fleetId}~1move'
-  /api/others/ships/{shipId}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}'
-  /api/others/ships/{shipId}/move:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1move'
-  /api/others/ships/{shipId}/auxiliaries:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries'
-  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1{auxiliaryId}'
-  /api/others/ships/{shipId}/auxiliaries/tasks:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1tasks'
-  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/{task}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1{auxiliaryId}~1{task}'
-  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/transfer-deuterium:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1auxiliaries~1{auxiliaryId}~1transfer-deuterium'
-  /api/others/ships/{shipId}/sector/autonomous-units:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1sector~1autonomous-units'
-  /api/others/ships/{shipId}/inventory:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1inventory'
-  /api/others/ships/{shipId}/inventory-transfers:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1inventory-transfers'
-  /api/others/inventory-transfers/{transferId}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1inventory-transfers~1{transferId}'
-  /api/others/ships/{shipId}/harvest:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1harvest'
-  /api/others/crafting/recipes:
-    $ref: './openapi-others.json#/paths/~1api~1others~1crafting~1recipes'
-  /api/others/ships/{shipId}/crafts:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1crafts'
-  /api/others/crafts/{craftId}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1crafts~1{craftId}'
-  /api/others/actions/{actionId}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1actions~1{actionId}'
-  /api/others/ships/{shipId}/weapons/laser:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1weapons~1laser'
-  /api/others/ships/{shipId}/missiles:
-    $ref: './openapi-others.json#/paths/~1api~1others~1ships~1{shipId}~1missiles'
-  /api/others/missiles/{missileId}:
-    $ref: './openapi-others.json#/paths/~1api~1others~1missiles~1{missileId}'
-  /api/probe/{probeId}/missiles:
-    $ref: './openapi-others.json#/paths/~1api~1probe~1{probeId}~1missiles'
-  /api/probe/{probeId}/missiles/{missileId}:
-    $ref: './openapi-others.json#/paths/~1api~1probe~1{probeId}~1missiles~1{missileId}'
   /api/version:
     get:
       security: []
@@ -1488,6 +1438,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/probe/{probeId}/missiles:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+    post:
+      tags: [Missiles]
+      summary: Start a one-minute Manny missile preparation
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorMannyId, missileItemId, targetId]
+              properties:
+                actorMannyId:
+                  type: string
+                missileItemId:
+                  type: string
+                targetId:
+                  type: string
+      responses:
+        '202':
+          description: Accepted for scheduler processing; no terminal universe effect has run inline
+  /api/probe/{probeId}/missiles/{missileId}:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+      - name: missileId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Missiles]
+      summary: Get a probe missile preparation, flight or history
+      responses:
+        '200':
+          description: Missile state
   /api/probe/{probeId}/inventory/{itemId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'

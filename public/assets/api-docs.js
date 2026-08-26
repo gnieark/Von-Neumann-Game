@@ -17,12 +17,13 @@
     }
 
     function initSwaggerUi() {
-        if (!document.getElementById("swagger-ui") || !window.SwaggerUIBundle) {
+        const swaggerUi = document.getElementById("swagger-ui");
+        if (!swaggerUi || !window.SwaggerUIBundle) {
             return;
         }
 
         window.SwaggerUIBundle({
-            "url": "/openapi.yaml",
+            "url": swaggerUi.dataset.openapiUrl,
             "dom_id": "#swagger-ui",
             "persistAuthorization": true,
             "tryItOutEnabled": true,
