@@ -498,14 +498,214 @@ $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
 $openApiOthers = file_get_contents($root . '/docs/openapi-others.yaml');
 $apiDocsRouteSource = file_get_contents($root . '/src/FrontRoute/FrontRouteApiDocs.php');
+$apiDocsScript = file_get_contents($root . '/public/assets/api-docs.js');
 $mainApiDocsHtml = (new FrontRouteApiDocs())->getContent('GET', '/api-docs', null, 'en');
 $othersApiDocsHtml = (new FrontRouteApiDocs())->getContent('GET', '/api-docs-others', null, 'en');
 $test->assert(is_string($frontIndex) && str_contains($frontIndex, 'api-docs-others') && str_contains($frontIndex, 'openapi-others\\.yaml'), 'front router exposes the Others Swagger UI and OpenAPI document');
 $test->assert(is_string($apiDocsRouteSource) && str_contains($apiDocsRouteSource, "'/openapi-others.yaml'"), 'API docs route handles the Others OpenAPI URL');
 $test->assert(str_contains($mainApiDocsHtml, 'data-openapi-url="/openapi.yaml"'), 'main Swagger UI loads the main OpenAPI document');
 $test->assert(str_contains($othersApiDocsHtml, 'data-openapi-url="/openapi-others.yaml"'), 'Others Swagger UI loads the autonomous Others OpenAPI document');
+$test->assert(is_string($apiDocsScript) && str_contains($apiDocsScript, '"docExpansion": "none"'), 'Swagger UI keeps tag accordions collapsed by default');
 $test->assert(is_string($openApi) && !str_contains($openApi, 'openapi-others'), 'main OpenAPI document is detached from the Others contract');
 $test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId}/missiles:'), 'main OpenAPI document retains probe missile endpoints without an external reference');
+$openApiDocument = is_string($openApi) ? yaml_parse($openApi) : false;
+$expectedOpenApiTagOrder = [
+    'system',
+    'account',
+    'probes',
+    'sectors',
+    'scut',
+    'movement',
+    'mannies',
+    'inventories',
+    'alerts',
+    'messaging',
+    'improvements',
+    'logbook',
+    'motorized-asteroids',
+    'Missiles',
+    'missions',
+    'forum',
+    'default probe',
+];
+$declaredOpenApiTagOrder = is_array($openApiDocument)
+    ? array_column($openApiDocument['tags'] ?? [], 'name')
+    : [];
+$test->assertEquals($expectedOpenApiTagOrder, $declaredOpenApiTagOrder, 'OpenAPI declares Swagger tags in the requested display order');
+$defaultProbeTagDescription = is_array($openApiDocument)
+    ? array_values(array_filter(
+        $openApiDocument['tags'] ?? [],
+        static fn (array $tag): bool => ($tag['name'] ?? null) === 'default probe'
+    ))
+    : [];
+$test->assert(
+    isset($defaultProbeTagDescription[0]['description'])
+        && str_contains($defaultProbeTagDescription[0]['description'], '/api/probe/{probeId}/...')
+        && str_contains($defaultProbeTagDescription[0]['description'], "player's default probe"),
+    'OpenAPI explains how default probe routes relate to explicit probeId routes'
+);
+$forumTagsAreComplete = true;
+$defaultProbeTagsAreComplete = true;
+$excludedProbeTagsAreAbsent = true;
+$explicitProbeMannyTagsAreComplete = true;
+$explicitProbeAlertTagsAreComplete = true;
+$explicitProbeInventoryTagsAreComplete = true;
+$allOpenApiOperationsAreTagged = true;
+$remainingOpenApiTagsMatchTheirDomains = true;
+$motorizedAsteroidMannyTagsAreComplete = true;
+$probeImprovementMannyTagsAreComplete = true;
+$openApiOperationReferencesAreAbsent = true;
+$scutMannyTagsAreComplete = true;
+$allOperationTagsAreDeclared = true;
+$defaultProbeTagsRemainIsolated = true;
+$additionalFunctionalTagsAreComplete = true;
+$expectedAdditionalTagsByPath = [
+    '/api/probe/{probeId}/storage-moves' => 'mannies',
+    '/api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share' => 'scut',
+    '/api/probe/{probeId}/damage-warnings' => 'movement',
+    '/api/probe/{probeId}/damage-warnings/{damageWarningId}' => 'movement',
+    '/api/probe/{probeId}/missiles' => 'mannies',
+    '/api/probe/{probeId}/mannies/{mannyId}/mine' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/assemble-probe' => 'probes',
+    '/api/probe/{probeId}/mannies/{mannyId}/salvage' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/detach-storage-container' => 'inventories',
+    '/api/probe/{probeId}/mannies/{mannyId}/drop-storage-container' => 'inventories',
+    '/api/probe/{probeId}/mannies/{mannyId}/inspect-sector-object' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/recover-storage-container' => 'inventories',
+    '/api/probe/{probeId}/mannies/{mannyId}/install-bookmark' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-to-probe' => 'probes',
+    '/api/probe/{probeId}/mannies/{mannyId}/transfer-to-probe' => 'probes',
+];
+$expectedOpenApiTagsByPath = [
+    '/api/version' => 'system',
+    '/api/session' => 'account',
+    '/api/me' => 'account',
+    '/api/me/api-key' => 'account',
+    '/api/crafting-recipes' => 'mannies',
+    '/api/probe/{probeId}' => 'probes',
+    '/api/probes' => 'probes',
+    '/api/probe/mission' => 'missions',
+    '/api/probe/missions' => 'missions',
+    '/api/probe/missions/{missionId}/abandon' => 'missions',
+    '/api/probe/{probeId}/storage-moves' => 'inventories',
+    '/api/probe/{probeId}/probe-improvements-available' => 'improvements',
+    '/api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share' => 'improvements',
+    '/api/probe/{probeId}/messages' => 'messaging',
+    '/api/probe/{probeId}/messages/{messageId}/read' => 'messaging',
+    '/api/probe/{probeId}/scut-network/{scutNetworkId}' => 'scut',
+    '/api/probe/{probeId}/logbook-pages' => 'logbook',
+    '/api/probe/{probeId}/logbook-page' => 'logbook',
+    '/api/probe/{probeId}/logbook-page/{logbookPageId}' => 'logbook',
+    '/api/probe/{probeId}/visited-sectors' => 'sectors',
+    '/api/visited-sectors' => 'sectors',
+    '/api/probe/{probeId}/sector' => 'sectors',
+    '/api/sector' => 'sectors',
+    '/api/probe/{probeId}/move' => 'movement',
+    '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories' => 'motorized-asteroids',
+    '/api/probe/{probeId}/asteroid-trajectories/{trajectoryId}' => 'motorized-asteroids',
+];
+if (is_array($openApiDocument)) {
+    foreach ($openApiDocument['paths'] ?? [] as $path => $pathItem) {
+        foreach (['get', 'post', 'put', 'patch', 'delete', 'options', 'head'] as $operationMethod) {
+            if (!isset($pathItem[$operationMethod]) || !is_array($pathItem[$operationMethod])) {
+                continue;
+            }
+            $tags = $pathItem[$operationMethod]['tags'] ?? [];
+            if (array_key_exists('$ref', $pathItem[$operationMethod])) {
+                $openApiOperationReferencesAreAbsent = false;
+            }
+            if ($tags === []) {
+                $allOpenApiOperationsAreTagged = false;
+            }
+            if (in_array('default probe', $tags, true) && $tags !== ['default probe']) {
+                $defaultProbeTagsRemainIsolated = false;
+            }
+            $expectedAdditionalTag = $expectedAdditionalTagsByPath[$path] ?? null;
+            if ($expectedAdditionalTag !== null && !in_array($expectedAdditionalTag, $tags, true)) {
+                $additionalFunctionalTagsAreComplete = false;
+            }
+            foreach ($tags as $tag) {
+                if (!in_array($tag, $declaredOpenApiTagOrder, true)) {
+                    $allOperationTagsAreDeclared = false;
+                }
+            }
+            $expectedDomainTag = $expectedOpenApiTagsByPath[$path] ?? null;
+            if ($expectedDomainTag !== null && !in_array($expectedDomainTag, $tags, true)) {
+                $remainingOpenApiTagsMatchTheirDomains = false;
+            }
+            if (str_starts_with($path, '/api/forum') && !in_array('forum', $tags, true)) {
+                $forumTagsAreComplete = false;
+            }
+
+            $isDefaultProbePath = ($path === '/api/probe' || str_starts_with($path, '/api/probe/'))
+                && !str_contains($path, '{probeId}')
+                && preg_match('#^/api/probe/missions?(?:/|$)#', $path) !== 1;
+            if ($isDefaultProbePath && !in_array('default probe', $tags, true)) {
+                $defaultProbeTagsAreComplete = false;
+            }
+
+            $isExcludedProbePath = str_contains($path, '{probeId}')
+                || preg_match('#^/api/probe/missions?(?:/|$)#', $path) === 1;
+            if ($isExcludedProbePath && in_array('default probe', $tags, true)) {
+                $excludedProbeTagsAreAbsent = false;
+            }
+            $isExplicitProbeMannyPath = str_starts_with($path, '/api/probe/{probeId}/mannies')
+                || $path === '/api/probe/{probeId}/atomic-printer/craft';
+            if ($isExplicitProbeMannyPath && !in_array('mannies', $tags, true)) {
+                $explicitProbeMannyTagsAreComplete = false;
+            }
+            $isMotorizedAsteroidMannyPath = in_array($path, [
+                '/api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid',
+                '/api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid',
+            ], true);
+            if ($isMotorizedAsteroidMannyPath && !in_array('motorized-asteroids', $tags, true)) {
+                $motorizedAsteroidMannyTagsAreComplete = false;
+            }
+            if ($path === '/api/probe/{probeId}/mannies/{mannyId}/improve-probe'
+                && !in_array('improvements', $tags, true)) {
+                $probeImprovementMannyTagsAreComplete = false;
+            }
+            $isScutMannyPath = in_array($path, [
+                '/api/probe/{probeId}/mannies/{mannyId}/turn-on-relay',
+                '/api/probe/{probeId}/mannies/{mannyId}/install-scut-transit-beacon',
+            ], true);
+            if ($isScutMannyPath && !in_array('scut', $tags, true)) {
+                $scutMannyTagsAreComplete = false;
+            }
+            $isExplicitProbeAlertPath = str_starts_with($path, '/api/probe/{probeId}/alerts')
+                || str_starts_with($path, '/api/probe/{probeId}/damage-warnings');
+            if ($isExplicitProbeAlertPath && !in_array('alerts', $tags, true)) {
+                $explicitProbeAlertTagsAreComplete = false;
+            }
+            $isExplicitProbeInventoryPath = in_array($path, [
+                '/api/probe/{probeId}/storage-containers',
+                '/api/probe/{probeId}/storage-containers/{containerId}',
+                '/api/probe/{probeId}/storage-containers/{containerId}/rules',
+                '/api/probe/{probeId}/storage-containers/{containerId}/crafting-reservations/reassign',
+                '/api/probe/{probeId}/inventory/{itemId}',
+                '/api/probe/{probeId}/inventory/{itemId}/jettison',
+            ], true);
+            if ($isExplicitProbeInventoryPath && !in_array('inventories', $tags, true)) {
+                $explicitProbeInventoryTagsAreComplete = false;
+            }
+        }
+    }
+}
+$test->assert(is_array($openApiDocument) && $forumTagsAreComplete, 'OpenAPI groups every forum operation in the forum category');
+$test->assert(is_array($openApiDocument) && $defaultProbeTagsAreComplete, 'OpenAPI groups default-probe operations without probeId in the default probe category');
+$test->assert(is_array($openApiDocument) && $excludedProbeTagsAreAbsent, 'OpenAPI excludes explicit-probe and mission operations from the default probe category');
+$test->assert(is_array($openApiDocument) && $explicitProbeMannyTagsAreComplete, 'OpenAPI groups every explicit-probe Manny operation in the mannies category');
+$test->assert(is_array($openApiDocument) && $explicitProbeAlertTagsAreComplete, 'OpenAPI groups every explicit-probe alert operation in the alerts category');
+$test->assert(is_array($openApiDocument) && $explicitProbeInventoryTagsAreComplete, 'OpenAPI groups explicit-probe inventory operations in the inventories category');
+$test->assert(is_array($openApiDocument) && $motorizedAsteroidMannyTagsAreComplete, 'OpenAPI also groups motorization and refueling Manny operations in the motorized-asteroids category');
+$test->assert(is_array($openApiDocument) && $probeImprovementMannyTagsAreComplete, 'OpenAPI also groups Manny probe improvement operations in the improvements category');
+$test->assert(is_array($openApiDocument) && $scutMannyTagsAreComplete, 'OpenAPI also groups relay activation and transit beacon installation in the scut category');
+$test->assert(is_array($openApiDocument) && $allOpenApiOperationsAreTagged, 'OpenAPI leaves no operation in the implicit default category');
+$test->assert(is_array($openApiDocument) && $remainingOpenApiTagsMatchTheirDomains, 'OpenAPI groups all formerly default operations by functional domain');
+$test->assert(is_array($openApiDocument) && $openApiOperationReferencesAreAbsent, 'OpenAPI operations are defined directly so Swagger tag accordions remain stable when expanded');
+$test->assert(is_array($openApiDocument) && $allOperationTagsAreDeclared, 'Every OpenAPI operation tag is declared in the Swagger display order');
+$test->assert(is_array($openApiDocument) && $defaultProbeTagsRemainIsolated, 'Default-probe compatibility routes remain isolated from functional Swagger categories');
+$test->assert(is_array($openApiDocument) && $additionalFunctionalTagsAreComplete, 'Canonical OpenAPI operations expose their relevant secondary functional tags');
 $openApiOthersDocument = is_string($openApiOthers) ? yaml_parse($openApiOthers) : false;
 $test->assert(is_array($openApiOthersDocument) && isset($openApiOthersDocument['openapi'], $openApiOthersDocument['info'], $openApiOthersDocument['paths'], $openApiOthersDocument['components']), 'Others OpenAPI document is a valid standalone YAML contract');
 $test->assert(is_array($openApiOthersDocument) && !isset($openApiOthersDocument['paths']['/api/probe/{probeId}/missiles']), 'Others OpenAPI document only contains Others endpoints');
@@ -974,7 +1174,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260826-api-docs-others"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260826-api-docs-collapsed"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');

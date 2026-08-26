@@ -25,6 +25,7 @@
         window.SwaggerUIBundle({
             "url": swaggerUi.dataset.openapiUrl,
             "dom_id": "#swagger-ui",
+            "docExpansion": "none",
             "persistAuthorization": true,
             "tryItOutEnabled": true,
             "requestInterceptor": (request) => {

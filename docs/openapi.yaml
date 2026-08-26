@@ -13,9 +13,33 @@ servers:
     description: Current host
 security:
   - bearerAuth: []
+tags:
+  - name: system
+  - name: account
+  - name: probes
+  - name: sectors
+  - name: scut
+  - name: movement
+  - name: mannies
+  - name: inventories
+  - name: alerts
+  - name: messaging
+  - name: improvements
+  - name: logbook
+  - name: motorized-asteroids
+  - name: Missiles
+  - name: missions
+  - name: forum
+  - name: default probe
+    description: >
+      These operations are also available through equivalent
+      `/api/probe/{probeId}/...` routes. They were retained after support for
+      multiple probes was introduced. When one of these routes is used, the
+      player's default probe is selected automatically.
 paths:
   /api/version:
     get:
+      tags: [system]
       security: []
       summary: Get API version
       responses:
@@ -31,6 +55,7 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
     post:
+      tags: [account]
       security: []
       summary: Create a password session
       requestBody:
@@ -66,6 +91,7 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
   /api/me:
     get:
+      tags: [account]
       summary: Get authenticated player
       responses:
         '200':
@@ -91,6 +117,7 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
   /api/me/api-key:
     post:
+      tags: [account]
       summary: Create an API key for the authenticated player
       description: >
         Returns a new API key that can be used as a Bearer token on protected
@@ -114,6 +141,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/crafting-recipes:
     get:
+      tags: [mannies]
       summary: List available crafting recipes
       responses:
         '200':
@@ -340,6 +368,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/forum/categories:
     get:
+      tags: [forum]
       summary: List forum categories
       responses:
         '200':
@@ -351,6 +380,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
+      tags: [forum]
       summary: Create a forum category
       description: Requires forum administrator permission.
       requestBody:
@@ -374,6 +404,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
   /api/forum/categories/{categoryId}:
     get:
+      tags: [forum]
       summary: Get a forum category
       parameters:
         - $ref: '#/components/parameters/ForumCategoryId'
@@ -389,6 +420,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
+      tags: [forum]
       summary: Update a forum category
       description: Requires forum administrator permission. Use sortOrder to reorder categories.
       parameters:
@@ -415,6 +447,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
+      tags: [forum]
       summary: Delete a forum category
       description: Requires forum administrator permission. Deletes posts and messages inside the category.
       parameters:
@@ -434,6 +467,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/forum/posts:
     get:
+      tags: [forum]
       summary: List forum posts
       description: Returns pinned posts first, then the most recently active posts. Defaults to 50 posts.
       parameters:
@@ -472,6 +506,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     post:
+      tags: [forum]
       summary: Create a forum post
       description: Creates a post and its first forum message.
       requestBody:
@@ -495,6 +530,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/forum/posts/{postId}:
     get:
+      tags: [forum]
       summary: Get a forum post with its first message and recent replies
       description: Returns the post, its first message, and the 50 most recent replies by default. Use limit and offset to load older replies.
       parameters:
@@ -528,6 +564,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
+      tags: [forum]
       summary: Moderate a forum post
       description: Forum moderators and forum admins can edit title/category and pin or unpin the post.
       parameters:
@@ -554,6 +591,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
+      tags: [forum]
       summary: Delete a forum post
       description: Requires forum moderator or forum admin permission.
       parameters:
@@ -573,6 +611,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/forum/posts/{postId}/messages:
     get:
+      tags: [forum]
       summary: List replies for a forum post
       description: Returns the 50 most recent replies by default. Use limit and offset to load older replies. The initial post message is exposed as firstMessage on the post detail response.
       parameters:
@@ -606,6 +645,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     post:
+      tags: [forum]
       summary: Reply to a forum post
       requestBody:
         required: true
@@ -630,6 +670,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/forum/messages/{messageId}:
     patch:
+      tags: [forum]
       summary: Edit a forum message
       description: The original author can edit their own message. Forum moderators and forum admins can edit any message.
       parameters:
@@ -656,6 +697,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
+      tags: [forum]
       summary: Delete a forum message
       description: Requires forum moderator or forum admin permission.
       parameters:
@@ -675,6 +717,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe:
     get:
+      tags: [default probe]
       summary: Get default Neumann probe
       responses:
         '200':
@@ -691,6 +734,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/{probeId}:
     get:
+      tags: [probes]
       summary: Get a Neumann probe by id
       description: >
         Returns the requested probe only when it belongs to the authenticated
@@ -723,6 +767,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
+      tags: [probes]
       summary: Update a Neumann probe
       description: >
         Renames the requested owned probe when `name` is provided. When
@@ -767,6 +812,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probes:
     get:
+      tags: [probes]
       summary: List player Neumann probes
       responses:
         '200':
@@ -779,6 +825,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/mission:
     get:
+      tags: [missions]
       summary: List active player missions
       description: Alias of /api/probe/missions kept for clients that use a singular mission route.
       responses:
@@ -792,6 +839,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/missions:
     get:
+      tags: [missions]
       summary: List active player missions
       description: Returns missions currently assigned to the authenticated player.
       responses:
@@ -807,6 +855,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/missions/{missionId}/abandon:
     post:
+      tags: [missions]
       summary: Abandon an active probe mission
       parameters:
         - $ref: '#/components/parameters/MissionId'
@@ -829,6 +878,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/storage-containers:
     get:
+      tags: [inventories]
       summary: List probe storage containers
       description: >
         Returns the selected probe core storage and each additional container
@@ -853,6 +903,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/{probeId}/storage-containers/{containerId}:
     get:
+      tags: [inventories]
       summary: Get one storage container content
       parameters:
         - $ref: '#/components/parameters/ProbeId'
@@ -869,6 +920,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
+      tags: [inventories]
       summary: Rename a storage container
       parameters:
         - $ref: '#/components/parameters/ProbeId'
@@ -896,6 +948,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/storage-containers/{containerId}/rules:
     patch:
+      tags: [inventories]
       summary: Update storage routing rules for a container
       description: >
         Priority routes matching new items to this selected-probe container
@@ -930,6 +983,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/storage-containers/{containerId}/crafting-reservations/reassign:
     post:
+      tags: [inventories]
       summary: Reassign active crafting reservations from a storage container
       description: >
         Atomically moves every active Manny or atomic-printer crafting output
@@ -974,6 +1028,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/storage-moves:
     post:
+      tags: [inventories, mannies]
       summary: Assign a Manny to move stock between containers
       description: >
         Starts a moving_stockage task on an idle onboard Manny. Unit items take
@@ -1003,9 +1058,76 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
     get:
-      $ref: '#/paths/~1api~1probe~1probe-improvements-available/get'
+      tags: [improvements]
+      summary: List available probe improvements
+      description: >
+        Returns probe improvements whose blueprints are known by the player
+        owning the selected probe. The `done` flag is evaluated for that
+        selected probe only. Pass `includeAll=1` to include locked catalog
+        entries as unavailable.
+      parameters:
+        - in: query
+          name: includeAll
+          schema:
+            type: boolean
+          required: false
+          description: Include locked improvements from the gameplay catalog.
+      responses:
+        '200':
+          description: Probe improvements known by the authenticated player for the selected probe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [improvements]
+                properties:
+                  improvements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProbeImprovement'
+              example:
+                improvements:
+                  - id: deuterium_compression
+                    name: Deuterium compression
+                    description: Compresses the external deuterium tank reserve so it can hold up to 200% fuel.
+                    available: true
+                    done: false
+                    installableOnProbe: true
+                    durationSeconds: 300
+                    ingredients:
+                      - type: electric_motor
+                        quantity: 1
+                        unit: item
+                        kind: item
+                      - type: steel_bar
+                        quantity: 2
+                        unit: item
+                        kind: item
+                    effects:
+                      maxDeuteriumPercent: 200
+                  - id: reinforced_container_couplings
+                    name: Reinforced container couplings
+                    description: Reinforces external container couplings so five additional containers are ignored when movement break risk is calculated.
+                    available: true
+                    done: false
+                    installableOnProbe: true
+                    durationSeconds: 300
+                    ingredients:
+                      - type: integrated_circuit
+                        quantity: 1
+                        unit: item
+                        kind: item
+                      - type: carbon_compounds
+                        quantity: 0.4
+                        unit: earth_container_equivalent
+                        kind: resource
+                    effects:
+                      fragileContainerRiskAdditionalContainerDiscount: 5
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share:
     post:
+      tags: [improvements, scut]
       summary: Share a known probe-improvement blueprint through SCUT
       description: >
         Copies a blueprint known by the authenticated player to the player who
@@ -1063,6 +1185,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/messages:
     get:
+      tags: [messaging]
       summary: List messages received by the current probe
       description: >
         Returns messages where the authenticated player's probe is the
@@ -1102,6 +1225,7 @@ paths:
         '400':
           $ref: '#/paths/~1api~1probe~1messages/get/responses/400'
     post:
+      tags: [messaging]
       summary: Send a message to a reachable probe or inhabited planet
       description: >
         Creates an unread message from the current probe to a recipient.
@@ -1136,15 +1260,53 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/ScutNetworkId'
     get:
-      $ref: '#/paths/~1api~1probe~1scut-network~1%7BscutNetworkId%7D/get'
+      tags: [scut]
+      summary: Inspect a SCUT relay network covering the current probe
+      parameters:
+        - $ref: '#/components/parameters/ScutNetworkId'
+      responses:
+        '200':
+          description: SCUT network details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScutNetworkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Probe is outside this network coverage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/messages/{messageId}/read:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/ProbeMessageId'
     patch:
-      $ref: '#/paths/~1api~1probe~1messages~1%7BmessageId%7D~1read/patch'
+      tags: [messaging]
+      summary: Mark a received probe message as read
+      description: >
+        Only the recipient probe can mark a message as read. Repeating the call
+        on an already-read message is safe and returns the message unchanged.
+      parameters:
+        - $ref: '#/components/parameters/ProbeMessageId'
+      responses:
+        '200':
+          description: Probe message marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeMessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/logbook-pages:
     get:
+      tags: [logbook]
       summary: List probe logbook pages
       description: >
         Returns the selected probe's logbook pages, sorted by probe-local
@@ -1190,6 +1352,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/logbook-page:
     post:
+      tags: [logbook]
       summary: Create a probe logbook page
       description: Creates a page in the selected probe's logbook.
       parameters:
@@ -1224,6 +1387,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/logbook-page/{logbookPageId}:
     get:
+      tags: [logbook]
       summary: Get a probe logbook page
       parameters:
         - $ref: '#/components/parameters/ProbeId'
@@ -1246,6 +1410,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
+      tags: [logbook]
       summary: Update a probe logbook page
       parameters:
         - $ref: '#/components/parameters/ProbeId'
@@ -1279,6 +1444,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
+      tags: [logbook]
       summary: Delete a probe logbook page
       parameters:
         - $ref: '#/components/parameters/ProbeId'
@@ -1298,6 +1464,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/alerts:
     get:
+      tags: [alerts]
       summary: List persistent probe alerts
       description: >
         Returns persistent alerts produced for the authenticated probe. Alerts
@@ -1325,11 +1492,40 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/AlertId'
     patch:
-      $ref: '#/paths/~1api~1probe~1alerts~1%7BalertId%7D/patch'
+      tags: [alerts]
+      summary: Mark a persistent probe alert as read
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '200':
+          description: Alert marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeAlertResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
-      $ref: '#/paths/~1api~1probe~1alerts~1%7BalertId%7D/delete'
+      tags: [alerts]
+      summary: Delete a persistent probe alert
+      description: >
+        Permanently deletes the alert only when it belongs to the selected
+        probe owned by the authenticated player. An unknown alert or an alert
+        belonging to another probe returns `404`.
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '204':
+          description: Alert deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/damage-warnings:
     get:
+      tags: [alerts, movement]
       summary: List probe movement damage warnings
       description: >
         Returns persistent warnings produced when a fragile chain of additional
@@ -1352,11 +1548,40 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/DamageWarningId'
     patch:
-      $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/patch'
+      tags: [alerts, movement]
+      summary: Mark a movement damage warning as read
+      parameters:
+        - $ref: '#/components/parameters/DamageWarningId'
+      responses:
+        '200':
+          description: Damage warning marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeDamageWarningResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
-      $ref: '#/paths/~1api~1probe~1damage-warnings~1%7BdamageWarningId%7D/delete'
+      tags: [alerts, movement]
+      summary: Delete a movement damage warning
+      description: >
+        Permanently deletes the warning only when it belongs to the selected
+        probe owned by the authenticated player. An unknown warning or a
+        warning belonging to another probe returns `404`.
+      parameters:
+        - $ref: '#/components/parameters/DamageWarningId'
+      responses:
+        '204':
+          description: Damage warning deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/visited-sectors:
     get:
+      tags: [sectors]
       summary: List sectors already visited by the requested probe
       description: >
         Returns only the requested probe's visited-sector history. Coordinates
@@ -1371,6 +1596,7 @@ paths:
           $ref: '#/paths/~1api~1probe~1visited-sectors/get/responses/401'
   /api/visited-sectors:
     get:
+      tags: [sectors]
       summary: List all sectors visited by the authenticated player
       description: >
         Returns the union of sectors visited by all probes owned by the
@@ -1384,6 +1610,7 @@ paths:
           $ref: '#/paths/~1api~1probe~1visited-sectors/get/responses/401'
   /api/probe/{probeId}/sector:
     get:
+      tags: [sectors]
       summary: Get observable probe sector and onboard inventory
       parameters:
         - $ref: '#/components/parameters/ProbeId'
@@ -1398,6 +1625,7 @@ paths:
           $ref: '#/paths/~1api~1probe~1sector/get/responses/400'
   /api/probe/{probeId}/move:
     post:
+      tags: [movement]
       summary: Start an asynchronous intersector movement
       parameters:
         - $ref: '#/components/parameters/ProbeId'
@@ -1415,6 +1643,7 @@ paths:
         '422':
           $ref: '#/paths/~1api~1probe~1move/post/responses/422'
     delete:
+      tags: [movement]
       summary: Cancel the active intersector movement during preparation
       description: >
         Cancels the active movement only while it is still in its preparation
@@ -1442,7 +1671,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
     post:
-      tags: [Missiles]
+      tags: [Missiles, mannies]
       summary: Start a one-minute Manny missile preparation
       parameters:
         - name: Idempotency-Key
@@ -1488,15 +1717,103 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/InventoryItemId'
     get:
-      $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D/get'
+      tags: [inventories]
+      summary: Get task state for an onboard inventory item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: mny_8d4a2c1f5a91b334
+      responses:
+        '200':
+          description: Inventory item task state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item]
+                properties:
+                  item:
+                    $ref: '#/components/schemas/ProbeInventoryItemTask'
+              example:
+                item:
+                  id: mny_8d4a2c1f5a91b334
+                  type: manny
+                  name: manny-1
+                  currentTask: null
+                  taskProgressPercent: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/probe/{probeId}/inventory/{itemId}/jettison:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/InventoryItemId'
     post:
-      $ref: '#/paths/~1api~1probe~1inventory~1%7BitemId%7D~1jettison/post'
+      tags: [inventories]
+      summary: Jettison an inventory entry into space
+      description: >
+        Discards stored metals/non-metal materials by amount, ejects an idle onboard Manny
+        into the current sector, deploys a scut_relay item as an inactive SCUT
+        relay in the current sector, or adds other supported crafted items to an
+        aggregated drifting-item stack in the current sector. Non-persisted core
+        equipment and additional containers cannot be jettisoned. The external
+        deuterium tank is not jettisonable.
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+          examples:
+            metals:
+              value: probe-1-stock-metals
+            manny:
+              value: mny_8d4a2c1f5a91b334
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeInventoryJettisonRequest'
+            examples:
+              partialStock:
+                value:
+                  amount: 0.05
+                  containerId: probe-core
+              wholeItem:
+                value: {}
+      responses:
+        '200':
+          description: Inventory entry jettisoned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeInventoryJettisonResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The requested Manny cannot be ejected now
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entry cannot be jettisoned or requested amount is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies:
     get:
+      tags: [mannies]
       summary: List persisted Manny robots for the current probe
       description: >
         Active Manny task details are exposed when the Manny is in the probe
@@ -1514,6 +1831,7 @@ paths:
           $ref: '#/paths/~1api~1probe~1mannies/get/responses/401'
   /api/probe/{probeId}/mannies/tasks:
     post:
+      tags: [mannies]
       summary: Assign tasks to several Mannies atomically
       description: >
         Applies the tasks in request order using the same validation and
@@ -1572,6 +1890,7 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     get:
+      tags: [mannies]
       summary: Get one persisted Manny robot
       description: >
         Returns the selected Manny's last persisted state with the same
@@ -1597,21 +1916,144 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D/patch'
+      tags: [mannies]
+      summary: Rename a Manny robot
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyRenameRequest'
+            example:
+              name: atelier
+      responses:
+        '200':
+          description: Manny renamed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Duplicate Manny name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/repair:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1repair/post'
+      tags: [mannies]
+      summary: Start restoring probe integrity with a Manny
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyRepairRequest'
+            example:
+              integrityPercent: 2
+      responses:
+        '202':
+          description: Repair task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable or probe cannot be repaired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Insufficient metals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/mine:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1mine/post'
+      tags: [mannies, sectors]
+      summary: Start mining a small body with a Manny
+      description: >
+        Pick objectId from a detailed SectorObject.id or from a solar system
+        minableTargets entry. Select resources from resourceTypes. For
+        asteroids, resourceAmounts is the authoritative remaining reserve in
+        equivalent earth containers; resourceComposition/resourceProfile define
+        how a multi-resource targetAmount is split. An idle Manny in another
+        sector covered by the same SCUT network can receive this order for its
+        own sector only when targetContainerId identifies a detached container
+        in that Manny sector.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyMineRequest'
+            example:
+              objectId: mine-rock
+              resources: [metals, ice, carbon_compounds]
+              targetAmount: 0.05
+              targetContainerId: detached-container-container-itm_extra
+      responses:
+        '202':
+          description: Mining task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Invalid target, unavailable resource, or insufficient cargo capacity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid:
     post:
+      tags: [mannies, motorized-asteroids]
       summary: Install a deuterium engine on an asteroid
       description: >
         Requires the Distributed Thrust Anchoring blueprint and an idle onboard
@@ -1667,6 +2109,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid:
     post:
+      tags: [mannies, motorized-asteroids]
       summary: Refuel an empty motorized asteroid
       description: >
         Starts one configured Manny outbound mining trip, consumes exactly 0.2
@@ -1716,6 +2159,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/sculpt-duck-asteroid:
     post:
+      tags: [mannies]
       summary: Sculpt an asteroid into the shape of a duck
       description: >
         Requires the Anatiform Asteroid Sculpting blueprint and an idle onboard
@@ -1770,6 +2214,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/asteroids/{asteroidId}/trajectories:
     post:
+      tags: [motorized-asteroids]
       summary: Launch a full motorized asteroid
       description: >
         Consumes the asteroid's binary fuel tank and creates one durable,
@@ -1836,6 +2281,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/asteroid-trajectories/{trajectoryId}:
     get:
+      tags: [motorized-asteroids]
       summary: Read locally detectable asteroid trajectory telemetry
       description: >
         Returns telemetry only while the selected probe occupies the
@@ -1867,21 +2313,162 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1craft/post'
+      tags: [mannies]
+      summary: Start crafting a Manny-built inventory item
+      description: Atomic-printer recipes must be started through `/api/probe/atomic-printer/craft`; that endpoint reserves an available Manny as printer assistant.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyCraftRequest'
+            example:
+              recipe: waypoint_bookmark
+      responses:
+        '202':
+          description: Crafting task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Insufficient resources, ingredients, or cargo capacity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/improve-probe:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1improve-probe/post'
+      tags: [mannies, improvements]
+      summary: Start improving the probe with a Manny
+      description: >
+        Starts an unlocked probe improvement on an idle onboard Manny. Required
+        ingredients are removed from the probe inventory when the order is
+        accepted; cancelling the Manny task refunds them.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyProbeImprovementRequest'
+            example:
+              improvement: deuterium_compression
+      responses:
+        '202':
+          description: Probe improvement task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, improvements]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  improvements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProbeImprovement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable or improvement already completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Improvement unavailable or required inventory missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/assemble-probe:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1assemble-probe/post'
+      tags: [mannies, probes]
+      summary: Assemble a new drone probe with a Manny
+      description: >
+        Starts a three-hour exterior Manny task. The generic model consumes two
+        selected empty additional containers plus one deuterium engine, one
+        SCUT relay, five electric motors, two atomic printer parts, and four
+        solar panels. The `deuterium_tanker` model additionally consumes ten
+        steel plates, two linear actuators, and one integrated circuit.
+        When the task completes, a new owned drone probe is created in the
+        assembly sector and the Manny is transferred from the old probe to the
+        new one. If the original probe leaves the sector before completion, the
+        exterior Manny can be left behind as a forgotten Manny. If the task is
+        cancelled by recall, consumed assembly ingredients are left as drifting
+        item stacks in the assembly sector.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyProbeAssemblyRequest'
+            example:
+              model: deuterium_tanker
+              containerIds:
+                - container-itm_aaaaaaaaaaaaaaaaaaaaaaaa
+                - container-itm_bbbbbbbbbbbbbbbbbbbbbbbb
+      responses:
+        '202':
+          description: Probe assembly task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Containers not empty or required components missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/atomic-printer/craft:
     post:
+      tags: [mannies]
       summary: Start crafting an atomic-printer item
       description: >
         Starts a recipe whose `craftableBy` includes `atomic_3d_printer`.
@@ -1909,81 +2496,699 @@ paths:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1salvage/post'
+      tags: [mannies, sectors]
+      summary: Recover a drifting sector object with a Manny
+      description: >
+        Starts a five-minute recovery task. Recoverable targets include
+        abandoned Mannys, drifting item stacks, detached storage containers, and
+        inactive SCUT relays present in the probe current sector. The target is
+        checked again when the delay ends; if another player has already
+        recovered it or an inactive relay has been switched on, the task
+        completes with a failed result and no object is transferred.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannySalvageRequest'
+            example:
+              objectId: manny-mny_abandoned
+      responses:
+        '202':
+          description: Recovery task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Object is not recoverable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/detach-storage-container:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1detach-storage-container/post'
+      tags: [mannies, inventories]
+      summary: Detach an additional storage container
+      description: >
+        Starts a detaching_storage_container task on an idle onboard Manny.
+        The target must be an additional storage container, never probe-core.
+        A container with space reserved for an active crafting output cannot
+        be detached; the API returns `409 storage_container_reserved`.
+        The container, its stored resources/items, and routing rules are
+        removed from the probe inventory when the order is accepted. On
+        completion it becomes either a visible drifting detached container, a
+        hidden container attached to an asteroid, or a container attached to
+        another owned probe in the same sector. Hidden-asteroid detaches expose
+        artificialObjectDetected in the Manny task/result so clients can
+        immediately reference the hidden detached container id.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyDetachStorageContainerRequest'
+            examples:
+              drifting:
+                value:
+                  containerId: container-itm_extra
+                  mode: drifting
+              hidden:
+                value:
+                  containerId: container-itm_extra
+                  mode: hidden_on_asteroid
+                  objectId: asteroid-abc123
+              attachToProbe:
+                value:
+                  containerId: container-itm_extra
+                  mode: attach_to_probe
+                  objectId: '42'
+      responses:
+        '202':
+          description: Detach task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable, probe moving, probe no longer operational, or container space reserved by an active craft (`storage_container_reserved`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Container or asteroid target is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/drop-storage-container:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-storage-container/post'
+      tags: [mannies, inventories]
+      summary: Drop an additional storage container on a planet
+      description: >
+        Starts a dropping_storage_container task on an idle onboard Manny. The
+        target must be a planet in the current sector and the probe inventory
+        must contain one atmospheric_drop_kit. A container with space reserved
+        for an active crafting output cannot be dropped; the API returns
+        `409 storage_container_reserved`. The container, its stored
+        resources/items, and routing rules are removed from the probe inventory
+        when the order is accepted, and the drop kit is consumed. On completion
+        the detached container is stored in sector JSON as attached to the
+        planet with the origin probe id, but planet-dropped containers are not
+        exposed by sector observation endpoints yet. If the container contains
+        biological_archive items for an active Oracle mission, their delivery
+        count is recorded on the owning player's mission, independently of the
+        probe used. The destination must differ from the requesting planet and
+        have a habitability score strictly above the configured Oracle threshold;
+        otherwise the mission fails. After both archives are delivered, returning
+        any probe owned by that player to the requesting sector completes the
+        mission and creates a planet-originated message announcing the future
+        once-per-24-hours Oracle service.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyDropStorageContainerRequest'
+            example:
+              containerId: container-itm_extra
+              planetId: planet-abc123
+      responses:
+        '202':
+          description: Drop task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable, probe moving, probe no longer operational, or container space reserved by an active craft (`storage_container_reserved`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Container, planet target, or required drop kit is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/inspect-sector-object:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1inspect-sector-object/post'
+      tags: [mannies, sectors]
+      summary: Inspect a sector object with a Manny
+      description: >
+        Sends an idle Manny to an inspectable sector object without mining.
+        Local Mannys inspect objects in the probe current sector; an idle
+        remote Manny can also be ordered when its sector and the probe sector
+        are covered by the same SCUT network, in which case the target object
+        must be in the Manny sector and the Manny remains there after
+        completion. Asteroids keep the existing hidden-detached-container
+        detection behavior. Visible detached containers and discovered hidden
+        detached containers generate a Manny report alert when the task completes.
+        Dormant constructs generate a Manny report alert and unlock one probe
+        improvement for the inspecting probe. The construct's selected recovery
+        scenario is stored in sector data and is not exposed by the API.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyInspectSectorObjectRequest'
+            example:
+              objectId: asteroid-abc123
+      responses:
+        '202':
+          description: Inspection task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Target is not an inspectable sector object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/recover-storage-container:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recover-storage-container/post'
+      tags: [mannies, inventories]
+      summary: Recover a detached storage container
+      description: >
+        Starts a salvage-duration recovery task for a detached storage
+        container. Drifting containers can also be recovered through the
+        salvage endpoint. Hidden containers are recovered by the object id
+        returned from mining or inspect-sector-object detection. Any other
+        Mannys currently mining into the recovered detached container are
+        interrupted, have their current mining cargo dropped, and switch to a
+        returning task with reason `target_container_recovered`.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyRecoverStorageContainerRequest'
+            example:
+              objectId: detached-container-container-itm_extra
+              source: asteroid
+      responses:
+        '202':
+          description: Recovery task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Detached container not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Manny unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Detached container cannot be recovered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/install-bookmark:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1install-bookmark/post'
+      tags: [mannies, sectors]
+      summary: Start installing a waypoint bookmark with a Manny
+      description: >
+        Assigns an idle onboard Manny to install one stocked waypoint bookmark
+        on a current-sector celestial object. The Manny consumes one bookmark
+        item when the order is accepted, spends 10 seconds giving it the needed
+        impulse, then the normal waypoint bookmark persistence is applied to the
+        target object.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyWaypointBookmarkInstallRequest'
+            example:
+              objectId: asteroid-abc123
+              name: North ice marker
+      responses:
+        '202':
+          description: Bookmark installation task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Manny, bookmark item, or target object not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Manny unavailable, probe already moving, or probe no longer operational
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Target is not a celestial object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/recall:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1recall/post'
+      tags: [mannies]
+      summary: Recall an exterior Manny to the probe
+      description: >
+        Cancels the current exterior task and starts a returning task when the
+        Manny is outside the probe. By default the return lasts one Manny travel
+        time. If the cancelled task has been running for less than that travel
+        time, the Manny turns around and the return duration matches the elapsed
+        task time. Cancelling a probe assembly task leaves its consumed
+        ingredients as drifting item stacks in the assembly sector. When the
+        Manny is in a different sector that shares SCUT
+        network coverage with the probe sector, the order is accepted remotely:
+        the task is cancelled, the Manny stays in that sector, and it is
+        registered there as forgotten instead of returning.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      responses:
+        '202':
+          description: Recall accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is outside both the probe current sector and same-SCUT remote command range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/drop-manny-cargo:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1drop-manny-cargo/post'
+      tags: [mannies]
+      summary: Drop a waiting Manny cargo and retry docking
+      description: >
+        Immediately discards the cargo of a Manny currently waiting outside for
+        storage space, then retries docking without that cargo. Resource cargo is
+        lost. Recoverable cargo objects, such as a salvaged Manny, drifting item,
+        or detached storage container, are restored to the current sector as
+        drifting/recoverable objects.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      responses:
+        '202':
+          description: Cargo dropped and Manny state refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is not waiting for storage space or is outside the current sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/refill-deuterium-tank:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1refill-deuterium-tank/post'
+      tags: [mannies]
+      summary: Start refilling the probe deuterium tank with a Manny
+      description: >
+        Starts a one-minute Manny task that fills the probe deuterium tank to
+        its configured maximum. The current sector must contain a deuterium
+        refuel station.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      responses:
+        '202':
+          description: Deuterium refill task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is busy, unavailable, or the probe tank is already full
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: No deuterium refuel station is available in the current sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-to-probe:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1transfer-deuterium-to-probe/post'
+      tags: [mannies, probes]
+      summary: Transfer deuterium to another probe or drone with a Manny
+      description: >
+        Starts a five-minute Manny task that transfers a reserved deuterium
+        amount from the current probe to another probe in the same
+        sector. Neither probe may have an active movement. The requested amount must be strictly lower than the source
+        probe current deuterium reserve. When the task completes, the target
+        probe is filled only up to its maximum deuterium capacity and any
+        surplus is returned to the source probe.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyDeuteriumTransferRequest'
+            example:
+              targetProbeId: 42
+              amount: 10
+      responses:
+        '202':
+          description: Deuterium transfer task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny is busy or unavailable, a probe is moving, Manny is not onboard, or the target tank is already full
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Target probe is not in the same sector or source deuterium is insufficient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/transfer-to-probe:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1transfer-to-probe/post'
+      tags: [mannies, probes]
+      summary: Transfer a Manny to another owned probe
+      description: >
+        Starts a Manny transfer task using the same duration as storage
+        container detachment. The target probe must be owned by the player and
+        in the Manny sector. The transfer is accepted when source probe, target
+        probe, and Manny are all in the same sector, or when the Manny is in a
+        remote SCUT-reachable sector with the target probe. If the Manny was
+        already executing a task, the task is cancelled with the same cleanup
+        rules as recall, then the Manny returns toward the target probe. Neither
+        the source nor target probe may have an active movement.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyProbeTransferRequest'
+            example:
+              targetProbeId: 42
+      responses:
+        '202':
+          description: Manny transfer task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny or source probe cannot accept the transfer order, or either probe is moving
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Target probe is not in the Manny sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/turn-on-relay:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1turn-on-relay/post'
+      tags: [mannies, scut]
+      summary: Send a Manny to turn on a SCUT relay
+      description: >
+        Starts a five-minute Manny task that turns on an inactive SCUT relay in
+        the probe current sector. The current sector must contain a star because
+        the relay needs solar energy. The task consumes one integrated_circuit
+        from the probe inventory. If the relay joins existing relay coverage,
+        the resulting network keeps the name of the largest existing network,
+        with oldest network as tie-breaker; otherwise networkName or "scut
+        network" is used.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyTurnOnRelayRequest'
+            example:
+              relayId: 12
+              networkName: Delta SCUT
+      responses:
+        '202':
+          description: SCUT relay turn-on task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable, probe moving, or relay already on
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Relay is not in the current sector, the sector has no star, or the probe lacks an integrated circuit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/mannies/{mannyId}/install-scut-transit-beacon:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
       - $ref: '#/components/parameters/MannyId'
     post:
-      $ref: '#/paths/~1api~1probe~1mannies~1%7BmannyId%7D~1install-scut-transit-beacon/post'
+      tags: [mannies, scut]
+      summary: Send a Manny to install a SCUT transit beacon
+      description: >
+        Starts a five-minute Manny task that equips an active SCUT relay in the
+        probe current sector with a scut_transit_beacon. The task consumes one
+        scut_transit_beacon item from the probe inventory.
+      parameters:
+        - $ref: '#/components/parameters/MannyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MannyScutTransitBeaconInstallRequest'
+            example:
+              relayId: 12
+      responses:
+        '202':
+          description: SCUT transit beacon installation task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manny, inventory]
+                properties:
+                  manny:
+                    $ref: '#/components/schemas/Manny'
+                  inventory:
+                    $ref: '#/components/schemas/ProbeInventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny unavailable, probe moving, or relay already has a transit beacon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Relay is not in the current sector, relay is inactive, or the probe lacks a SCUT transit beacon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mind-snapshot/reassign:
     post:
+      tags: [default probe]
       summary: Reassign a terminal probe mind snapshot
       description: >
         Available only when the current probe is dead or trapped by a black hole.
@@ -2009,6 +3214,7 @@ paths:
           $ref: '#/components/responses/Conflict'
   /api/probe/storage-containers:
     get:
+      tags: [default probe]
       summary: List probe storage containers
       description: >
         Returns the probe core storage and each additional container created
@@ -2031,6 +3237,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/storage-containers/{containerId}:
     get:
+      tags: [default probe]
       summary: Get one storage container content
       parameters:
         - $ref: '#/components/parameters/StorageContainerId'
@@ -2046,6 +3253,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
+      tags: [default probe]
       summary: Rename a storage container
       parameters:
         - $ref: '#/components/parameters/StorageContainerId'
@@ -2072,6 +3280,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/storage-containers/{containerId}/rules:
     patch:
+      tags: [default probe]
       summary: Update storage routing rules for a container
       description: >
         Priority routes matching new items to this container first unless it is
@@ -2105,6 +3314,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/storage-moves:
     post:
+      tags: [default probe]
       summary: Assign a Manny to move stock between containers
       description: >
         Starts a moving_stockage task on an idle onboard Manny. Unit items take
@@ -2168,6 +3378,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/probe-improvements-available:
     get:
+      tags: [default probe]
       summary: List available probe improvements
       description: >
         Returns probe improvements whose blueprints are known by the player
@@ -2236,6 +3447,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/messages:
     get:
+      tags: [default probe]
       summary: List messages received by the current probe
       description: >
         Returns messages where the authenticated player's probe is the
@@ -2315,6 +3527,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
     post:
+      tags: [default probe]
       summary: Send a message to a reachable probe or inhabited planet
       description: >
         Creates an unread message from the current probe to a recipient.
@@ -2354,6 +3567,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/scut-network/{scutNetworkId}:
     get:
+      tags: [default probe]
       summary: Inspect a SCUT relay network covering the current probe
       parameters:
         - $ref: '#/components/parameters/ScutNetworkId'
@@ -2376,6 +3590,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/messages/sent:
     get:
+      tags: [default probe]
       summary: List messages sent by the current probe
       description: >
         Returns messages where the authenticated player's probe is the sender.
@@ -2436,6 +3651,7 @@ paths:
           $ref: '#/components/responses/BadRequest'
   /api/probe/messages/{messageId}/read:
     patch:
+      tags: [default probe]
       summary: Mark a received probe message as read
       description: >
         Only the recipient probe can mark a message as read. Repeating the call
@@ -2455,6 +3671,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/alerts:
     get:
+      tags: [default probe]
       summary: List persistent probe alerts
       description: >
         Returns persistent alerts produced for the authenticated probe. Alerts
@@ -2584,6 +3801,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/alerts/{alertId}:
     patch:
+      tags: [default probe]
       summary: Mark a persistent probe alert as read
       parameters:
         - $ref: '#/components/parameters/AlertId'
@@ -2599,6 +3817,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
+      tags: [default probe]
       summary: Delete a persistent probe alert
       description: >
         Permanently deletes the alert only when it belongs to the selected
@@ -2615,6 +3834,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/damage-warnings:
     get:
+      tags: [default probe]
       summary: List probe movement damage warnings
       description: >
         Returns persistent warnings produced when a fragile chain of additional
@@ -2663,6 +3883,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/damage-warnings/{damageWarningId}:
     patch:
+      tags: [default probe]
       summary: Mark a movement damage warning as read
       parameters:
         - $ref: '#/components/parameters/DamageWarningId'
@@ -2678,6 +3899,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
+      tags: [default probe]
       summary: Delete a movement damage warning
       description: >
         Permanently deletes the warning only when it belongs to the selected
@@ -2694,6 +3916,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/visited-sectors:
     get:
+      tags: [default probe]
       summary: List sectors already visited by the current probe
       description: >
         Returns the authenticated player's visited-sector history for the
@@ -2720,6 +3943,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/sector:
     get:
+      tags: [default probe]
       summary: Get observable probe sector and onboard inventory
       responses:
         '200':
@@ -2916,6 +4140,7 @@ paths:
                   message: External sensors are unavailable at current relativistic velocity.
   /api/probe/move:
     post:
+      tags: [default probe]
       summary: Start an asynchronous intersector movement
       requestBody:
         required: true
@@ -2982,6 +4207,7 @@ paths:
                   message: Insufficient deuterium for movement.
   /api/probe/inventory/{itemId}:
     get:
+      tags: [default probe]
       summary: Get task state for an onboard inventory item
       parameters:
         - name: itemId
@@ -3014,6 +4240,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/probe/inventory/{itemId}/jettison:
     post:
+      tags: [default probe]
       summary: Jettison an inventory entry into space
       description: >
         Discards stored metals/non-metal materials by amount, ejects an idle onboard Manny
@@ -3073,6 +4300,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies:
     get:
+      tags: [default probe]
       summary: List persisted Manny robots for the current probe
       description: >
         Active Manny task details are exposed when the Manny is in the probe
@@ -3109,6 +4337,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /api/probe/mannies/{mannyId}:
     patch:
+      tags: [default probe]
       summary: Rename a Manny robot
       parameters:
         - $ref: '#/components/parameters/MannyId'
@@ -3145,6 +4374,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/repair:
     post:
+      tags: [default probe]
       summary: Start restoring probe integrity with a Manny
       parameters:
         - $ref: '#/components/parameters/MannyId'
@@ -3185,6 +4415,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/mine:
     post:
+      tags: [default probe]
       summary: Start mining a small body with a Manny
       description: >
         Pick objectId from a detailed SectorObject.id or from a solar system
@@ -3237,6 +4468,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/craft:
     post:
+      tags: [default probe]
       summary: Start crafting a Manny-built inventory item
       description: Atomic-printer recipes must be started through `/api/probe/atomic-printer/craft`; that endpoint reserves an available Manny as printer assistant.
       parameters:
@@ -3278,6 +4510,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/improve-probe:
     post:
+      tags: [default probe]
       summary: Start improving the probe with a Manny
       description: >
         Starts an unlocked probe improvement on an idle onboard Manny. Required
@@ -3326,6 +4559,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/assemble-probe:
     post:
+      tags: [default probe]
       summary: Assemble a new drone probe with a Manny
       description: >
         Starts a three-hour exterior Manny task. The generic model consumes two
@@ -3383,6 +4617,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/atomic-printer/craft:
     post:
+      tags: [default probe]
       summary: Start crafting an atomic-printer item
       description: >
         Starts a recipe whose `craftableBy` includes `atomic_3d_printer`.
@@ -3429,6 +4664,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/salvage:
     post:
+      tags: [default probe]
       summary: Recover a drifting sector object with a Manny
       description: >
         Starts a five-minute recovery task. Recoverable targets include
@@ -3476,6 +4712,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/detach-storage-container:
     post:
+      tags: [default probe]
       summary: Detach an additional storage container
       description: >
         Starts a detaching_storage_container task on an idle onboard Manny.
@@ -3543,6 +4780,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/drop-storage-container:
     post:
+      tags: [default probe]
       summary: Drop an additional storage container on a planet
       description: >
         Starts a dropping_storage_container task on an idle onboard Manny. The
@@ -3605,6 +4843,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/inspect-sector-object:
     post:
+      tags: [default probe]
       summary: Inspect a sector object with a Manny
       description: >
         Sends an idle Manny to an inspectable sector object without mining.
@@ -3657,6 +4896,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/recover-storage-container:
     post:
+      tags: [default probe]
       summary: Recover a detached storage container
       description: >
         Starts a salvage-duration recovery task for a detached storage
@@ -3712,6 +4952,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/install-bookmark:
     post:
+      tags: [default probe]
       summary: Start installing a waypoint bookmark with a Manny
       description: >
         Assigns an idle onboard Manny to install one stocked waypoint bookmark
@@ -3765,6 +5006,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/recall:
     post:
+      tags: [default probe]
       summary: Recall an exterior Manny to the probe
       description: >
         Cancels the current exterior task and starts a returning task when the
@@ -3802,6 +5044,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/drop-manny-cargo:
     post:
+      tags: [default probe]
       summary: Drop a waiting Manny cargo and retry docking
       description: >
         Immediately discards the cargo of a Manny currently waiting outside for
@@ -3834,6 +5077,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/refill-deuterium-tank:
     post:
+      tags: [default probe]
       summary: Start refilling the probe deuterium tank with a Manny
       description: >
         Starts a one-minute Manny task that fills the probe deuterium tank to
@@ -3870,6 +5114,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/transfer-deuterium-to-probe:
     post:
+      tags: [default probe]
       summary: Transfer deuterium to another probe or drone with a Manny
       description: >
         Starts a five-minute Manny task that transfers a reserved deuterium
@@ -3920,6 +5165,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/transfer-to-probe:
     post:
+      tags: [default probe]
       summary: Transfer a Manny to another owned probe
       description: >
         Starts a Manny transfer task using the same duration as storage
@@ -3971,6 +5217,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/turn-on-relay:
     post:
+      tags: [default probe]
       summary: Send a Manny to turn on a SCUT relay
       description: >
         Starts a five-minute Manny task that turns on an inactive SCUT relay in
@@ -4024,6 +5271,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/probe/mannies/{mannyId}/install-scut-transit-beacon:
     post:
+      tags: [default probe]
       summary: Send a Manny to install a SCUT transit beacon
       description: >
         Starts a five-minute Manny task that equips an active SCUT relay in the
@@ -4072,6 +5320,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/sector:
     get:
+      tags: [sectors]
       summary: Observe a sector by player-relative coordinates
       description: >
         Coordinates are relative to the authenticated player's reference frame.
