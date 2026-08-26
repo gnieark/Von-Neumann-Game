@@ -373,8 +373,16 @@ $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafti
 $test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
 $probeMissileRecipe = CraftingRecipeCatalog::find('missile');
 $test->assertEquals(['manny'], $probeMissileRecipe['craftableBy'] ?? null, 'missile recipe is craftable by Manny');
-$test->assertEquals(0.20, $probeMissileRecipe['ingredients'][0]['quantity'] ?? null, 'missile recipe consumes exactly 0.20 ECE of metals');
-$test->assertEquals(0.10, $probeMissileRecipe['ingredients'][1]['quantity'] ?? null, 'missile recipe consumes exactly 0.10 ECE of carbon compounds');
+$probeMissileIngredients = [];
+foreach ($probeMissileRecipe['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $probeMissileIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(1, $probeMissileIngredients['battery_pack']['quantity'] ?? null, 'missile recipe requires one battery pack');
+$test->assertEquals(2, $probeMissileIngredients['micro_conductor']['quantity'] ?? null, 'missile recipe requires two micro-etched conductors');
+$test->assertEquals(0.20, $probeMissileIngredients['metals']['quantity'] ?? null, 'missile recipe consumes exactly 0.20 ECE of metals');
+$test->assertEquals(0.10, $probeMissileIngredients['carbon_compounds']['quantity'] ?? null, 'missile recipe consumes exactly 0.10 ECE of carbon compounds');
 $test->assertEquals(3600, $probeMissileRecipe['durationSeconds'] ?? null, 'missile recipe takes exactly one hour');
 $test->assertEquals(0.05, $probeMissileRecipe['output']['containerSpace'] ?? null, 'probe missile occupies exactly 0.05 ECE');
 $configuredProbeImprovement = ProbeImprovementCatalog::find('deuterium-compression', $loadedGameplayConfig['probeImprovements'] ?? []);
@@ -3725,6 +3733,14 @@ $recipesById = [];
 foreach ($craftingRecipes->body['recipes'] ?? [] as $recipe) {
     $recipesById[$recipe['id'] ?? ''] = $recipe;
 }
+$apiMissileIngredients = [];
+foreach ($recipesById['missile']['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $apiMissileIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(1, $apiMissileIngredients['battery_pack']['quantity'] ?? null, 'crafting recipe API exposes one missile battery pack');
+$test->assertEquals(2, $apiMissileIngredients['micro_conductor']['quantity'] ?? null, 'crafting recipe API exposes two missile micro-etched conductors');
 $test->assert(isset($recipesById['steel_bar']), 'crafting recipes expose steel bars');
 $test->assertEquals(0.02, $recipesById['steel_bar']['ingredients'][0]['quantity'] ?? null, 'steel bar recipe consumes 0.02 metal containers');
 $test->assertEquals(300, $recipesById['steel_bar']['durationSeconds'] ?? null, 'steel bar takes five real minutes to craft');

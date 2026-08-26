@@ -141,6 +141,8 @@ final class CraftingRecipeCatalog
     public const MANNY_CONTAINER_SPACE = 0.05;
     public const MANNY_CARGO_CAPACITY = 0.05;
     public const MANNY_CRAFTING_SECONDS = 3600;
+    public const MISSILE_BATTERY_PACKS = 1;
+    public const MISSILE_MICRO_CONDUCTORS = 2;
     public const MISSILE_METALS_COST = 0.20;
     public const MISSILE_CARBON_COMPOUNDS_COST = 0.10;
     public const MISSILE_CONTAINER_SPACE = 0.05;
@@ -260,6 +262,8 @@ final class CraftingRecipeCatalog
             'description' => self::description($config, ProbeItem::TYPE_MISSILE),
             'craftableBy' => [self::FABRICATOR_MANNY],
             'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_BATTERY_PACK, Config::int($config, 'missile.batteryPackCount', self::MISSILE_BATTERY_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_MICRO_CONDUCTOR, Config::int($config, 'missile.microConductorCount', self::MISSILE_MICRO_CONDUCTORS)),
                 self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'missile.metalsCost', self::MISSILE_METALS_COST)),
                 self::resourceIngredient(ResourceComposition::CARBON_COMPOUNDS, Config::float($config, 'missile.carbonCompoundsCost', self::MISSILE_CARBON_COMPOUNDS_COST)),
             ],
