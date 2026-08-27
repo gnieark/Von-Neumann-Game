@@ -86,16 +86,15 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         }
         if ($targetProbe !== null) {
             $damage = (float) ($resolution['integrityDamagePercent'] ?? 0.0);
-            $targetProbe->integrityPercent = round(max(0.0, $targetProbe->integrityPercent - $damage), 2);
-            if (($resolution['targetDestroyed'] ?? false) === true) {
-                $targetProbe->status = ProbeStatus::Dead;
+            $targetProbe->subtractIntegrityPercent($damage);
+            if ($targetProbe->status === ProbeStatus::Dead) {
                 $this->destroyObject($sector, $source->getId());
             }
             $this->probes->save($targetProbe);
             $this->sectors->saveSector($sector);
             return $this->terminal(
                 $trajectory,
-                ($resolution['targetDestroyed'] ?? false) ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED,
+                $targetProbe->status === ProbeStatus::Dead ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED,
                 (string) $resolution['outcome'],
                 null,
             );

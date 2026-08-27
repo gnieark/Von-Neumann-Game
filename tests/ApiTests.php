@@ -2395,8 +2395,30 @@ $departedProbeResultAlerts = array_values(array_filter(
 $test->assertEquals([], $departedProbeResultAlerts, 'a probe launcher that left the impact sector receives no result alert');
 $secondaryProbe->currentSector = $probeLauncherOrigin;
 $probes->save($secondaryProbe);
+
+$fatalTargetOwner = $players->createPlayer('fatal-missile-target-owner', 'Fatal Missile Target Owner', null, $secondaryProbe->currentSector);
+$fatalTargetProbe = $probes->createForPlayer($fatalTargetOwner->id, 'Low integrity missile target', $secondaryProbe->currentSector);
+$storage->initializeProbeStorage($fatalTargetProbe);
+$fatalTargetProbe->integrityPercent = 5.0;
+$fatalTargetProbe->excludeFromStats = true;
+$probes->save($fatalTargetProbe);
+$fatalMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'fatal-probe-missile-alert-test-item');
+$fatalProbeMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
+    'actorMannyId' => $missileAlertManny->uid,
+    'missileItemId' => $fatalMissileItem->uid,
+    'targetId' => (string) $fatalTargetProbe->id,
+]);
+$processScheduledMannyNow($missileAlertManny->id);
+$fatalProbeImpactHistory = $resolveMissileHitNow((string) $fatalProbeMissile['public_id']);
+$fatalProbeImpactDetails = json_decode((string) $fatalProbeImpactHistory['details_json'], true, 512, JSON_THROW_ON_ERROR);
+$fatalTargetProbeAfterImpact = $probes->findById($fatalTargetProbe->id);
+$test->assertEquals(0.0, $fatalTargetProbeAfterImpact?->integrityPercent, 'missile damage greater than remaining probe integrity is clamped to zero');
+$test->assertEquals(5.0, (float) ($fatalProbeImpactDetails['damage'] ?? -1), 'missile resolution records only the integrity damage actually applied');
+$test->assertEquals(true, $fatalProbeImpactDetails['destroyed'] ?? null, 'missile resolution reports a zero-integrity probe as destroyed');
+$test->assertEquals(ProbeStatus::Dead, $fatalTargetProbeAfterImpact?->status, 'a probe reaching zero integrity becomes dead');
+
 $missileFixtureObjectIds = [];
-foreach ([$probeToOthersMissile['public_id'], $othersToProbeMissile['missile']['public_id'], $departedLauncherMissile['missile']['public_id'], $departedProbeMissile['public_id']] as $fixtureMissileId) {
+foreach ([$probeToOthersMissile['public_id'], $othersToProbeMissile['missile']['public_id'], $departedLauncherMissile['missile']['public_id'], $departedProbeMissile['public_id'], $fatalProbeMissile['public_id']] as $fixtureMissileId) {
     $missileFixtureObjectIds[] = 'weapon-' . $fixtureMissileId;
     $missileFixtureObjectIds[] = 'weapon-result-' . $fixtureMissileId;
     $missileFixtureObjectIds[] = 'weapon-damage-' . $fixtureMissileId;
@@ -2726,7 +2748,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(120, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(121, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
@@ -8853,13 +8875,24 @@ $sameMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode
 $test->assertEquals(400, $sameMove->status, 'POST /api/probe/move rejects current sector destination');
 
 if ($moveProbe !== null) {
-    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 1.99 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $integrityBeforeMovementThresholdChecks = $moveProbe->integrityPercent;
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 9.99, deuterium_stock = 100 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $lowIntegrityMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $lowIntegrityMove->status, 'POST /api/probe/move rejects probe integrity below ten percent');
+    $test->assertEquals('probe_integrity_too_low', $lowIntegrityMove->body['error']['code'] ?? null, 'low-integrity movement refusal exposes a stable error code');
+    $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'low-integrity movement refusal consumes no deuterium');
+
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 10, deuterium_stock = 1.99 WHERE id = :id')->execute(['id' => $moveProbe->id]);
     $noFuel = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(422, $noFuel->status, 'POST /api/probe/move rejects stock below the fixed two-point travel cost');
+    $test->assertEquals('insufficient_fuel', $noFuel->body['error']['code'] ?? null, 'exactly ten percent integrity permits movement validation to reach the fuel check');
     $test->assertEquals(1.99, $probes->findByPlayerId($player->id)?->deuteriumStock, 'rejected movement keeps the deuterium needed for deceleration');
 
     $originBeforeMove = $moveProbe->currentSector;
-    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = :integrity, deuterium_stock = 100 WHERE id = :id')->execute([
+        'id' => $moveProbe->id,
+        'integrity' => $integrityBeforeMovementThresholdChecks,
+    ]);
     $pdo->prepare(
         'UPDATE mannies
          SET location_type = :location_type,

@@ -38,6 +38,7 @@ final class ProbeMovementService
 {
     public const BLACK_HOLE_TRAP_MIN_DELAY_SECONDS = 5400;
     public const BLACK_HOLE_TRAP_MAX_DELAY_SECONDS = 10800;
+    public const MINIMUM_MOVEMENT_INTEGRITY_PERCENT = 10.0;
 
     private readonly SectorGrid $grid;
     private readonly array $gameplayConfig;
@@ -79,6 +80,9 @@ final class ProbeMovementService
     {
         $probe = $this->refreshProbeMovementStateLocked($probe);
         $this->ensureProbeOperational($probe);
+        if ($probe->integrityPercent < self::MINIMUM_MOVEMENT_INTEGRITY_PERCENT) {
+            throw new ProbeMovementException(422, 'probe_integrity_too_low', 'Probe integrity must be at least 10 percent to start a movement.');
+        }
 
         if ($this->movements->findActiveByProbeId($probe->id) !== null) {
             throw new ProbeMovementException(409, 'probe_already_moving', 'The probe is already moving between sectors.');
@@ -160,6 +164,9 @@ final class ProbeMovementService
 
     public function refreshProbeMovementState(NeumannProbe $probe, bool $persistIntermediatePhase = false): NeumannProbe
     {
+        if ($probe->status === ProbeStatus::Dead) {
+            return $probe;
+        }
         $movement = $this->movements->findActiveByProbeId($probe->id);
         if ($movement === null) {
             return $probe;
@@ -181,6 +188,9 @@ final class ProbeMovementService
 
     private function refreshProbeMovementStateLocked(NeumannProbe $probe, bool $persistIntermediatePhase = false): NeumannProbe
     {
+        if ($probe->status === ProbeStatus::Dead) {
+            return $probe;
+        }
         $movement = $this->movements->findActiveByProbeId($probe->id);
         if ($movement === null) {
             return $probe;
@@ -937,7 +947,7 @@ final class ProbeMovementService
             $integrityLoss += round($roll * $this->float('intersectorIntegrityLossMaxPercentPerDistance', 3.0), 2);
         }
 
-        $probe->integrityPercent = round(max(0.0, $probe->integrityPercent - $integrityLoss), 2);
+        $probe->subtractIntegrityPercent($integrityLoss);
     }
 
     private function scheduleBlackHoleTrapIfNeeded(NeumannProbe $probe): void

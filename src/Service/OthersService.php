@@ -826,7 +826,7 @@ final class OthersService
             $damageKey = 'laser:' . $action['public_id'] . ':' . $lock['next_damage_at'];
             try {
                 $pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key' => $damageKey, 'kind' => $target['kind'], 'target' => $target['id'], 'damage' => $target['kind'] === 'probe' ? 5 : ($target['kind'] === 'manny' ? 1 : 0), 'now' => $now]);
-                if ($target['kind'] === 'probe' && $this->probes !== null) { $probe = $this->probes->findById((int) $target['id']); if ($probe !== null) { $probe->integrityPercent = max(0.0, $probe->integrityPercent - 5.0); $this->probes->save($probe); } }
+                if ($target['kind'] === 'probe' && $this->probes !== null) { $probe = $this->probes->findById((int) $target['id']); if ($probe !== null) { $probe->subtractIntegrityPercent(5.0); $this->probes->save($probe); } }
                 elseif ($target['kind'] === 'manny') { $pdo->prepare('DELETE FROM mannies WHERE uid=:uid AND location_type=\'sector\'')->execute(['uid' => $target['id']]); if ($this->sectors !== null) { $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z'])); if ($sector->removeObjectById('manny-' . $target['id'])) { $this->sectors->saveSector($sector); } } $this->stopLaser($action, $lock, $now, 'target_destroyed'); return; }
             } catch (\PDOException $error) { if (!str_contains(strtolower($error->getMessage()), 'unique')) { throw $error; } }
             $nextDamage = (new \DateTimeImmutable((string) $lock['next_damage_at']))->modify('+10 minutes');
@@ -957,7 +957,7 @@ final class OthersService
         try{$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')]);}catch(\PDOException $e){if(str_contains(strtolower($e->getMessage()),'unique')){return ['damage'=>0,'replayed'=>true];}throw $e;}
         if($target['kind']==='manny'){$pdo->prepare("DELETE FROM mannies WHERE uid=:uid AND location_type='sector'")->execute(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
         if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target);return ['damage'=>1,'destroyed'=>true];}
-        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$before=$probe->integrityPercent;$probe->integrityPercent=round(max(0.0,$probe->integrityPercent-$damage),2);$applied=round($before-$probe->integrityPercent,2);$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->integrityPercent<=0];}
+        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$applied=$probe->subtractIntegrityPercent($damage);$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->status===ProbeStatus::Dead];}
         if ($target['kind'] === 'motorized_asteroid') {
             $trajectoryId = (int) $target['trajectory_id'];
             $now = gmdate('c');
