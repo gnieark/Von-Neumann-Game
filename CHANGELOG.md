@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-27
+
+### Changed
+
+- Interface : le groupe « Secteur » de `/mannies` permet désormais de préparer le lancement d’un missile depuis la sonde courante, avec sélection du missile en soute et d’une cible locale détectée. La tâche de préparation d’une minute dispose aussi de son propre état d’avancement dans la carte de la Manny.
+
 ## 2026-08-25
 
 ### Changed

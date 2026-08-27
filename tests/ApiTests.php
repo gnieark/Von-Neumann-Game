@@ -942,6 +942,13 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorO
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspect-sector-object'), 'mannies JS posts generic sector-object inspections');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-refuel-motorized-asteroid-form'), 'mannies JS renders the motorized asteroid refueling form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-asteroid-form'), 'mannies JS renders the asteroid trajectory launch form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-missile-form'), 'mannies JS renders the probe missile launch form in sector actions');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'explicitCurrentProbeApiPath("/missiles")'), 'mannies JS posts missile launches through the explicit current-probe endpoint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"actorMannyId": String(mannyId), missileItemId, targetId'), 'mannies JS sends the canonical probe missile payload');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/sector/autonomous-units?limit=500'), 'mannies JS loads local autonomous units as missile targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.mannyUid || object.id'), 'mannies JS uses the canonical Manny uid for missile targets');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'launchMissileActionTitle' => 'Lancer un missile'"), 'French translations label the missile launch action');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'launchMissileActionTitle' => 'Launch a missile'"), 'English translations label the missile launch action');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'function asteroidLaunchHint'), 'mannies JS selects mode-specific asteroid launch help');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-asteroid-launch-hint'), 'mannies JS renders dynamic asteroid launch help');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidLaunchSystemImpactHint' => 'L’astéroïde accélère"), 'French translations explain system-impact launches');
@@ -1182,7 +1189,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260826-api-docs-collapsed"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260827-manny-missiles"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
