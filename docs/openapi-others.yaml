@@ -385,6 +385,10 @@ components:
       name: Idempotency-Key
       in: header
       required: false
+      description: >-
+        An optional key chosen by your client that prevents the same command from
+        being executed twice if the request is retried after a timeout or network
+        interruption.
       schema:
         type: string
         minLength: 1
