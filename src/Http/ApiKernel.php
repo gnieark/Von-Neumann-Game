@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 121;
+    public const API_VERSION = 122;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1397,6 +1397,7 @@ final class ApiKernel
         $observation['dataFreshness'] = 'live';
         $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
         $observation = $this->withObservedProbePresence($observation, $probe, $observableSector);
+        $observation = $this->withObservedMovingMissiles($observation, $probe, $observableSector);
         $observation = $this->withScutSectorData($player, $observation, $observableSector, includeRelays: true);
 
         return new ApiResponse(200, [
@@ -2187,7 +2188,7 @@ final class ApiKernel
                 $sector['objects'][] = ['id' => (string) $ship['public_id'], 'observedClass' => $ship['type'] === 'mothership' ? 'large_ship' : 'ship', 'estimated' => false];
             }
             foreach ($entities['projectiles'] as $projectile) {
-                $sector['objects'][] = ['id' => (string) $projectile['public_id'], 'observedClass' => 'suspected_missile', 'estimated' => false];
+                $sector['objects'][] = $this->observedMovingMissileArray($projectile);
             }
         } elseif (($sector['knowledgeLevel'] ?? null) === 'neighbor_scan') {
             foreach ($entities['ships'] as $ship) {
@@ -2495,6 +2496,62 @@ final class ApiKernel
         }
 
         return $observation;
+    }
+
+    private function withObservedMovingMissiles(array $observation, NeumannProbe $probe, SectorCoordinates $observableSector): array
+    {
+        if (
+            ($observation['knowledgeLevel'] ?? null) !== 'detailed'
+            || !$observableSector->equals($probe->currentSector)
+        ) {
+            return $observation;
+        }
+
+        $projectiles = $this->others?->movingProjectilesBySector(
+            $observableSector->getX(),
+            $observableSector->getY(),
+            $observableSector->getZ(),
+        ) ?? [];
+        if ($projectiles === []) {
+            return $observation;
+        }
+
+        $observation['objects'] = is_array($observation['objects'] ?? null) ? $observation['objects'] : [];
+        foreach ($projectiles as $projectile) {
+            $observation['objects'][] = $this->observedMovingMissileArray($projectile, $probe);
+        }
+
+        return $observation;
+    }
+
+    /** @param array<string, mixed> $projectile */
+    private function observedMovingMissileArray(array $projectile, ?NeumannProbe $observingProbe = null): array
+    {
+        $targetKind = (string) $projectile['target_kind'];
+        $targetId = (string) $projectile['target_public_id'];
+        $missile = [
+            'id' => (string) $projectile['public_id'],
+            'type' => 'missile',
+            'observedClass' => 'suspected_missile',
+            'name' => (string) $projectile['public_id'],
+            'estimated' => false,
+            'summary' => 'Kinetic projectile in motion.',
+            'dangerLevel' => 'moderate',
+            'status' => (string) $projectile['status'],
+            'launcherKind' => (string) $projectile['launcher_kind'],
+            'targetKind' => $targetKind,
+            'targetId' => $targetId,
+            'launchedAt' => (string) $projectile['launched_at'],
+            'impactAt' => (string) $projectile['impact_at'],
+        ];
+        if ($observingProbe !== null) {
+            $missile['targetsCurrentProbe'] = $targetKind === 'probe' && $targetId === (string) $observingProbe->id;
+            if ($missile['targetsCurrentProbe']) {
+                $missile['dangerLevel'] = 'extreme';
+            }
+        }
+
+        return $missile;
     }
 
     private function withScutSectorData(Player $player, array $observation, SectorCoordinates $sector, bool $includeRelays): array

@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260827-missile-resolution-alerts';
+const ASSET_VERSION = '20260827-movement-integrity-checklist';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);

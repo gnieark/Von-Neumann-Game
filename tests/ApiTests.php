@@ -781,6 +781,11 @@ $test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigation
 $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'probe.systems.integrityPercent') && str_contains($movementScript, '>= 10'), 'movement JS derives the ten-percent integrity prerequisite from current probe telemetry');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'probeIntegrityMinimum'), 'movement JS renders minimum integrity in the preparation checklist');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'blockedByIntegrity'), 'movement JS disables movement submission below minimum integrity');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeIntegrityMinimum' => 'Intégrité minimale de la sonde (10 %)'"), 'French translations label the movement integrity prerequisite');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeIntegrityMinimum' => 'Minimum probe integrity (10%)'"), 'English translations label the movement integrity prerequisite');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'step=\"0.0001\" required></label>'), 'Manny deuterium transfer amount starts empty instead of prefilled');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'amountInput.value.trim() === "" ? null'), 'Manny deuterium transfer amount remains empty while the user edits it');
@@ -885,6 +890,7 @@ $test->assert(
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroid-trajectories/{trajectoryId}:'), 'OpenAPI documents local trajectory telemetry');
 $test->assert(str_contains($openApi, 'discriminator:') && str_contains($openApi, "propertyName: mode"), 'OpenAPI discriminates trajectory requests by mode');
 $test->assert(str_contains($openApi, 'asteroid_temporarily_occluded') && str_contains($openApi, 'motorFuelStatus'), 'OpenAPI documents trajectory errors and binary asteroid fuel');
+$test->assert(str_contains($openApi, 'targetsCurrentProbe') && str_contains($openApi, 'type: missile'), 'OpenAPI documents moving missile observations and observer-target matching');
 $test->assert(str_contains($openApi, 'Generated asteroids have a short content-based name such as Ice Deut 15ce'), 'OpenAPI documents content/hash asteroid names');
 $test->assert(str_contains($openApi, 'nextUsefulRefreshDelayMs'), 'OpenAPI documents Manny list useful refresh delay hints');
 $test->assert(str_contains($openApi, 'enum: [covered, uncovered, unknown]'), 'OpenAPI documents SCUT coverage knowledge states');
@@ -1049,14 +1055,19 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorS
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutNetworks.length > 0'), 'sensors JS derives SCUT coverage from the sector endpoint');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutCoverageStatus === "unknown"'), 'sensors JS renders unknown SCUT coverage');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="asteroid-trajectory-alerts"'), 'sensors view exposes a prominent live asteroid trajectory alert region');
+$test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="missile-threat-alerts"'), 'sensors view exposes a prominent live targeted-missile alert region');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function detectedMovingAsteroids'), 'sensors JS detects active motorized asteroid trajectories in sector scan objects');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function detectedTargetingMissiles'), 'sensors JS detects moving missiles targeting the selected probe');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'object.targetsCurrentProbe === true'), 'sensors JS trusts the probe-scoped missile target projection');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, '["bookmarkTargets", "minableTargets"]'), 'sensors JS also detects trajectories on solar-system asteroid representations');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'trajectory.estimatedCompletionAt || trajectory.nextTransitionAt'), 'sensors JS computes the system-impact countdown from sector telemetry');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'trajectory.targetObjectId'), 'sensors JS resolves the system-impact target from sector telemetry');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'renderSectorObjects(data.sector, isCurrentProbeSector)'), 'sensors JS limits moving-asteroid alerts to the selected probe current-sector scan');
-$test->assert(is_string($appCss) && str_contains($appCss, '.asteroid-trajectory-alerts'), 'sensors CSS puts moving motorized asteroid telemetry in a dedicated alert panel');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-live-alerts'), 'sensors CSS shares the critical live-alert presentation between moving asteroids and targeted missiles');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidTrajectoryImpactIn' => 'Impact estimé dans {duration}'"), 'French translations include the live estimated-impact countdown');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidTrajectoryImpactIn' => 'Estimated impact in {duration}'"), 'English translations include the live estimated-impact countdown');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missileThreatAlertTitle' => 'ALERTE : MISSILE DIRIGÉ VERS LA SONDE COURANTE'"), 'French translations include the live targeted-missile alert');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missileThreatAlertTitle' => 'ALERT: MISSILE TARGETING CURRENT PROBE'"), 'English translations include the live targeted-missile alert');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'Couverture SCUT : inconnue'"), 'French translations include unknown SCUT coverage');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'SCUT coverage: unknown'"), 'English translations include unknown SCUT coverage');
 $test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'scheduleRefresh'), 'sensors JS does not poll and overwrite coordinate input');
@@ -1197,7 +1208,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260827-missile-resolution-alerts"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260827-movement-integrity-checklist"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, '"/api/others/alerts"'), 'Others OpenAPI documents the persistent alert collection');
@@ -2240,6 +2251,26 @@ $preparedAlertMissile = $othersService->prepareProbeMissile($secondaryProbe, $mu
     'targetId' => (string) $sameSectorProbe->id,
 ]);
 $processScheduledMannyNow($missileAlertManny->id);
+$targetedMissileSectorResponse = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/sector', $multiProbeHeaders);
+$targetedMissileSectorObject = array_values(array_filter(
+    $targetedMissileSectorResponse->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === ($preparedAlertMissile['public_id'] ?? null),
+))[0] ?? null;
+$test->assertEquals(200, $targetedMissileSectorResponse->status, 'probe-scoped current-sector scan succeeds while a missile is moving');
+$test->assertEquals('missile', $targetedMissileSectorObject['type'] ?? null, 'probe-scoped current-sector scan exposes a moving missile as a sector object');
+$test->assertEquals('moving', $targetedMissileSectorObject['status'] ?? null, 'moving missile sector telemetry comes from the canonical projectile status');
+$test->assertEquals('probe', $targetedMissileSectorObject['targetKind'] ?? null, 'moving missile sector telemetry exposes its public target kind');
+$test->assertEquals((string) $sameSectorProbe->id, $targetedMissileSectorObject['targetId'] ?? null, 'moving missile sector telemetry exposes its opaque target id');
+$test->assertEquals(true, $targetedMissileSectorObject['targetsCurrentProbe'] ?? null, 'moving missile sector telemetry identifies the observing target probe');
+$test->assertEquals('extreme', $targetedMissileSectorObject['dangerLevel'] ?? null, 'a missile targeting the observing probe is projected as an extreme danger');
+$test->assert(isset($targetedMissileSectorObject['launchedAt'], $targetedMissileSectorObject['impactAt']), 'moving missile sector telemetry exposes its live countdown timestamps');
+$observerMissileSectorResponse = $kernel->handle('GET', '/api/probe/' . $secondaryProbe->id . '/sector', $multiProbeHeaders);
+$observerMissileSectorObject = array_values(array_filter(
+    $observerMissileSectorResponse->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === ($preparedAlertMissile['public_id'] ?? null),
+))[0] ?? null;
+$test->assertEquals(false, $observerMissileSectorObject['targetsCurrentProbe'] ?? null, 'the same moving missile does not threaten another observing probe');
+$test->assertEquals('moderate', $observerMissileSectorObject['dangerLevel'] ?? null, 'a missile targeting another object remains visible without becoming a critical observer threat');
 $missileAlertObjectId = 'weapon-' . ($preparedAlertMissile['public_id'] ?? '');
 $targetedMissileAlert = array_values(array_filter(
     $damageWarnings->findByProbeId($sameSectorProbe->id),
@@ -2748,7 +2779,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(121, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(122, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');

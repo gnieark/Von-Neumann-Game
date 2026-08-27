@@ -1618,7 +1618,7 @@ button.account-menu-item {
     font-size: 1rem;
 }
 
-.asteroid-trajectory-alerts {
+.sector-live-alerts {
     display: grid;
     gap: 12px;
     position: relative;
@@ -1637,17 +1637,17 @@ button.account-menu-item {
     font-family: "Lucida Console", "Courier New", monospace;
 }
 
-.asteroid-trajectory-alerts[hidden] {
+.sector-live-alerts[hidden] {
     display: none;
 }
 
-.asteroid-trajectory-alert-heading {
+.sector-live-alert-heading {
     display: flex;
     align-items: center;
     gap: 10px;
 }
 
-.asteroid-trajectory-alert-heading h4 {
+.sector-live-alert-heading h4 {
     margin: 0;
     color: #ff8876;
     font-size: .94rem;
@@ -1656,25 +1656,25 @@ button.account-menu-item {
     text-shadow: 0 0 8px rgba(255, 95, 72, .4);
 }
 
-.asteroid-trajectory-alert-signal {
+.sector-live-alert-signal {
     color: #ffcf55;
     font-size: 1.15rem;
     filter: drop-shadow(0 0 5px rgba(255, 207, 85, .65));
-    animation: asteroid-trajectory-alert-pulse 1.2s ease-in-out infinite;
+    animation: sector-live-alert-pulse 1.2s ease-in-out infinite;
 }
 
-.asteroid-trajectory-alert-list {
+.sector-live-alert-list {
     display: grid;
     gap: 10px;
 }
 
-.asteroid-trajectory-alert-card {
+.sector-live-alert-card {
     padding: 11px;
     border: 1px solid rgba(255, 136, 118, .38);
     background: rgba(12, 4, 3, .74);
 }
 
-.asteroid-trajectory-identity {
+.sector-live-alert-identity {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
@@ -1682,62 +1682,63 @@ button.account-menu-item {
     margin: 0 0 10px;
 }
 
-.asteroid-trajectory-identity span {
+.sector-live-alert-identity span {
     color: rgba(255, 224, 217, .62);
     font-size: .72rem;
     text-transform: uppercase;
 }
 
-.asteroid-trajectory-identity strong {
+.sector-live-alert-identity strong {
     color: #fff4dc;
     font-size: 1rem;
 }
 
-.asteroid-trajectory-alert-card dl {
+.sector-live-alert-card dl {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
     gap: 9px 16px;
     margin: 0;
 }
 
-.asteroid-trajectory-alert-card dl div {
+.sector-live-alert-card dl div {
     display: grid;
     align-content: start;
     gap: 3px;
 }
 
-.asteroid-trajectory-alert-card dt {
+.sector-live-alert-card dt {
     color: rgba(255, 224, 217, .58);
     font-size: .7rem;
     letter-spacing: .035em;
     text-transform: uppercase;
 }
 
-.asteroid-trajectory-alert-card dd {
+.sector-live-alert-card dd {
     margin: 0;
     color: #ffe0d9;
     line-height: 1.35;
 }
 
-.asteroid-trajectory-alert-card dd small {
+.sector-live-alert-card dd small {
     display: block;
     margin-top: 2px;
     color: rgba(255, 224, 217, .58);
 }
 
-.asteroid-trajectory-countdown {
+.asteroid-trajectory-countdown,
+.missile-threat-countdown {
     color: #ffcf55;
     font-weight: 800;
     text-shadow: 0 0 6px rgba(255, 207, 85, .34);
 }
 
-@keyframes asteroid-trajectory-alert-pulse {
+@keyframes sector-live-alert-pulse {
     0%, 100% { opacity: .58; transform: scale(.92); }
     50% { opacity: 1; transform: scale(1.08); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .asteroid-trajectory-alert-signal {
+    .sector-live-alert-signal {
         animation: none;
     }
 }

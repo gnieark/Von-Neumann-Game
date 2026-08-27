@@ -262,9 +262,21 @@ final class OthersRepository
     {
         $ships = $this->pdo->prepare("SELECT public_id, type, status FROM others_ships WHERE sector_x = :x AND sector_y = :y AND sector_z = :z AND destroyed_at IS NULL AND status <> 'removed' AND status <> 'transit' ORDER BY public_id");
         $ships->execute(['x' => $x, 'y' => $y, 'z' => $z]);
-        $projectiles = $this->pdo->prepare("SELECT public_id, status FROM others_projectiles WHERE sector_x = :x AND sector_y = :y AND sector_z = :z AND status = 'moving' ORDER BY public_id");
-        $projectiles->execute(['x' => $x, 'y' => $y, 'z' => $z]);
-        return ['ships' => $ships->fetchAll(), 'projectiles' => $projectiles->fetchAll()];
+        return ['ships' => $ships->fetchAll(), 'projectiles' => $this->movingProjectilesBySector($x, $y, $z)];
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function movingProjectilesBySector(int $x, int $y, int $z): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT public_id, launcher_kind, target_public_id, target_kind, status, launched_at, impact_at
+             FROM others_projectiles
+             WHERE sector_x = :x AND sector_y = :y AND sector_z = :z AND status = 'moving'
+             ORDER BY public_id"
+        );
+        $stmt->execute(['x' => $x, 'y' => $y, 'z' => $z]);
+
+        return $stmt->fetchAll();
     }
 
     public function deployedAuxiliariesBySector(int $x, int $y, int $z): array

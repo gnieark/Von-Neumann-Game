@@ -47,6 +47,7 @@
             "detached_container": tr("detachedContainerObject", "Detached container"),
             "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
             "scut_relay": tr("scutRelayObject", "SCUT relay"),
+            "missile": tr("suspectedMissileObject", "Detected missile"),
             "object": tr("object", "Object"),
             "unknown": tr("unknownObject", "Unknown object"),
         }[type] || type || tr("unknownObject", "Unknown object");
@@ -154,6 +155,7 @@
             "Waypoint bookmark detected in this sector.": tr("observationSummaryWaypointBookmark", "Waypoint bookmark detected in this sector."),
             "Detached storage container drifting in open space.": tr("observationSummaryDetachedContainerDrifting", "Detached storage container drifting in open space."),
             "Detached storage container hidden on an asteroid.": tr("observationSummaryDetachedContainerHidden", "Detached storage container hidden on an asteroid."),
+            "Kinetic projectile in motion.": tr("observationSummaryMissile", "Kinetic projectile in motion."),
             "Deuterium refuel station detected in orbit.": tr("observationSummaryDeuteriumRefuelStation", "Deuterium refuel station detected in orbit."),
             "Active long-range SCUT communication relay.": tr("observationSummaryScutRelayActive", "Active long-range SCUT communication relay."),
             "Inactive long-range SCUT communication relay.": tr("observationSummaryScutRelayInactive", "Inactive long-range SCUT communication relay."),
@@ -943,8 +945,8 @@
             "html": trajectoryCountdownHtml(trajectory),
         });
 
-        return "<article class=\"asteroid-trajectory-alert-card\">"
-            + "<p class=\"asteroid-trajectory-identity\"><span>" + window.VNG.escapeHtml(objectTypeLabel("asteroid")) + "</span><strong>" + window.VNG.escapeHtml(asteroid.name || asteroid.id || trajectory.asteroidId || "-") + "</strong></p>"
+        return "<article class=\"sector-live-alert-card\">"
+            + "<p class=\"sector-live-alert-identity\"><span>" + window.VNG.escapeHtml(objectTypeLabel("asteroid")) + "</span><strong>" + window.VNG.escapeHtml(asteroid.name || asteroid.id || trajectory.asteroidId || "-") + "</strong></p>"
             + "<dl>"
             + details.map((detail) => (
                 "<div><dt>" + window.VNG.escapeHtml(detail.label) + "</dt><dd>" + (detail.html || window.VNG.escapeHtml(detail.value)) + "</dd></div>"
@@ -970,12 +972,84 @@
             ? tr("asteroidTrajectoryAlertTitle", "ALERT: MOTORIZED ASTEROID IN MOTION")
             : window.VNG.formatText(tr("asteroidTrajectoryAlertMultipleTitle", "ALERT: {count} MOTORIZED ASTEROIDS IN MOTION"), {"count": records.length});
         const objectIndex = trajectoryObjectIndex(sector);
-        node.innerHTML = "<header class=\"asteroid-trajectory-alert-heading\">"
-            + "<span class=\"asteroid-trajectory-alert-signal\" aria-hidden=\"true\">▲</span>"
+        node.innerHTML = "<header class=\"sector-live-alert-heading\">"
+            + "<span class=\"sector-live-alert-signal\" aria-hidden=\"true\">▲</span>"
             + "<h4>" + window.VNG.escapeHtml(title) + "</h4>"
             + "</header>"
-            + "<div class=\"asteroid-trajectory-alert-list\">"
+            + "<div class=\"sector-live-alert-list\">"
             + records.map((record) => trajectoryDetailHtml(record, objectIndex)).join("")
+            + "</div>";
+        node.hidden = false;
+    }
+
+    function detectedTargetingMissiles(sector) {
+        return (Array.isArray(sector && sector.objects) ? sector.objects : []).filter((object) => (
+            object
+            && object.type === "missile"
+            && object.status === "moving"
+            && object.targetsCurrentProbe === true
+        ));
+    }
+
+    function missileThreatCountdownText(remainingSeconds) {
+        return window.VNG.formatText(
+            tr("missileThreatImpactIn", "Estimated impact in {duration}"),
+            {"duration": window.VNG.duration(remainingSeconds, tr)}
+        );
+    }
+
+    function missileThreatCountdownHtml(missile) {
+        const endAt = Date.parse(missile && missile.impactAt || "");
+        if (!Number.isFinite(endAt)) {
+            return window.VNG.escapeHtml(tr("missileThreatDurationUnknown", "Estimated impact time unavailable"));
+        }
+
+        const remainingSeconds = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+        return "<span class=\"missile-threat-countdown\" data-countdown-end-at=\"" + window.VNG.escapeHtml(String(endAt)) + "\">"
+            + window.VNG.escapeHtml(missileThreatCountdownText(remainingSeconds))
+            + "</span>"
+            + "<small>" + window.VNG.escapeHtml(formatDate(missile.impactAt)) + "</small>";
+    }
+
+    function missileThreatDetailHtml(missile) {
+        const details = [
+            {"label": tr("missileThreatStatus", "Status"), "value": tr("missileThreatMoving", "In flight")},
+            {"label": tr("missileThreatTarget", "Target"), "value": tr("missileThreatCurrentProbe", "Current probe")},
+            {"label": tr("missileThreatEstimatedImpact", "Estimated impact"), "html": missileThreatCountdownHtml(missile)},
+        ];
+
+        return "<article class=\"sector-live-alert-card\">"
+            + "<p class=\"sector-live-alert-identity\"><span>" + window.VNG.escapeHtml(objectTypeLabel("missile")) + "</span><strong>" + window.VNG.escapeHtml(missile.name || missile.id || "-") + "</strong></p>"
+            + "<dl>"
+            + details.map((detail) => (
+                "<div><dt>" + window.VNG.escapeHtml(detail.label) + "</dt><dd>" + (detail.html || window.VNG.escapeHtml(detail.value)) + "</dd></div>"
+            )).join("")
+            + "</dl>"
+            + "</article>";
+    }
+
+    function renderMissileThreatAlerts(sector) {
+        const node = document.getElementById("missile-threat-alerts");
+        if (!node) {
+            return;
+        }
+
+        const missiles = detectedTargetingMissiles(sector);
+        if (missiles.length === 0) {
+            node.hidden = true;
+            node.innerHTML = "";
+            return;
+        }
+
+        const title = missiles.length === 1
+            ? tr("missileThreatAlertTitle", "ALERT: MISSILE TARGETING CURRENT PROBE")
+            : window.VNG.formatText(tr("missileThreatAlertMultipleTitle", "ALERT: {count} MISSILES TARGETING CURRENT PROBE"), {"count": missiles.length});
+        node.innerHTML = "<header class=\"sector-live-alert-heading\">"
+            + "<span class=\"sector-live-alert-signal\" aria-hidden=\"true\">▲</span>"
+            + "<h4>" + window.VNG.escapeHtml(title) + "</h4>"
+            + "</header>"
+            + "<div class=\"sector-live-alert-list\">"
+            + missiles.map(missileThreatDetailHtml).join("")
             + "</div>";
         node.hidden = false;
     }
@@ -1057,13 +1131,14 @@
         return "";
     }
 
-    function renderSectorObjects(sector, showTrajectoryAlerts = false) {
+    function renderSectorObjects(sector, showLiveAlerts = false) {
         const node = document.getElementById("sector-objects");
         if (!node) {
             return;
         }
 
-        renderAsteroidTrajectoryAlerts(showTrajectoryAlerts ? sector : null);
+        renderAsteroidTrajectoryAlerts(showLiveAlerts ? sector : null);
+        renderMissileThreatAlerts(showLiveAlerts ? sector : null);
         const openPanels = window.VNG.openDisclosureIds(node, ".sector-system-toggle[aria-expanded=\"true\"][aria-controls]");
         setText("sector-context", sectorContext(sector));
         const scutCoverage = document.getElementById("sector-scut-coverage");
@@ -1179,6 +1254,7 @@
     function updateLiveCountdowns() {
         const countdowns = Array.from(document.querySelectorAll(".sector-countdown-value[data-countdown-end-at]"));
         const trajectoryCountdowns = Array.from(document.querySelectorAll(".asteroid-trajectory-countdown[data-countdown-end-at]"));
+        const missileCountdowns = Array.from(document.querySelectorAll(".missile-threat-countdown[data-countdown-end-at]"));
         let hasPendingCountdown = false;
         const now = Date.now();
 
@@ -1211,12 +1287,25 @@
             }
         });
 
+        missileCountdowns.forEach((countdown) => {
+            const endAt = Number(countdown.dataset.countdownEndAt);
+            if (!Number.isFinite(endAt)) {
+                return;
+            }
+
+            const remainingSeconds = Math.max(0, Math.ceil((endAt - now) / 1000));
+            countdown.textContent = missileThreatCountdownText(remainingSeconds);
+            if (remainingSeconds > 0 && now < endAt) {
+                hasPendingCountdown = true;
+            }
+        });
+
         countdownTimer = hasPendingCountdown ? window.setTimeout(updateLiveCountdowns, 1000) : null;
     }
 
     function scheduleLiveCountdowns() {
         clearCountdownTimer();
-        if (!document.querySelector(".sector-countdown-value[data-countdown-end-at], .asteroid-trajectory-countdown[data-countdown-end-at]")) {
+        if (!document.querySelector(".sector-countdown-value[data-countdown-end-at], .asteroid-trajectory-countdown[data-countdown-end-at], .missile-threat-countdown[data-countdown-end-at]")) {
             return;
         }
 
