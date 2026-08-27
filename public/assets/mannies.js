@@ -8,7 +8,7 @@
     const MANNY_CARGO_CAPACITY = 0.05;
     const MANNY_HASH_FIELD = "mannyStateHash";
     const STATE_HASH_IGNORED_FIELDS = new Set([MANNY_HASH_FIELD, "hash", "taskProgressPercent"]);
-    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "install-scut-transit-beacon", "motorize-asteroid", "refuel-motorized-asteroid", "launch-asteroid", "improve-probe", "assemble-probe", "transfer-deuterium", "transfer-manny"]);
+    const PROBE_INVENTORY_ACTIONS = new Set(["detach-storage", "drop-storage", "bookmark", "craft", "atomic-printer-craft", "turn-on-relay", "install-scut-transit-beacon", "motorize-asteroid", "refuel-motorized-asteroid", "launch-asteroid", "launch-missile", "improve-probe", "assemble-probe", "transfer-deuterium", "transfer-manny"]);
     const PROBE_ASSEMBLY_COMPONENTS = [
         {"type": "deuterium_engine", "quantity": 1},
         {"type": "scut_relay", "quantity": 1},
@@ -24,6 +24,7 @@
 
     const state = {
         currentCraftingRecipes: [],
+        currentAutonomousUnits: [],
         craftingRecipesStatus: "idle",
         currentInventory: null,
         currentMannies: [],
@@ -301,6 +302,10 @@
                 "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
                 "scutTransitBeaconTargets": scutTransitBeaconRelayTargets().map((relay) => relay.id).join(","),
                 "scutTransitBeaconStock": scutTransitBeaconItems().length,
+                "missileLaunch": [
+                    missileItems().map((item) => item.id).join(","),
+                    missileTargets().map((target) => target.type + ":" + target.id).join(","),
+                ].join("|"),
                 "remoteSectorMine": remoteMannyMineStateHash(item),
                 "remoteSectorInspect": remoteMannyInspectStateHash(item),
                 "deuteriumTransfer": [
@@ -370,6 +375,7 @@
             "parachute_pack": tr("parachutePack", "Parachute pack"),
             "descent_guidance_module": tr("descentGuidanceModule", "Descent guidance module"),
             "atmospheric_drop_kit": tr("atmosphericDropKit", "Atmospheric drop kit"),
+            "missile": tr("missileItem", "Missile"),
             "manny": tr("mannyObject", "Manny"),
         }[type] || fallback || type || "-";
     }
@@ -398,6 +404,7 @@
             "installing_scut_transit_beacon": tr("installingScutTransitBeacon", "Installing SCUT transit beacon"),
             "improving_probe": tr("improvingProbe", "Improving probe"),
             "assembling_probe": tr("assemblingProbe", "Assembling probe"),
+            "preparing_missile": tr("preparingMissile", "Preparing a missile"),
             "assisting_atomic_printer": tr("assistingAtomicPrinter", "Assisting the atomic printer"),
             "atomic_printing": tr("atomicPrinting", "Atomic printing"),
             "unknown_too_far": tr("mannyUnknownTooFar", "Status unknown, too far"),
@@ -427,6 +434,10 @@
             "waypoint_bookmark": tr("waypointBookmark", "Waypoint bookmark"),
             "manny": tr("mannyObject", "Manny"),
             "probe": tr("tabProbe", "Probe"),
+            "others_auxiliary": tr("othersAuxiliaryObject", "Others auxiliary"),
+            "ship": tr("othersShipObject", "Others ship"),
+            "large_ship": tr("othersLargeShipObject", "Others mothership"),
+            "suspected_missile": tr("suspectedMissileObject", "Detected missile"),
             "object": tr("object", "Object"),
         }[type] || type || tr("object", "Object");
     }
@@ -1104,6 +1115,95 @@
         return Array.isArray(state.currentInventory && state.currentInventory.items)
             ? state.currentInventory.items.filter((item) => item.type === "atmospheric_drop_kit")
             : [];
+    }
+
+    function missileItems() {
+        return Array.isArray(state.currentInventory && state.currentInventory.items)
+            ? state.currentInventory.items.filter((item) => item.type === "missile" && item.id)
+            : [];
+    }
+
+    function missileTargetLabel(target) {
+        const type = objectTypeLabel(target && target.type ? target.type : "object");
+        const name = target && target.name && String(target.name) !== String(target.id) ? " " + target.name : "";
+
+        return type + name + " (" + String(target && target.id || "-") + ")";
+    }
+
+    function missileTargets() {
+        const targets = new Map();
+        const add = (target) => {
+            if (target && target.id) {
+                targets.set(String(target.id), {...target, "id": String(target.id)});
+            }
+        };
+        const collectSectorObject = (object) => {
+            if (!object || typeof object !== "object") {
+                return;
+            }
+            if (["ship", "large_ship", "suspected_missile"].includes(object.observedClass)) {
+                add({"id": object.id, "type": object.observedClass, "name": object.name || ""});
+            }
+            if (object.type === "manny") {
+                add({"id": object.mannyUid || object.id, "type": "manny", "name": object.name || ""});
+            }
+            if (object.type === "asteroid" && object.trajectory) {
+                add({"id": object.id, "type": "asteroid", "name": object.name || ""});
+            }
+            ["bookmarkTargets", "minableTargets"].forEach((key) => {
+                if (Array.isArray(object[key])) {
+                    object[key].forEach(collectSectorObject);
+                }
+            });
+        };
+
+        (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : []).forEach(collectSectorObject);
+        (Array.isArray(state.currentSectorProbes) ? state.currentSectorProbes : []).forEach((probe) => {
+            add({"id": probe.id, "type": "probe", "name": probe.name || ""});
+        });
+        (Array.isArray(state.currentAutonomousUnits) ? state.currentAutonomousUnits : []).forEach((unit) => {
+            if (["manny", "others_auxiliary"].includes(unit && unit.kind)) {
+                add({"id": unit.id, "type": unit.kind, "name": unit.name || ""});
+            }
+        });
+
+        return Array.from(targets.values());
+    }
+
+    function missileOptionList(items) {
+        return items.length
+            ? items.map((item) => "<option value=\"" + escaped(item.id) + "\">" + escaped(inventoryItemTypeLabel(item.type, item.name || item.id) + " (" + item.id + ")") + "</option>").join("")
+            : "<option value=\"\">-</option>";
+    }
+
+    function missileTargetOptionList(targets) {
+        return targets.length
+            ? targets.map((target) => "<option value=\"" + escaped(target.id) + "\">" + escaped(missileTargetLabel(target)) + "</option>").join("")
+            : "<option value=\"\">-</option>";
+    }
+
+    function missileLaunchHint(items, targets) {
+        if (items.length === 0) {
+            return tr("noMissileInInventory", "No missile is available in inventory.");
+        }
+        if (targets.length === 0) {
+            return tr("noMissileTarget", "No admissible target is detected in the current sector.");
+        }
+
+        return tr("missileLaunchHint", "The Manny prepares the missile for one minute before launch toward a detected target in the current sector.");
+    }
+
+    function renderLaunchMissileForm() {
+        const items = missileItems();
+        const targets = missileTargets();
+        const disabled = items.length === 0 || targets.length === 0;
+
+        return "<form class=\"manny-launch-missile-form manny-form\">"
+            + "<label>" + escaped(tr("missileItem", "Missile")) + "<select name=\"missileItemId\" required>" + missileOptionList(items) + "</select></label>"
+            + "<label>" + escaped(tr("missileTarget", "Target")) + "<select name=\"targetId\" required>" + missileTargetOptionList(targets) + "</select></label>"
+            + "<button type=\"submit\"" + (disabled ? " disabled aria-disabled=\"true\"" : "") + ">" + escaped(tr("launchMissile", "Prepare launch")) + "</button>"
+            + "<p class=\"manny-missile-launch-hint\">" + escaped(missileLaunchHint(items, targets)) + "</p>"
+            + "</form>";
     }
 
     function bookmarkTargets() {
@@ -2156,6 +2256,15 @@
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
         }
+        if (manny.currentTask === "preparing_missile") {
+            return "<section class=\"manny-task-panel\">"
+                + "<h4>" + escaped(tr("missilePreparationInProgress", "Missile preparation in progress")) + "</h4>"
+                + "<p>" + escaped(window.VNG.formatText(tr("missilePreparationTaskDetail", "The missile is aimed at {target} and will launch after one minute of preparation."), {
+                    "target": payload.targetObjectId || tr("missileTarget", "Target"),
+                })) + "</p>"
+                + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
+                + "</section>";
+        }
 
         return "<section class=\"manny-task-panel\">"
             + "<h4>" + escaped(taskLabel(manny.currentTask)) + "</h4>"
@@ -3165,6 +3274,7 @@
             {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint bookmark"), "render": renderBookmarkForm},
             {"id": "turn-on-relay", "title": tr("turnOnScutRelayActionTitle", "Activate a SCUT relay"), "render": renderTurnOnRelayForm},
             {"id": "install-scut-transit-beacon", "title": tr("installScutTransitBeaconActionTitle", "Beacon a SCUT relay"), "render": renderScutTransitBeaconInstallForm},
+            {"id": "launch-missile", "title": tr("launchMissileActionTitle", "Launch a missile"), "render": renderLaunchMissileForm},
         ];
         if (hasDistributedThrustAnchoringBlueprint()) {
             actions.push({"id": "motorize-asteroid", "title": tr("motorizeAsteroidActionTitle", "Install propulsion on an asteroid"), "render": renderMotorizeAsteroidForm});
@@ -3280,6 +3390,7 @@
             "motorize-asteroid": renderMotorizeAsteroidForm,
             "refuel-motorized-asteroid": renderRefuelMotorizedAsteroidForm,
             "launch-asteroid": renderLaunchAsteroidForm,
+            "launch-missile": renderLaunchMissileForm,
             "improve-probe": renderImproveProbeForm,
             "assemble-probe": renderAssembleProbeForm,
             "transfer-deuterium": renderDeuteriumTransferForm,
@@ -3603,6 +3714,7 @@
             updateMannyBookmarkForms();
             updateScutTransitBeaconInstallForms();
             updateMotorizeAsteroidForms();
+            updateLaunchMissileForms();
             updateMannyInspectSectorObjectForms();
             updateMannyDetachStorageContainerForms();
             updateMannyDropStorageContainerForms();
@@ -4022,6 +4134,36 @@
         });
     }
 
+    function updateLaunchMissileForms() {
+        document.querySelectorAll(".manny-launch-missile-form").forEach((form) => {
+            const missileSelect = form.querySelector("select[name=\"missileItemId\"]");
+            const targetSelect = form.querySelector("select[name=\"targetId\"]");
+            const button = form.querySelector("button[type=\"submit\"]");
+            const hint = form.querySelector(".manny-missile-launch-hint");
+            const selectedMissile = missileSelect ? missileSelect.value : "";
+            const selectedTarget = targetSelect ? targetSelect.value : "";
+            const items = missileItems();
+            const targets = missileTargets();
+
+            if (missileSelect) {
+                missileSelect.innerHTML = missileOptionList(items);
+                missileSelect.value = items.some((item) => String(item.id) === selectedMissile) ? selectedMissile : (items[0] ? String(items[0].id) : "");
+            }
+            if (targetSelect) {
+                targetSelect.innerHTML = missileTargetOptionList(targets);
+                targetSelect.value = targets.some((target) => String(target.id) === selectedTarget) ? selectedTarget : (targets[0] ? String(targets[0].id) : "");
+            }
+            if (button) {
+                const disabled = items.length === 0 || targets.length === 0;
+                button.disabled = disabled;
+                button.setAttribute("aria-disabled", disabled ? "true" : "false");
+            }
+            if (hint) {
+                hint.textContent = missileLaunchHint(items, targets);
+            }
+        });
+    }
+
     function updatePrinterCraftForms() {
         document.querySelectorAll(".printer-craft-form").forEach((form) => {
             const select = form.querySelector(".manny-craft-recipe");
@@ -4078,6 +4220,9 @@
         }
         if (form.classList.contains("manny-motorize-asteroid-form")) {
             updateMotorizeAsteroidForms();
+        }
+        if (form.classList.contains("manny-launch-missile-form")) {
+            updateLaunchMissileForms();
         }
         if (form.classList.contains("manny-improve-probe-form")) {
             updateProbeImprovementForm(form);
@@ -4203,10 +4348,14 @@
             const sector = sectorData && sectorData.sector ? sectorData.sector : {};
             state.currentInventory = probe.inventory || (sectorData && sectorData.inventory) || null;
             state.currentProbeId = Number.isFinite(Number(probe.id)) ? Number(probe.id) : null;
+            const autonomousUnitData = state.currentProbeId
+                ? await window.VNG.apiJson(explicitCurrentProbeApiPath("/sector/autonomous-units?limit=500"), {"method": "GET"}).catch(() => null)
+                : null;
             state.currentProbeDeuterium = Math.max(0, Number(probe.fuel && probe.fuel.deuterium) || 0);
             state.currentProbeMaxDeuterium = Math.max(0, Number(probe.fuel && probe.fuel.maxDeuterium) || 100);
             state.currentSectorObjects = Array.isArray(sector.objects) ? sector.objects : [];
             state.currentSectorProbes = Array.isArray(sector.probes) ? sector.probes : [];
+            state.currentAutonomousUnits = Array.isArray(autonomousUnitData && autonomousUnitData.autonomousUnits) ? autonomousUnitData.autonomousUnits : [];
             const rawMannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
             const storageContainerDropCompleted = hasCompletedStorageContainerDrop(state.currentMannies, rawMannies);
             refreshPayload = {"probe": probe, "mannies": rawMannies, "sector": sector, "nextUsefulRefreshDelayMs": mannyData && mannyData.nextUsefulRefreshDelayMs};
@@ -4481,6 +4630,19 @@
                 : {"mode": mode, "targetObjectId": String(formData.get("targetObjectId") || ""), "targetSpeedC": Number(formData.get("targetSpeedC"))};
             return window.VNG.apiJson(explicitCurrentProbeApiPath("/asteroids/" + encodeURIComponent(objectId) + "/trajectories"), {
                 "method": "POST", "body": JSON.stringify(payload),
+            });
+        }
+        if (form.classList.contains("manny-launch-missile-form")) {
+            const missileItemId = String(formData.get("missileItemId") || "");
+            const targetId = String(formData.get("targetId") || "");
+            if (!missileItemId || !targetId) {
+                updateLaunchMissileForms();
+                setStatus(tr("invalidMissileLaunchOrder", "Select a missile and a target."));
+                return null;
+            }
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/missiles"), {
+                "method": "POST",
+                "body": JSON.stringify({"actorMannyId": String(mannyId), missileItemId, targetId}),
             });
         }
         if (form.classList.contains("manny-improve-probe-form")) {

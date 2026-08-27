@@ -11,9 +11,11 @@ use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
 use VonNeumannGame\Domain\ProbeModel;
 use VonNeumannGame\Domain\ProbeDirection;
+use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\MannyRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\ProbeImprovementRepository;
@@ -36,6 +38,7 @@ final class ProbeMovementService
 {
     public const BLACK_HOLE_TRAP_MIN_DELAY_SECONDS = 5400;
     public const BLACK_HOLE_TRAP_MAX_DELAY_SECONDS = 10800;
+    public const MINIMUM_MOVEMENT_INTEGRITY_PERCENT = 10.0;
 
     private readonly SectorGrid $grid;
     private readonly array $gameplayConfig;
@@ -59,6 +62,7 @@ final class ProbeMovementService
         private readonly string $worldSeed = 'default-world',
         ?SectorGrid $grid = null,
         array $gameplayConfig = [],
+        private readonly ?OthersRepository $others = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->gameplayConfig = $gameplayConfig;
@@ -76,6 +80,9 @@ final class ProbeMovementService
     {
         $probe = $this->refreshProbeMovementStateLocked($probe);
         $this->ensureProbeOperational($probe);
+        if ($probe->integrityPercent < self::MINIMUM_MOVEMENT_INTEGRITY_PERCENT) {
+            throw new ProbeMovementException(422, 'probe_integrity_too_low', 'Probe integrity must be at least 10 percent to start a movement.');
+        }
 
         if ($this->movements->findActiveByProbeId($probe->id) !== null) {
             throw new ProbeMovementException(409, 'probe_already_moving', 'The probe is already moving between sectors.');
@@ -157,6 +164,9 @@ final class ProbeMovementService
 
     public function refreshProbeMovementState(NeumannProbe $probe, bool $persistIntermediatePhase = false): NeumannProbe
     {
+        if ($probe->status === ProbeStatus::Dead) {
+            return $probe;
+        }
         $movement = $this->movements->findActiveByProbeId($probe->id);
         if ($movement === null) {
             return $probe;
@@ -178,6 +188,9 @@ final class ProbeMovementService
 
     private function refreshProbeMovementStateLocked(NeumannProbe $probe, bool $persistIntermediatePhase = false): NeumannProbe
     {
+        if ($probe->status === ProbeStatus::Dead) {
+            return $probe;
+        }
         $movement = $this->movements->findActiveByProbeId($probe->id);
         if ($movement === null) {
             return $probe;
@@ -202,6 +215,7 @@ final class ProbeMovementService
             $this->missions?->completeReadyOracleMissions($probe);
             $this->createIntelligentLifeAlerts($probe, $movement);
             $this->createDormantConstructAlerts($probe, $movement);
+            $this->createOthersArrivalAlerts($probe, $movement);
             if (!$alreadyVisited) {
                 $this->startIntelligentLifeScenarios($probe, $movement);
             }
@@ -547,6 +561,37 @@ final class ProbeMovementService
                 'A dormant construct has been detected in this sector. Its origin and purpose are unknown; dispatching a Manny to inspect it is recommended.',
             );
         }
+    }
+
+    private function createOthersArrivalAlerts(NeumannProbe $probe, ProbeMovement $movement): void
+    {
+        if ($this->damageWarnings === null) { return; }
+        if ($this->others !== null) {
+            $entities = $this->others->observableEntitiesBySector($movement->target->getX(), $movement->target->getY(), $movement->target->getZ());
+            $auxiliaryCount = count($this->others->deployedAuxiliariesBySector($movement->target->getX(), $movement->target->getY(), $movement->target->getZ()));
+            if ($entities['ships'] !== [] || $auxiliaryCount > 0) {
+                $states = []; foreach ($entities['ships'] as $ship) { $states[$ship['status']] = ($states[$ship['status']] ?? 0) + 1; }
+                $this->damageWarnings->createOthersAlert($probe->id, $movement->id, ProbeDamageWarning::TYPE_OTHERS_PRESENCE, 'others-presence', $movement->target, 'Artificial vessels detected: ' . count($entities['ships']) . ' ship(s), states ' . json_encode($states, JSON_UNESCAPED_SLASHES) . ', and ' . $auxiliaryCount . ' deployed auxiliary unit(s). Do not deploy Mannys: their transmissions are immediately detectable.', 'arrival');
+            }
+        }
+        if ($this->sectors !== null) {
+            $sector = $this->sectors->getOrCreateSector($movement->target);
+            foreach ($this->allPlanets($sector->getObjects()) as $planet) {
+                if ($planet->wasHarvestedByOthers()) {
+                    $this->damageWarnings->createOthersAlert($probe->id, $movement->id, ProbeDamageWarning::TYPE_OTHERS_HARVEST_TRACES, 'harvest-traces-' . $planet->getId(), $movement->target, 'Artificial mining traces are visible on planet ' . $planet->getId() . ': constitutive material is missing.', 'arrival');
+                }
+            }
+        }
+    }
+
+    private function allPlanets(array $objects): array
+    {
+        $planets = [];
+        foreach ($objects as $object) {
+            if ($object instanceof Planet) { $planets[] = $object; }
+            if ($object instanceof SolarSystem) { foreach ($object->getOrbitalBodies() as $body) { if ($body->getObject() instanceof Planet) { $planets[] = $body->getObject(); } } }
+        }
+        return $planets;
     }
 
     /**
@@ -902,7 +947,7 @@ final class ProbeMovementService
             $integrityLoss += round($roll * $this->float('intersectorIntegrityLossMaxPercentPerDistance', 3.0), 2);
         }
 
-        $probe->integrityPercent = round(max(0.0, $probe->integrityPercent - $integrityLoss), 2);
+        $probe->subtractIntegrityPercent($integrityLoss);
     }
 
     private function scheduleBlackHoleTrapIfNeeded(NeumannProbe $probe): void

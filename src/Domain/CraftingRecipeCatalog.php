@@ -141,6 +141,12 @@ final class CraftingRecipeCatalog
     public const MANNY_CONTAINER_SPACE = 0.05;
     public const MANNY_CARGO_CAPACITY = 0.05;
     public const MANNY_CRAFTING_SECONDS = 3600;
+    public const MISSILE_BATTERY_PACKS = 1;
+    public const MISSILE_MICRO_CONDUCTORS = 2;
+    public const MISSILE_METALS_COST = 0.20;
+    public const MISSILE_CARBON_COMPOUNDS_COST = 0.10;
+    public const MISSILE_CONTAINER_SPACE = 0.05;
+    public const MISSILE_CRAFTING_SECONDS = 3600;
     private const DEFAULT_DESCRIPTIONS = [
         'waypoint_bookmark' => 'A transmitting beacon placed on an object such as an asteroid or planet, or set in orbit around a star or gas giant. Its message can be read by every Neumann probe present in the sector.',
         'steel_bar' => 'A rigid structural bar used in frames, rails, braces, and heavy mechanical assemblies.',
@@ -164,6 +170,7 @@ final class CraftingRecipeCatalog
         'descent_guidance_module' => 'A small avionics and actuator package for limited steering during a cargo drop.',
         'atmospheric_drop_kit' => 'A disposable descent kit for dropping one storage container through an atmosphere with ablative shielding, parachute braking, and limited steering authority.',
         'manny' => 'A fully assembled maintenance unit able to repair, mine, carry cargo, and build new parts.',
+        'missile' => 'A compact autonomous kinetic projectile for sector-local engagements.',
     ];
 
     /**
@@ -193,6 +200,7 @@ final class CraftingRecipeCatalog
             self::parachutePack($config),
             self::descentGuidanceModule($config),
             self::atmosphericDropKit($config),
+            self::missile($config),
             self::manny($config),
         ];
     }
@@ -242,6 +250,29 @@ final class CraftingRecipeCatalog
                 'containerSpace' => Config::float($config, 'waypoint_bookmark.containerSpace', self::WAYPOINT_BOOKMARK_CONTAINER_SPACE),
                 'containerSpaceUnit' => ProbeInventory::CAPACITY_UNIT,
             ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private static function missile(array $config): array
+    {
+        return [
+            'id' => ProbeItem::TYPE_MISSILE,
+            'name' => ProbeItem::MISSILE_NAME,
+            'description' => self::description($config, ProbeItem::TYPE_MISSILE),
+            'craftableBy' => [self::FABRICATOR_MANNY],
+            'ingredients' => [
+                self::itemIngredient(ProbeItem::TYPE_BATTERY_PACK, Config::int($config, 'missile.batteryPackCount', self::MISSILE_BATTERY_PACKS)),
+                self::itemIngredient(ProbeItem::TYPE_MICRO_CONDUCTOR, Config::int($config, 'missile.microConductorCount', self::MISSILE_MICRO_CONDUCTORS)),
+                self::resourceIngredient(ResourceComposition::METALS, Config::float($config, 'missile.metalsCost', self::MISSILE_METALS_COST)),
+                self::resourceIngredient(ResourceComposition::CARBON_COMPOUNDS, Config::float($config, 'missile.carbonCompoundsCost', self::MISSILE_CARBON_COMPOUNDS_COST)),
+            ],
+            'durationSeconds' => Config::int($config, 'missile.durationSeconds', self::MISSILE_CRAFTING_SECONDS),
+            'output' => self::itemOutput(
+                ProbeItem::TYPE_MISSILE,
+                ProbeItem::MISSILE_NAME,
+                Config::float($config, 'missile.containerSpace', self::MISSILE_CONTAINER_SPACE),
+            ),
         ];
     }
 

@@ -11,6 +11,7 @@
         hasExplicitRouteTarget: /^\/movement(?:\/\d+)?\/-?\d+\/-?\d+\/-?\d+$/.test(window.location.pathname),
         probeAlreadyMoving: false,
         probeDeuteriumSufficient: false,
+        probeIntegritySufficient: null,
         syncedDefaultTarget: false,
         userEditedTarget: false,
     };
@@ -327,6 +328,7 @@
         node.innerHTML = "<h3>" + window.VNG.escapeHtml(tr("jumpPreparationChecklist", "Preparation")) + "</h3>"
             + "<ul>"
             + "<li><span>" + window.VNG.escapeHtml(tr("deuteriumSufficient", "Sufficient deuterium")) + "</span>" + checklistValue(state.probeDeuteriumSufficient) + "</li>"
+            + "<li><span>" + window.VNG.escapeHtml(tr("probeIntegrityMinimum", "Minimum probe integrity (10%)")) + "</span>" + checklistValue(state.probeIntegritySufficient) + "</li>"
             + "<li><span>" + window.VNG.escapeHtml(tr("manniesAboard", "Mannys aboard")) + "</span>" + checklistValue(allManniesAboard()) + "</li>"
             + "</ul>";
     }
@@ -342,15 +344,17 @@
         const targetInvalid = !window.VNG.validRelativeCoordinates(target);
         const targetIsCurrent = !targetInvalid && sameRelativeCoordinates(target, state.currentProbeSectorRelative);
         const blockedByFuel = !state.probeDeuteriumSufficient;
+        const blockedByIntegrity = state.probeIntegritySufficient !== true;
         const invalidMessage = tr("invalidCoordinates", "Invalid relative coordinates: x + y + z must be even.");
         const alreadyMovingMessage = tr("probeAlreadyMoving", "The probe is already moving between sectors.");
         const fuelMessage = tr("insufficientFuelForJump", "Insufficient deuterium to initiate a jump.");
+        const integrityMessage = tr("insufficientIntegrityForJump", "Probe integrity must be at least 10% to initiate a jump.");
         const currentSectorMessage = tr("currentSectorDestination", "Choose a different sector to initiate a jump.");
 
-        button.disabled = state.probeAlreadyMoving || blockedByFuel || targetInvalid || targetIsCurrent;
+        button.disabled = state.probeAlreadyMoving || blockedByFuel || blockedByIntegrity || targetInvalid || targetIsCurrent;
         button.title = state.probeAlreadyMoving
             ? alreadyMovingMessage
-            : (blockedByFuel ? fuelMessage : (targetInvalid ? invalidMessage : (targetIsCurrent ? currentSectorMessage : "")));
+            : (blockedByFuel ? fuelMessage : (blockedByIntegrity ? integrityMessage : (targetInvalid ? invalidMessage : (targetIsCurrent ? currentSectorMessage : ""))));
         button.setAttribute("aria-disabled", button.disabled ? "true" : "false");
         if (control) {
             control.classList.toggle("disabled", button.disabled);
@@ -383,6 +387,7 @@
         state.probeAlreadyMoving = Boolean(movement && ["preparing", "accelerating", "cruising", "decelerating"].includes(movement.phase || movement.status));
         renderMovementCancelControl();
         state.probeDeuteriumSufficient = Number(probe && probe.fuel ? probe.fuel.deuterium : 0) > 0.0001;
+        state.probeIntegritySufficient = Number(probe && probe.systems ? probe.systems.integrityPercent : NaN) >= 10;
         syncDefaultTargetFromCurrentSector();
 
         return data;
@@ -469,6 +474,10 @@
             setText("action-status", tr("insufficientFuelForJump", "Insufficient deuterium to initiate a jump."));
             return;
         }
+        if (state.probeIntegritySufficient !== true) {
+            setText("action-status", tr("insufficientIntegrityForJump", "Probe integrity must be at least 10% to initiate a jump."));
+            return;
+        }
         if (!window.VNG.validRelativeCoordinates(target)) {
             setText("action-status", tr("invalidCoordinates", "Invalid relative coordinates: x + y + z must be even."));
             applyMoveButtonState();
@@ -529,6 +538,10 @@
             }
             if (!state.probeDeuteriumSufficient) {
                 setText("action-status", tr("insufficientFuelForJump", "Insufficient deuterium to initiate a jump."));
+                return;
+            }
+            if (state.probeIntegritySufficient !== true) {
+                setText("action-status", tr("insufficientIntegrityForJump", "Probe integrity must be at least 10% to initiate a jump."));
                 return;
             }
             if (!window.VNG.validRelativeCoordinates(moveFormTarget())) {

@@ -18,16 +18,22 @@ final class Player
         public string $updatedAt,
         public bool $forumAdmin = false,
         public bool $forumModerator = false,
+        public bool $canControlOthers = false,
     ) {}
 
     public function publicArray(): array
     {
-        return [
+        $result = [
             'id' => $this->id,
             'username' => $this->username,
             'displayName' => $this->displayName,
             'forumAdmin' => $this->forumAdmin,
             'forumModerator' => $this->forumModerator,
         ];
+        if ($this->canControlOthers) {
+            $result['canControlOthers'] = true;
+        }
+
+        return $result;
     }
 }

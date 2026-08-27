@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Sector;
 
 use VonNeumannGame\Config\Config;
+use VonNeumannGame\Domain\PlanetResourceStockCalculator;
 
 final class SectorContentGenerator
 {
@@ -259,17 +260,24 @@ final class SectorContentGenerator
         $intelligentLife = $habitability > $this->float('planets.intelligentLifeThreshold', 0.35)
             && $random->nextFloat() < $this->float('planets.intelligentLifeChance', self::INTELLIGENT_LIFE_CHANCE);
 
+        $planetId = $this->objectId($coordinates, 'planet', $index);
+        $roundedMass = $this->round($mass);
+        $roundedRadius = $this->round($radius);
+        $resourceHints = $this->resourceHints($random, $category);
+        $amounts = (new PlanetResourceStockCalculator($this->config))->calculate($planetId, $category, $roundedMass, $roundedRadius, $atmosphere, $habitability, $resourceHints);
         return new Planet(
-            $this->objectId($coordinates, 'planet', $index),
+            $planetId,
             null,
             $category,
-            $this->round($mass),
-            $this->round($radius),
+            $roundedMass,
+            $roundedRadius,
             $atmosphere,
             $habitability,
-            $this->resourceHints($random, $category),
+            $resourceHints,
             intelligentLife: $intelligentLife,
             description: 'Planetary body classified as ' . $category . '.',
+            resourceAmounts: $amounts,
+            harvestedByOthers: false,
         );
     }
 

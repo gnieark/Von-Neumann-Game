@@ -1076,6 +1076,20 @@ button.account-menu-item {
     animation: panel-tab-warning-led-blink .8s steps(2, start) infinite;
 }
 
+.panel-tab.alerts-critical {
+    border-color: #ff3b4f;
+    color: #ffd7db;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.45),
+        inset 0 -1px 0 rgba(0,0,0,.85),
+        0 0 0 1px rgba(255, 59, 79, .52),
+        0 0 24px rgba(255, 35, 58, .42);
+}
+
+.panel-tab.alerts-critical::after {
+    animation: panel-tab-critical-led-blink .65s steps(2, start) infinite;
+}
+
 .panel-tab[data-nav-link="/scut"].scut-network-available::after {
     box-shadow:
         inset 0 1px 1px rgba(255,255,255,.55),
@@ -1604,7 +1618,7 @@ button.account-menu-item {
     font-size: 1rem;
 }
 
-.asteroid-trajectory-alerts {
+.sector-live-alerts {
     display: grid;
     gap: 12px;
     position: relative;
@@ -1623,17 +1637,17 @@ button.account-menu-item {
     font-family: "Lucida Console", "Courier New", monospace;
 }
 
-.asteroid-trajectory-alerts[hidden] {
+.sector-live-alerts[hidden] {
     display: none;
 }
 
-.asteroid-trajectory-alert-heading {
+.sector-live-alert-heading {
     display: flex;
     align-items: center;
     gap: 10px;
 }
 
-.asteroid-trajectory-alert-heading h4 {
+.sector-live-alert-heading h4 {
     margin: 0;
     color: #ff8876;
     font-size: .94rem;
@@ -1642,25 +1656,25 @@ button.account-menu-item {
     text-shadow: 0 0 8px rgba(255, 95, 72, .4);
 }
 
-.asteroid-trajectory-alert-signal {
+.sector-live-alert-signal {
     color: #ffcf55;
     font-size: 1.15rem;
     filter: drop-shadow(0 0 5px rgba(255, 207, 85, .65));
-    animation: asteroid-trajectory-alert-pulse 1.2s ease-in-out infinite;
+    animation: sector-live-alert-pulse 1.2s ease-in-out infinite;
 }
 
-.asteroid-trajectory-alert-list {
+.sector-live-alert-list {
     display: grid;
     gap: 10px;
 }
 
-.asteroid-trajectory-alert-card {
+.sector-live-alert-card {
     padding: 11px;
     border: 1px solid rgba(255, 136, 118, .38);
     background: rgba(12, 4, 3, .74);
 }
 
-.asteroid-trajectory-identity {
+.sector-live-alert-identity {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
@@ -1668,62 +1682,63 @@ button.account-menu-item {
     margin: 0 0 10px;
 }
 
-.asteroid-trajectory-identity span {
+.sector-live-alert-identity span {
     color: rgba(255, 224, 217, .62);
     font-size: .72rem;
     text-transform: uppercase;
 }
 
-.asteroid-trajectory-identity strong {
+.sector-live-alert-identity strong {
     color: #fff4dc;
     font-size: 1rem;
 }
 
-.asteroid-trajectory-alert-card dl {
+.sector-live-alert-card dl {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
     gap: 9px 16px;
     margin: 0;
 }
 
-.asteroid-trajectory-alert-card dl div {
+.sector-live-alert-card dl div {
     display: grid;
     align-content: start;
     gap: 3px;
 }
 
-.asteroid-trajectory-alert-card dt {
+.sector-live-alert-card dt {
     color: rgba(255, 224, 217, .58);
     font-size: .7rem;
     letter-spacing: .035em;
     text-transform: uppercase;
 }
 
-.asteroid-trajectory-alert-card dd {
+.sector-live-alert-card dd {
     margin: 0;
     color: #ffe0d9;
     line-height: 1.35;
 }
 
-.asteroid-trajectory-alert-card dd small {
+.sector-live-alert-card dd small {
     display: block;
     margin-top: 2px;
     color: rgba(255, 224, 217, .58);
 }
 
-.asteroid-trajectory-countdown {
+.asteroid-trajectory-countdown,
+.missile-threat-countdown {
     color: #ffcf55;
     font-weight: 800;
     text-shadow: 0 0 6px rgba(255, 207, 85, .34);
 }
 
-@keyframes asteroid-trajectory-alert-pulse {
+@keyframes sector-live-alert-pulse {
     0%, 100% { opacity: .58; transform: scale(.92); }
     50% { opacity: 1; transform: scale(1.08); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .asteroid-trajectory-alert-signal {
+    .sector-live-alert-signal {
         animation: none;
     }
 }
@@ -2013,6 +2028,18 @@ button.account-menu-item {
     background: rgba(255, 176, 32, .18);
     color: #ffe4b3;
     box-shadow: 0 0 0 1px rgba(255, 176, 32, .32), 0 0 20px rgba(255, 176, 32, .28);
+}
+
+.sector-critical-alert:not(.acknowledged) {
+    animation: sector-critical-alert-blink .65s steps(2, start) infinite;
+    border-color: #ff3b4f;
+    background: rgba(255, 35, 58, .22);
+    color: #ffd7db;
+    box-shadow: 0 0 0 1px rgba(255, 59, 79, .42), 0 0 24px rgba(255, 35, 58, .42);
+}
+
+.sector-critical-alert:not(.acknowledged) .sector-alert-message {
+    color: #ffd7db;
 }
 
 .sector-manny-report-alert:not(.acknowledged) {
@@ -2594,6 +2621,21 @@ button.account-menu-item {
     }
 }
 
+@keyframes sector-critical-alert-blink {
+    0%,
+    100% {
+        background: rgba(255, 35, 58, .38);
+        color: #fff0f2;
+        box-shadow: 0 0 0 1px rgba(255, 85, 101, .7), 0 0 32px rgba(255, 35, 58, .72);
+    }
+
+    50% {
+        background: rgba(255, 35, 58, .07);
+        color: #ff596a;
+        box-shadow: 0 0 0 1px rgba(255, 59, 79, .28), 0 0 7px rgba(255, 35, 58, .22);
+    }
+}
+
 @keyframes panel-tab-led-blink {
     0%,
     100% {
@@ -2637,6 +2679,29 @@ button.account-menu-item {
             -27px 0 0 -4px #563715,
             -27px 0 0 -2px rgba(2, 7, 5, .95),
             -27px 0 4px -2px rgba(255, 176, 32, .24);
+    }
+}
+
+@keyframes panel-tab-critical-led-blink {
+    0%,
+    100% {
+        box-shadow:
+            inset 0 1px 1px rgba(255,255,255,.55),
+            0 1px 2px rgba(0,0,0,.75),
+            -30px -3px 0 -7px rgba(255, 225, 229, .95),
+            -27px 0 0 -4px #ff3b4f,
+            -27px 0 0 -2px rgba(7, 2, 3, .95),
+            -27px 0 13px -1px rgba(255, 35, 58, .96);
+    }
+
+    50% {
+        box-shadow:
+            inset 0 1px 1px rgba(255,255,255,.55),
+            0 1px 2px rgba(0,0,0,.75),
+            -30px -3px 0 -7px rgba(255, 225, 229, .16),
+            -27px 0 0 -4px #5b1820,
+            -27px 0 0 -2px rgba(7, 2, 3, .95),
+            -27px 0 4px -2px rgba(255, 35, 58, .26);
     }
 }
 

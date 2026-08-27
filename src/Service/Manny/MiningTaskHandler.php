@@ -8,6 +8,7 @@ use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Sector\Asteroid;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Sector\SectorManny;
@@ -132,7 +133,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
             throw new MannyActionException(422, 'invalid_mining_target', 'This object cannot be mined by a Manny.');
         }
 
-        $availableAmounts = $target instanceof Asteroid
+        $availableAmounts = $target instanceof Asteroid || $target instanceof DormantConstruct
             ? ($this->availableAsteroidResourceAmountsForOrders)($probe, $target, $taskSector)
             : null;
         $composition = $availableAmounts !== null
@@ -161,7 +162,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
         }
 
         $resourceProfile = ResourceComposition::profileForSelection($composition, $selectedResources);
-        if ($target instanceof Asteroid && $availableAmounts !== null) {
+        if (($target instanceof Asteroid || $target instanceof DormantConstruct) && $availableAmounts !== null) {
             ($this->ensureAsteroidHasResources)($availableAmounts, $resourceProfile, $targetAmount);
         }
         $artificialObjectDetected = $target instanceof Asteroid

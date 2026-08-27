@@ -19,6 +19,9 @@ use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
 use VonNeumannGame\Repository\DetachedStorageContainerRepository;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\MissionRepository;
+use VonNeumannGame\Repository\OthersAuditRepository;
+use VonNeumannGame\Repository\OthersIdempotencyRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
 use VonNeumannGame\Repository\PlayerRepository;
@@ -39,6 +42,7 @@ use VonNeumannGame\RateLimit\RedisTokenRateLimiter;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MissionService;
 use VonNeumannGame\Service\MovementDurationCalculator;
+use VonNeumannGame\Service\OthersService;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeReinstantiationService;
 use VonNeumannGame\Service\ProbeStorageService;
@@ -47,6 +51,7 @@ use VonNeumannGame\Service\ScutNetworkService;
 use VonNeumannGame\Service\SectorObservationService;
 use VonNeumannGame\Service\WaypointBookmarkService;
 use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryService;
+use VonNeumannGame\Service\AutonomousUnitObservationService;
 use VonNeumannGame\Service\AsteroidTrajectory\AccelerationPhaseHandler;
 use VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryPhaseProcessor;
 use VonNeumannGame\Service\AsteroidTrajectory\ImpactDamageResolver;
@@ -109,9 +114,10 @@ final class AppFactory
         $sessions = new SessionRepository($pdo);
         $apiKeys = new ApiKeyRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
+        $others = new OthersRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
-        $asteroidTrajectoryService = new AsteroidTrajectoryService($asteroidTrajectoryRepository, $probes, $scheduledEvents, $sectorService, $gameplayConfig, $universeConfig, $damageWarnings);
+        $asteroidTrajectoryService = new AsteroidTrajectoryService($asteroidTrajectoryRepository, $probes, $scheduledEvents, $sectorService, $gameplayConfig, $universeConfig, $damageWarnings, $others);
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig, mannies: $mannies, asteroidTrajectories: $asteroidTrajectoryRepository, asteroidTrajectoryService: $asteroidTrajectoryService);
@@ -120,7 +126,7 @@ final class AppFactory
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectoryRepository);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig, others: $others);
         $redisConfig = $this->redisConfig();
         $rateLimitConfig = Config::getArray($redisConfig, 'rateLimit');
         $rateLimiter = Config::bool($redisConfig, 'rateLimit.enabled', true)
@@ -132,7 +138,8 @@ final class AppFactory
             )
             : null;
 
-        return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements, $rateLimiter, $asteroidTrajectoryService);
+        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items);
+        return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements, $rateLimiter, $asteroidTrajectoryService, $others, new OthersIdempotencyRepository($pdo), new OthersAuditRepository($pdo), $othersService, new AutonomousUnitObservationService($mannies, $others));
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService
@@ -150,6 +157,7 @@ final class AppFactory
         $missions = new MissionRepository($pdo);
         $movements = new ProbeMovementRepository($pdo);
         $asteroidTrajectories = new AsteroidTrajectoryRepository($pdo);
+        $others = new OthersRepository($pdo);
         $visitedSectors = new VisitedSectorRepository($pdo);
         $damageWarnings = new ProbeDamageWarningRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
@@ -165,7 +173,7 @@ final class AppFactory
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
         $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig);
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig, others: $others);
         $trajectoryConfig = Config::getArray($gameplayConfig, 'asteroidTrajectories');
         $impactConfig = Config::getArray($trajectoryConfig, 'impact');
         $impactDamage = new ImpactDamageResolver(
@@ -178,11 +186,12 @@ final class AppFactory
             planetaryLossMinimum: Config::float($impactConfig, 'planetaryMassLossMinimumFraction', 0.01),
             planetaryLossMaximum: Config::float($impactConfig, 'planetaryMassLossMaximumFraction', 0.3),
         );
+        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items);
         $trajectoryProcessor = new AsteroidTrajectoryPhaseProcessor(
             $asteroidTrajectories,
             new PhaseHandlerRegistry([
                 new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, Config::int($trajectoryConfig, 'coastingDurationSeconds', 600)),
-                new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, $impactDamage),
+                new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, $impactDamage, $others, $othersService),
                 new SectorTransferPhaseHandler(
                     $asteroidTrajectories,
                     $scheduledEvents,
@@ -201,7 +210,7 @@ final class AppFactory
             ]),
         );
 
-        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $trajectoryProcessor);
+        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $trajectoryProcessor, $othersService);
     }
 
     public function authService(PDO $pdo): AuthService

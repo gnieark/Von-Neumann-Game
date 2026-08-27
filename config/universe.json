@@ -80,6 +80,19 @@
     "backgroundHabitabilityRange": [0.0, 0.18],
     "rareMetalsTraceChance": 0.22
   },
+  "planetResourceStocks": {
+    "resourceContainersPerEarthVolume": 1000000.0,
+    "categoryRecoverableFractions": {"gas_giant": 0.40, "ice_giant": 0.35, "frozen": 0.28, "ocean": 0.22, "rocky": 0.18, "dwarf": 0.16, "lava": 0.12},
+    "compositionWeights": {
+      "gas_giant": {"deuterium": 0.78, "metals": 0.04, "ice": 0.04, "carbon_compounds": 0.14},
+      "ice_giant": {"deuterium": 0.18, "metals": 0.10, "ice": 0.55, "carbon_compounds": 0.17},
+      "frozen": {"deuterium": 0.06, "metals": 0.22, "ice": 0.60, "carbon_compounds": 0.12},
+      "ocean": {"deuterium": 0.03, "metals": 0.18, "ice": 0.62, "carbon_compounds": 0.17},
+      "rocky": {"deuterium": 0.01, "metals": 0.72, "ice": 0.07, "carbon_compounds": 0.20},
+      "dwarf": {"deuterium": 0.02, "metals": 0.58, "ice": 0.32, "carbon_compounds": 0.08},
+      "lava": {"deuterium": 0.00, "metals": 0.92, "ice": 0.00, "carbon_compounds": 0.08}
+    }
+  },
   "asteroids": {
     "compositionWeights": {"iron": 25, "silicate": 35, "carbonaceous": 22, "ice": 12, "rare_metals": 6},
     "resourcesByComposition": {

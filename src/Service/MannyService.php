@@ -164,7 +164,7 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
             fn(UniverseObject $target): bool => $this->isMineableObject($target),
-            fn(NeumannProbe $probe, Asteroid $asteroid, mixed $sectorCoordinates): array => $this->availableAsteroidResourceAmountsForOrders($probe, $asteroid, $sectorCoordinates),
+            fn(NeumannProbe $probe, UniverseObject $object, mixed $sectorCoordinates): array => $this->availableAsteroidResourceAmountsForOrders($probe, $object, $sectorCoordinates),
             fn(UniverseObject $target): array => $this->resourceComposition($target),
             function (array $availableAmounts, array $resourceProfile, float $targetAmount): void {
                 $this->ensureAsteroidHasResources($availableAmounts, $resourceProfile, $targetAmount);
@@ -2326,6 +2326,23 @@ final class MannyService implements MannyTaskRuntime
      */
     private function dormantConstructInspectionReport(NeumannProbe $probe, SectorContent $sector, DormantConstruct $construct): array
     {
+        if (in_array($construct->getSubtype(), ['others_auxiliary', 'others_auxiliary_wreck'], true)) {
+            $amounts = $construct->getResourceAmounts();
+            $recovered = 0.0;
+            if (!$construct->isIdentified()) {
+                $recovered = min((float)($amounts[ResourceComposition::DEUTERIUM] ?? 0.0), max(0.0, $this->maxDeuteriumPercent($probe) - $probe->deuteriumStock));
+                if ($recovered > 0.0) {
+                    $probe->deuteriumStock = round($probe->deuteriumStock + $recovered, 4);
+                    $amounts[ResourceComposition::DEUTERIUM] = round(max(0.0, (float)$amounts[ResourceComposition::DEUTERIUM] - $recovered), 4);
+                    $this->probes->save($probe);
+                }
+                if ($sector->replaceObject($construct->withIdentification(true, $amounts))) { $this->sectors->saveSector($sector); }
+            }
+            return [
+                'scenario' => 'others_auxiliary_analysis',
+                'message' => 'Manny report: an artificial auxiliary structure was identified. ' . ($recovered > 0.0 ? number_format($recovered, 4, '.', '') . ' ECE of deuterium was transferred to the probe.' : 'No deuterium could be transferred.'),
+            ];
+        }
         $scenario = $construct->getInspectionScenario();
         if ($scenario === null) {
             $scenarios = DormantConstruct::inspectionScenarios();
@@ -2413,7 +2430,7 @@ final class MannyService implements MannyTaskRuntime
      */
     private function resourceComposition(UniverseObject $object): array
     {
-        if ($object instanceof Asteroid) {
+        if ($object instanceof Asteroid || $object instanceof DormantConstruct) {
             return ResourceComposition::fromAmounts($object->getResourceAmounts());
         }
 
@@ -2425,8 +2442,9 @@ final class MannyService implements MannyTaskRuntime
     /**
      * @return array<string, float>
      */
-    private function availableAsteroidResourceAmountsForOrders(NeumannProbe $probe, Asteroid $asteroid, SectorCoordinates $sector): array
+    private function availableAsteroidResourceAmountsForOrders(NeumannProbe $probe, UniverseObject $asteroid, SectorCoordinates $sector): array
     {
+        if (!$asteroid instanceof Asteroid && !$asteroid instanceof DormantConstruct) { return []; }
         $availableAmounts = $asteroid->getResourceAmounts();
         foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
             if ($manny->currentTask !== Manny::TASK_MINING || ($manny->taskPayload['objectId'] ?? null) !== $asteroid->getId()) {
@@ -2485,7 +2503,7 @@ final class MannyService implements MannyTaskRuntime
             'resourceComposition' => $composition,
         ];
 
-        if ($object instanceof Asteroid) {
+        if ($object instanceof Asteroid || $object instanceof DormantConstruct) {
             $target['composition'] = $data['composition'] ?? null;
             $target['sizeCategory'] = $data['sizeCategory'] ?? null;
             $target['resourceAmounts'] = $object->getResourceAmounts();
@@ -2599,7 +2617,7 @@ final class MannyService implements MannyTaskRuntime
 
         $sector = $this->sectors->getOrCreateSector($manny->sector);
         $object = $sector->findObjectById($objectId);
-        if (!$object instanceof Asteroid) {
+        if (!$object instanceof Asteroid && !$object instanceof DormantConstruct) {
             return $amount;
         }
 

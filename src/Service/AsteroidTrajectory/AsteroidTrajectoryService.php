@@ -13,6 +13,7 @@ use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\PlayerReferenceFrame;
@@ -37,6 +38,7 @@ final class AsteroidTrajectoryService
         array $gameplayConfig,
         array $universeConfig,
         private readonly ?ProbeDamageWarningRepository $alerts = null,
+        private readonly ?OthersRepository $others = null,
     ) {
         $this->trajectoryConfig = Config::getArray($gameplayConfig, 'asteroidTrajectories');
         $massRange = Config::getArray($universeConfig, 'asteroids.massRange', [0.000001, 0.02]);
@@ -151,7 +153,8 @@ final class AsteroidTrajectoryService
 
         $targetType = $trajectory->targetProbeId !== null
             ? 'probe'
-            : ($sector->findObjectById($trajectory->targetObjectId)?->getType()->value ?? 'unknown');
+            : ($sector->findObjectById($trajectory->targetObjectId)?->getType()->value
+                ?? ($this->others?->findShipByPublicId($trajectory->targetObjectId) !== null ? 'ship' : 'unknown'));
 
         return $message . ' Target: ' . $trajectory->targetObjectId . ' (' . $targetType . ').';
     }
@@ -271,9 +274,14 @@ final class AsteroidTrajectoryService
             $numericTargetId = filter_var($targetId, FILTER_VALIDATE_INT);
             $targetProbe = $numericTargetId !== false ? $this->probes->findById((int) $numericTargetId) : null;
             if ($targetProbe === null || !$targetProbe->currentSector->equals($probe->currentSector)) {
-                throw new AsteroidTrajectoryException(422, 'invalid_asteroid_impact_target', 'The impact target must be a local probe, asteroid, planet or star.');
+                $othersShip = $this->others?->findShipByPublicId($targetId);
+                if ($othersShip === null || $othersShip['destroyed_at'] !== null || in_array((string)$othersShip['status'], ['transit','removed','destroyed'], true)
+                    || [(int)$othersShip['sector_x'],(int)$othersShip['sector_y'],(int)$othersShip['sector_z']] !== [$probe->currentSector->getX(),$probe->currentSector->getY(),$probe->currentSector->getZ()]) {
+                    throw new AsteroidTrajectoryException(422, 'invalid_asteroid_impact_target', 'The impact target must be a local probe, Others ship, asteroid, planet or star.');
+                }
+            } else {
+                $targetProbeId = $targetProbe->id;
             }
-            $targetProbeId = $targetProbe->id;
         }
         [$starMass] = $this->referenceStar($sector);
         $revolutionDuration = $this->revolutions->durationSeconds($starMass);

@@ -636,10 +636,11 @@ async function bindProbeSelector() {
     });
 }
 
-function setNavigationWarning(path, active, warning) {
+function setNavigationWarning(path, active, warning, critical = false) {
     navLinkNodes(path).forEach((node) => {
         node.classList.toggle("alerts-pending", Boolean(active));
-        node.classList.toggle("alerts-warning", Boolean(warning));
+        node.classList.toggle("alerts-warning", Boolean(warning) && !critical);
+        node.classList.toggle("alerts-critical", Boolean(critical));
     });
 }
 
@@ -808,16 +809,19 @@ async function syncNavigationWarnings() {
     const unreadDamageWarnings = persistentAlerts.some((alert) => (
         alert && alert.type === "storage_container_break" && alert.status === "unread"
     ));
+    const unreadTargetedWeaponAlerts = persistentAlerts.some((alert) => (
+        alert && alert.type === "others_weapon" && ["weapon_targeted", "weapon_damage"].includes(alert.phase) && alert.status === "unread"
+    ));
     if (messageData) {
         const receivedMessages = Array.isArray(messageData.messages) ? messageData.messages : [];
         setNavigationWarning("/messaging", receivedMessages.some((message) => message && message.status === "unread"));
     }
     if (sectorData) {
         const alerts = sectorAlerts(sectorData.sector || {}, messages);
-        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged) || unreadPersistentAlerts, unreadDamageWarnings);
+        setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged) || unreadPersistentAlerts, unreadDamageWarnings, unreadTargetedWeaponAlerts);
         setNavigationScutCoverage(Array.isArray(sectorData.sector && sectorData.sector.scutNetworks) && sectorData.sector.scutNetworks.length > 0);
     } else {
-        setNavigationWarning("/alerts", unreadPersistentAlerts, unreadDamageWarnings);
+        setNavigationWarning("/alerts", unreadPersistentAlerts, unreadDamageWarnings, unreadTargetedWeaponAlerts);
         setNavigationScutCoverage(false);
     }
 }

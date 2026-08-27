@@ -4,7 +4,7 @@
             <p class="eyebrow">{{t.apiDocsEyebrow}}</p>
             <h1>{{t.apiDocsTitle}}</h1>
         </div>
-        <a class="openapi-raw-link" href="/openapi.yaml">{{t.rawOpenApi}}</a>
+        <a class="openapi-raw-link" href="{{openApiUrl}}">{{t.rawOpenApi}}</a>
     </div>
-    <div id="swagger-ui" class="swagger-host">{{t.loading}}</div>
+    <div id="swagger-ui" class="swagger-host" data-openapi-url="{{openApiUrl}}">{{t.loading}}</div>
 </section>

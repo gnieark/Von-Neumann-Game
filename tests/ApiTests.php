@@ -28,6 +28,7 @@ use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Domain\StorageContainer;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
+use VonNeumannGame\FrontRoute\FrontRouteApiDocs;
 use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
 use VonNeumannGame\FrontRoute\FrontRouteHome;
@@ -42,6 +43,7 @@ use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
 use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\ApiKeyRepository;
 use VonNeumannGame\Repository\DetachedStorageContainerRepository;
 use VonNeumannGame\Repository\PlayerAuthRepository;
@@ -59,6 +61,7 @@ use VonNeumannGame\Repository\SessionRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
 use VonNeumannGame\Repository\VisitedSectorRepository;
 use VonNeumannGame\Service\MovementDurationCalculator;
+use VonNeumannGame\Service\OthersService;
 use VonNeumannGame\Service\DetachedContainerJsonMigrationService;
 use VonNeumannGame\Service\MannyService;
 use VonNeumannGame\Service\MissionService;
@@ -370,6 +373,20 @@ $test->assertEquals(['local'], $loadedGameplayConfig['listValues'] ?? null, 'loc
 $configuredSteelBar = CraftingRecipeCatalog::find('steel_bar', $loadedGameplayConfig['crafting'] ?? []);
 $test->assertEquals(123, $configuredSteelBar['durationSeconds'] ?? null, 'crafting recipes consume gameplay config overrides');
 $test->assertEquals('Test steel bar description', $configuredSteelBar['description'] ?? null, 'crafting recipes consume gameplay config descriptions');
+$probeMissileRecipe = CraftingRecipeCatalog::find('missile');
+$test->assertEquals(['manny'], $probeMissileRecipe['craftableBy'] ?? null, 'missile recipe is craftable by Manny');
+$probeMissileIngredients = [];
+foreach ($probeMissileRecipe['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $probeMissileIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(1, $probeMissileIngredients['battery_pack']['quantity'] ?? null, 'missile recipe requires one battery pack');
+$test->assertEquals(2, $probeMissileIngredients['micro_conductor']['quantity'] ?? null, 'missile recipe requires two micro-etched conductors');
+$test->assertEquals(0.20, $probeMissileIngredients['metals']['quantity'] ?? null, 'missile recipe consumes exactly 0.20 ECE of metals');
+$test->assertEquals(0.10, $probeMissileIngredients['carbon_compounds']['quantity'] ?? null, 'missile recipe consumes exactly 0.10 ECE of carbon compounds');
+$test->assertEquals(3600, $probeMissileRecipe['durationSeconds'] ?? null, 'missile recipe takes exactly one hour');
+$test->assertEquals(0.05, $probeMissileRecipe['output']['containerSpace'] ?? null, 'probe missile occupies exactly 0.05 ECE');
 $configuredProbeImprovement = ProbeImprovementCatalog::find('deuterium-compression', $loadedGameplayConfig['probeImprovements'] ?? []);
 $test->assertEquals(300, $configuredProbeImprovement['durationSeconds'] ?? null, 'probe improvements expose default gameplay definitions');
 $configuredContainerCouplingsImprovement = ProbeImprovementCatalog::find('reinforced-container-couplings', $loadedGameplayConfig['probeImprovements'] ?? []);
@@ -486,9 +503,224 @@ $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
 $alertIllustrationMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-alert-illustration-images.php');
+$othersAlertsMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-others-alerts.php');
 $sectorPointCloudScript = file_get_contents($root . '/scripts/generate-threejs-point-cloud-sectors.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
+$openApiOthers = file_get_contents($root . '/docs/openapi-others.yaml');
+$apiDocsRouteSource = file_get_contents($root . '/src/FrontRoute/FrontRouteApiDocs.php');
+$apiDocsScript = file_get_contents($root . '/public/assets/api-docs.js');
+$mainApiDocsHtml = (new FrontRouteApiDocs())->getContent('GET', '/api-docs', null, 'en');
+$othersApiDocsHtml = (new FrontRouteApiDocs())->getContent('GET', '/api-docs-others', null, 'en');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, 'api-docs-others') && str_contains($frontIndex, 'openapi-others\\.yaml'), 'front router exposes the Others Swagger UI and OpenAPI document');
+$test->assert(is_string($apiDocsRouteSource) && str_contains($apiDocsRouteSource, "'/openapi-others.yaml'"), 'API docs route handles the Others OpenAPI URL');
+$test->assert(str_contains($mainApiDocsHtml, 'data-openapi-url="/openapi.yaml"'), 'main Swagger UI loads the main OpenAPI document');
+$test->assert(str_contains($othersApiDocsHtml, 'data-openapi-url="/openapi-others.yaml"'), 'Others Swagger UI loads the autonomous Others OpenAPI document');
+$test->assert(is_string($apiDocsScript) && str_contains($apiDocsScript, '"docExpansion": "none"'), 'Swagger UI keeps tag accordions collapsed by default');
+$test->assert(is_string($openApi) && !str_contains($openApi, 'openapi-others'), 'main OpenAPI document is detached from the Others contract');
+$test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId}/missiles:'), 'main OpenAPI document retains probe missile endpoints without an external reference');
+$openApiDocument = is_string($openApi) ? yaml_parse($openApi) : false;
+$expectedOpenApiTagOrder = [
+    'system',
+    'account',
+    'probes',
+    'sectors',
+    'scut',
+    'movement',
+    'mannies',
+    'inventories',
+    'alerts',
+    'messaging',
+    'improvements',
+    'logbook',
+    'motorized-asteroids',
+    'Missiles',
+    'missions',
+    'forum',
+    'default probe',
+];
+$declaredOpenApiTagOrder = is_array($openApiDocument)
+    ? array_column($openApiDocument['tags'] ?? [], 'name')
+    : [];
+$test->assertEquals($expectedOpenApiTagOrder, $declaredOpenApiTagOrder, 'OpenAPI declares Swagger tags in the requested display order');
+$defaultProbeTagDescription = is_array($openApiDocument)
+    ? array_values(array_filter(
+        $openApiDocument['tags'] ?? [],
+        static fn (array $tag): bool => ($tag['name'] ?? null) === 'default probe'
+    ))
+    : [];
+$test->assert(
+    isset($defaultProbeTagDescription[0]['description'])
+        && str_contains($defaultProbeTagDescription[0]['description'], '/api/probe/{probeId}/...')
+        && str_contains($defaultProbeTagDescription[0]['description'], "player's default probe"),
+    'OpenAPI explains how default probe routes relate to explicit probeId routes'
+);
+$forumTagsAreComplete = true;
+$defaultProbeTagsAreComplete = true;
+$excludedProbeTagsAreAbsent = true;
+$explicitProbeMannyTagsAreComplete = true;
+$explicitProbeAlertTagsAreComplete = true;
+$explicitProbeInventoryTagsAreComplete = true;
+$allOpenApiOperationsAreTagged = true;
+$remainingOpenApiTagsMatchTheirDomains = true;
+$motorizedAsteroidMannyTagsAreComplete = true;
+$probeImprovementMannyTagsAreComplete = true;
+$openApiOperationReferencesAreAbsent = true;
+$scutMannyTagsAreComplete = true;
+$allOperationTagsAreDeclared = true;
+$defaultProbeTagsRemainIsolated = true;
+$additionalFunctionalTagsAreComplete = true;
+$expectedAdditionalTagsByPath = [
+    '/api/probe/{probeId}/storage-moves' => 'mannies',
+    '/api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share' => 'scut',
+    '/api/probe/{probeId}/damage-warnings' => 'movement',
+    '/api/probe/{probeId}/damage-warnings/{damageWarningId}' => 'movement',
+    '/api/probe/{probeId}/missiles' => 'mannies',
+    '/api/probe/{probeId}/mannies/{mannyId}/mine' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/assemble-probe' => 'probes',
+    '/api/probe/{probeId}/mannies/{mannyId}/salvage' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/detach-storage-container' => 'inventories',
+    '/api/probe/{probeId}/mannies/{mannyId}/drop-storage-container' => 'inventories',
+    '/api/probe/{probeId}/mannies/{mannyId}/inspect-sector-object' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/recover-storage-container' => 'inventories',
+    '/api/probe/{probeId}/mannies/{mannyId}/install-bookmark' => 'sectors',
+    '/api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-to-probe' => 'probes',
+    '/api/probe/{probeId}/mannies/{mannyId}/transfer-to-probe' => 'probes',
+];
+$expectedOpenApiTagsByPath = [
+    '/api/version' => 'system',
+    '/api/session' => 'account',
+    '/api/me' => 'account',
+    '/api/me/api-key' => 'account',
+    '/api/crafting-recipes' => 'mannies',
+    '/api/probe/{probeId}' => 'probes',
+    '/api/probes' => 'probes',
+    '/api/probe/mission' => 'missions',
+    '/api/probe/missions' => 'missions',
+    '/api/probe/missions/{missionId}/abandon' => 'missions',
+    '/api/probe/{probeId}/storage-moves' => 'inventories',
+    '/api/probe/{probeId}/probe-improvements-available' => 'improvements',
+    '/api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share' => 'improvements',
+    '/api/probe/{probeId}/messages' => 'messaging',
+    '/api/probe/{probeId}/messages/{messageId}/read' => 'messaging',
+    '/api/probe/{probeId}/scut-network/{scutNetworkId}' => 'scut',
+    '/api/probe/{probeId}/logbook-pages' => 'logbook',
+    '/api/probe/{probeId}/logbook-page' => 'logbook',
+    '/api/probe/{probeId}/logbook-page/{logbookPageId}' => 'logbook',
+    '/api/probe/{probeId}/visited-sectors' => 'sectors',
+    '/api/visited-sectors' => 'sectors',
+    '/api/probe/{probeId}/sector' => 'sectors',
+    '/api/sector' => 'sectors',
+    '/api/probe/{probeId}/move' => 'movement',
+    '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories' => 'motorized-asteroids',
+    '/api/probe/{probeId}/asteroid-trajectories/{trajectoryId}' => 'motorized-asteroids',
+];
+if (is_array($openApiDocument)) {
+    foreach ($openApiDocument['paths'] ?? [] as $path => $pathItem) {
+        foreach (['get', 'post', 'put', 'patch', 'delete', 'options', 'head'] as $operationMethod) {
+            if (!isset($pathItem[$operationMethod]) || !is_array($pathItem[$operationMethod])) {
+                continue;
+            }
+            $tags = $pathItem[$operationMethod]['tags'] ?? [];
+            if (array_key_exists('$ref', $pathItem[$operationMethod])) {
+                $openApiOperationReferencesAreAbsent = false;
+            }
+            if ($tags === []) {
+                $allOpenApiOperationsAreTagged = false;
+            }
+            if (in_array('default probe', $tags, true) && $tags !== ['default probe']) {
+                $defaultProbeTagsRemainIsolated = false;
+            }
+            $expectedAdditionalTag = $expectedAdditionalTagsByPath[$path] ?? null;
+            if ($expectedAdditionalTag !== null && !in_array($expectedAdditionalTag, $tags, true)) {
+                $additionalFunctionalTagsAreComplete = false;
+            }
+            foreach ($tags as $tag) {
+                if (!in_array($tag, $declaredOpenApiTagOrder, true)) {
+                    $allOperationTagsAreDeclared = false;
+                }
+            }
+            $expectedDomainTag = $expectedOpenApiTagsByPath[$path] ?? null;
+            if ($expectedDomainTag !== null && !in_array($expectedDomainTag, $tags, true)) {
+                $remainingOpenApiTagsMatchTheirDomains = false;
+            }
+            if (str_starts_with($path, '/api/forum') && !in_array('forum', $tags, true)) {
+                $forumTagsAreComplete = false;
+            }
+
+            $isDefaultProbePath = ($path === '/api/probe' || str_starts_with($path, '/api/probe/'))
+                && !str_contains($path, '{probeId}')
+                && preg_match('#^/api/probe/missions?(?:/|$)#', $path) !== 1;
+            if ($isDefaultProbePath && !in_array('default probe', $tags, true)) {
+                $defaultProbeTagsAreComplete = false;
+            }
+
+            $isExcludedProbePath = str_contains($path, '{probeId}')
+                || preg_match('#^/api/probe/missions?(?:/|$)#', $path) === 1;
+            if ($isExcludedProbePath && in_array('default probe', $tags, true)) {
+                $excludedProbeTagsAreAbsent = false;
+            }
+            $isExplicitProbeMannyPath = str_starts_with($path, '/api/probe/{probeId}/mannies')
+                || $path === '/api/probe/{probeId}/atomic-printer/craft';
+            if ($isExplicitProbeMannyPath && !in_array('mannies', $tags, true)) {
+                $explicitProbeMannyTagsAreComplete = false;
+            }
+            $isMotorizedAsteroidMannyPath = in_array($path, [
+                '/api/probe/{probeId}/mannies/{mannyId}/motorize-asteroid',
+                '/api/probe/{probeId}/mannies/{mannyId}/refuel-motorized-asteroid',
+            ], true);
+            if ($isMotorizedAsteroidMannyPath && !in_array('motorized-asteroids', $tags, true)) {
+                $motorizedAsteroidMannyTagsAreComplete = false;
+            }
+            if ($path === '/api/probe/{probeId}/mannies/{mannyId}/improve-probe'
+                && !in_array('improvements', $tags, true)) {
+                $probeImprovementMannyTagsAreComplete = false;
+            }
+            $isScutMannyPath = in_array($path, [
+                '/api/probe/{probeId}/mannies/{mannyId}/turn-on-relay',
+                '/api/probe/{probeId}/mannies/{mannyId}/install-scut-transit-beacon',
+            ], true);
+            if ($isScutMannyPath && !in_array('scut', $tags, true)) {
+                $scutMannyTagsAreComplete = false;
+            }
+            $isExplicitProbeAlertPath = str_starts_with($path, '/api/probe/{probeId}/alerts')
+                || str_starts_with($path, '/api/probe/{probeId}/damage-warnings');
+            if ($isExplicitProbeAlertPath && !in_array('alerts', $tags, true)) {
+                $explicitProbeAlertTagsAreComplete = false;
+            }
+            $isExplicitProbeInventoryPath = in_array($path, [
+                '/api/probe/{probeId}/storage-containers',
+                '/api/probe/{probeId}/storage-containers/{containerId}',
+                '/api/probe/{probeId}/storage-containers/{containerId}/rules',
+                '/api/probe/{probeId}/storage-containers/{containerId}/crafting-reservations/reassign',
+                '/api/probe/{probeId}/inventory/{itemId}',
+                '/api/probe/{probeId}/inventory/{itemId}/jettison',
+            ], true);
+            if ($isExplicitProbeInventoryPath && !in_array('inventories', $tags, true)) {
+                $explicitProbeInventoryTagsAreComplete = false;
+            }
+        }
+    }
+}
+$test->assert(is_array($openApiDocument) && $forumTagsAreComplete, 'OpenAPI groups every forum operation in the forum category');
+$test->assert(is_array($openApiDocument) && $defaultProbeTagsAreComplete, 'OpenAPI groups default-probe operations without probeId in the default probe category');
+$test->assert(is_array($openApiDocument) && $excludedProbeTagsAreAbsent, 'OpenAPI excludes explicit-probe and mission operations from the default probe category');
+$test->assert(is_array($openApiDocument) && $explicitProbeMannyTagsAreComplete, 'OpenAPI groups every explicit-probe Manny operation in the mannies category');
+$test->assert(is_array($openApiDocument) && $explicitProbeAlertTagsAreComplete, 'OpenAPI groups every explicit-probe alert operation in the alerts category');
+$test->assert(is_array($openApiDocument) && $explicitProbeInventoryTagsAreComplete, 'OpenAPI groups explicit-probe inventory operations in the inventories category');
+$test->assert(is_array($openApiDocument) && $motorizedAsteroidMannyTagsAreComplete, 'OpenAPI also groups motorization and refueling Manny operations in the motorized-asteroids category');
+$test->assert(is_array($openApiDocument) && $probeImprovementMannyTagsAreComplete, 'OpenAPI also groups Manny probe improvement operations in the improvements category');
+$test->assert(is_array($openApiDocument) && $scutMannyTagsAreComplete, 'OpenAPI also groups relay activation and transit beacon installation in the scut category');
+$test->assert(is_array($openApiDocument) && $allOpenApiOperationsAreTagged, 'OpenAPI leaves no operation in the implicit default category');
+$test->assert(is_array($openApiDocument) && $remainingOpenApiTagsMatchTheirDomains, 'OpenAPI groups all formerly default operations by functional domain');
+$test->assert(is_array($openApiDocument) && $openApiOperationReferencesAreAbsent, 'OpenAPI operations are defined directly so Swagger tag accordions remain stable when expanded');
+$test->assert(is_array($openApiDocument) && $allOperationTagsAreDeclared, 'Every OpenAPI operation tag is declared in the Swagger display order');
+$test->assert(is_array($openApiDocument) && $defaultProbeTagsRemainIsolated, 'Default-probe compatibility routes remain isolated from functional Swagger categories');
+$test->assert(is_array($openApiDocument) && $additionalFunctionalTagsAreComplete, 'Canonical OpenAPI operations expose their relevant secondary functional tags');
+$openApiOthersDocument = is_string($openApiOthers) ? yaml_parse($openApiOthers) : false;
+$test->assert(is_array($openApiOthersDocument) && isset($openApiOthersDocument['openapi'], $openApiOthersDocument['info'], $openApiOthersDocument['paths'], $openApiOthersDocument['components']), 'Others OpenAPI document is a valid standalone YAML contract');
+$test->assert(is_array($openApiOthersDocument) && !isset($openApiOthersDocument['paths']['/api/probe/{probeId}/missiles']), 'Others OpenAPI document only contains Others endpoints');
+$test->assert(!is_file($root . '/docs/openapi-others.json'), 'legacy Others JSON OpenAPI document is removed');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
 $mannyTaskRefresherSource = file_get_contents($root . '/src/Service/Manny/MannyTaskRefresher.php');
 $probeMovementServiceSource = file_get_contents($root . '/src/Service/ProbeMovementService.php');
@@ -549,6 +781,11 @@ $test->assert(is_string($mainScript) && str_contains($mainScript, 'setNavigation
 $test->assert(is_string($appCss) && str_contains($appCss, '.panel-tab[data-nav-link="/scut"].scut-network-available::after'), 'SCUT nav LED uses a dedicated weak coverage state');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'hasExplicitRouteTarget'), 'movement JS preserves explicit prepare-jump route targets');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'currentSectorDestination'), 'movement JS disables jumps toward the current sector');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'probe.systems.integrityPercent') && str_contains($movementScript, '>= 10'), 'movement JS derives the ten-percent integrity prerequisite from current probe telemetry');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'probeIntegrityMinimum'), 'movement JS renders minimum integrity in the preparation checklist');
+$test->assert(is_string($movementScript) && str_contains($movementScript, 'blockedByIntegrity'), 'movement JS disables movement submission below minimum integrity');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeIntegrityMinimum' => 'Intégrité minimale de la sonde (10 %)'"), 'French translations label the movement integrity prerequisite');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeIntegrityMinimum' => 'Minimum probe integrity (10%)'"), 'English translations label the movement integrity prerequisite');
 $test->assert(is_string($movementScript) && str_contains($movementScript, 'movementDestructionRiskKnown'), 'movement JS warns about configured long-jump destruction risk');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'step=\"0.0001\" required></label>'), 'Manny deuterium transfer amount starts empty instead of prefilled');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'amountInput.value.trim() === "" ? null'), 'Manny deuterium transfer amount remains empty while the user edits it');
@@ -653,6 +890,7 @@ $test->assert(
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/asteroid-trajectories/{trajectoryId}:'), 'OpenAPI documents local trajectory telemetry');
 $test->assert(str_contains($openApi, 'discriminator:') && str_contains($openApi, "propertyName: mode"), 'OpenAPI discriminates trajectory requests by mode');
 $test->assert(str_contains($openApi, 'asteroid_temporarily_occluded') && str_contains($openApi, 'motorFuelStatus'), 'OpenAPI documents trajectory errors and binary asteroid fuel');
+$test->assert(str_contains($openApi, 'targetsCurrentProbe') && str_contains($openApi, 'type: missile'), 'OpenAPI documents moving missile observations and observer-target matching');
 $test->assert(str_contains($openApi, 'Generated asteroids have a short content-based name such as Ice Deut 15ce'), 'OpenAPI documents content/hash asteroid names');
 $test->assert(str_contains($openApi, 'nextUsefulRefreshDelayMs'), 'OpenAPI documents Manny list useful refresh delay hints');
 $test->assert(str_contains($openApi, 'enum: [covered, uncovered, unknown]'), 'OpenAPI documents SCUT coverage knowledge states');
@@ -713,6 +951,13 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorO
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspect-sector-object'), 'mannies JS posts generic sector-object inspections');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-refuel-motorized-asteroid-form'), 'mannies JS renders the motorized asteroid refueling form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-asteroid-form'), 'mannies JS renders the asteroid trajectory launch form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-missile-form'), 'mannies JS renders the probe missile launch form in sector actions');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'explicitCurrentProbeApiPath("/missiles")'), 'mannies JS posts missile launches through the explicit current-probe endpoint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"actorMannyId": String(mannyId), missileItemId, targetId'), 'mannies JS sends the canonical probe missile payload');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/sector/autonomous-units?limit=500'), 'mannies JS loads local autonomous units as missile targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.mannyUid || object.id'), 'mannies JS uses the canonical Manny uid for missile targets');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'launchMissileActionTitle' => 'Lancer un missile'"), 'French translations label the missile launch action');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'launchMissileActionTitle' => 'Launch a missile'"), 'English translations label the missile launch action');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'function asteroidLaunchHint'), 'mannies JS selects mode-specific asteroid launch help');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-asteroid-launch-hint'), 'mannies JS renders dynamic asteroid launch help');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidLaunchSystemImpactHint' => 'L’astéroïde accélère"), 'French translations explain system-impact launches');
@@ -810,14 +1055,19 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sectorS
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutNetworks.length > 0'), 'sensors JS derives SCUT coverage from the sector endpoint');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'sector.scutCoverageStatus === "unknown"'), 'sensors JS renders unknown SCUT coverage');
 $test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="asteroid-trajectory-alerts"'), 'sensors view exposes a prominent live asteroid trajectory alert region');
+$test->assert(is_string($sensorsTemplate) && str_contains($sensorsTemplate, 'id="missile-threat-alerts"'), 'sensors view exposes a prominent live targeted-missile alert region');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function detectedMovingAsteroids'), 'sensors JS detects active motorized asteroid trajectories in sector scan objects');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function detectedTargetingMissiles'), 'sensors JS detects moving missiles targeting the selected probe');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'object.targetsCurrentProbe === true'), 'sensors JS trusts the probe-scoped missile target projection');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, '["bookmarkTargets", "minableTargets"]'), 'sensors JS also detects trajectories on solar-system asteroid representations');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'trajectory.estimatedCompletionAt || trajectory.nextTransitionAt'), 'sensors JS computes the system-impact countdown from sector telemetry');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'trajectory.targetObjectId'), 'sensors JS resolves the system-impact target from sector telemetry');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'renderSectorObjects(data.sector, isCurrentProbeSector)'), 'sensors JS limits moving-asteroid alerts to the selected probe current-sector scan');
-$test->assert(is_string($appCss) && str_contains($appCss, '.asteroid-trajectory-alerts'), 'sensors CSS puts moving motorized asteroid telemetry in a dedicated alert panel');
+$test->assert(is_string($appCss) && str_contains($appCss, '.sector-live-alerts'), 'sensors CSS shares the critical live-alert presentation between moving asteroids and targeted missiles');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidTrajectoryImpactIn' => 'Impact estimé dans {duration}'"), 'French translations include the live estimated-impact countdown');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'asteroidTrajectoryImpactIn' => 'Estimated impact in {duration}'"), 'English translations include the live estimated-impact countdown');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missileThreatAlertTitle' => 'ALERTE : MISSILE DIRIGÉ VERS LA SONDE COURANTE'"), 'French translations include the live targeted-missile alert');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'missileThreatAlertTitle' => 'ALERT: MISSILE TARGETING CURRENT PROBE'"), 'English translations include the live targeted-missile alert');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'Couverture SCUT : inconnue'"), 'French translations include unknown SCUT coverage');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorScutUnknown' => 'SCUT coverage: unknown'"), 'English translations include unknown SCUT coverage');
 $test->assert(is_string($sensorsScript) && !str_contains($sensorsScript, 'scheduleRefresh'), 'sensors JS does not poll and overwrite coordinate input');
@@ -866,6 +1116,11 @@ $test->assert(is_string($alertsScript) && str_contains($alertsScript, '"method":
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, '"/damage-warnings/"'), 'alerts JS uses the dedicated delete endpoint for damage warnings');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alert.illustrationImageUrl'), 'alerts JS reads optional illustration image URLs');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'class=\"sector-alert-illustration\"'), 'alerts JS renders illustrations below persistent alert text');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, '["weapon_targeted", "weapon_damage"].includes(alert.phase)'), 'alerts JS recognizes targeted and impact-damage missile alerts as critical');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, 'return "sector-critical-alert"'), 'alerts JS assigns the critical alert class to a targeted missile');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'node.classList.toggle("alerts-critical", Boolean(critical))'), 'main JS exposes the targeted-missile state on the alerts navigation tab');
+$test->assert(is_string($appCss) && str_contains($appCss, '@keyframes sector-critical-alert-blink'), 'alerts CSS defines a red blinking critical missile alert');
+$test->assert(is_string($appCss) && str_contains($appCss, '@keyframes panel-tab-critical-led-blink'), 'alerts CSS defines a red blinking critical navigation indicator');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-alert-delete'), 'alerts CSS styles the persistent-alert delete icon');
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-alert-illustration') && str_contains($appCss, 'object-fit: contain;'), 'alerts CSS preserves illustration aspect ratios');
 $test->assert(is_string($appCss) && preg_match('/\.sector-alert-illustration\s*\{[^}]*width:\s*100%;[^}]*height:\s*auto;/s', $appCss) === 1, 'alerts CSS keeps illustrations at full card width without distortion');
@@ -953,8 +1208,10 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260821-crafting-recipes-retry"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260827-movement-integrity-checklist"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
+$test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
+$test->assert(is_string($openApiOthers) && str_contains($openApiOthers, '"/api/others/alerts"'), 'Others OpenAPI documents the persistent alert collection');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1209,6 +1466,12 @@ $test->assert(!in_array('ice_stock', $probeSchemaColumns, true), 'Probe table no
 $test->assert(!in_array('organic_compounds_stock', $probeSchemaColumns, true), 'Probe table no longer duplicates carbon-compound stocks');
 $test->assert(in_array('exclude_from_stats', $probeSchemaColumns, true), 'Probe table can exclude probes from public stats');
 $test->assert(!in_array('other_stock', $probeSchemaColumns, true), 'Probe table no longer stores generic other_stock');
+$othersAlertSchemaColumns = array_column($pdo->query('PRAGMA table_info(others_alerts)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assertEquals(
+    ['id', 'public_id', 'player_id', 'ship_public_id', 'type', 'status', 'phase', 'event_key', 'message', 'created_at', 'updated_at', 'read_at'],
+    $othersAlertSchemaColumns,
+    'Others alert table exposes the canonical persistent alert columns',
+);
 
 require_once $root . '/scripts/one-shot-scripts/remove-legacy-probe-resource-stocks.php';
 $legacyStorageMigrationPdo = new PDO('sqlite::memory:');
@@ -1612,6 +1875,23 @@ $remainingPurgeStatuses = $pdo->query("SELECT status FROM scheduled_events WHERE
 $test->assertEquals(['done', 'pending', 'running'], $remainingPurgeStatuses, 'scheduled-event purge keeps recent and active events');
 $pdo->exec("DELETE FROM scheduled_events WHERE type LIKE 'test.purge.%'");
 
+$othersAlertsMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'others-alerts-migration.sqlite';
+$othersAlertsMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'others-alerts-migration.json';
+file_put_contents($othersAlertsMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $othersAlertsMigrationDbPath], JSON_THROW_ON_ERROR));
+$othersAlertsMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-others-alerts.php')
+    . ' --database-config=' . escapeshellarg($othersAlertsMigrationConfig);
+exec($othersAlertsMigrationCommand . ' 2>&1', $othersAlertsMigrationOutput, $othersAlertsMigrationStatus);
+$test->assertEquals(0, $othersAlertsMigrationStatus, 'Others alerts migration exits successfully');
+$othersAlertsMigrationPdo = new PDO('sqlite:' . $othersAlertsMigrationDbPath);
+$othersAlertsMigrationTables = $othersAlertsMigrationPdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='others_alerts'")->fetchAll(PDO::FETCH_COLUMN);
+$test->assertEquals(['others_alerts'], $othersAlertsMigrationTables, 'Others alerts migration creates the persistent alert table');
+$secondOthersAlertsMigrationOutput = [];
+$secondOthersAlertsMigrationStatus = 0;
+exec($othersAlertsMigrationCommand . ' 2>&1', $secondOthersAlertsMigrationOutput, $secondOthersAlertsMigrationStatus);
+$test->assertEquals(0, $secondOthersAlertsMigrationStatus, 'Others alerts migration can be replayed safely');
+$test->assert(str_contains(implode("\n", $secondOthersAlertsMigrationOutput), 'table_created=no'), 'replayed Others alerts migration reports an unchanged schema');
+
 $alertIllustrationMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'alert-illustration-migration.sqlite';
 $alertIllustrationMigrationPdo = new PDO('sqlite:' . $alertIllustrationMigrationDbPath);
 $alertIllustrationMigrationPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -1722,13 +2002,24 @@ $asteroidTrajectoryService = new AsteroidTrajectoryService(
     json_decode((string) file_get_contents($root . '/config/universe.json'), true, 512, JSON_THROW_ON_ERROR),
     $damageWarnings,
 );
+$others = new OthersRepository($pdo);
+$othersService = new OthersService(
+    $others,
+    $scheduledEvents,
+    json_decode((string) file_get_contents($root . '/config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR),
+    sectors: $sectorService,
+    probes: $probes,
+    alerts: $damageWarnings,
+    mannies: $mannies,
+    items: $items,
+);
 $testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTrajectories, new PhaseHandlerRegistry([
     new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, 600),
     new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, new ImpactDamageResolver()),
     new SectorTransferPhaseHandler($asteroidTrajectories, $scheduledEvents, $sectorService, new CaptureCalculator()),
     new BlackHoleOrbitPhaseHandler($asteroidTrajectories, $sectorService),
 ]));
-$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $testTrajectoryProcessor);
+$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $testTrajectoryProcessor, $othersService);
 $processScheduledMannyNow = static function (int|string $mannyId) use ($pdo, $scheduler, $mannies): array {
     if (is_string($mannyId)) {
         $mannyId = $mannies->findByUid($mannyId)?->id ?? 0;
@@ -1762,13 +2053,46 @@ $processScheduledMannyNow = static function (int|string $mannyId) use ($pdo, $sc
 
     return $stats;
 };
+$processOthersActionNow = static function (array $action) use ($pdo, $scheduledEvents, $othersService): void {
+    $eventId = (int) ($action['scheduled_event_id'] ?? 0);
+    $event = $scheduledEvents->findById($eventId) ?? throw new RuntimeException('Others action event not found.');
+    $othersService->processScheduledAction($event);
+    $pdo->prepare("UPDATE scheduled_events SET status='done',processed_at=:now,updated_at=:now WHERE id=:id")
+        ->execute(['now' => gmdate('c'), 'id' => $eventId]);
+};
+$resolveMissileHitNow = static function (string $missileId) use ($pdo, $scheduledEvents, $othersService): array {
+    $stmt = $pdo->prepare('SELECT p.*,l.scheduled_event_id FROM others_projectiles p JOIN missile_launches l ON l.id=p.launch_id WHERE p.public_id=:public_id');
+    $stmt->execute(['public_id' => $missileId]);
+    $projectile = $stmt->fetch(PDO::FETCH_ASSOC) ?: throw new RuntimeException('Missile projectile not found.');
+    $impactAt = null;
+    for ($offset = 0; $offset < 1000; $offset++) {
+        $candidate = gmdate('c', 1767225600 + $offset);
+        $roll = hexdec(substr(hash('sha256', $missileId . '|' . $projectile['target_public_id'] . '|' . $candidate . '|hit'), 0, 8)) / 4294967296;
+        if ($roll < 0.95) {
+            $impactAt = $candidate;
+            break;
+        }
+    }
+    if ($impactAt === null) {
+        throw new RuntimeException('Unable to produce a deterministic missile hit fixture.');
+    }
+    $pdo->prepare('UPDATE others_projectiles SET impact_at=:impact_at WHERE id=:id')->execute(['impact_at' => $impactAt, 'id' => (int) $projectile['id']]);
+    $event = $scheduledEvents->findById((int) $projectile['scheduled_event_id']) ?? throw new RuntimeException('Missile projectile event not found.');
+    $othersService->processScheduledProjectile($event);
+    $pdo->prepare("UPDATE scheduled_events SET status='done',processed_at=:now,updated_at=:now WHERE id=:id")
+        ->execute(['now' => gmdate('c'), 'id' => $event->id]);
+    $history = $pdo->prepare('SELECT * FROM others_projectile_history WHERE projectile_public_id=:public_id');
+    $history->execute(['public_id' => $missileId]);
+
+    return $history->fetch(PDO::FETCH_ASSOC) ?: throw new RuntimeException('Missile projectile history not found.');
+};
 $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
     $sectorService,
     $visitedSectors,
     mannies: $mannies,
     asteroidTrajectories: $asteroidTrajectories,
     asteroidTrajectoryService: $asteroidTrajectoryService,
-), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService);
+), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService);
 
 $trajectoryColumns = array_column($pdo->query('PRAGMA table_info(asteroid_trajectories)')->fetchAll(PDO::FETCH_ASSOC), 'name');
 $test->assert(in_array('uid', $trajectoryColumns, true) && in_array('current_sector_x', $trajectoryColumns, true), 'asteroid trajectory SQL schema is installed by the explicit schema migration');
@@ -1919,6 +2243,224 @@ $renameAndDefault = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->i
 $test->assertEquals(200, $renameAndDefault->status, 'PATCH /api/probe/{probeId} accepts combined name + isDefault payload');
 $test->assertEquals('Renamed And Default', $probes->findById($sameSectorProbe->id)?->name ?? null, 'Combined PATCH persists the new probe name');
 $test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'Combined PATCH persists default probe selection when permitted');
+$missileAlertManny = $mannies->createForProbe($secondaryProbe->id, 'Missile alert operator', uid: 'mny-missile-alert-operator');
+$missileAlertItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'missile-alert-test-item');
+$preparedAlertMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
+    'actorMannyId' => $missileAlertManny->uid,
+    'missileItemId' => $missileAlertItem->uid,
+    'targetId' => (string) $sameSectorProbe->id,
+]);
+$processScheduledMannyNow($missileAlertManny->id);
+$targetedMissileSectorResponse = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/sector', $multiProbeHeaders);
+$targetedMissileSectorObject = array_values(array_filter(
+    $targetedMissileSectorResponse->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === ($preparedAlertMissile['public_id'] ?? null),
+))[0] ?? null;
+$test->assertEquals(200, $targetedMissileSectorResponse->status, 'probe-scoped current-sector scan succeeds while a missile is moving');
+$test->assertEquals('missile', $targetedMissileSectorObject['type'] ?? null, 'probe-scoped current-sector scan exposes a moving missile as a sector object');
+$test->assertEquals('moving', $targetedMissileSectorObject['status'] ?? null, 'moving missile sector telemetry comes from the canonical projectile status');
+$test->assertEquals('probe', $targetedMissileSectorObject['targetKind'] ?? null, 'moving missile sector telemetry exposes its public target kind');
+$test->assertEquals((string) $sameSectorProbe->id, $targetedMissileSectorObject['targetId'] ?? null, 'moving missile sector telemetry exposes its opaque target id');
+$test->assertEquals(true, $targetedMissileSectorObject['targetsCurrentProbe'] ?? null, 'moving missile sector telemetry identifies the observing target probe');
+$test->assertEquals('extreme', $targetedMissileSectorObject['dangerLevel'] ?? null, 'a missile targeting the observing probe is projected as an extreme danger');
+$test->assert(isset($targetedMissileSectorObject['launchedAt'], $targetedMissileSectorObject['impactAt']), 'moving missile sector telemetry exposes its live countdown timestamps');
+$observerMissileSectorResponse = $kernel->handle('GET', '/api/probe/' . $secondaryProbe->id . '/sector', $multiProbeHeaders);
+$observerMissileSectorObject = array_values(array_filter(
+    $observerMissileSectorResponse->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === ($preparedAlertMissile['public_id'] ?? null),
+))[0] ?? null;
+$test->assertEquals(false, $observerMissileSectorObject['targetsCurrentProbe'] ?? null, 'the same moving missile does not threaten another observing probe');
+$test->assertEquals('moderate', $observerMissileSectorObject['dangerLevel'] ?? null, 'a missile targeting another object remains visible without becoming a critical observer threat');
+$missileAlertObjectId = 'weapon-' . ($preparedAlertMissile['public_id'] ?? '');
+$targetedMissileAlert = array_values(array_filter(
+    $damageWarnings->findByProbeId($sameSectorProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === $missileAlertObjectId,
+))[0] ?? null;
+$observerMissileAlert = array_values(array_filter(
+    $damageWarnings->findByProbeId($secondaryProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === $missileAlertObjectId,
+))[0] ?? null;
+$test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_TARGETED, $targetedMissileAlert?->phase, 'a probe targeted by a launched missile receives the critical weapon_targeted alert phase');
+$test->assertEquals(ProbeDamageWarning::PHASE_WEAPON, $observerMissileAlert?->phase, 'another probe in the launch sector keeps the regular weapon alert phase');
+$test->assert(
+    $targetedMissileAlert !== null
+        && str_contains($targetedMissileAlert->message, 'suspected target: probe Renamed And Default (#' . $sameSectorProbe->id . ')'),
+    'missile launch alerts identify the suspected probe target by name and public id',
+);
+$test->assertEquals(null, $mannies->findById($missileAlertManny->id)?->currentTask, 'missile launch completion frees its operator Manny');
+$targetedMissileAlertResponse = $kernel->handle('GET', '/api/probe/' . $sameSectorProbe->id . '/alerts?status=unread', $multiProbeHeaders);
+$targetedMissileApiAlert = array_values(array_filter(
+    $targetedMissileAlertResponse->body['alerts'] ?? [],
+    static fn(array $alert): bool => ($alert['id'] ?? null) === $targetedMissileAlert?->id,
+))[0] ?? null;
+$test->assertEquals('weapon_targeted', $targetedMissileApiAlert['phase'] ?? null, 'probe alerts API exposes the targeted missile phase used by the WebUI');
+$probeImpactHistory = $resolveMissileHitNow((string) $preparedAlertMissile['public_id']);
+$probeImpactDetails = json_decode((string) $probeImpactHistory['details_json'], true, 512, JSON_THROW_ON_ERROR);
+$launcherResultObjectId = 'weapon-result-' . $preparedAlertMissile['public_id'];
+$victimDamageObjectId = 'weapon-damage-' . $preparedAlertMissile['public_id'];
+$probeLauncherResultAlert = array_values(array_filter(
+    $damageWarnings->findByProbeId($secondaryProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === $launcherResultObjectId,
+))[0] ?? null;
+$probeVictimDamageAlert = array_values(array_filter(
+    $damageWarnings->findByProbeId($sameSectorProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === $victimDamageObjectId,
+))[0] ?? null;
+$test->assertEquals('impacted', $probeImpactHistory['result'] ?? null, 'scheduled missile resolution persists an impacted result');
+$test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_RESULT, $probeLauncherResultAlert?->phase, 'a probe launcher still in the sector receives the missile result alert');
+$test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $probeVictimDamageAlert?->phase, 'an impacted probe receives its own critical damage alert');
+$test->assert(
+    isset($probeImpactDetails['damagePercent'])
+        && $probeVictimDamageAlert !== null
+        && str_contains($probeVictimDamageAlert->message, (string) $probeImpactDetails['damagePercent'] . '% of total integrity'),
+    'a surviving probe victim receives damage expressed as a percentage of total integrity',
+);
+foreach ([$targetedMissileAlert, $observerMissileAlert, $probeLauncherResultAlert, $probeVictimDamageAlert] as $fixtureAlert) {
+    if ($fixtureAlert !== null) {
+        $damageWarnings->markRead($fixtureAlert);
+    }
+}
+
+$othersAlertPlayer = $players->createPlayer('others-alert-owner', 'Others Alert Owner', null, $secondaryProbe->currentSector);
+$players->setOthersControl($othersAlertPlayer->id, true);
+$othersAlertPlayer = $players->findById($othersAlertPlayer->id) ?? throw new RuntimeException('Others alert owner not found.');
+$othersAlertHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($othersAlertPlayer)['token']];
+$othersAlertFleet = $others->createFleet($othersAlertPlayer->id, $secondaryProbe->currentSector->getX(), $secondaryProbe->currentSector->getY(), $secondaryProbe->currentSector->getZ());
+$othersVictimShip = $othersAlertFleet['ship'];
+$probeToOthersMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'probe-to-others-alert-test-item');
+$probeToOthersMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
+    'actorMannyId' => $missileAlertManny->uid,
+    'missileItemId' => $probeToOthersMissileItem->uid,
+    'targetId' => (string) $othersVictimShip['public_id'],
+]);
+$processScheduledMannyNow($missileAlertManny->id);
+$othersVictimImpactHistory = $resolveMissileHitNow((string) $probeToOthersMissile['public_id']);
+$othersVictimImpactDetails = json_decode((string) $othersVictimImpactHistory['details_json'], true, 512, JSON_THROW_ON_ERROR);
+$othersVictimAlertsResponse = $kernel->handle('GET', '/api/others/alerts?status=unread', $othersAlertHeaders);
+$othersVictimDamageAlert = array_values(array_filter(
+    $othersVictimAlertsResponse->body['alerts'] ?? [],
+    static fn(array $alert): bool => ($alert['shipId'] ?? null) === $othersVictimShip['public_id'] && ($alert['phase'] ?? null) === 'weapon_damage',
+))[0] ?? null;
+$test->assertEquals(200, $othersVictimAlertsResponse->status, 'GET /api/others/alerts lists persistent owned ship alerts');
+$test->assertEquals('missile_damage', $othersVictimDamageAlert['type'] ?? null, 'an impacted Others ship receives a missile damage alert');
+$test->assertEquals(10.0, (float) ($othersVictimImpactDetails['damagePercent'] ?? -1), 'Others ship damage is normalized against maximum integrity');
+$test->assert(
+    str_contains((string) ($othersVictimDamageAlert['message'] ?? ''), '10% of total integrity'),
+    'a surviving Others ship alert expresses damage as a percentage of total integrity',
+);
+$othersVictimAlertRead = $kernel->handle('PATCH', '/api/others/alerts/' . rawurlencode((string) ($othersVictimDamageAlert['id'] ?? 'missing')), $othersAlertHeaders);
+$test->assertEquals(200, $othersVictimAlertRead->status, 'PATCH /api/others/alerts/{alertId} marks an owned Others alert as read');
+$test->assertEquals('read', $othersVictimAlertRead->body['alert']['status'] ?? null, 'Others alert acknowledgement persists its read status');
+
+$othersMissileItemId = OthersRepository::publicId('item');
+$pdo->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,NULL,:now,:now)")
+    ->execute(['public_id' => $othersMissileItemId, 'ship_id' => (int) $othersVictimShip['id'], 'now' => gmdate('c')]);
+$othersLauncherShip = $others->findShipByPublicId((string) $othersVictimShip['public_id']) ?? throw new RuntimeException('Others missile launcher not found.');
+$othersToProbeMissile = $othersService->launchOthersMissile($othersLauncherShip, ['missileItemId' => $othersMissileItemId, 'targetId' => (string) $sameSectorProbe->id]);
+$processOthersActionNow($othersToProbeMissile['action']);
+$othersLauncherImpactHistory = $resolveMissileHitNow((string) $othersToProbeMissile['missile']['public_id']);
+$othersLauncherImpactDetails = json_decode((string) $othersLauncherImpactHistory['details_json'], true, 512, JSON_THROW_ON_ERROR);
+$othersLauncherAlertsResponse = $kernel->handle('GET', '/api/others/alerts?status=unread', $othersAlertHeaders);
+$othersLauncherResultAlert = array_values(array_filter(
+    $othersLauncherAlertsResponse->body['alerts'] ?? [],
+    static fn(array $alert): bool => ($alert['shipId'] ?? null) === $othersVictimShip['public_id'] && ($alert['phase'] ?? null) === 'weapon_result',
+))[0] ?? null;
+$test->assertEquals('missile_resolution', $othersLauncherResultAlert['type'] ?? null, 'an Others launcher still in the sector receives its missile result alert');
+$test->assert(
+    isset($othersLauncherImpactDetails['damagePercent'])
+        && str_contains((string) ($othersLauncherResultAlert['message'] ?? ''), (string) $othersLauncherImpactDetails['damagePercent'] . '% of total integrity'),
+    'the Others launcher result reports probe damage as a percentage of total integrity',
+);
+$othersLauncherResultRead = $kernel->handle('PATCH', '/api/others/alerts/' . rawurlencode((string) ($othersLauncherResultAlert['id'] ?? 'missing')), $othersAlertHeaders);
+$test->assertEquals(200, $othersLauncherResultRead->status, 'an Others missile result alert can be acknowledged');
+$othersProbeVictimDamageAlert = array_values(array_filter(
+    $damageWarnings->findByProbeId($sameSectorProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === 'weapon-damage-' . $othersToProbeMissile['missile']['public_id'],
+))[0] ?? null;
+$test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $othersProbeVictimDamageAlert?->phase, 'a probe hit by an Others missile receives its own damage alert');
+if ($othersProbeVictimDamageAlert !== null) {
+    $damageWarnings->markRead($othersProbeVictimDamageAlert);
+}
+
+$departedLauncherMissileItemId = OthersRepository::publicId('item');
+$pdo->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,NULL,:now,:now)")
+    ->execute(['public_id' => $departedLauncherMissileItemId, 'ship_id' => (int) $othersVictimShip['id'], 'now' => gmdate('c')]);
+$othersLauncherShip = $others->findShipByPublicId((string) $othersVictimShip['public_id']) ?? throw new RuntimeException('Departing Others launcher not found.');
+$departedLauncherMissile = $othersService->launchOthersMissile($othersLauncherShip, ['missileItemId' => $departedLauncherMissileItemId, 'targetId' => (string) $sameSectorProbe->id]);
+$processOthersActionNow($departedLauncherMissile['action']);
+$originX = (int) $othersLauncherShip['sector_x'];
+$originY = (int) $othersLauncherShip['sector_y'];
+$originZ = (int) $othersLauncherShip['sector_z'];
+$pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,updated_at=:now WHERE id=:id')
+    ->execute(['x' => $originX + 1, 'y' => $originY + 1, 'now' => gmdate('c'), 'id' => (int) $othersLauncherShip['id']]);
+$resolveMissileHitNow((string) $departedLauncherMissile['missile']['public_id']);
+$departedResultCount = $pdo->prepare('SELECT COUNT(*) FROM others_alerts WHERE player_id=:player_id AND event_key=:event_key');
+$departedResultCount->execute(['player_id' => $othersAlertPlayer->id, 'event_key' => 'weapon-result-' . $departedLauncherMissile['missile']['public_id']]);
+$departedResultAlertCount = (int) $departedResultCount->fetchColumn();
+$departedResultCount->closeCursor();
+$test->assertEquals(0, $departedResultAlertCount, 'a missile launcher that left the impact sector receives no result alert');
+$pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,sector_z=:z,updated_at=:now WHERE id=:id')
+    ->execute(['x' => $originX, 'y' => $originY, 'z' => $originZ, 'now' => gmdate('c'), 'id' => (int) $othersLauncherShip['id']]);
+$departedProbeVictimAlert = array_values(array_filter(
+    $damageWarnings->findByProbeId($sameSectorProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === 'weapon-damage-' . $departedLauncherMissile['missile']['public_id'],
+))[0] ?? null;
+if ($departedProbeVictimAlert !== null) {
+    $damageWarnings->markRead($departedProbeVictimAlert);
+}
+$departedProbeMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'departed-probe-missile-alert-test-item');
+$departedProbeMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
+    'actorMannyId' => $missileAlertManny->uid,
+    'missileItemId' => $departedProbeMissileItem->uid,
+    'targetId' => (string) $sameSectorProbe->id,
+]);
+$processScheduledMannyNow($missileAlertManny->id);
+$probeLauncherOrigin = $secondaryProbe->currentSector;
+$secondaryProbe->currentSector = new SectorCoordinates($probeLauncherOrigin->getX() + 1, $probeLauncherOrigin->getY() + 1, $probeLauncherOrigin->getZ());
+$probes->save($secondaryProbe);
+$resolveMissileHitNow((string) $departedProbeMissile['public_id']);
+$departedProbeResultAlerts = array_values(array_filter(
+    $damageWarnings->findByProbeId($secondaryProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === 'weapon-result-' . $departedProbeMissile['public_id'],
+));
+$test->assertEquals([], $departedProbeResultAlerts, 'a probe launcher that left the impact sector receives no result alert');
+$secondaryProbe->currentSector = $probeLauncherOrigin;
+$probes->save($secondaryProbe);
+
+$fatalTargetOwner = $players->createPlayer('fatal-missile-target-owner', 'Fatal Missile Target Owner', null, $secondaryProbe->currentSector);
+$fatalTargetProbe = $probes->createForPlayer($fatalTargetOwner->id, 'Low integrity missile target', $secondaryProbe->currentSector);
+$storage->initializeProbeStorage($fatalTargetProbe);
+$fatalTargetProbe->integrityPercent = 5.0;
+$fatalTargetProbe->excludeFromStats = true;
+$probes->save($fatalTargetProbe);
+$fatalMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'fatal-probe-missile-alert-test-item');
+$fatalProbeMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
+    'actorMannyId' => $missileAlertManny->uid,
+    'missileItemId' => $fatalMissileItem->uid,
+    'targetId' => (string) $fatalTargetProbe->id,
+]);
+$processScheduledMannyNow($missileAlertManny->id);
+$fatalProbeImpactHistory = $resolveMissileHitNow((string) $fatalProbeMissile['public_id']);
+$fatalProbeImpactDetails = json_decode((string) $fatalProbeImpactHistory['details_json'], true, 512, JSON_THROW_ON_ERROR);
+$fatalTargetProbeAfterImpact = $probes->findById($fatalTargetProbe->id);
+$test->assertEquals(0.0, $fatalTargetProbeAfterImpact?->integrityPercent, 'missile damage greater than remaining probe integrity is clamped to zero');
+$test->assertEquals(5.0, (float) ($fatalProbeImpactDetails['damage'] ?? -1), 'missile resolution records only the integrity damage actually applied');
+$test->assertEquals(true, $fatalProbeImpactDetails['destroyed'] ?? null, 'missile resolution reports a zero-integrity probe as destroyed');
+$test->assertEquals(ProbeStatus::Dead, $fatalTargetProbeAfterImpact?->status, 'a probe reaching zero integrity becomes dead');
+
+$missileFixtureObjectIds = [];
+foreach ([$probeToOthersMissile['public_id'], $othersToProbeMissile['missile']['public_id'], $departedLauncherMissile['missile']['public_id'], $departedProbeMissile['public_id'], $fatalProbeMissile['public_id']] as $fixtureMissileId) {
+    $missileFixtureObjectIds[] = 'weapon-' . $fixtureMissileId;
+    $missileFixtureObjectIds[] = 'weapon-result-' . $fixtureMissileId;
+    $missileFixtureObjectIds[] = 'weapon-damage-' . $fixtureMissileId;
+}
+foreach ([$secondaryProbe->id, $sameSectorProbe->id] as $fixtureProbeId) {
+    foreach ($damageWarnings->findByProbeId($fixtureProbeId) as $fixtureAlert) {
+        if (in_array($fixtureAlert->objectId, $missileFixtureObjectIds, true)) {
+            $damageWarnings->markRead($fixtureAlert);
+        }
+    }
+}
 $farOwnedProbe = $probes->createForPlayer($multiProbePlayer->id, 'Far future probe', new SectorCoordinates(100, 0, 0));
 $storage->initializeProbeStorage($farOwnedProbe);
 $farOwnedProbe->excludeFromStats = true;
@@ -2237,7 +2779,10 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(117, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(122, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
+$test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
+$test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 $removedInspectAsteroid = $kernel->handle('POST', '/api/probe/mannies/mny_missing/inspect-asteroid');
@@ -3501,6 +4046,14 @@ $recipesById = [];
 foreach ($craftingRecipes->body['recipes'] ?? [] as $recipe) {
     $recipesById[$recipe['id'] ?? ''] = $recipe;
 }
+$apiMissileIngredients = [];
+foreach ($recipesById['missile']['ingredients'] ?? [] as $ingredient) {
+    if (is_array($ingredient)) {
+        $apiMissileIngredients[(string) ($ingredient['type'] ?? '')] = $ingredient;
+    }
+}
+$test->assertEquals(1, $apiMissileIngredients['battery_pack']['quantity'] ?? null, 'crafting recipe API exposes one missile battery pack');
+$test->assertEquals(2, $apiMissileIngredients['micro_conductor']['quantity'] ?? null, 'crafting recipe API exposes two missile micro-etched conductors');
 $test->assert(isset($recipesById['steel_bar']), 'crafting recipes expose steel bars');
 $test->assertEquals(0.02, $recipesById['steel_bar']['ingredients'][0]['quantity'] ?? null, 'steel bar recipe consumes 0.02 metal containers');
 $test->assertEquals(300, $recipesById['steel_bar']['durationSeconds'] ?? null, 'steel bar takes five real minutes to craft');
@@ -8353,13 +8906,24 @@ $sameMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode
 $test->assertEquals(400, $sameMove->status, 'POST /api/probe/move rejects current sector destination');
 
 if ($moveProbe !== null) {
-    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 1.99 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $integrityBeforeMovementThresholdChecks = $moveProbe->integrityPercent;
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 9.99, deuterium_stock = 100 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $lowIntegrityMove = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $lowIntegrityMove->status, 'POST /api/probe/move rejects probe integrity below ten percent');
+    $test->assertEquals('probe_integrity_too_low', $lowIntegrityMove->body['error']['code'] ?? null, 'low-integrity movement refusal exposes a stable error code');
+    $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'low-integrity movement refusal consumes no deuterium');
+
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = 10, deuterium_stock = 1.99 WHERE id = :id')->execute(['id' => $moveProbe->id]);
     $noFuel = $kernel->handle('POST', '/api/probe/move', $moveHeaders, json_encode(['target' => ['x' => 1, 'y' => 1, 'z' => 0]], JSON_THROW_ON_ERROR));
     $test->assertEquals(422, $noFuel->status, 'POST /api/probe/move rejects stock below the fixed two-point travel cost');
+    $test->assertEquals('insufficient_fuel', $noFuel->body['error']['code'] ?? null, 'exactly ten percent integrity permits movement validation to reach the fuel check');
     $test->assertEquals(1.99, $probes->findByPlayerId($player->id)?->deuteriumStock, 'rejected movement keeps the deuterium needed for deceleration');
 
     $originBeforeMove = $moveProbe->currentSector;
-    $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 100 WHERE id = :id')->execute(['id' => $moveProbe->id]);
+    $pdo->prepare('UPDATE neumann_probes SET integrity_percent = :integrity, deuterium_stock = 100 WHERE id = :id')->execute([
+        'id' => $moveProbe->id,
+        'integrity' => $integrityBeforeMovementThresholdChecks,
+    ]);
     $pdo->prepare(
         'UPDATE mannies
          SET location_type = :location_type,
@@ -9018,6 +9582,12 @@ foreach ([
     'POST /api/probe/1/mannies/mny_missing/sculpt-duck-asteroid',
     'POST /api/probe/1/asteroids/mtr_missing/trajectories',
     'GET /api/probe/1/asteroid-trajectories/atr_missing',
+    'POST /api/probe/1/missiles',
+    'GET /api/probe/1/missiles/missile_missing',
+    'GET /api/others',
+    'GET /api/others/alerts',
+    'PATCH /api/others/alerts/oalert_missing',
+    'POST /api/others/ships/ship_missing/missiles',
     'GET /api/probe/messages',
     'GET /api/probe/messages/sent',
     'GET /api/probe/1/logbook-pages',

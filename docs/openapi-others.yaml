@@ -1,0 +1,535 @@
+---
+openapi: 3.0.3
+info:
+  title: Von Neumann Game — Others API
+  version: '120'
+security:
+- bearerAuth: []
+servers:
+- url: /
+  description: Current host
+paths:
+  "/api/others/alerts":
+    get:
+      tags:
+      - Others
+      summary: List persistent alerts for owned Others ships
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [unread]
+      responses:
+        '200':
+          description: Account-wide Others alerts, newest first
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersAlertsResponse"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+  "/api/others/alerts/{alertId}":
+    parameters:
+    - "$ref": "#/components/parameters/AlertId"
+    patch:
+      tags:
+      - Others
+      summary: Mark one owned Others alert as read
+      responses:
+        '200':
+          description: Updated alert
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersAlertResponse"
+        '404':
+          "$ref": "#/components/responses/NotFound"
+  "/api/others":
+    get:
+      tags:
+      - Others
+      summary: Get the operator Others overview
+      responses:
+        '200':
+          description: Overview
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+  "/api/others/fleets":
+    get:
+      tags:
+      - Others
+      summary: List owned Others fleets
+      responses:
+        '200':
+          description: Fleet summaries
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+  "/api/others/fleets/{fleetId}":
+    parameters:
+    - "$ref": "#/components/parameters/FleetId"
+    get:
+      tags:
+      - Others
+      summary: Get one owned fleet
+      responses:
+        '200':
+          description: Fleet detail
+        '404':
+          "$ref": "#/components/responses/NotFound"
+  "/api/others/fleets/{fleetId}/move":
+    parameters:
+    - "$ref": "#/components/parameters/FleetId"
+    post:
+      tags:
+      - Others
+      summary: Schedule independent moves for eligible fleet ships
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        "$ref": "#/components/requestBodies/Move"
+      responses:
+        '202':
+          description: Moves accepted, ignored or blocked
+        '409':
+          "$ref": "#/components/responses/Conflict"
+  "/api/others/ships/{shipId}":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    get:
+      tags:
+      - Others
+      summary: Get one owned Others ship
+      responses:
+        '200':
+          description: Ship without absolute coordinates
+        '404':
+          "$ref": "#/components/responses/NotFound"
+  "/api/others/ships/{shipId}/move":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    post:
+      tags:
+      - Others
+      summary: Schedule an intersector move
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        "$ref": "#/components/requestBodies/Move"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+    delete:
+      tags:
+      - Others
+      summary: Request cancellation during the fifteen-minute window
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+        '409':
+          "$ref": "#/components/responses/Conflict"
+  "/api/others/ships/{shipId}/auxiliaries":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    get:
+      tags:
+      - Others
+      summary: Get a cursor-paginated auxiliary page
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+      responses:
+        '200':
+          description: Stable auxiliary page
+  "/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    - "$ref": "#/components/parameters/AuxiliaryId"
+    get:
+      tags:
+      - Others
+      summary: Get one auxiliary
+      responses:
+        '200':
+          description: Auxiliary detail
+        '404':
+          "$ref": "#/components/responses/NotFound"
+  "/api/others/ships/{shipId}/auxiliaries/tasks":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    post:
+      tags:
+      - Others
+      summary: Atomically schedule an auxiliary task batch
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/{task}":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    - "$ref": "#/components/parameters/AuxiliaryId"
+    - name: task
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+        - mine
+        - recall
+        - recover-dormant-auxiliary
+    post:
+      tags:
+      - Others
+      summary: Schedule one auxiliary task
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/transfer-deuterium":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    - "$ref": "#/components/parameters/AuxiliaryId"
+    post:
+      tags:
+      - Others
+      summary: Schedule a tank-to-tank deuterium transfer
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/ships/{shipId}/sector/autonomous-units":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    get:
+      tags:
+      - Others
+      summary: Observe locally deployed autonomous units
+      responses:
+        '200':
+          description: Mannys and Others auxiliaries, without absolute coordinates
+  "/api/others/ships/{shipId}/inventory":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    get:
+      tags:
+      - Others
+      summary: Get this ship's own inventory
+      responses:
+        '200':
+          description: Resources, objects and reservations
+  "/api/others/ships/{shipId}/inventory-transfers":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    post:
+      tags:
+      - Others
+      summary: Schedule an inventory transfer
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/inventory-transfers/{transferId}":
+    parameters:
+    - name: transferId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Others
+      summary: Get a transfer
+      responses:
+        '200':
+          description: Transfer state
+        '404':
+          "$ref": "#/components/responses/NotFound"
+  "/api/others/ships/{shipId}/harvest":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    post:
+      tags:
+      - Others
+      summary: Schedule a planetary swarm harvest
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+    delete:
+      tags:
+      - Others
+      summary: Interrupt and recall the harvest swarm
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/crafting/recipes":
+    get:
+      tags:
+      - Others
+      summary: Get mothership workshop recipes
+      responses:
+        '200':
+          description: Canonical recipes
+  "/api/others/ships/{shipId}/crafts":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    get:
+      tags:
+      - Others
+      summary: List this mothership's crafts
+      responses:
+        '200':
+          description: Crafts
+    post:
+      tags:
+      - Others
+      summary: Schedule a mothership craft
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/crafts/{craftId}":
+    parameters:
+    - name: craftId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Others
+      summary: Get one craft
+      responses:
+        '200':
+          description: Craft state
+  "/api/others/actions/{actionId}":
+    parameters:
+    - name: actionId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Others
+      summary: Get one scheduler-driven action
+      responses:
+        '200':
+          description: Persisted action state
+  "/api/others/ships/{shipId}/weapons/laser":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    post:
+      tags:
+      - Others
+      summary: Schedule an immediate local laser lock
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        "$ref": "#/components/requestBodies/Target"
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/ships/{shipId}/missiles":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    post:
+      tags:
+      - Others
+      summary: Schedule an immediate Others missile launch
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - missileItemId
+              - targetId
+              properties:
+                missileItemId:
+                  type: string
+                targetId:
+                  type: string
+      responses:
+        '202':
+          "$ref": "#/components/responses/Accepted"
+  "/api/others/missiles/{missileId}":
+    parameters:
+    - "$ref": "#/components/parameters/MissileId"
+    get:
+      tags:
+      - Others
+      summary: Get an owned missile launch or history
+      responses:
+        '200':
+          description: Missile state without absolute coordinates
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    FleetId:
+      name: fleetId
+      in: path
+      required: true
+      schema:
+        type: string
+    ShipId:
+      name: shipId
+      in: path
+      required: true
+      schema:
+        type: string
+    AuxiliaryId:
+      name: auxiliaryId
+      in: path
+      required: true
+      schema:
+        type: string
+    MissileId:
+      name: missileId
+      in: path
+      required: true
+      schema:
+        type: string
+    AlertId:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^oalert_[a-f0-9]{20}$'
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        An optional key chosen by your client that prevents the same command from
+        being executed twice if the request is retried after a timeout or network
+        interruption.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  requestBodies:
+    Move:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+            - target
+            properties:
+              target:
+                "$ref": "#/components/schemas/RelativeCoordinates"
+              leaveAuxiliariesBehind:
+                type: boolean
+    Target:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+            - targetId
+            properties:
+              targetId:
+                type: string
+  schemas:
+    OthersAlert:
+      type: object
+      required: [id, shipId, type, status, phase, message, createdAt, updatedAt, readAt]
+      properties:
+        id:
+          type: string
+          pattern: '^oalert_[a-f0-9]{20}$'
+        shipId:
+          type: string
+          description: Opaque public identifier of the firing or victim Others ship concerned by this alert.
+        type:
+          type: string
+          enum: [missile_resolution, missile_damage]
+        status:
+          type: string
+          enum: [unread, read]
+        phase:
+          type: string
+          enum: [weapon_result, weapon_damage]
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+    OthersAlertsResponse:
+      type: object
+      required: [alerts]
+      properties:
+        alerts:
+          type: array
+          items:
+            "$ref": "#/components/schemas/OthersAlert"
+    OthersAlertResponse:
+      type: object
+      required: [alert]
+      properties:
+        alert:
+          "$ref": "#/components/schemas/OthersAlert"
+    RelativeCoordinates:
+      type: object
+      required:
+      - x
+      - "y"
+      - z
+      properties:
+        x:
+          type: integer
+        "y":
+          type: integer
+        z:
+          type: integer
+  responses:
+    Accepted:
+      description: Accepted for scheduler processing; no terminal universe effect
+        has run inline
+    Unauthorized:
+      description: Bearer authentication required
+    Forbidden:
+      description: others_permission_required
+    NotFound:
+      description: Owned resource not found
+    Conflict:
+      description: State or idempotency conflict

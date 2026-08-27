@@ -385,6 +385,15 @@
       "containerSpace": 0.08,
       "durationSeconds": 3600
     },
+    "missile": {
+      "description": "A compact autonomous kinetic projectile for sector-local engagements.",
+      "batteryPackCount": 1,
+      "microConductorCount": 2,
+      "metalsCost": 0.2,
+      "carbonCompoundsCost": 0.1,
+      "containerSpace": 0.05,
+      "durationSeconds": 3600
+    },
     "manny": {
       "description": "A fully assembled maintenance unit able to repair, mine, carry cargo, and build new parts.",
       "linearActuatorCount": 6,
