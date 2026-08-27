@@ -1628,7 +1628,12 @@ paths:
     post:
       tags: [movement]
       summary: Start an asynchronous intersector movement
-      description: The probe must have at least 10 percent integrity when movement preparation starts.
+      description: >
+        The probe must have at least 10 percent integrity when movement
+        preparation starts. When the origin and destination each contain an
+        active transit-beacon relay in the same SCUT network, the movement is
+        protected from high-velocity destruction and its total intersector
+        integrity loss is capped at 9 percentage points.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       requestBody:
@@ -4163,7 +4168,12 @@ paths:
     post:
       tags: [default probe]
       summary: Start an asynchronous intersector movement
-      description: The probe must have at least 10 percent integrity when movement preparation starts.
+      description: >
+        The probe must have at least 10 percent integrity when movement
+        preparation starts. When the origin and destination each contain an
+        active transit-beacon relay in the same SCUT network, the movement is
+        protected from high-velocity destruction and its total intersector
+        integrity loss is capped at 9 percentage points.
       requestBody:
         required: true
         content:

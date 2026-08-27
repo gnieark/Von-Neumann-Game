@@ -39,6 +39,7 @@ final class ProbeMovementService
     public const BLACK_HOLE_TRAP_MIN_DELAY_SECONDS = 5400;
     public const BLACK_HOLE_TRAP_MAX_DELAY_SECONDS = 10800;
     public const MINIMUM_MOVEMENT_INTEGRITY_PERCENT = 10.0;
+    public const SCUT_TRANSIT_MAX_INTEGRITY_LOSS_PERCENT = 9.0;
 
     private readonly SectorGrid $grid;
     private readonly array $gameplayConfig;
@@ -945,6 +946,9 @@ final class ProbeMovementService
             ]);
             $roll = hexdec(substr(hash('sha256', $payload), 0, 8)) / hexdec('ffffffff');
             $integrityLoss += round($roll * $this->float('intersectorIntegrityLossMaxPercentPerDistance', 3.0), 2);
+        }
+        if ($this->isProtectedByScutTransitBeaconCorridor($movement)) {
+            $integrityLoss = min($integrityLoss, self::SCUT_TRANSIT_MAX_INTEGRITY_LOSS_PERCENT);
         }
 
         $probe->subtractIntegrityPercent($integrityLoss);

@@ -805,6 +805,8 @@ $test->assert(is_string($appCss) && str_contains($appCss, '.scut-transit-panel')
 $test->assert(is_string($appCss) && str_contains($appCss, '.neighbor-sector-jump'), 'movement CSS styles secured SCUT transit direct jump buttons');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitCorridorsTitle' => 'Corridors SCUT sécurisés'"), 'French translations include the secured SCUT corridor title');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitCorridorsTitle' => 'Secured SCUT corridors'"), 'English translations include the secured SCUT corridor title');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'plafonne la perte d’intégrité à 9 %'), 'French secured SCUT corridor help documents the integrity-loss cap');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, 'caps integrity loss at 9%'), 'English secured SCUT corridor help documents the integrity-loss cap');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'scutTransitInitiateJump' => 'INITIATE JUMP'"), 'English translations include the direct secured SCUT jump button label');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'probe.fuel.maxDeuterium'), 'probe JS reads the max deuterium fuel cap');
 $test->assert(is_string($probeScript) && str_contains($probeScript, 'loadProbeImprovementsOnce'), 'probe JS loads probe improvements once');
@@ -9220,6 +9222,7 @@ if ($riskProbe !== null) {
             $test->assert($protectedMovement->target->equals($protectedRiskTarget), 'protected movement targets the equipped destination sector');
             $base = time();
             $chosenStartedAt = gmdate('c', $base - 240 * 60);
+            $chosenIntegrityLoss = 0.0;
             for ($i = 0; $i < 2000; $i++) {
                 $candidate = gmdate('c', $base - (240 * 60) - $i);
                 $payload = implode('|', [
@@ -9231,11 +9234,28 @@ if ($riskProbe !== null) {
                     $candidate,
                 ]);
                 $roll = hexdec(substr(hash('sha256', $payload), 0, 15)) / hexdec(str_repeat('f', 15));
-                if ($roll < 0.40) {
+                $candidateIntegrityLoss = 0.0;
+                for ($sectorIndex = 1; $sectorIndex <= $protectedMovement->distance; $sectorIndex++) {
+                    $damagePayload = implode('|', [
+                        'api-test-world',
+                        'intersector-dust-damage',
+                        $protectedMovement->probeId,
+                        $protectedMovement->id,
+                        $protectedMovement->origin->toKey(),
+                        $protectedMovement->target->toKey(),
+                        $candidate,
+                        $sectorIndex,
+                    ]);
+                    $damageRoll = hexdec(substr(hash('sha256', $damagePayload), 0, 8)) / hexdec('ffffffff');
+                    $candidateIntegrityLoss += round($damageRoll * 3.0, 2);
+                }
+                if ($roll < 0.40 && $candidateIntegrityLoss > ProbeMovementService::SCUT_TRANSIT_MAX_INTEGRITY_LOSS_PERCENT) {
                     $chosenStartedAt = $candidate;
+                    $chosenIntegrityLoss = $candidateIntegrityLoss;
                     break;
                 }
             }
+            $test->assert($chosenIntegrityLoss > ProbeMovementService::SCUT_TRANSIT_MAX_INTEGRITY_LOSS_PERCENT, 'protected movement fixture would lose more than nine integrity points without its SCUT corridor');
 
             $pdo->prepare("UPDATE probe_movements SET started_at = :started, preparation_ends_at = :prep, acceleration_ends_at = :accel, cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival, destruction_checked_at = NULL WHERE id = :id")->execute([
                 'id' => $protectedMovement->id,
@@ -9253,6 +9273,14 @@ if ($riskProbe !== null) {
             $test->assertEquals('cruising', $protectedCruiseMovement?->status, 'protected movement remains active after destruction check');
             $test->assert($protectedCruiseMovement?->destructionCheckedAt !== null, 'protected movement still records the destruction check');
             $test->assertEquals(null, $protectedCruiseMovement?->destroyedAt, 'protected movement does not record destruction');
+
+            $pdo->prepare("UPDATE probe_movements SET status = 'decelerating', arrival_at = :arrival, deceleration_ends_at = :arrival WHERE id = :id")->execute([
+                'id' => $protectedMovement->id,
+                'arrival' => gmdate('c', $base - 60),
+            ]);
+            $protectedArrivedProbe = $kernel->handle('GET', '/api/probe', $protectedRiskHeaders);
+            $test->assertEquals('idle', $protectedArrivedProbe->body['probe']['status'] ?? null, 'protected SCUT movement reaches its destination');
+            $test->assertEquals(91.0, (float) ($protectedArrivedProbe->body['probe']['systems']['integrityPercent'] ?? -1), 'protected SCUT movement caps total integrity loss at nine percentage points');
         }
     }
 
