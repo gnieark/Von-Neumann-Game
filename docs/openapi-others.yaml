@@ -2,13 +2,50 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '118'
+  version: '120'
 security:
 - bearerAuth: []
 servers:
 - url: /
   description: Current host
 paths:
+  "/api/others/alerts":
+    get:
+      tags:
+      - Others
+      summary: List persistent alerts for owned Others ships
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [unread]
+      responses:
+        '200':
+          description: Account-wide Others alerts, newest first
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersAlertsResponse"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+  "/api/others/alerts/{alertId}":
+    parameters:
+    - "$ref": "#/components/parameters/AlertId"
+    patch:
+      tags:
+      - Others
+      summary: Mark one owned Others alert as read
+      responses:
+        '200':
+          description: Updated alert
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersAlertResponse"
+        '404':
+          "$ref": "#/components/responses/NotFound"
   "/api/others":
     get:
       tags:
@@ -381,6 +418,13 @@ components:
       required: true
       schema:
         type: string
+    AlertId:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^oalert_[a-f0-9]{20}$'
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -419,6 +463,51 @@ components:
               targetId:
                 type: string
   schemas:
+    OthersAlert:
+      type: object
+      required: [id, shipId, type, status, phase, message, createdAt, updatedAt, readAt]
+      properties:
+        id:
+          type: string
+          pattern: '^oalert_[a-f0-9]{20}$'
+        shipId:
+          type: string
+          description: Opaque public identifier of the firing or victim Others ship concerned by this alert.
+        type:
+          type: string
+          enum: [missile_resolution, missile_damage]
+        status:
+          type: string
+          enum: [unread, read]
+        phase:
+          type: string
+          enum: [weapon_result, weapon_damage]
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+    OthersAlertsResponse:
+      type: object
+      required: [alerts]
+      properties:
+        alerts:
+          type: array
+          items:
+            "$ref": "#/components/schemas/OthersAlert"
+    OthersAlertResponse:
+      type: object
+      required: [alert]
+      properties:
+        alert:
+          "$ref": "#/components/schemas/OthersAlert"
     RelativeCoordinates:
       type: object
       required:

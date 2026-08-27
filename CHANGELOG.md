@@ -6,6 +6,9 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v120 / résolution des missiles : à l’impact, le lanceur reçoit le résultat seulement s’il est encore physiquement présent dans le secteur et la victime reçoit sa propre alerte de dégâts. Pour une sonde ou un vaisseau Others survivant, les dégâts sont exprimés en pourcentage de son intégrité maximale. Les vaisseaux disposent désormais d’alertes persistantes via `GET /api/others/alerts` et peuvent les acquitter via `PATCH /api/others/alerts/{alertId}`.
+- Migration obligatoire avant redémarrage : exécuter `php scripts/one-shot-scripts/migrate-others-alerts.php --database-config=…` afin de créer le stockage canonique des alertes Others.
+- API v119 / alertes missiles : l’alerte de lancement indique désormais le type et l’identifiant public de la cible supposée (ainsi que son nom pour une sonde ou une Manny). Une sonde directement ciblée reçoit la phase canonique `weapon_targeted`, affichée par la WebUI sous forme d’alerte critique rouge clignotante ; les autres observateurs du secteur conservent l’alerte verte `weapon`.
 - Interface : le groupe « Secteur » de `/mannies` permet désormais de préparer le lancement d’un missile depuis la sonde courante, avec sélection du missile en soute et d’une cible locale détectée. La tâche de préparation d’une minute dispose aussi de son propre état d’avancement dans la carte de la Manny.
 
 ## 2026-08-25

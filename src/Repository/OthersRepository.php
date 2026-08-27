@@ -33,6 +33,74 @@ final class OthersRepository
         }
     }
 
+    /** @return array<string, mixed> */
+    public function createAlert(int $playerId, string $shipPublicId, string $type, string $phase, string $eventKey, string $message): array
+    {
+        $existing = $this->findAlertByEventKey($playerId, $eventKey);
+        if ($existing !== null) {
+            return $existing;
+        }
+        $now = gmdate('c');
+        $publicId = self::publicId('oalert');
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO others_alerts (public_id,player_id,ship_public_id,type,status,phase,event_key,message,created_at,updated_at,read_at)
+             VALUES (:public_id,:player_id,:ship_public_id,:type,'unread',:phase,:event_key,:message,:created_at,:updated_at,NULL)"
+        );
+        $stmt->execute([
+            'public_id' => $publicId,
+            'player_id' => $playerId,
+            'ship_public_id' => $shipPublicId,
+            'type' => $type,
+            'phase' => $phase,
+            'event_key' => $eventKey,
+            'message' => $message,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $this->findAlertForPlayer($publicId, $playerId) ?? throw new \RuntimeException('Others alert creation failed.');
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function findAlertsForPlayer(int $playerId, bool $unreadOnly = false): array
+    {
+        $statusClause = $unreadOnly ? " AND status='unread'" : '';
+        $stmt = $this->pdo->prepare('SELECT * FROM others_alerts WHERE player_id=:player_id' . $statusClause . ' ORDER BY created_at DESC,id DESC');
+        $stmt->execute(['player_id' => $playerId]);
+
+        return $stmt->fetchAll();
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findAlertForPlayer(string $publicId, int $playerId): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM others_alerts WHERE public_id=:public_id AND player_id=:player_id');
+        $stmt->execute(['public_id' => $publicId, 'player_id' => $playerId]);
+
+        return $stmt->fetch() ?: null;
+    }
+
+    /** @param array<string, mixed> $alert
+     *  @return array<string, mixed>
+     */
+    public function markAlertRead(array $alert): array
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare("UPDATE others_alerts SET status='read',read_at=COALESCE(read_at,:now),updated_at=:now WHERE id=:id");
+        $stmt->execute(['now' => $now, 'id' => (int) $alert['id']]);
+
+        return $this->findAlertForPlayer((string) $alert['public_id'], (int) $alert['player_id']) ?? throw new \RuntimeException('Others alert disappeared.');
+    }
+
+    /** @return array<string, mixed>|null */
+    private function findAlertByEventKey(int $playerId, string $eventKey): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM others_alerts WHERE player_id=:player_id AND event_key=:event_key');
+        $stmt->execute(['player_id' => $playerId, 'event_key' => $eventKey]);
+
+        return $stmt->fetch() ?: null;
+    }
+
     public function createFleet(int $playerId, int $x, int $y, int $z): array
     {
         return $this->transaction(function () use ($playerId, $x, $y, $z): array {

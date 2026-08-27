@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 118;
+    public const API_VERSION = 120;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -136,6 +136,8 @@ final class ApiKernel
     private function routes(): array
     {
         return [
+            ApiRoute::regex('#^/api/others/alerts/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAlertReadResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::path('/api/others/alerts', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAlertsResponse($player, $ctx->query))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersMissileCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->missileResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->probeMissileCreateResponse($player, $probe, $ctx->body)), $ctx->intParam(0), ['POST'])),
@@ -466,6 +468,27 @@ final class ApiKernel
             'auxiliaryCount' => array_sum(array_map(static fn(array $row): int => (int) $row['auxiliary_count'], $fleets)),
             'activeActionCount' => array_sum(array_map(static fn(array $row): int => (int) $row['active_action_count'], $fleets)),
         ]]);
+    }
+
+    private function othersAlertsResponse(Player $player, array $query): ApiResponse
+    {
+        $status = isset($query['status']) ? trim((string) $query['status']) : null;
+        if ($status !== null && $status !== 'unread') {
+            return ApiResponse::error(400, 'bad_request', 'status must be unread');
+        }
+        $alerts = $this->others?->findAlertsForPlayer($player->id, $status === 'unread') ?? [];
+
+        return new ApiResponse(200, ['alerts' => array_map(fn(array $alert): array => $this->presentOthersAlert($alert), $alerts)]);
+    }
+
+    private function othersAlertReadResponse(Player $player, string $alertId): ApiResponse
+    {
+        $alert = $this->others?->findAlertForPlayer($alertId, $player->id);
+        if ($alert === null) {
+            return ApiResponse::error(404, 'others_alert_not_found', 'Others alert not found.');
+        }
+
+        return new ApiResponse(200, ['alert' => $this->presentOthersAlert($this->others->markAlertRead($alert))]);
     }
 
     private function othersFleetsResponse(Player $player): ApiResponse
@@ -856,6 +879,21 @@ final class ApiKernel
     private function presentOthersFleetSummary(array $fleet): array
     {
         return ['id' => (string) $fleet['public_id'], 'status' => (string) $fleet['status'], 'shipCount' => (int) $fleet['ship_count'], 'standardShipCount' => (int) $fleet['standard_ship_count'], 'auxiliaryCount' => (int) $fleet['auxiliary_count'], 'deployedAuxiliaryCount' => (int) $fleet['deployed_auxiliary_count'], 'activeActionCount' => (int) $fleet['active_action_count']];
+    }
+
+    private function presentOthersAlert(array $alert): array
+    {
+        return [
+            'id' => (string) $alert['public_id'],
+            'shipId' => (string) $alert['ship_public_id'],
+            'type' => (string) $alert['type'],
+            'status' => (string) $alert['status'],
+            'phase' => (string) $alert['phase'],
+            'message' => (string) $alert['message'],
+            'createdAt' => (string) $alert['created_at'],
+            'updatedAt' => (string) $alert['updated_at'],
+            'readAt' => $alert['read_at'] !== null ? (string) $alert['read_at'] : null,
+        ];
     }
 
     private function presentOthersShip(array $ship): array

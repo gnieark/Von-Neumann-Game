@@ -622,6 +622,24 @@ final class SchemaInitializer
                 FOREIGN KEY(player_id) REFERENCES players(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_others_operator_audit_player_created ON others_operator_audit(player_id, created_at)",
+            "CREATE TABLE IF NOT EXISTS others_alerts (
+                id $id,
+                public_id $caseSensitiveText NOT NULL UNIQUE,
+                player_id INTEGER NOT NULL,
+                ship_public_id $caseSensitiveText NOT NULL,
+                type $text NOT NULL,
+                status $text NOT NULL,
+                phase $text NOT NULL,
+                event_key $caseSensitiveText NOT NULL,
+                message TEXT NOT NULL,
+                created_at $text NOT NULL,
+                updated_at $text NOT NULL,
+                read_at $nullableText,
+                UNIQUE(player_id, event_key),
+                FOREIGN KEY(player_id) REFERENCES players(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_others_alerts_player_status ON others_alerts(player_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_others_alerts_ship_status ON others_alerts(ship_public_id, status, created_at)",
             "CREATE TABLE IF NOT EXISTS others_fleets (
                 id $id,
                 public_id $caseSensitiveText NOT NULL UNIQUE,

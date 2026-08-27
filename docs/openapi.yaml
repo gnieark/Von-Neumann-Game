@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '118'
+  version: '120'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -50,7 +50,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 118
+                apiVersion: 120
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -7165,7 +7165,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred, probe_destroyed, asteroid_trajectory, blueprint_shared]
+          enum: [storage_container_break, intelligent_life, sector_object_detected, manny_report, anomaly_detected, mind_snapshot_transferred, probe_destroyed, asteroid_trajectory, blueprint_shared, others_presence, others_weapon, others_harvest_traces]
         status:
           type: string
           enum: [unread, read]
@@ -7180,7 +7180,8 @@ components:
           description: Absolute HTTP or HTTPS URL of the optional alert illustration. Null when the alert has no illustration.
         phase:
           type: string
-          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch, probe_loss, ignition, blueprint_share]
+          enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch, probe_loss, ignition, blueprint_share, weapon, weapon_targeted, weapon_result, weapon_damage]
+          description: A missile alert uses `weapon_targeted` when the selected probe is its suspected target, `weapon_result` for a launcher still present at resolution, and `weapon_damage` for an impacted victim. Other weapon detections use `weapon`.
         scheduledAt:
           type: string
           format: date-time

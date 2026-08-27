@@ -18,6 +18,10 @@ final class ProbeDamageWarning
     public const TYPE_OTHERS_PRESENCE = 'others_presence';
     public const TYPE_OTHERS_WEAPON = 'others_weapon';
     public const TYPE_OTHERS_HARVEST_TRACES = 'others_harvest_traces';
+    public const PHASE_WEAPON = 'weapon';
+    public const PHASE_WEAPON_TARGETED = 'weapon_targeted';
+    public const PHASE_WEAPON_RESULT = 'weapon_result';
+    public const PHASE_WEAPON_DAMAGE = 'weapon_damage';
     public const STATUS_UNREAD = 'unread';
     public const STATUS_READ = 'read';
 

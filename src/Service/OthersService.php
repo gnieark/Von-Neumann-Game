@@ -909,7 +909,13 @@ final class OthersService
         $projectileId = (int)$pdo->lastInsertId(); $event = $this->events->schedule(SchedulerService::MISSILE_PROJECTILE,'missile_projectile',$projectileId,$impactAt,['projectileId'=>(string)$launch['public_id']]);
         $pdo->prepare("UPDATE missile_launches SET status='launched',projectile_public_id=:projectile,impact_at=:impact_at,scheduled_event_id=:event_id,updated_at=:now WHERE id=:id")->execute(['projectile'=>(string)$launch['public_id'],'impact_at'=>$impactAt,'event_id'=>$event->id,'now'=>$now,'id'=>(int)$launch['id']]);
         if ($action !== null) { $pdo->prepare("UPDATE others_actions SET status='running',ends_at=:impact_at,scheduled_event_id=:event_id,updated_at=:now WHERE id=:id AND status='queued'")->execute(['impact_at'=>$impactAt,'event_id'=>$event->id,'now'=>$now,'id'=>(int)$action['id']]); }
-        $this->createWeaponAlerts(new SectorCoordinates((int)$launch['sector_x'],(int)$launch['sector_y'],(int)$launch['sector_z']),(string)$launch['public_id'],'Kinetic weapon launch detected; estimated resolution in '.($interception?'fifteen':'thirty').' minutes.',$impactAt);
+        $this->createWeaponAlerts(
+            new SectorCoordinates((int) $launch['sector_x'], (int) $launch['sector_y'], (int) $launch['sector_z']),
+            (string) $launch['public_id'],
+            'Kinetic weapon launch detected; suspected target: ' . $this->missileTargetLabel($target) . '; estimated resolution in ' . ($interception ? 'fifteen' : 'thirty') . ' minutes.',
+            $impactAt,
+            $target,
+        );
     }
 
     public function processScheduledProjectile(ScheduledEvent $event): void
@@ -917,38 +923,41 @@ final class OthersService
         $this->others->transaction(function () use ($event): void {
             $pdo=$this->others->pdo(); $stmt=$pdo->prepare("SELECT p.*,l.player_id,l.id AS launch_sql_id,a.public_id AS action_public_id FROM others_projectiles p JOIN missile_launches l ON l.id=p.launch_id LEFT JOIN others_actions a ON a.id=p.action_id WHERE p.id=:id AND p.status='moving'"); $stmt->execute(['id'=>$event->entityId]); $projectile=$stmt->fetch(); if(!$projectile){return;}
             $target=$this->resolveMissileTarget((int)$projectile['sector_x'],(int)$projectile['sector_y'],(int)$projectile['sector_z'],(string)$projectile['target_public_id']);
-            if($target===null || $target['kind']!==$projectile['target_kind']) { $this->finishProjectile($projectile,'lost',['reason'=>'target_lost']); return; }
-            if($target['kind']==='missile') { $this->interceptProjectile($target,$projectile); $this->finishProjectile($projectile,'intercepted',['targetId'=>$target['id']]); return; }
+            $targetIdentity = $target ?? ['kind' => (string) $projectile['target_kind'], 'id' => (string) $projectile['target_public_id']];
+            if($target===null || $target['kind']!==$projectile['target_kind']) { $this->finishProjectile($projectile,'lost',['reason'=>'target_lost'],$targetIdentity); return; }
+            if($target['kind']==='missile') { $this->interceptProjectile($target,$projectile); $this->finishProjectile($projectile,'intercepted',['targetId'=>$target['id']],$target); return; }
             $probability=$this->missileHitProbability($target,$projectile); $roll=$this->stableFraction((string)$projectile['public_id'].'|'.$target['id'].'|'.$projectile['impact_at'].'|hit');
-            if($roll >= $probability) { $this->finishProjectile($projectile,'missed',['probability'=>$probability]); return; }
-            $details=$this->applyMissileImpact($projectile,$target); $this->finishProjectile($projectile,'impacted',$details+['probability'=>$probability]);
+            if($roll >= $probability) { $this->finishProjectile($projectile,'missed',['probability'=>$probability],$target); return; }
+            $details=$this->applyMissileImpact($projectile,$target); $this->finishProjectile($projectile,'impacted',$details+['probability'=>$probability],$target);
         });
     }
 
-    private function finishProjectile(array $projectile,string $result,array $details): void
+    /** @param array<string, mixed> $target */
+    private function finishProjectile(array $projectile,string $result,array $details,array $target): void
     {
         $pdo=$this->others->pdo(); $now=gmdate('c'); $actionPublicId=(string)($projectile['action_public_id']??'');
         $pdo->prepare('INSERT INTO others_projectile_history (projectile_public_id,action_public_id,result,details_json,resolved_at) VALUES (:projectile,:action,:result,:details,:resolved_at)')->execute(['projectile'=>(string)$projectile['public_id'],'action'=>$actionPublicId,'result'=>$result,'details'=>json_encode($details,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),'resolved_at'=>$now]);
         $pdo->prepare("UPDATE missile_launches SET status='resolved',result=:result,updated_at=:now WHERE id=:id")->execute(['result'=>$result,'now'=>$now,'id'=>(int)$projectile['launch_sql_id']]);
         if($projectile['action_id']!==null){$pdo->prepare("UPDATE others_actions SET status='succeeded',result_json=:details,completed_at=:now,updated_at=:now WHERE id=:id AND status='running'")->execute(['details'=>json_encode(['outcome'=>$result]+$details,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),'now'=>$now,'id'=>(int)$projectile['action_id']]);}
+        $this->createProjectileResolutionAlerts($projectile, $target, $result, $details, $now);
         $pdo->prepare('DELETE FROM others_projectiles WHERE id=:id')->execute(['id'=>(int)$projectile['id']]);
     }
 
     private function interceptProjectile(array $target,array $interceptor): void
     {
-        $pdo=$this->others->pdo(); $stmt=$pdo->prepare("SELECT p.*,l.id AS launch_sql_id,a.public_id AS action_public_id FROM others_projectiles p JOIN missile_launches l ON l.id=p.launch_id LEFT JOIN others_actions a ON a.id=p.action_id WHERE p.public_id=:id AND p.status='moving'"); $stmt->execute(['id'=>$target['id']]); $projectile=$stmt->fetch();
-        if($projectile){$this->finishProjectile($projectile,'intercepted',['interceptorId'=>$interceptor['public_id']]);}
+        $pdo=$this->others->pdo(); $stmt=$pdo->prepare("SELECT p.*,l.player_id,l.id AS launch_sql_id,a.public_id AS action_public_id FROM others_projectiles p JOIN missile_launches l ON l.id=p.launch_id LEFT JOIN others_actions a ON a.id=p.action_id WHERE p.public_id=:id AND p.status='moving'"); $stmt->execute(['id'=>$target['id']]); $projectile=$stmt->fetch();
+        if($projectile){$this->finishProjectile($projectile,'intercepted',['interceptorId'=>$interceptor['public_id']],['kind'=>(string)$projectile['target_kind'],'id'=>(string)$projectile['target_public_id']]);}
     }
 
     /** @return array<string,mixed> */
     private function applyMissileImpact(array $projectile,array $target): array
     {
         $pdo=$this->others->pdo(); $key='missile:'.$projectile['public_id'].':'.$target['kind'].':'.$target['id']; $damage=match($target['kind']){'probe'=>(12+(int)floor($this->stableFraction($key.'|damage')*7)),'others_ship'=>10,default=>1};
-        if($target['kind']==='others_ship'){$ship=$this->damageShip((string)$target['id'],$damage,$key);return ['damage'=>$damage,'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
+        if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$ship=$this->damageShip((string)$target['id'],$damage,$key);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
         try{$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')]);}catch(\PDOException $e){if(str_contains(strtolower($e->getMessage()),'unique')){return ['damage'=>0,'replayed'=>true];}throw $e;}
         if($target['kind']==='manny'){$pdo->prepare("DELETE FROM mannies WHERE uid=:uid AND location_type='sector'")->execute(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
         if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target);return ['damage'=>1,'destroyed'=>true];}
-        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);if($probe!==null){$probe->integrityPercent=round(max(0.0,$probe->integrityPercent-$damage),2);$this->probes->save($probe);}return ['damage'=>$damage,'destroyed'=>$probe?->integrityPercent<=0];}
+        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$before=$probe->integrityPercent;$probe->integrityPercent=round(max(0.0,$probe->integrityPercent-$damage),2);$applied=round($before-$probe->integrityPercent,2);$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->integrityPercent<=0];}
         if ($target['kind'] === 'motorized_asteroid') {
             $trajectoryId = (int) $target['trajectory_id'];
             $now = gmdate('c');
@@ -1054,10 +1063,128 @@ final class OthersService
 
     private function sameCoordinates(array $a, array $b): bool { return [(int) $a['sector_x'],(int) $a['sector_y'],(int) $a['sector_z']] === [(int) $b['sector_x'],(int) $b['sector_y'],(int) $b['sector_z']]; }
 
-    private function createWeaponAlerts(SectorCoordinates $sector, string $eventKey, string $message, string $scheduledAt): void
+    /**
+     * @param array<string, mixed> $projectile
+     * @param array<string, mixed> $target
+     * @param array<string, mixed> $details
+     */
+    private function createProjectileResolutionAlerts(array $projectile, array $target, string $result, array $details, string $resolvedAt): void
+    {
+        $sector = new SectorCoordinates((int) $projectile['sector_x'], (int) $projectile['sector_y'], (int) $projectile['sector_z']);
+        $targetLabel = $this->missileTargetLabel($target);
+        $resultMessage = $this->missileResultMessage((string) $projectile['public_id'], $targetLabel, $result, $details);
+        $resultEventKey = 'weapon-result-' . (string) $projectile['public_id'];
+
+        if (($projectile['launcher_kind'] ?? null) === 'probe' && $this->probes !== null && $this->alerts !== null) {
+            $launcher = $this->probes->findById((int) $projectile['launcher_public_id']);
+            if ($launcher !== null && $this->probeIsPresentInSector($launcher, $sector)) {
+                $this->alerts->createOthersAlert($launcher->id, null, ProbeDamageWarning::TYPE_OTHERS_WEAPON, $resultEventKey, $sector, $resultMessage, ProbeDamageWarning::PHASE_WEAPON_RESULT, $resolvedAt);
+            }
+        } elseif (($projectile['launcher_kind'] ?? null) === 'others_ship') {
+            $launcher = $this->others->findShipByPublicId((string) $projectile['launcher_public_id']);
+            if ($launcher !== null && $this->othersShipIsPresentInSector($launcher, $sector)) {
+                $this->others->createAlert((int) $launcher['player_id'], (string) $launcher['public_id'], 'missile_resolution', ProbeDamageWarning::PHASE_WEAPON_RESULT, $resultEventKey, $resultMessage);
+            }
+        }
+
+        if ($result !== 'impacted') {
+            return;
+        }
+        $victimMessage = $this->missileVictimMessage((string) $projectile['public_id'], $targetLabel, $details);
+        $victimEventKey = 'weapon-damage-' . (string) $projectile['public_id'];
+        if (($target['kind'] ?? null) === 'probe' && $this->probes !== null && $this->alerts !== null) {
+            $victim = $this->probes->findById((int) $target['id']);
+            if ($victim !== null) {
+                $this->alerts->createOthersAlert($victim->id, null, ProbeDamageWarning::TYPE_OTHERS_WEAPON, $victimEventKey, $sector, $victimMessage, ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $resolvedAt);
+            }
+        } elseif (($target['kind'] ?? null) === 'others_ship') {
+            $victim = $this->others->findShipByPublicId((string) $target['id']);
+            if ($victim !== null) {
+                $this->others->createAlert((int) $victim['player_id'], (string) $victim['public_id'], 'missile_damage', ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $victimEventKey, $victimMessage);
+            }
+        }
+    }
+
+    private function probeIsPresentInSector(NeumannProbe $probe, SectorCoordinates $sector): bool
+    {
+        return $probe->currentSector->toKey() === $sector->toKey()
+            && !in_array($probe->status, [ProbeStatus::Dead, ProbeStatus::Accelerating, ProbeStatus::Cruising, ProbeStatus::Decelerating], true);
+    }
+
+    /** @param array<string, mixed> $ship */
+    private function othersShipIsPresentInSector(array $ship, SectorCoordinates $sector): bool
+    {
+        return $ship['destroyed_at'] === null
+            && !in_array((string) $ship['status'], ['transit', 'destroyed', 'removed'], true)
+            && [(int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']] === [$sector->getX(), $sector->getY(), $sector->getZ()];
+    }
+
+    /** @param array<string, mixed> $details */
+    private function missileResultMessage(string $missileId, string $targetLabel, string $result, array $details): string
+    {
+        return match ($result) {
+            'impacted' => !empty($details['destroyed'])
+                ? 'Missile ' . $missileId . ' impacted target ' . $targetLabel . '; target destroyed.'
+                : 'Missile ' . $missileId . ' impacted target ' . $targetLabel . $this->missileDamageSuffix($details),
+            'missed' => 'Missile ' . $missileId . ' missed target ' . $targetLabel . '.',
+            'intercepted' => 'Missile ' . $missileId . ' was intercepted before reaching target ' . $targetLabel . '.',
+            'lost' => 'Missile ' . $missileId . ' lost target ' . $targetLabel . '.',
+            default => 'Missile ' . $missileId . ' resolved with outcome ' . $result . ' against target ' . $targetLabel . '.',
+        };
+    }
+
+    /** @param array<string, mixed> $details */
+    private function missileVictimMessage(string $missileId, string $targetLabel, array $details): string
+    {
+        return !empty($details['destroyed'])
+            ? 'Missile ' . $missileId . ' impacted ' . $targetLabel . '; target destroyed.'
+            : 'Missile ' . $missileId . ' impacted ' . $targetLabel . $this->missileDamageSuffix($details);
+    }
+
+    /** @param array<string, mixed> $details */
+    private function missileDamageSuffix(array $details): string
+    {
+        if (!isset($details['damagePercent']) || !is_numeric($details['damagePercent'])) {
+            return '; impact confirmed.';
+        }
+
+        return '; damage: ' . rtrim(rtrim(number_format((float) $details['damagePercent'], 2, '.', ''), '0'), '.') . '% of total integrity.';
+    }
+
+    /** @param array<string, mixed>|null $target */
+    private function createWeaponAlerts(SectorCoordinates $sector, string $eventKey, string $message, string $scheduledAt, ?array $target = null): void
     {
         if ($this->probes === null || $this->alerts === null) { return; }
-        foreach ($this->probes->findBySector($sector) as $probe) { $this->alerts->createOthersAlert($probe->id, null, ProbeDamageWarning::TYPE_OTHERS_WEAPON, 'weapon-' . $eventKey, $sector, $message, 'weapon', $scheduledAt); }
+        foreach ($this->probes->findBySector($sector) as $probe) {
+            $phase = $target !== null
+                && ($target['kind'] ?? null) === 'probe'
+                && (string) $probe->id === (string) ($target['id'] ?? '')
+                    ? ProbeDamageWarning::PHASE_WEAPON_TARGETED
+                    : ProbeDamageWarning::PHASE_WEAPON;
+            $this->alerts->createOthersAlert($probe->id, null, ProbeDamageWarning::TYPE_OTHERS_WEAPON, 'weapon-' . $eventKey, $sector, $message, $phase, $scheduledAt);
+        }
+    }
+
+    /** @param array<string, mixed> $target */
+    private function missileTargetLabel(array $target): string
+    {
+        $id = (string) ($target['id'] ?? 'unknown');
+        if (($target['kind'] ?? null) === 'probe' && $this->probes !== null) {
+            $probe = $this->probes->findById((int) $id);
+            return $probe === null ? 'probe #' . $id : 'probe ' . $probe->name . ' (#' . $id . ')';
+        }
+        if (($target['kind'] ?? null) === 'manny' && $this->mannies !== null) {
+            $manny = $this->mannies->findByUid($id);
+            return $manny === null ? 'Manny ' . $id : 'Manny ' . $manny->name . ' (' . $id . ')';
+        }
+
+        return match ($target['kind'] ?? null) {
+            'others_ship' => 'Others ship ' . $id,
+            'others_auxiliary' => 'Others auxiliary ' . $id,
+            'missile' => 'missile ' . $id,
+            'motorized_asteroid' => 'motorized asteroid ' . $id,
+            default => 'object ' . $id,
+        };
     }
 
     private function sameSector(array $a, array $b): bool
