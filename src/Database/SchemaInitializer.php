@@ -502,6 +502,7 @@ final class SchemaInitializer
             )",
             "CREATE INDEX IF NOT EXISTS idx_manny_tasks_type ON manny_tasks(task_type)",
             "CREATE INDEX IF NOT EXISTS idx_manny_tasks_object ON manny_tasks(object_id)",
+            "CREATE INDEX IF NOT EXISTS idx_manny_tasks_target_container ON manny_tasks(target_container_id)",
             "CREATE TABLE IF NOT EXISTS manny_task_consumed_items (
                 id $id,
                 manny_task_id INTEGER NOT NULL,

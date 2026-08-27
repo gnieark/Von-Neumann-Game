@@ -23,6 +23,7 @@ use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SolarSystem;
 use VonNeumannGame\Sector\Star;
+use VonNeumannGame\Service\MannyService;
 
 final class AsteroidTrajectoryService
 {
@@ -39,6 +40,7 @@ final class AsteroidTrajectoryService
         array $universeConfig,
         private readonly ?ProbeDamageWarningRepository $alerts = null,
         private readonly ?OthersRepository $others = null,
+        private readonly ?MannyService $mannyService = null,
     ) {
         $this->trajectoryConfig = Config::getArray($gameplayConfig, 'asteroidTrajectories');
         $massRange = Config::getArray($universeConfig, 'asteroids.massRange', [0.000001, 0.02]);
@@ -104,6 +106,17 @@ final class AsteroidTrajectoryService
                 }
                 throw $error;
             }
+            $this->mannyService?->recallMiningManniesTargetingDetachedContainers(
+                array_values(array_filter(array_map(
+                    static fn(array $container): string => is_string($container['id'] ?? null) ? trim($container['id']) : '',
+                    $values['attachmentsSnapshot'],
+                ))),
+                'target_container_departed_with_asteroid',
+            );
+            // A recall removes the Manny's sector object from a freshly loaded
+            // aggregate. Reload before saving the launch state so that this
+            // method cannot overwrite that removal with its older snapshot.
+            $sector = $this->sectors->getOrCreateSector($probe->currentSector);
             if ($mode === AsteroidTrajectory::MODE_SECTOR_TRANSFER) {
                 if (!$sector->removeObjectById($asteroidId)) {
                     throw new \RuntimeException('Unable to remove the departing asteroid from its origin.');

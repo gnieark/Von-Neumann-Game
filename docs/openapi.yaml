@@ -2232,8 +2232,11 @@ paths:
         each failed capture attempt, reduces the next capture probability by
         10 percentage points (100%, 90%, 80%, and so on). Crossing several
         empty sectors therefore makes a later capture progressively less
-        certain. Black holes always capture the asteroid. Absolute coordinates
-        are never returned.
+        certain. Black holes always capture the asteroid. Starting either
+        trajectory mode interrupts every Manny mining into a container attached
+        to the asteroid, including Mannys belonging to another probe, and sends
+        them back with reason `target_container_departed_with_asteroid`.
+        Absolute coordinates are never returned.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
         - name: asteroidId
@@ -2750,8 +2753,9 @@ paths:
         salvage endpoint. Hidden containers are recovered by the object id
         returned from mining or inspect-sector-object detection. Any other
         Mannys currently mining into the recovered detached container are
-        interrupted, have their current mining cargo dropped, and switch to a
-        returning task with reason `target_container_recovered`.
+        interrupted across all probes, have their current mining cargo dropped,
+        and switch to a returning task with reason
+        `target_container_recovered`.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -4929,8 +4933,9 @@ paths:
         salvage endpoint. Hidden containers are recovered by the object id
         returned from mining or inspect-sector-object detection. Any other
         Mannys currently mining into the recovered detached container are
-        interrupted, have their current mining cargo dropped, and switch to a
-        returning task with reason `target_container_recovered`.
+        interrupted across all probes, have their current mining cargo dropped,
+        and switch to a returning task with reason
+        `target_container_recovered`.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:

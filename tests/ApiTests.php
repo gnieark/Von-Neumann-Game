@@ -19,6 +19,7 @@ use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeDirection;
 use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeImprovementCatalog;
+use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeModel;
@@ -1252,6 +1253,7 @@ $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE UNIQUE INDEX IF NOT EXISTS idx_probe_movements_one_active_per_probe ON probe_movements(active_probe_id)'), 'MySQL active movement uniqueness is part of the canonical schema');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_players_default_probe_id'), 'canonical schema indexes the selected default probe');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_mannies_task_scheduled_event_id'), 'canonical schema indexes Manny scheduled events');
+$test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_manny_tasks_target_container'), 'canonical schema indexes Manny target-container tasks');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_items_storage_container_id'), 'canonical schema indexes item storage containers');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'idx_probe_missions_player_status'), 'schema indexes missions by player and status');
 $test->assert(is_string($schemaInitializer) && str_contains($schemaInitializer, 'CREATE TABLE IF NOT EXISTS probe_improvement_blueprints'), 'schema stores probe improvement blueprints by player');
@@ -1281,6 +1283,7 @@ foreach ([
     'idx_players_default_probe_id',
     'idx_mannies_storage_container_id',
     'idx_mannies_task_scheduled_event_id',
+    'idx_manny_tasks_target_container',
     'idx_probe_items_storage_container_id',
     'idx_probe_messages_recipient_endpoint',
     'idx_probe_messages_sender_endpoint',
@@ -2001,6 +2004,7 @@ $asteroidTrajectoryService = new AsteroidTrajectoryService(
     json_decode((string) file_get_contents($root . '/config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR),
     json_decode((string) file_get_contents($root . '/config/universe.json'), true, 512, JSON_THROW_ON_ERROR),
     $damageWarnings,
+    mannyService: $mannyService,
 );
 $others = new OthersRepository($pdo);
 $othersService = new OthersService(
@@ -5552,6 +5556,16 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $multiInterruptedMiningEntity = $mannies->findByUidForProbe($multiHiddenProbe->id, $multiHiddenMannyIds[0]);
                 if ($multiInterruptedMiningEntity !== null) {
                     $processScheduledMannyNow($multiInterruptedMiningEntity->id);
+                    $crossProbeRecallProbe = $probes->createForPlayer(
+                        $multiHiddenPlayer->id,
+                        'Cross-probe recall target',
+                        $multiHiddenProbe->currentSector,
+                    );
+                    $multiInterruptedMiningEntity = $mannies->findById($multiInterruptedMiningEntity->id);
+                    if ($multiInterruptedMiningEntity !== null) {
+                        $multiInterruptedMiningEntity->probeId = $crossProbeRecallProbe->id;
+                        $mannies->save($multiInterruptedMiningEntity);
+                    }
                 }
 
                 $multiRecoverA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($multiHiddenMannyIds[2]) . '/recover-storage-container', $multiHiddenHeaders, json_encode([
@@ -5565,8 +5579,8 @@ if ($detachProbe !== null && $detachMannyId !== '') {
                 $test->assertEquals(202, $multiRecoverA->status, 'first hidden container recovery on a shared asteroid is accepted');
                 $test->assertEquals(202, $multiRecoverB->status, 'second hidden container recovery on a shared asteroid is accepted');
                 $test->assertEquals(0, count($sectorService->getOrCreateSector($multiHiddenProbe->currentSector)->hiddenDetachedContainersForObject('multi-cache-rock')), 'recovering multiple hidden containers reserves all of them out of SQL-backed sector state');
-                $multiInterruptedManny = $mannies->findByUidForProbe($multiHiddenProbe->id, $multiHiddenMannyIds[0]);
-                $test->assertEquals(Manny::TASK_RETURNING, $multiInterruptedManny?->currentTask, 'recovering a target detached container recalls Mannys mining into it');
+                $multiInterruptedManny = $mannies->findByUid($multiHiddenMannyIds[0]);
+                $test->assertEquals(Manny::TASK_RETURNING, $multiInterruptedManny?->currentTask, 'recovering a target detached container recalls Mannys mining into it across probes');
                 $test->assertEquals('target_container_recovered', $multiInterruptedManny?->taskPayload['reason'] ?? null, 'interrupted mining recall records the recovered target-container reason');
                 $test->assertEquals($multiHiddenObjectIdA, $multiInterruptedManny?->taskPayload['targetContainerId'] ?? null, 'interrupted mining recall records the recovered target container id');
                 $test->assertEquals(0.0, $multiInterruptedManny?->cargoMetals, 'interrupted mining recall drops the Manny mining cargo');
@@ -6842,12 +6856,42 @@ if ($motorizeProbe !== null) {
     $refueledAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
     $test->assertEquals(Asteroid::MOTOR_FUEL_FULL, $refueledAsteroid instanceof Asteroid ? $refueledAsteroid->getMotorFuelStatus() : null, 'refueling completion fills the asteroid tank exactly once');
 
+    $launchTargetContainerId = 'detached-container-launch-target';
+    $launchTargetSector = $sectorService->getOrCreateSector($motorizeProbe->currentSector);
+    $launchTargetSector->addHiddenDetachedContainer(new SectorDetachedContainer(
+        $launchTargetContainerId,
+        'Launch target container',
+        SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
+        $motorizeProbe->id,
+        $motorizePlayer->id,
+        $motorizeProbe->id,
+        $motorizedAsteroidId,
+        1.0,
+        ProbeInventory::CAPACITY_UNIT,
+        gmdate('c'),
+        [
+            'sourceContainerId' => 'launch-target-source',
+            'container' => [
+                'id' => 'launch-target-source',
+                'kind' => 'additional',
+                'label' => 'Launch target container',
+                'sortOrder' => 1,
+                'capacity' => 1.0,
+            ],
+            'resources' => ['metals' => 0.0, 'ice' => 0.0, 'carbon_compounds' => 0.0],
+            'items' => [],
+        ],
+        discoveredByPlayerIds: [$motorizePlayer->id],
+    ));
+    $sectorService->saveSector($launchTargetSector);
+
     $mineMotorizedAsteroid = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeMiningMannyId) . '/mine', $motorizeHeaders, json_encode([
         'objectId' => $motorizedAsteroidId,
         'resources' => ['metals'],
         'targetAmount' => 0.01,
+        'targetContainerId' => $launchTargetContainerId,
     ], JSON_THROW_ON_ERROR));
-    $test->assertEquals(202, $mineMotorizedAsteroid->status, 'a motorized asteroid remains mineable');
+    $test->assertEquals(202, $mineMotorizedAsteroid->status, 'a motorized asteroid remains mineable into an attached container');
 
     $createdTransfer = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/asteroids/' . rawurlencode($motorizedAsteroidId) . '/trajectories', $motorizeHeaders, json_encode([
         'mode' => AsteroidTrajectory::MODE_SECTOR_TRANSFER,
@@ -6857,6 +6901,9 @@ if ($motorizeProbe !== null) {
     $transferPublicId = (string) ($createdTransfer->body['trajectory']['id'] ?? '');
     $test->assert(str_starts_with($transferPublicId, 'atr_'), 'trajectory creation returns its opaque public id');
     $test->assertEquals(AsteroidTrajectory::STATUS_CROSSING_SECTOR, $createdTransfer->body['trajectory']['status'] ?? null, 'sector transfer begins in crossing_sector');
+    $launchedMiningManny = $mannies->findByUid($motorizeMiningMannyId);
+    $test->assertEquals(Manny::TASK_RETURNING, $launchedMiningManny?->currentTask, 'launching a motorized asteroid recalls mining Mannys targeting an attached container');
+    $test->assertEquals('target_container_departed_with_asteroid', $launchedMiningManny?->taskPayload['reason'] ?? null, 'asteroid launch recall records a stable reason');
     $test->assert(!array_key_exists('originSector', $createdTransfer->body['trajectory'] ?? []) && !array_key_exists('currentSector', $createdTransfer->body['trajectory'] ?? []), 'trajectory creation never exposes absolute internal sectors');
     $emptyLaunchedAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
     $test->assertEquals(null, $emptyLaunchedAsteroid, 'sector-transfer acceptance removes the asteroid from its origin at effective departure');

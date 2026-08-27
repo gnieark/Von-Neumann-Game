@@ -1229,7 +1229,7 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $reservedDetachedContainer = $this->cargo->reserveDetachedContainerForSalvage($probe, $manny, $target);
-        $this->recallMiningManniesTargetingDetachedContainer($probe, $manny->id, $objectId);
+        $this->recallMiningManniesTargetingDetachedContainers([$objectId], 'target_container_recovered', $manny->id);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $salvageSeconds = $this->salvageSeconds();
         $manny->locationType = Manny::LOCATION_SECTOR;
@@ -1251,34 +1251,60 @@ final class MannyService implements MannyTaskRuntime
         return $this->requiredManny($probe, $uid);
     }
 
-    private function recallMiningManniesTargetingDetachedContainer(NeumannProbe $probe, int $recoveringMannyId, string $containerId): void
+    /**
+     * @param list<string> $containerIds
+     */
+    public function recallMiningManniesTargetingDetachedContainers(
+        array $containerIds,
+        string $reason,
+        ?int $exceptMannyId = null,
+    ): int
     {
+        $containerIds = array_values(array_unique(array_filter(
+            array_map(static fn(mixed $id): string => is_string($id) ? trim($id) : '', $containerIds),
+            static fn(string $id): bool => $id !== '',
+        )));
+        if ($containerIds === []) {
+            return 0;
+        }
+
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
-            if (
-                $manny->id === $recoveringMannyId
-                || $manny->currentTask !== Manny::TASK_MINING
-                || $this->miningTaskTargetContainerId($manny) !== $containerId
-            ) {
+        $recalled = 0;
+        foreach ($this->mannies->findMiningIdsByTargetContainerIds($containerIds) as $mannyId) {
+            if ($mannyId === $exceptMannyId) {
                 continue;
             }
 
-            $returnDurationSeconds = $this->recallReturnDurationSeconds($manny, $now);
-            $droppedCargo = $this->cargo->dropWaitingMannyCargo($manny);
-            $this->cargo->clearMannyCargo($manny);
-            $manny->currentTask = Manny::TASK_RETURNING;
-            $manny->taskStartedAt = $now->format('c');
-            $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
-            $manny->taskPayload = [
-                'reason' => 'target_container_recovered',
-                'lastTask' => Manny::TASK_MINING,
-                'result' => 'cancelled',
-                'targetContainerId' => $containerId,
-                'droppedCargo' => $droppedCargo,
-            ];
-            $this->removeMannyFromSector($manny);
-            $this->mannies->save($manny);
+            $didRecall = $this->mannies->withMannyLock($mannyId, function (Manny $manny) use ($containerIds, $reason, $now): bool {
+                $containerId = $this->miningTaskTargetContainerId($manny);
+                if ($manny->currentTask !== Manny::TASK_MINING || $containerId === null || !in_array($containerId, $containerIds, true)) {
+                    return false;
+                }
+
+                $returnDurationSeconds = $this->recallReturnDurationSeconds($manny, $now);
+                $droppedCargo = $this->cargo->dropWaitingMannyCargo($manny);
+                $this->cargo->clearMannyCargo($manny);
+                $manny->currentTask = Manny::TASK_RETURNING;
+                $manny->taskStartedAt = $now->format('c');
+                $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
+                $manny->taskPayload = [
+                    'reason' => $reason,
+                    'lastTask' => Manny::TASK_MINING,
+                    'result' => 'cancelled',
+                    'targetContainerId' => $containerId,
+                    'droppedCargo' => $droppedCargo,
+                ];
+                $this->removeMannyFromSector($manny);
+                $this->mannies->save($manny);
+
+                return true;
+            });
+            if ($didRecall) {
+                $recalled++;
+            }
         }
+
+        return $recalled;
     }
 
     public function startWaypointBookmarkInstallation(NeumannProbe $probe, Player $player, string $uid, string $objectId, string $name): Manny

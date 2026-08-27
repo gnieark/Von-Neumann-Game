@@ -234,6 +234,39 @@ final class MannyRepository
     }
 
     /**
+     * @param list<string> $containerIds
+     * @return list<int>
+     */
+    public function findMiningIdsByTargetContainerIds(array $containerIds): array
+    {
+        $containerIds = array_values(array_unique(array_filter(
+            array_map(static fn(mixed $id): string => is_string($id) ? trim($id) : '', $containerIds),
+            static fn(string $id): bool => $id !== '',
+        )));
+        if ($containerIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($containerIds), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT m.id
+             FROM manny_tasks mt
+             INNER JOIN mannies m
+                ON m.id = mt.manny_id
+               AND m.task_scheduled_event_id = mt.scheduled_event_id
+             INNER JOIN scheduled_events se ON se.id = mt.scheduled_event_id
+             WHERE m.current_task = ?
+               AND mt.task_type = ?
+               AND se.status IN ('pending', 'running')
+               AND mt.target_container_id IN ({$placeholders})
+             ORDER BY m.id"
+        );
+        $stmt->execute([Manny::TASK_MINING, Manny::TASK_MINING, ...$containerIds]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
      * @template T
      * @param callable(Manny): T $callback
      * @return T
@@ -550,13 +583,26 @@ final class MannyRepository
             $taskType = $value !== false ? (string) $value : (string) ($manny->taskPayload['lastTask'] ?? 'completed');
         }
         $now = gmdate('c');
+        $miningTargetContainer = $manny->currentTask === Manny::TASK_MINING
+            && is_array($manny->taskPayload['targetContainer'] ?? null)
+            ? $manny->taskPayload['targetContainer']
+            : null;
+        $targetContainerId = $manny->currentTask === Manny::TASK_MINING
+            ? (
+                $miningTargetContainer !== null
+                && is_string($miningTargetContainer['id'] ?? null)
+                && trim($miningTargetContainer['id']) !== ''
+                    ? trim($miningTargetContainer['id'])
+                    : null
+            )
+            : ($manny->taskPayload['targetContainerId'] ?? null);
         $values = [
             'manny_id' => $manny->id, 'event_id' => $manny->taskScheduledEventId,
             'task_type' => $taskType, 'recipe' => $manny->taskPayload['recipe'] ?? null,
             'run_id' => $manny->taskPayload['craftingRunId'] ?? null, 'resource_type' => $manny->taskPayload['resourceType'] ?? null,
             'target_amount' => $manny->taskPayload['targetAmount'] ?? null, 'extracted_amount' => $manny->taskPayload['extractedAmount'] ?? null,
             'object_id' => $manny->taskPayload['objectId'] ?? null, 'target_object_id' => $manny->taskPayload['targetObjectId'] ?? null,
-            'target_container_id' => $manny->taskPayload['targetContainerId'] ?? null, 'source_container_id' => $manny->taskPayload['fromContainerId'] ?? null,
+            'target_container_id' => $targetContainerId, 'source_container_id' => $manny->taskPayload['fromContainerId'] ?? null,
             'destination_container_id' => $manny->taskPayload['toContainerId'] ?? null, 'target_probe_id' => $manny->taskPayload['targetProbeId'] ?? null,
             'relay_id' => $manny->taskPayload['relayId'] ?? null, 'improvement' => $manny->taskPayload['improvement'] ?? null,
             'created_at' => $now, 'updated_at' => $now,
