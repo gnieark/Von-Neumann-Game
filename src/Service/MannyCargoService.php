@@ -367,6 +367,14 @@ final class MannyCargoService
             return;
         }
 
+        $waitingSince = null;
+        if ($manny->currentTask === Manny::TASK_WAITING_FOR_SPACE) {
+            $waitingSince = $manny->taskPayload[Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY] ?? null;
+            if (!is_string($waitingSince) || trim($waitingSince) === '') {
+                throw new \RuntimeException('Waiting-for-space task is missing its canonical start timestamp; run migrate-manny-waiting-for-space-timeouts.php.');
+            }
+        }
+
         $manny->currentTask = Manny::TASK_WAITING_FOR_SPACE;
         $manny->taskStartedAt ??= gmdate('c');
         $manny->taskEndsAt = null;
@@ -374,6 +382,7 @@ final class MannyCargoService
             'reason' => 'return_to_probe',
             'waitingFor' => 'storage_space',
         ], $payload);
+        $manny->taskPayload[Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY] = $waitingSince ?? gmdate('c');
     }
 
     public function transferMannyCargoToProbe(Manny $manny, NeumannProbe $probe): void

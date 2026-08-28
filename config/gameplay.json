@@ -73,6 +73,7 @@
   "manny": {
     "cargoCapacity": 0.05,
     "containerSpace": 0.05,
+    "waitingForSpaceTimeoutSeconds": 604800,
     "mineablePlanetMaxMassEarthUnits": 0.0123,
     "actions": {
       "repairSecondsPerIntegrityPercent": 600,

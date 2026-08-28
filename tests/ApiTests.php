@@ -2785,7 +2785,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(122, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(123, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
@@ -8553,6 +8553,7 @@ if ($createdProbe !== null) {
     ))[0] ?? null;
     $test->assertEquals('waiting_for_space', $waitingFourth['currentTask'] ?? null, 'returning Manny waits outside when the probe has no storage slot');
     $test->assertEquals('sector', $waitingFourth['location']['type'] ?? null, 'waiting Manny remains in the sector');
+    $test->assert(is_string($waitingFourth['task'][Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY] ?? null), 'waiting Manny records the canonical start of its storage timeout');
 
     $dropMannyCargo = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($fourthMannyId) . '/drop-manny-cargo', $headers, json_encode([], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $dropMannyCargo->status, 'POST /api/probe/mannies/{id}/drop-manny-cargo accepts a waiting Manny cargo drop');
@@ -8613,6 +8614,69 @@ if ($createdProbe !== null) {
     $processScheduledMannyNow($fourthMannyDbId);
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->locationType, 'freeing storage lets a waiting Manny enter the probe');
     $test->assertEquals(null, $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId)?->currentTask, 'Manny waiting for storage returns to idle after docking');
+
+    $prepareExpiredWaitingManny = static function (
+        string $username,
+        float $storedMetals,
+    ) use ($auth, $probes, $mannies, $storage, $storageContainers): array {
+        $timeoutPlayer = $auth->registerPlayerWithPassword($username, 'secret', $username);
+        $timeoutProbe = $probes->findByPlayerId($timeoutPlayer->id) ?? throw new RuntimeException('Expected timeout test probe.');
+        $timeoutProbeMannies = $mannies->findByProbeId($timeoutProbe->id);
+        $timeoutManny = $timeoutProbeMannies[0] ?? throw new RuntimeException('Expected timeout test Manny.');
+        $core = $storageContainers->findByUidForProbe($timeoutProbe->id, 'probe-core') ?? throw new RuntimeException('Expected timeout test core container.');
+        // Configure stock before moving the target Manny out of storage: the
+        // storage helper repairs unplaced probe Mannies as part of setup.
+        $timeoutProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $timeoutProbe, ['metals' => $storedMetals]);
+        $timeoutProbeMannies = $mannies->findByProbeId($timeoutProbe->id);
+        $timeoutManny = $timeoutProbeMannies[0] ?? throw new RuntimeException('Expected timeout test Manny.');
+        $core = $storageContainers->findByUidForProbe($timeoutProbe->id, 'probe-core') ?? throw new RuntimeException('Expected timeout test core container.');
+        foreach (array_slice(array_values(array_filter($timeoutProbeMannies, static fn(Manny $candidate): bool => $candidate->id !== $timeoutManny->id)), 0, 3) as $storedManny) {
+            $storedManny->storageContainerId = $core->id;
+            $storedManny->locationType = Manny::LOCATION_PROBE;
+            $storedManny->sector = null;
+            $mannies->save($storedManny);
+        }
+        $storage->releaseMannyFromStorage($timeoutManny);
+        $timeoutManny->locationType = Manny::LOCATION_SECTOR;
+        $timeoutManny->sector = $timeoutProbe->currentSector;
+        $timeoutManny->currentTask = Manny::TASK_WAITING_FOR_SPACE;
+        $timeoutManny->taskStartedAt = gmdate('c', time() - MannyService::WAITING_FOR_SPACE_TIMEOUT_SECONDS - 60);
+        $timeoutManny->taskEndsAt = null;
+        $timeoutManny->taskPayload = [
+            'reason' => 'cargo_delivery',
+            'waitingFor' => 'storage_space',
+            Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY => gmdate('c', time() - MannyService::WAITING_FOR_SPACE_TIMEOUT_SECONDS - 1),
+            Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY => gmdate('c'),
+        ];
+        $timeoutManny->cargoMetals = 0.05;
+        $mannies->save($timeoutManny);
+
+        return [$timeoutProbe, $timeoutManny];
+    };
+
+    [$cargoTimeoutProbe, $cargoTimeoutManny] = $prepareExpiredWaitingManny('waiting-timeout-docks', 0.95);
+    $cargoTimeoutEventId = $cargoTimeoutManny->taskScheduledEventId;
+    $processScheduledMannyNow($cargoTimeoutManny->id);
+    $cargoTimeoutResult = $mannies->findById($cargoTimeoutManny->id);
+    $test->assertEquals('probe', $cargoTimeoutResult?->locationType, 'a Manny docks after the seven-day timeout when abandoning cargo frees enough space');
+    $test->assertEquals(null, $cargoTimeoutResult?->currentTask, 'a Manny that docks after its timeout becomes idle');
+    $test->assertEquals(0.0, $cargoTimeoutResult?->cargoMetals, 'the seven-day timeout abandons Manny resource cargo');
+    $test->assertEquals('returned_after_cargo_abandonment', $cargoTimeoutResult?->taskPayload['result'] ?? null, 'timed-out docking records cargo abandonment');
+    $test->assertEquals(0.95, $storage->resourceStock($cargoTimeoutProbe, ResourceComposition::METALS), 'automatically abandoned cargo is not transferred into probe storage');
+    $test->assertEquals('done', $cargoTimeoutEventId !== null ? $scheduledEvents->findById($cargoTimeoutEventId)?->status : null, 'successful timeout docking completes its scheduler event');
+
+    [$abandonedTimeoutProbe, $abandonedTimeoutManny] = $prepareExpiredWaitingManny('waiting-timeout-abandoned', 0.99);
+    $abandonedTimeoutEventId = $abandonedTimeoutManny->taskScheduledEventId;
+    $processScheduledMannyNow($abandonedTimeoutManny->id);
+    $abandonedTimeoutResult = $mannies->findById($abandonedTimeoutManny->id);
+    $test->assertEquals(null, $abandonedTimeoutResult?->probeId, 'a timed-out Manny becomes unowned when its own storage slot remains unavailable');
+    $test->assertEquals(Manny::LOCATION_SECTOR, $abandonedTimeoutResult?->locationType, 'an unowned timed-out Manny remains in its sector');
+    $test->assertEquals(null, $abandonedTimeoutResult?->currentTask, 'an abandoned timed-out Manny has no active task');
+    $test->assertEquals('abandoned', $abandonedTimeoutResult?->taskPayload['result'] ?? null, 'storage timeout records the final abandonment result');
+    $abandonedTimeoutSector = $sectorRepository->load($abandonedTimeoutProbe->currentSector);
+    $abandonedTimeoutObject = $abandonedTimeoutSector->findObjectById(SectorManny::objectIdForUid($abandonedTimeoutManny->uid));
+    $test->assertEquals(SectorManny::STATE_ABANDONED, $abandonedTimeoutObject?->toArray()['state'] ?? null, 'storage timeout exposes the Manny as an abandoned salvageable sector object');
+    $test->assertEquals('done', $abandonedTimeoutEventId !== null ? $scheduledEvents->findById($abandonedTimeoutEventId)?->status : null, 'final Manny abandonment completes its scheduler event');
 
     $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.45]);
     $steelBarIds = [];
@@ -8821,6 +8885,7 @@ if ($createdProbe !== null) {
         $waitingSalvageSetup->taskPayload = [
             'reason' => 'salvage_return',
             'waitingFor' => 'storage_space',
+            Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY => gmdate('c'),
             'salvaged' => [
                 'type' => 'manny',
                 'id' => $fourthMannyId,

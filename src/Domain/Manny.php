@@ -9,6 +9,7 @@ use VonNeumannGame\Sector\SectorCoordinates;
 final class Manny
 {
     public const TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY = '_scheduledRunAt';
+    public const WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY = 'waitingForSpaceSince';
 
     public const LOCATION_PROBE = 'probe';
     public const LOCATION_SECTOR = 'sector';
