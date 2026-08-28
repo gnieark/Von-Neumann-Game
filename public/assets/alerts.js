@@ -51,8 +51,15 @@
         return alert && alert.message ? alert.message : tr("unknownAlert", "Unknown alert.");
     }
 
+    function isCriticalImpactAlert(alert) {
+        return Boolean(alert) && (
+            (alert.type === "others_weapon" && ["weapon_targeted", "weapon_damage"].includes(alert.phase))
+            || (alert.type === "asteroid_trajectory" && alert.phase === "weapon_damage")
+        );
+    }
+
     function persistentAlertClassName(alert) {
-        if (alert && alert.type === "others_weapon" && ["weapon_targeted", "weapon_damage"].includes(alert.phase)) {
+        if (isCriticalImpactAlert(alert)) {
             return "sector-critical-alert";
         }
         if (alert && alert.type === "storage_container_break") {
@@ -123,7 +130,7 @@
         }
 
         const hasUnreadDamageWarning = alerts.some((alert) => alert.kind === "persistent-alert" && alert.type === "storage_container_break" && !alert.acknowledged);
-        const hasUnreadTargetedWeaponAlert = alerts.some((alert) => alert.kind === "persistent-alert" && alert.type === "others_weapon" && ["weapon_targeted", "weapon_damage"].includes(alert.phase) && !alert.acknowledged);
+        const hasUnreadTargetedWeaponAlert = alerts.some((alert) => alert.kind === "persistent-alert" && isCriticalImpactAlert(alert) && !alert.acknowledged);
         window.VNG.setNavigationWarning("/alerts", alerts.some((alert) => !alert.acknowledged), hasUnreadDamageWarning, hasUnreadTargetedWeaponAlert);
         if (empty) {
             empty.hidden = alerts.length > 0;

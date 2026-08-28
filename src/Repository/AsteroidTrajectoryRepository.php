@@ -27,14 +27,14 @@ final class AsteroidTrajectoryRepository
             'INSERT INTO asteroid_trajectories
              (uid, asteroid_id, mode, status, origin_sector_x, origin_sector_y, origin_sector_z,
               current_sector_x, current_sector_y, current_sector_z, direction_x, direction_y, direction_z,
-              target_object_id, target_probe_id, target_speed_c, asteroid_mass_earth, star_mass_solar,
+              launcher_probe_id, target_object_id, target_probe_id, target_speed_c, asteroid_mass_earth, star_mass_solar,
               acceleration_started_at, acceleration_ends_at, revolution_duration_seconds, planned_revolutions,
               next_transition_at, sectors_crossed, capture_penalty_steps, maximum_sector_crossings,
               result, failure_reason, asteroid_snapshot_json, attachments_snapshot_json, created_at, updated_at)
              VALUES
              (:uid, :asteroid_id, :mode, :status, :origin_x, :origin_y, :origin_z,
               :current_x, :current_y, :current_z, :direction_x, :direction_y, :direction_z,
-              :target_object_id, :target_probe_id, :target_speed_c, :asteroid_mass_earth, :star_mass_solar,
+              :launcher_probe_id, :target_object_id, :target_probe_id, :target_speed_c, :asteroid_mass_earth, :star_mass_solar,
               :acceleration_started_at, :acceleration_ends_at, :revolution_duration_seconds, :planned_revolutions,
               :next_transition_at, :sectors_crossed, :capture_penalty_steps, :maximum_sector_crossings,
               NULL, NULL, :asteroid_snapshot_json, :attachments_snapshot_json, :created_at, :updated_at)'
@@ -53,6 +53,7 @@ final class AsteroidTrajectoryRepository
             'origin_x' => $origin->getX(), 'origin_y' => $origin->getY(), 'origin_z' => $origin->getZ(),
             'current_x' => $current->getX(), 'current_y' => $current->getY(), 'current_z' => $current->getZ(),
             'direction_x' => $direction['x'] ?? null, 'direction_y' => $direction['y'] ?? null, 'direction_z' => $direction['z'] ?? null,
+            'launcher_probe_id' => $values['launcherProbeId'] ?? null,
             'target_object_id' => $values['targetObjectId'] ?? null,
             'target_probe_id' => $values['targetProbeId'] ?? null,
             'target_speed_c' => $values['targetSpeedC'] ?? null,
@@ -191,6 +192,7 @@ final class AsteroidTrajectoryRepository
             new SectorCoordinates((int) $row['origin_sector_x'], (int) $row['origin_sector_y'], (int) $row['origin_sector_z']),
             new SectorCoordinates((int) $row['current_sector_x'], (int) $row['current_sector_y'], (int) $row['current_sector_z']),
             $direction,
+            $row['launcher_probe_id'] !== null ? (int) $row['launcher_probe_id'] : null,
             $row['target_object_id'] !== null ? (string) $row['target_object_id'] : null,
             $row['target_probe_id'] !== null ? (int) $row['target_probe_id'] : null,
             $row['target_speed_c'] !== null ? (float) $row['target_speed_c'] : null,

@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-28
+
+### Changed
+
+- API v124 / impacts d’astéroïdes motorisés : la sonde lanceuse reçoit désormais une alerte persistante récapitulant le résultat uniquement si elle est encore physiquement présente dans le secteur à la résolution. Une sonde ou un vaisseau Others victime reçoit sa propre alerte critique de dégâts, avec le pourcentage d’intégrité perdue lorsque la cible survit. Les effets sur les étoiles, planètes et astéroïdes sont récapitulés au seul lanceur.
+- Migration obligatoire avant redémarrage : scheduler arrêté, exécuter `php scripts/one-shot-scripts/migrate-asteroid-impact-alerts.php --database-config=…` afin d’ajouter la référence canonique de la sonde lanceuse aux trajectoires. Les trajectoires historiques conservent explicitement un lanceur inconnu et ne peuvent donc produire que l’éventuelle alerte de victime.
+
 ## 2026-08-27
 
 ### Changed

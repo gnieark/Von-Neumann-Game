@@ -191,7 +191,7 @@ final class AppFactory
             $asteroidTrajectories,
             new PhaseHandlerRegistry([
                 new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, Config::int($trajectoryConfig, 'coastingDurationSeconds', 600)),
-                new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, $impactDamage, $others, $othersService),
+                new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, $impactDamage, $others, $othersService, $damageWarnings),
                 new SectorTransferPhaseHandler(
                     $asteroidTrajectories,
                     $scheduledEvents,

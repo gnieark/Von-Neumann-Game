@@ -504,6 +504,7 @@ $sensorsScript = file_get_contents($root . '/public/assets/sensors.js');
 $sensorsTemplate = file_get_contents($root . '/templates/sensors.html');
 $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to-mysql.php');
 $alertIllustrationMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-alert-illustration-images.php');
+$asteroidImpactAlertsMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-asteroid-impact-alerts.php');
 $othersAlertsMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-others-alerts.php');
 $sectorPointCloudScript = file_get_contents($root . '/scripts/generate-threejs-point-cloud-sectors.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
@@ -1120,6 +1121,7 @@ $test->assert(is_string($alertsScript) && str_contains($alertsScript, '"/damage-
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alert.illustrationImageUrl'), 'alerts JS reads optional illustration image URLs');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'class=\"sector-alert-illustration\"'), 'alerts JS renders illustrations below persistent alert text');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, '["weapon_targeted", "weapon_damage"].includes(alert.phase)'), 'alerts JS recognizes targeted and impact-damage missile alerts as critical');
+$test->assert(is_string($alertsScript) && str_contains($alertsScript, 'alert.type === "asteroid_trajectory" && alert.phase === "weapon_damage"'), 'alerts JS recognizes motorized-asteroid victim alerts as critical');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'return "sector-critical-alert"'), 'alerts JS assigns the critical alert class to a targeted missile');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'node.classList.toggle("alerts-critical", Boolean(critical))'), 'main JS exposes the targeted-missile state on the alerts navigation tab');
 $test->assert(is_string($appCss) && str_contains($appCss, '@keyframes sector-critical-alert-blink'), 'alerts CSS defines a red blinking critical missile alert');
@@ -1211,10 +1213,12 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260827-movement-integrity-checklist"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260828-asteroid-impact-alerts"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
+$test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, '"/api/others/alerts"'), 'Others OpenAPI documents the persistent alert collection');
+$test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'asteroid_impact_damage'), 'Others OpenAPI documents motorized-asteroid victim alerts');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1971,6 +1975,27 @@ exec($asteroidMigrationCommand . ' 2>&1', $secondAsteroidMigrationOutput, $secon
 $test->assertEquals(0, $secondAsteroidMigrationStatus, 'asteroid trajectory migration can be rerun safely');
 $test->assert(str_contains(implode("\n", $secondAsteroidMigrationOutput), 'asteroids_changed=0'), 'second asteroid trajectory migration performs no sector rewrite');
 
+$asteroidImpactAlertMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'asteroid-impact-alert-migration.sqlite';
+$asteroidImpactAlertMigrationPdo = new PDO('sqlite:' . $asteroidImpactAlertMigrationDbPath);
+$asteroidImpactAlertMigrationPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$asteroidImpactAlertMigrationPdo->exec('CREATE TABLE asteroid_trajectories (id INTEGER PRIMARY KEY, uid TEXT NOT NULL)');
+$asteroidImpactAlertMigrationPdo->exec("INSERT INTO asteroid_trajectories (id, uid) VALUES (1, 'atr_existing')");
+$asteroidImpactAlertMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'asteroid-impact-alert-migration.json';
+file_put_contents($asteroidImpactAlertMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $asteroidImpactAlertMigrationDbPath], JSON_THROW_ON_ERROR));
+$asteroidImpactAlertMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-asteroid-impact-alerts.php')
+    . ' --database-config=' . escapeshellarg($asteroidImpactAlertMigrationConfig);
+exec($asteroidImpactAlertMigrationCommand . ' 2>&1', $asteroidImpactAlertMigrationOutput, $asteroidImpactAlertMigrationStatus);
+$test->assertEquals(0, $asteroidImpactAlertMigrationStatus, 'asteroid impact alert migration exits successfully');
+$asteroidImpactAlertMigrationColumns = array_column($asteroidImpactAlertMigrationPdo->query('PRAGMA table_info(asteroid_trajectories)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assert(in_array('launcher_probe_id', $asteroidImpactAlertMigrationColumns, true), 'asteroid impact alert migration adds the nullable launcher reference');
+$test->assertEquals(null, $asteroidImpactAlertMigrationPdo->query('SELECT launcher_probe_id FROM asteroid_trajectories WHERE id=1')->fetchColumn(), 'existing trajectories retain an explicitly unknown launcher');
+$secondAsteroidImpactAlertMigrationOutput = [];
+$secondAsteroidImpactAlertMigrationStatus = 0;
+exec($asteroidImpactAlertMigrationCommand . ' 2>&1', $secondAsteroidImpactAlertMigrationOutput, $secondAsteroidImpactAlertMigrationStatus);
+$test->assertEquals(0, $secondAsteroidImpactAlertMigrationStatus, 'asteroid impact alert migration can be replayed safely');
+$test->assert(str_contains(implode("\n", $secondAsteroidImpactAlertMigrationOutput), 'column_added=no'), 'replayed asteroid impact alert migration reports an unchanged schema');
+
 $mannies = new MannyRepository($pdo, scheduledEvents: $scheduledEvents);
 $items = new ProbeItemRepository($pdo);
 $probeImprovements = new ProbeImprovementRepository($pdo);
@@ -1985,6 +2010,7 @@ $storageContainers = new StorageContainerRepository($pdo);
 $logbook = new ProbeLogbookRepository($pdo);
 $movements = new ProbeMovementRepository($pdo);
 $asteroidTrajectories = new AsteroidTrajectoryRepository($pdo);
+$others = new OthersRepository($pdo);
 $sessions = new SessionRepository($pdo);
 $apiKeys = new ApiKeyRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
@@ -2006,9 +2032,9 @@ $asteroidTrajectoryService = new AsteroidTrajectoryService(
     json_decode((string) file_get_contents($root . '/config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR),
     json_decode((string) file_get_contents($root . '/config/universe.json'), true, 512, JSON_THROW_ON_ERROR),
     $damageWarnings,
+    $others,
     mannyService: $mannyService,
 );
-$others = new OthersRepository($pdo);
 $othersService = new OthersService(
     $others,
     $scheduledEvents,
@@ -2021,7 +2047,7 @@ $othersService = new OthersService(
 );
 $testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTrajectories, new PhaseHandlerRegistry([
     new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, 600),
-    new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, new ImpactDamageResolver()),
+    new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, new ImpactDamageResolver(), $others, $othersService, $damageWarnings),
     new SectorTransferPhaseHandler($asteroidTrajectories, $scheduledEvents, $sectorService, new CaptureCalculator()),
     new BlackHoleOrbitPhaseHandler($asteroidTrajectories, $sectorService),
 ]));
@@ -2101,7 +2127,7 @@ $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
 ), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService);
 
 $trajectoryColumns = array_column($pdo->query('PRAGMA table_info(asteroid_trajectories)')->fetchAll(PDO::FETCH_ASSOC), 'name');
-$test->assert(in_array('uid', $trajectoryColumns, true) && in_array('current_sector_x', $trajectoryColumns, true), 'asteroid trajectory SQL schema is installed by the explicit schema migration');
+$test->assert(in_array('uid', $trajectoryColumns, true) && in_array('current_sector_x', $trajectoryColumns, true) && in_array('launcher_probe_id', $trajectoryColumns, true), 'asteroid trajectory SQL schema includes the canonical launcher reference');
 $repositoryTrajectory = $asteroidTrajectories->create([
     'asteroidId' => 'repository-trajectory-rock',
     'mode' => AsteroidTrajectory::MODE_SECTOR_TRANSFER,
@@ -2785,7 +2811,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(123, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(124, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
@@ -6978,6 +7004,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
     $impactTrajectoryUid = (string) ($impactLaunch->body['trajectory']['id'] ?? '');
     $impactTrajectory = $asteroidTrajectories->findByUid($impactTrajectoryUid);
     $test->assertEquals(AsteroidTrajectory::STATUS_ACCELERATING, $impactTrajectory?->status, 'system impact begins in acceleration');
+    $test->assertEquals($impactProbe->id, $impactTrajectory?->launcherProbeId, 'system impact persists the launching probe for its later result alert');
     foreach ([$impactProbe, $impactObserverProbe] as $alertedProbe) {
         $trajectoryAlerts = array_values(array_filter(
             $damageWarnings->findByProbeId($alertedProbe->id),
@@ -7003,9 +7030,144 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
         $postImpactSector = $sectorRepository->load($impactProbe->currentSector);
         $test->assertEquals(null, $postImpactSector->findObjectById('system-impact-rock'), 'a stellar impact vaporizes the source asteroid');
         $test->assert($postImpactSector->findObjectById('system-impact-star') instanceof Star, 'a stellar impact leaves the star unchanged');
+        $stellarResultAlerts = array_values(array_filter(
+            $damageWarnings->findByProbeId($impactProbe->id),
+            static fn(ProbeDamageWarning $warning): bool => $warning->objectId === 'asteroid-result-' . $impactTrajectoryUid,
+        ));
+        $observerStellarResultAlerts = array_values(array_filter(
+            $damageWarnings->findByProbeId($impactObserverProbe->id),
+            static fn(ProbeDamageWarning $warning): bool => $warning->objectId === 'asteroid-result-' . $impactTrajectoryUid,
+        ));
+        $test->assertEquals(1, count($stellarResultAlerts), 'the launching probe still in the sector receives exactly one asteroid impact result alert');
+        $test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_RESULT, $stellarResultAlerts[0]->phase ?? null, 'the asteroid launcher result uses the canonical weapon_result phase');
+        $test->assert(str_contains($stellarResultAlerts[0]->message ?? '', 'no effect on target, impactor destroyed'), 'the asteroid launcher result summarizes a stellar impact consequence');
+        $test->assertEquals([], $observerStellarResultAlerts, 'a non-launching observer receives no asteroid impact result alert');
         $testTrajectoryProcessor->process($impactTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $impactAt);
         $test->assertEquals(AsteroidTrajectory::STATUS_NO_EFFECT, $asteroidTrajectories->findById($impactTrajectory->id)?->status, 'replaying a terminal impact event has no second effect');
+        $replayedStellarResultAlerts = array_values(array_filter(
+            $damageWarnings->findByProbeId($impactProbe->id),
+            static fn(ProbeDamageWarning $warning): bool => $warning->objectId === 'asteroid-result-' . $impactTrajectoryUid,
+        ));
+        $test->assertEquals(1, count($replayedStellarResultAlerts), 'replaying a terminal asteroid event creates no duplicate result alert');
     }
+
+    $probeImpactAsteroid = (new Asteroid(
+        'probe-impact-rock', 'Probe impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
+        resourceAmounts: ['metals' => 1.0],
+    ))->withDeuteriumEngine();
+    $probeImpactSector = $sectorRepository->load($impactProbe->currentSector);
+    $probeImpactSector->addObject($probeImpactAsteroid);
+    $sectorRepository->save($probeImpactSector);
+    $probeImpactLaunch = $kernel->handle(
+        'POST',
+        '/api/probe/' . $impactProbe->id . '/asteroids/probe-impact-rock/trajectories',
+        $impactHeaders,
+        json_encode([
+            'mode' => AsteroidTrajectory::MODE_SYSTEM_IMPACT,
+            'targetObjectId' => (string) $impactObserverProbe->id,
+            'targetSpeedC' => 0.01,
+        ], JSON_THROW_ON_ERROR),
+    );
+    $test->assertEquals(202, $probeImpactLaunch->status, 'a motorized asteroid can target a local probe for impact-alert coverage');
+    $probeImpactTrajectoryUid = (string) ($probeImpactLaunch->body['trajectory']['id'] ?? '');
+    $probeImpactTrajectory = $asteroidTrajectories->findByUid($probeImpactTrajectoryUid);
+    if ($probeImpactTrajectory !== null) {
+        $probeAccelerationFinishedAt = new DateTimeImmutable((string) $probeImpactTrajectory->accelerationEndsAt, new DateTimeZone('UTC'));
+        $testTrajectoryProcessor->process($probeImpactTrajectory->id, AsteroidTrajectory::STATUS_ACCELERATING, null, $probeAccelerationFinishedAt);
+        $testTrajectoryProcessor->process($probeImpactTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $probeAccelerationFinishedAt->modify('+600 seconds'));
+    }
+    $probeImpactResultAlert = array_values(array_filter(
+        $damageWarnings->findByProbeId($impactProbe->id),
+        static fn(ProbeDamageWarning $warning): bool => $warning->objectId === 'asteroid-result-' . $probeImpactTrajectoryUid,
+    ))[0] ?? null;
+    $probeImpactVictimAlert = array_values(array_filter(
+        $damageWarnings->findByProbeId($impactObserverProbe->id),
+        static fn(ProbeDamageWarning $warning): bool => $warning->objectId === 'asteroid-damage-' . $probeImpactTrajectoryUid,
+    ))[0] ?? null;
+    $test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_RESULT, $probeImpactResultAlert?->phase, 'a local asteroid launcher receives the probe impact result');
+    $test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $probeImpactVictimAlert?->phase, 'a probe hit by a motorized asteroid receives its own critical damage alert');
+    $test->assert(str_contains($probeImpactVictimAlert?->message ?? '', '% of total integrity'), 'a surviving asteroid victim receives damage expressed as a percentage of total integrity');
+
+    $othersImpactOwner = $players->createPlayer('asteroid-others-victim', 'Asteroid Others Victim', null, $impactProbe->currentSector);
+    $players->setOthersControl($othersImpactOwner->id, true);
+    $othersImpactHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($othersImpactOwner)['token']];
+    $othersImpactFleet = $others->createFleet($othersImpactOwner->id, $impactProbe->currentSector->getX(), $impactProbe->currentSector->getY(), $impactProbe->currentSector->getZ());
+    $othersImpactShip = $othersImpactFleet['ship'];
+    $othersImpactAsteroid = (new Asteroid(
+        'others-impact-rock', 'Others impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
+        resourceAmounts: ['metals' => 1.0],
+    ))->withDeuteriumEngine();
+    $othersImpactSector = $sectorRepository->load($impactProbe->currentSector);
+    $othersImpactSector->addObject($othersImpactAsteroid);
+    $sectorRepository->save($othersImpactSector);
+    $othersImpactLaunch = $kernel->handle(
+        'POST',
+        '/api/probe/' . $impactProbe->id . '/asteroids/others-impact-rock/trajectories',
+        $impactHeaders,
+        json_encode([
+            'mode' => AsteroidTrajectory::MODE_SYSTEM_IMPACT,
+            'targetObjectId' => (string) $othersImpactShip['public_id'],
+            'targetSpeedC' => 0.05,
+        ], JSON_THROW_ON_ERROR),
+    );
+    $test->assertEquals(202, $othersImpactLaunch->status, 'a motorized asteroid can target a local Others ship for impact-alert coverage');
+    $othersImpactTrajectoryUid = (string) ($othersImpactLaunch->body['trajectory']['id'] ?? '');
+    $othersImpactTrajectory = $asteroidTrajectories->findByUid($othersImpactTrajectoryUid);
+    if ($othersImpactTrajectory !== null) {
+        $othersAccelerationFinishedAt = new DateTimeImmutable((string) $othersImpactTrajectory->accelerationEndsAt, new DateTimeZone('UTC'));
+        $testTrajectoryProcessor->process($othersImpactTrajectory->id, AsteroidTrajectory::STATUS_ACCELERATING, null, $othersAccelerationFinishedAt);
+        $testTrajectoryProcessor->process($othersImpactTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $othersAccelerationFinishedAt->modify('+600 seconds'));
+    }
+    $othersImpactDamageAlert = array_values(array_filter(
+        $others->findAlertsForPlayer($othersImpactOwner->id),
+        static fn(array $alert): bool => ($alert['event_key'] ?? null) === 'asteroid-damage-' . $othersImpactTrajectoryUid,
+    ))[0] ?? null;
+    $test->assertEquals('asteroid_impact_damage', $othersImpactDamageAlert['type'] ?? null, 'an Others ship hit by a motorized asteroid receives a persistent damage alert');
+    $test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $othersImpactDamageAlert['phase'] ?? null, 'the Others asteroid victim alert uses the canonical weapon_damage phase');
+    $test->assert(str_contains((string) ($othersImpactDamageAlert['message'] ?? ''), 'target destroyed'), 'the Others victim alert summarizes the relativistic impact consequence');
+    $othersImpactAlertsResponse = $kernel->handle('GET', '/api/others/alerts?status=unread', $othersImpactHeaders);
+    $othersImpactApiAlert = array_values(array_filter(
+        $othersImpactAlertsResponse->body['alerts'] ?? [],
+        static fn(array $alert): bool => ($alert['type'] ?? null) === 'asteroid_impact_damage',
+    ))[0] ?? null;
+    $test->assertEquals(200, $othersImpactAlertsResponse->status, 'Others alerts API exposes motorized-asteroid victim alerts');
+    $test->assertEquals((string) $othersImpactShip['public_id'], $othersImpactApiAlert['shipId'] ?? null, 'Others asteroid damage alerts identify the victim ship through its opaque id');
+
+    $departedLauncherAsteroid = (new Asteroid(
+        'departed-launcher-impact-rock', 'Departed launcher impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
+        resourceAmounts: ['metals' => 1.0],
+    ))->withDeuteriumEngine();
+    $departedLauncherSector = $sectorRepository->load($impactProbe->currentSector);
+    $departedLauncherSector->addObject($departedLauncherAsteroid);
+    $sectorRepository->save($departedLauncherSector);
+    $departedLauncherImpact = $kernel->handle(
+        'POST',
+        '/api/probe/' . $impactProbe->id . '/asteroids/departed-launcher-impact-rock/trajectories',
+        $impactHeaders,
+        json_encode([
+            'mode' => AsteroidTrajectory::MODE_SYSTEM_IMPACT,
+            'targetObjectId' => 'system-impact-star',
+            'targetSpeedC' => 0.05,
+        ], JSON_THROW_ON_ERROR),
+    );
+    $test->assertEquals(202, $departedLauncherImpact->status, 'a local launcher can start an asteroid impact before leaving its sector');
+    $departedLauncherTrajectoryUid = (string) ($departedLauncherImpact->body['trajectory']['id'] ?? '');
+    $departedLauncherTrajectory = $asteroidTrajectories->findByUid($departedLauncherTrajectoryUid);
+    if ($departedLauncherTrajectory !== null) {
+        $departedAccelerationFinishedAt = new DateTimeImmutable((string) $departedLauncherTrajectory->accelerationEndsAt, new DateTimeZone('UTC'));
+        $testTrajectoryProcessor->process($departedLauncherTrajectory->id, AsteroidTrajectory::STATUS_ACCELERATING, null, $departedAccelerationFinishedAt);
+        $launcherOrigin = $impactProbe->currentSector;
+        $impactProbe->currentSector = new SectorCoordinates($launcherOrigin->getX() + 1, $launcherOrigin->getY() + 1, $launcherOrigin->getZ());
+        $probes->save($impactProbe);
+        $testTrajectoryProcessor->process($departedLauncherTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $departedAccelerationFinishedAt->modify('+600 seconds'));
+        $impactProbe->currentSector = $launcherOrigin;
+        $probes->save($impactProbe);
+    }
+    $departedLauncherResultAlerts = array_values(array_filter(
+        $damageWarnings->findByProbeId($impactProbe->id),
+        static fn(ProbeDamageWarning $warning): bool => $warning->objectId === 'asteroid-result-' . $departedLauncherTrajectoryUid,
+    ));
+    $test->assertEquals([], $departedLauncherResultAlerts, 'an asteroid launcher that left the impact sector receives no result alert');
 }
 
 $stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');

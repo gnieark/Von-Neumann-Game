@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '123'
+  version: '124'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -50,7 +50,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 123
+                apiVersion: 124
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -7221,7 +7221,7 @@ components:
         phase:
           type: string
           enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch, probe_loss, ignition, blueprint_share, weapon, weapon_targeted, weapon_result, weapon_damage]
-          description: A missile alert uses `weapon_targeted` when the selected probe is its suspected target, `weapon_result` for a launcher still present at resolution, and `weapon_damage` for an impacted victim. Other weapon detections use `weapon`.
+          description: Missile and motorized-asteroid impact alerts use `weapon_result` for a launcher still present in the impact sector and `weapon_damage` for an impacted victim. A missile also uses `weapon_targeted` when the selected probe is its suspected target; other weapon detections use `weapon`.
         scheduledAt:
           type: string
           format: date-time

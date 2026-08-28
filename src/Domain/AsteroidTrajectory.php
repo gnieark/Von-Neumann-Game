@@ -47,6 +47,7 @@ final class AsteroidTrajectory
         public readonly SectorCoordinates $originSector,
         public SectorCoordinates $currentSector,
         public readonly ?array $direction,
+        public readonly ?int $launcherProbeId,
         public readonly ?string $targetObjectId,
         public readonly ?int $targetProbeId,
         public readonly ?float $targetSpeedC,

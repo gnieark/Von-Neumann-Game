@@ -5,16 +5,20 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service\AsteroidTrajectory;
 
 use VonNeumannGame\Domain\AsteroidTrajectory;
+use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Repository\AsteroidTrajectoryRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
+use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Service\OthersService;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DeterministicRandom;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\SectorContent;
+use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\Star;
 
@@ -30,6 +34,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         private readonly ImpactDamageResolver $damage,
         private readonly ?OthersRepository $others = null,
         private readonly ?OthersService $othersService = null,
+        private readonly ?ProbeDamageWarningRepository $alerts = null,
     ) {
         $this->distribution = new MaterialDistributionCalculator();
     }
@@ -45,7 +50,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         $sector = $this->sectors->getOrCreateSector($trajectory->currentSector);
         $source = $sector->findObjectById($trajectory->asteroidId);
         if (!$source instanceof Asteroid) {
-            return $this->terminal($trajectory, AsteroidTrajectory::STATUS_MISSED, 'source_missing', 'source_missing');
+            return $this->finish($trajectory, AsteroidTrajectory::STATUS_MISSED, 'source_missing', 'source_missing', 'unknown', null, [], $now);
         }
 
         $targetProbe = $trajectory->targetProbeId !== null ? $this->probes->findById($trajectory->targetProbeId) : null;
@@ -57,14 +62,30 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         if (($target === null && !$othersPresent) || ($targetProbe !== null && !$targetProbe->currentSector->equals($trajectory->currentSector))) {
             $this->destroyObject($sector, $source->getId());
             $this->sectors->saveSector($sector);
-            return $this->terminal($trajectory, AsteroidTrajectory::STATUS_MISSED, 'target_missing', 'target_missing');
+            $missingKind = $targetProbe !== null ? 'probe' : ($targetOthers !== null ? 'others_ship' : 'unknown');
+            $missingTarget = $targetProbe ?? $targetOthers;
+            return $this->finish($trajectory, AsteroidTrajectory::STATUS_MISSED, 'target_missing', 'target_missing', $missingKind, $missingTarget, [], $now);
         }
         if ($othersPresent) {
             $this->destroyObject($sector, $source->getId());
             $this->sectors->saveSector($sector);
             $relativistic = (float)$trajectory->targetSpeedC >= 0.05;
-            $this->othersService?->damageShip((string)$targetOthers['public_id'], $relativistic ? (int)$targetOthers['integrity'] : 10, 'asteroid-impact:'.$trajectory->uid, $relativistic);
-            return $this->terminal($trajectory, $relativistic ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED, $relativistic ? 'destroyed' : 'damaged', null);
+            $after = $this->othersService?->damageShip((string)$targetOthers['public_id'], $relativistic ? (int)$targetOthers['integrity'] : 10, 'asteroid-impact:'.$trajectory->uid, $relativistic);
+            $applied = max(0, (int) $targetOthers['integrity'] - (int) ($after['integrity'] ?? 0));
+            $details = [
+                'targetDestroyed' => $after === null || $after['destroyed_at'] !== null,
+                'integrityDamagePercent' => round(100 * $applied / max(1, (int) $targetOthers['max_integrity']), 2),
+            ];
+            return $this->finish(
+                $trajectory,
+                $relativistic ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED,
+                $relativistic ? 'destroyed' : 'damaged',
+                null,
+                'others_ship',
+                $targetOthers,
+                $details,
+                $now,
+            );
         }
         $targetMovement = $targetProbe !== null ? $this->movements->findActiveByProbeId($targetProbe->id) : null;
         if (
@@ -74,7 +95,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         ) {
             $this->destroyObject($sector, $source->getId());
             $this->sectors->saveSector($sector);
-            return $this->terminal($trajectory, AsteroidTrajectory::STATUS_MISSED, 'moving_probe', 'moving_probe');
+            return $this->finish($trajectory, AsteroidTrajectory::STATUS_MISSED, 'moving_probe', 'moving_probe', 'probe', $targetProbe, [], $now);
         }
 
         $random = new DeterministicRandom('asteroid-impact:' . $trajectory->uid);
@@ -82,21 +103,25 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         if ($target instanceof Star) {
             $this->destroyObject($sector, $source->getId());
             $this->sectors->saveSector($sector);
-            return $this->terminal($trajectory, AsteroidTrajectory::STATUS_NO_EFFECT, 'star_unchanged', 'star_unchanged');
+            return $this->finish($trajectory, AsteroidTrajectory::STATUS_NO_EFFECT, 'star_unchanged', 'star_unchanged', 'star', null, $resolution, $now);
         }
         if ($targetProbe !== null) {
             $damage = (float) ($resolution['integrityDamagePercent'] ?? 0.0);
-            $targetProbe->subtractIntegrityPercent($damage);
+            $appliedDamage = $targetProbe->subtractIntegrityPercent($damage);
             if ($targetProbe->status === ProbeStatus::Dead) {
                 $this->destroyObject($sector, $source->getId());
             }
             $this->probes->save($targetProbe);
             $this->sectors->saveSector($sector);
-            return $this->terminal(
+            return $this->finish(
                 $trajectory,
                 $targetProbe->status === ProbeStatus::Dead ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED,
                 (string) $resolution['outcome'],
                 null,
+                'probe',
+                $targetProbe,
+                ['integrityDamagePercent' => $appliedDamage] + $resolution,
+                $now,
             );
         }
         if ($target instanceof Asteroid && ($resolution['outcome'] ?? null) === 'merged') {
@@ -108,11 +133,15 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         }
         $this->sectors->saveSector($sector);
 
-        return $this->terminal(
+        return $this->finish(
             $trajectory,
             ($resolution['outcome'] ?? '') === 'destroyed' ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED,
             (string) ($resolution['outcome'] ?? 'completed'),
             null,
+            $target instanceof Asteroid ? 'asteroid' : 'planet',
+            null,
+            $resolution,
+            $now,
         );
     }
 
@@ -213,6 +242,128 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
     {
         $sector->removeObjectById($objectId);
         $sector->removeContainersForObject($objectId);
+    }
+
+    /** @param array<string, mixed>|NeumannProbe|null $target */
+    private function finish(
+        AsteroidTrajectory $trajectory,
+        string $status,
+        string $result,
+        ?string $failure,
+        string $targetKind,
+        array|NeumannProbe|null $target,
+        array $details,
+        \DateTimeImmutable $resolvedAt,
+    ): AsteroidTrajectory {
+        $updated = $this->terminal($trajectory, $status, $result, $failure);
+        $sector = $trajectory->currentSector;
+        $targetLabel = $this->targetLabel($trajectory, $targetKind, $target);
+        $scheduledAt = $resolvedAt->format('c');
+
+        if ($trajectory->launcherProbeId !== null && $this->alerts !== null) {
+            $launcher = $this->probes->findById($trajectory->launcherProbeId);
+            if ($launcher !== null && $this->probeIsPresentInSector($launcher, $sector)) {
+                $this->alerts->createAsteroidImpactAlert(
+                    $launcher->id,
+                    $sector,
+                    'asteroid-result-' . $trajectory->uid,
+                    $trajectory->asteroidId,
+                    $this->resultMessage($trajectory->asteroidId, $targetLabel, $result, $details),
+                    ProbeDamageWarning::PHASE_WEAPON_RESULT,
+                    $scheduledAt,
+                );
+            }
+        }
+
+        if (!in_array($result, ['source_missing', 'target_missing', 'moving_probe'], true)) {
+            $victimMessage = $this->victimMessage($trajectory->asteroidId, $targetLabel, $result, $details);
+            if ($targetKind === 'probe' && $target instanceof NeumannProbe && $this->alerts !== null) {
+                $this->alerts->createAsteroidImpactAlert(
+                    $target->id,
+                    $sector,
+                    'asteroid-damage-' . $trajectory->uid,
+                    $trajectory->asteroidId,
+                    $victimMessage,
+                    ProbeDamageWarning::PHASE_WEAPON_DAMAGE,
+                    $scheduledAt,
+                );
+            } elseif ($targetKind === 'others_ship' && is_array($target) && $this->others !== null) {
+                $this->others->createAlert(
+                    (int) $target['player_id'],
+                    (string) $target['public_id'],
+                    'asteroid_impact_damage',
+                    ProbeDamageWarning::PHASE_WEAPON_DAMAGE,
+                    'asteroid-damage-' . $trajectory->uid,
+                    $victimMessage,
+                );
+            }
+        }
+
+        return $updated;
+    }
+
+    private function probeIsPresentInSector(NeumannProbe $probe, SectorCoordinates $sector): bool
+    {
+        return $probe->currentSector->equals($sector)
+            && !in_array($probe->status, [ProbeStatus::Dead, ProbeStatus::Accelerating, ProbeStatus::Cruising, ProbeStatus::Decelerating], true);
+    }
+
+    /** @param array<string, mixed>|NeumannProbe|null $target */
+    private function targetLabel(AsteroidTrajectory $trajectory, string $targetKind, array|NeumannProbe|null $target): string
+    {
+        if ($target instanceof NeumannProbe) {
+            return 'probe ' . $target->name . ' (#' . $target->id . ')';
+        }
+        if ($targetKind === 'others_ship' && is_array($target)) {
+            return 'Others ship ' . (string) $target['public_id'];
+        }
+
+        return $targetKind . ' ' . ($trajectory->targetObjectId ?? 'unknown');
+    }
+
+    /** @param array<string, mixed> $details */
+    private function resultMessage(string $asteroidId, string $targetLabel, string $result, array $details): string
+    {
+        $prefix = 'Motorized asteroid ' . $asteroidId;
+
+        return match ($result) {
+            'source_missing' => $prefix . ' could not complete its impact trajectory because the impactor was no longer present.',
+            'target_missing' => $prefix . ' missed target ' . $targetLabel . ' because it was no longer present.',
+            'moving_probe' => $prefix . ' missed target ' . $targetLabel . ' after the probe left on an intersector movement.',
+            'star_unchanged', 'no_effect' => $prefix . ' impacted target ' . $targetLabel . '; no effect on target, impactor destroyed.',
+            'destroyed' => $prefix . ' impacted target ' . $targetLabel . '; target destroyed.',
+            'damaged' => $prefix . ' impacted target ' . $targetLabel . $this->damageSuffix($details),
+            'merged' => $prefix . ' impacted target ' . $targetLabel . '; impactor and target merged.',
+            'fragmented' => $prefix . ' impacted target ' . $targetLabel . '; target fragmented' . $this->fragmentSuffix($details) . '.',
+            'dislocated' => $prefix . ' impacted target ' . $targetLabel . '; target dislocated' . $this->fragmentSuffix($details) . '.',
+            default => $prefix . ' resolved against target ' . $targetLabel . ' with outcome ' . $result . '.',
+        };
+    }
+
+    /** @param array<string, mixed> $details */
+    private function victimMessage(string $asteroidId, string $targetLabel, string $result, array $details): string
+    {
+        return $this->resultMessage($asteroidId, $targetLabel, $result, $details);
+    }
+
+    /** @param array<string, mixed> $details */
+    private function damageSuffix(array $details): string
+    {
+        if (!isset($details['integrityDamagePercent']) || !is_numeric($details['integrityDamagePercent'])) {
+            return '; target damaged.';
+        }
+
+        $percent = rtrim(rtrim(number_format((float) $details['integrityDamagePercent'], 2, '.', ''), '0'), '.');
+
+        return '; damage: ' . $percent . '% of total integrity.';
+    }
+
+    /** @param array<string, mixed> $details */
+    private function fragmentSuffix(array $details): string
+    {
+        $count = (int) ($details['fragmentCount'] ?? 0);
+
+        return $count > 0 ? ' into ' . $count . ' recoverable fragments' : '';
     }
 
     private function terminal(AsteroidTrajectory $trajectory, string $status, string $result, ?string $failure): AsteroidTrajectory

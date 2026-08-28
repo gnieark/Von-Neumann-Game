@@ -472,10 +472,10 @@ components:
           pattern: '^oalert_[a-f0-9]{20}$'
         shipId:
           type: string
-          description: Opaque public identifier of the firing or victim Others ship concerned by this alert.
+          description: Opaque public identifier of the firing or victim Others ship concerned by this missile or motorized-asteroid alert.
         type:
           type: string
-          enum: [missile_resolution, missile_damage]
+          enum: [missile_resolution, missile_damage, asteroid_impact_damage]
         status:
           type: string
           enum: [unread, read]

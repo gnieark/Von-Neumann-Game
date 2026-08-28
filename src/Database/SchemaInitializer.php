@@ -428,6 +428,7 @@ final class SchemaInitializer
                 direction_x INTEGER NULL,
                 direction_y INTEGER NULL,
                 direction_z INTEGER NULL,
+                launcher_probe_id INTEGER NULL,
                 target_object_id $nullableText,
                 target_probe_id INTEGER NULL,
                 target_speed_c $decimal NULL,

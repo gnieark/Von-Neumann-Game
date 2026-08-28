@@ -92,6 +92,7 @@ final class AsteroidTrajectoryService
             $values = $mode === AsteroidTrajectory::MODE_SYSTEM_IMPACT
                 ? $this->systemImpactValues($probe, $sector, $asteroid, $request, $now)
                 : $this->sectorTransferValues($player, $probe, $asteroid, $request, $now);
+            $values['launcherProbeId'] = $probe->id;
             $values['asteroidSnapshot'] = $asteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY)->toArray();
             $values['attachmentsSnapshot'] = array_map(
                 static fn(\VonNeumannGame\Sector\SectorDetachedContainer $container): array => $container->toArray(),
