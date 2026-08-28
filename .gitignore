@@ -23,6 +23,7 @@ AGENTS.md
 /config/oauth.json
 /config/*-local.json
 /config/*.local.json
+/scripts/others_control/config.json
 
 # Logs and cache
 *.log
