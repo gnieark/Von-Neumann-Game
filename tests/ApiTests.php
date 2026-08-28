@@ -535,7 +535,11 @@ $test->assertEquals($deprecatedProbeMissileOperation['tags'] ?? null, $igniteMis
 $test->assert(
     is_array($igniteMissileOperation)
         && !in_array('Idempotency-Key', array_column($igniteMissileOperation['parameters'] ?? [], 'name'), true)
-        && (($igniteMissileOperation['requestBody']['content']['application/json']['schema']['required'] ?? null) === ['targetId']),
+        && (($igniteMissileOperation['requestBody']['content']['application/json']['schema']['required'] ?? null) === ['targetId'])
+        && str_starts_with(
+            (string) ($igniteMissileOperation['requestBody']['content']['application/json']['schema']['properties']['missileItemId']['description'] ?? ''),
+            'Optional.',
+        ),
     'the canonical Manny missile contract has no idempotency header and makes missileItemId optional',
 );
 $expectedOpenApiTagOrder = [

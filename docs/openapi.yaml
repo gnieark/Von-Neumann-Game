@@ -1731,6 +1731,9 @@ paths:
               properties:
                 missileItemId:
                   type: string
+                  description: >
+                    Optional. When omitted, the first available missile in the
+                    probe inventory is used.
                 targetId:
                   type: string
       responses:
