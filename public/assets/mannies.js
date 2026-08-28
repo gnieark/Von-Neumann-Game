@@ -4640,9 +4640,9 @@
                 setStatus(tr("invalidMissileLaunchOrder", "Select a missile and a target."));
                 return null;
             }
-            return window.VNG.apiJson(explicitCurrentProbeApiPath("/missiles"), {
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/ignite_missile"), {
                 "method": "POST",
-                "body": JSON.stringify({"actorMannyId": String(mannyId), missileItemId, targetId}),
+                "body": JSON.stringify({missileItemId, targetId}),
             });
         }
         if (form.classList.contains("manny-improve-probe-form")) {
