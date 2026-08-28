@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v125 / lancement de missiles par les Mannys : ajout de `POST /api/probe/{probeId}/mannies/{mannyId}/ignite_missile`, sans `Idempotency-Key`. Son payload exige `targetId` et accepte un `missileItemId` facultatif ; en son absence, le premier missile disponible de l’inventaire est choisi. La Manny reste occupée une minute avant le lancement. `POST /api/probe/{probeId}/missiles` est désormais déprécié au profit de cette route.
 - API v124 / impacts d’astéroïdes motorisés : la sonde lanceuse reçoit désormais une alerte persistante récapitulant le résultat uniquement si elle est encore physiquement présente dans le secteur à la résolution. Une sonde ou un vaisseau Others victime reçoit sa propre alerte critique de dégâts, avec le pourcentage d’intégrité perdue lorsque la cible survit. Les effets sur les étoiles, planètes et astéroïdes sont récapitulés au seul lanceur.
 - Migration obligatoire avant redémarrage : scheduler arrêté, exécuter `php scripts/one-shot-scripts/migrate-asteroid-impact-alerts.php --database-config=…` afin d’ajouter la référence canonique de la sonde lanceuse aux trajectoires. Les trajectoires historiques conservent explicitement un lanceur inconnu et ne peuvent donc produire que l’éventuelle alerte de victime.
 

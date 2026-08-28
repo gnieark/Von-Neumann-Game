@@ -16,7 +16,6 @@ use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
-use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
@@ -104,25 +103,41 @@ final class OthersService
         if (!is_string($mannyId) || $mannyId === '' || !is_string($itemId) || $itemId === '' || !is_string($targetId) || $targetId === '') {
             throw new OthersActionException(400, 'bad_request', 'actorMannyId, missileItemId and targetId are required.');
         }
+        return $this->igniteProbeMissile($probe, $playerId, $mannyId, ['missileItemId' => $itemId, 'targetId' => $targetId]);
+    }
+
+    /** @return array<string,mixed> */
+    public function igniteProbeMissile(NeumannProbe $probe, int $playerId, string $mannyId, array $payload): array
+    {
+        $itemIdProvided = array_key_exists('missileItemId', $payload);
+        $itemId = $itemIdProvided ? $payload['missileItemId'] : null; $targetId = $payload['targetId'] ?? null;
+        if (($itemIdProvided && (!is_string($itemId) || $itemId === '')) || !is_string($targetId) || $targetId === '') {
+            throw new OthersActionException(400, 'bad_request', 'targetId is required and missileItemId must be a non-empty string when provided.');
+        }
         if ($this->mannies === null || $this->items === null) { throw new OthersActionException(503, 'missile_service_unavailable', 'Missile preparation is unavailable.'); }
         $manny = $this->mannies->findByUidForProbe($probe->id, $mannyId);
         if ($manny === null || !$manny->isOnProbe()) { throw new OthersActionException(404, 'manny_not_found', 'An embarked Manny was not found.'); }
         if ($manny->currentTask !== null) { throw new OthersActionException(409, 'manny_busy', 'The Manny is already busy.'); }
-        $item = $this->items->findByUidForProbe($probe->id, $itemId);
-        if ($item === null || $item->type !== ProbeItem::TYPE_MISSILE) { throw new OthersActionException(404, 'missile_item_not_found', 'A missile item was not found in this probe inventory.'); }
         $target = $this->resolveMissileTarget($probe->currentSector->getX(), $probe->currentSector->getY(), $probe->currentSector->getZ(), $targetId);
         if ($target === null) { throw new OthersActionException(404, 'target_not_found', 'An admissible missile target was not found in this sector.'); }
-        return $this->others->transaction(function () use ($probe, $playerId, $manny, $item, $target): array {
+        return $this->others->transaction(function () use ($probe, $playerId, $manny, $itemId, $target): array {
             $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $launchAt = $now->modify('+1 minute');
-            $lockSql = 'SELECT id FROM probe_items WHERE id=:item_id AND probe_id=:probe_id';
+            $lockSql = "SELECT pi.* FROM probe_items pi WHERE pi.probe_id=:probe_id AND pi.type='missile'";
+            $parameters = ['probe_id' => $probe->id];
+            if ($itemId !== null) {
+                $lockSql .= ' AND pi.uid=:item_uid';
+                $parameters['item_uid'] = $itemId;
+            } else {
+                $lockSql .= " AND NOT EXISTS (SELECT 1 FROM missile_launches ml WHERE ml.probe_item_id=pi.id AND ml.status IN ('preparing','queued')) ORDER BY pi.created_at ASC, pi.id ASC LIMIT 1";
+            }
             if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) !== 'sqlite') { $lockSql .= ' FOR UPDATE'; }
-            $lock = $pdo->prepare($lockSql); $lock->execute(['item_id' => $item->id, 'probe_id' => $probe->id]);
-            if ($lock->fetchColumn() === false) { throw new OthersActionException(409, 'action_conflict', 'The missile item changed while accepting the command.'); }
-            $check = $pdo->prepare("SELECT 1 FROM missile_launches WHERE probe_item_id=:item_id AND status IN ('preparing','queued') LIMIT 1"); $check->execute(['item_id' => $item->id]);
+            $lock = $pdo->prepare($lockSql); $lock->execute($parameters); $item = $lock->fetch();
+            if (!$item) { throw new OthersActionException(404, 'missile_item_not_found', 'An available missile item was not found in this probe inventory.'); }
+            $check = $pdo->prepare("SELECT 1 FROM missile_launches WHERE probe_item_id=:item_id AND status IN ('preparing','queued') LIMIT 1"); $check->execute(['item_id' => (int) $item['id']]);
             if ($check->fetchColumn() !== false) { throw new OthersActionException(409, 'action_conflict', 'The missile item is already reserved.'); }
             $missileId = OthersRepository::publicId('missile');
             $pdo->prepare("INSERT INTO missile_launches (public_id,launcher_kind,launcher_public_id,player_id,probe_id,manny_id,probe_item_id,others_action_id,others_item_id,target_public_id,target_kind,sector_x,sector_y,sector_z,status,projectile_public_id,launch_at,impact_at,result,scheduled_event_id,created_at,updated_at) VALUES (:public_id,'probe',:launcher,:player_id,:probe_id,:manny_id,:item_id,NULL,NULL,:target,:kind,:x,:y,:z,'preparing',NULL,:launch_at,NULL,NULL,NULL,:created_at,:updated_at)")->execute([
-                'public_id' => $missileId, 'launcher' => (string) $probe->id, 'player_id' => $playerId, 'probe_id' => $probe->id, 'manny_id' => $manny->id, 'item_id' => $item->id,
+                'public_id' => $missileId, 'launcher' => (string) $probe->id, 'player_id' => $playerId, 'probe_id' => $probe->id, 'manny_id' => $manny->id, 'item_id' => (int) $item['id'],
                 'target' => $target['id'], 'kind' => $target['kind'], 'x' => $probe->currentSector->getX(), 'y' => $probe->currentSector->getY(), 'z' => $probe->currentSector->getZ(),
                 'launch_at' => $launchAt->format('c'), 'created_at' => $now->format('c'), 'updated_at' => $now->format('c'),
             ]);

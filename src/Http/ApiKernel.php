@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 124;
+    public const API_VERSION = 125;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -141,6 +141,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/ships/([^/]+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersMissileCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->missileResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->probeMissileCreateResponse($player, $probe, $ctx->body)), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/ignite_missile$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMannyMissileCreateResponse($player, $probe, $ctx->stringParam(1), $ctx->body), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $_probe): ApiResponse => $this->missileResponse($player, $ctx->stringParam(1)), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/weapons/laser$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersLaserResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/crafts$#', ['GET', 'POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $ctx->method === 'POST' ? $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersCraftCreateResponse($player, $ctx->stringParam(0), $ctx->body)) : $this->othersCraftsResponse($player, $ctx->stringParam(0)))),
@@ -755,6 +756,14 @@ final class ApiKernel
         $payload = $this->decodeJsonBody($body);
         if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
         $missile = $this->othersService?->prepareProbeMissile($probe, $player->id, $payload) ?? throw new \RuntimeException('Probe missile service is unavailable.');
+        return new ApiResponse(202, ['missile' => $this->presentMissile($missile)]);
+    }
+
+    private function probeMannyMissileCreateResponse(Player $player, NeumannProbe $probe, string $mannyId, ?string $body): ApiResponse
+    {
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $missile = $this->othersService?->igniteProbeMissile($probe, $player->id, $mannyId, $payload) ?? throw new \RuntimeException('Probe missile service is unavailable.');
         return new ApiResponse(202, ['missile' => $this->presentMissile($missile)]);
     }
 

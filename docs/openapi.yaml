@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '124'
+  version: '125'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -50,7 +50,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 124
+                apiVersion: 125
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1680,6 +1680,11 @@ paths:
     post:
       tags: [Missiles, mannies]
       summary: Start a one-minute Manny missile preparation
+      deprecated: true
+      description: >
+        Deprecated. Use
+        `POST /api/probe/{probeId}/mannies/{mannyId}/ignite_missile`
+        instead.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -1705,6 +1710,44 @@ paths:
       responses:
         '202':
           description: Accepted for scheduler processing; no terminal universe effect has run inline
+  /api/probe/{probeId}/mannies/{mannyId}/ignite_missile:
+    parameters:
+      - $ref: '#/components/parameters/ProbeId'
+      - $ref: '#/components/parameters/MannyId'
+    post:
+      tags: [Missiles, mannies]
+      summary: Start a one-minute Manny missile preparation
+      description: >
+        Starts a one-minute missile preparation with the selected embarked
+        Manny. When missileItemId is omitted, the first available missile in
+        the probe inventory is used.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetId]
+              properties:
+                missileItemId:
+                  type: string
+                targetId:
+                  type: string
+      responses:
+        '202':
+          description: Missile preparation accepted for scheduler processing
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Manny busy or missile already reserved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/missiles/{missileId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'

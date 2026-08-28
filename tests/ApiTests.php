@@ -521,7 +521,23 @@ $test->assert(str_contains($othersApiDocsHtml, 'data-openapi-url="/openapi-other
 $test->assert(is_string($apiDocsScript) && str_contains($apiDocsScript, '"docExpansion": "none"'), 'Swagger UI keeps tag accordions collapsed by default');
 $test->assert(is_string($openApi) && !str_contains($openApi, 'openapi-others'), 'main OpenAPI document is detached from the Others contract');
 $test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId}/missiles:'), 'main OpenAPI document retains probe missile endpoints without an external reference');
+$test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId}/mannies/{mannyId}/ignite_missile:'), 'main OpenAPI document exposes the canonical Manny missile endpoint');
 $openApiDocument = is_string($openApi) ? yaml_parse($openApi) : false;
+$deprecatedProbeMissileOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/missiles']['post'] ?? null) : null;
+$igniteMissileOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/mannies/{mannyId}/ignite_missile']['post'] ?? null) : null;
+$test->assert(
+    is_array($deprecatedProbeMissileOperation)
+        && ($deprecatedProbeMissileOperation['deprecated'] ?? false) === true
+        && str_contains((string) ($deprecatedProbeMissileOperation['description'] ?? ''), 'POST /api/probe/{probeId}/mannies/{mannyId}/ignite_missile'),
+    'OpenAPI deprecates the old probe missile command and points to the Manny-scoped replacement',
+);
+$test->assertEquals($deprecatedProbeMissileOperation['tags'] ?? null, $igniteMissileOperation['tags'] ?? null, 'the canonical Manny missile endpoint retains the deprecated operation tags');
+$test->assert(
+    is_array($igniteMissileOperation)
+        && !in_array('Idempotency-Key', array_column($igniteMissileOperation['parameters'] ?? [], 'name'), true)
+        && (($igniteMissileOperation['requestBody']['content']['application/json']['schema']['required'] ?? null) === ['targetId']),
+    'the canonical Manny missile contract has no idempotency header and makes missileItemId optional',
+);
 $expectedOpenApiTagOrder = [
     'system',
     'account',
@@ -578,6 +594,7 @@ $expectedAdditionalTagsByPath = [
     '/api/probe/{probeId}/damage-warnings' => 'movement',
     '/api/probe/{probeId}/damage-warnings/{damageWarningId}' => 'movement',
     '/api/probe/{probeId}/missiles' => 'mannies',
+    '/api/probe/{probeId}/mannies/{mannyId}/ignite_missile' => 'Missiles',
     '/api/probe/{probeId}/mannies/{mannyId}/mine' => 'sectors',
     '/api/probe/{probeId}/mannies/{mannyId}/assemble-probe' => 'probes',
     '/api/probe/{probeId}/mannies/{mannyId}/salvage' => 'sectors',
@@ -956,8 +973,8 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspec
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-refuel-motorized-asteroid-form'), 'mannies JS renders the motorized asteroid refueling form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-asteroid-form'), 'mannies JS renders the asteroid trajectory launch form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-missile-form'), 'mannies JS renders the probe missile launch form in sector actions');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'explicitCurrentProbeApiPath("/missiles")'), 'mannies JS posts missile launches through the explicit current-probe endpoint');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, '"actorMannyId": String(mannyId), missileItemId, targetId'), 'mannies JS sends the canonical probe missile payload');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/ignite_missile")'), 'mannies JS posts missile launches through the canonical Manny-scoped endpoint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'JSON.stringify({missileItemId, targetId})'), 'mannies JS sends the canonical Manny missile payload without duplicating the actor id');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/sector/autonomous-units?limit=500'), 'mannies JS loads local autonomous units as missile targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.mannyUid || object.id'), 'mannies JS uses the canonical Manny uid for missile targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'launchMissileActionTitle' => 'Lancer un missile'"), 'French translations label the missile launch action');
@@ -1213,7 +1230,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260828-asteroid-impact-alerts"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260828-manny-ignite-missile"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
@@ -2275,6 +2292,42 @@ $renameAndDefault = $kernel->handle('PATCH', '/api/probe/' . $sameSectorProbe->i
 $test->assertEquals(200, $renameAndDefault->status, 'PATCH /api/probe/{probeId} accepts combined name + isDefault payload');
 $test->assertEquals('Renamed And Default', $probes->findById($sameSectorProbe->id)?->name ?? null, 'Combined PATCH persists the new probe name');
 $test->assertEquals($sameSectorProbe->id, $players->findById($multiProbePlayer->id)?->defaultProbeId, 'Combined PATCH persists default probe selection when permitted');
+$igniteMissileProbe = $probes->createForPlayer($multiProbePlayer->id, 'Manny missile endpoint probe', $secondaryProbe->currentSector);
+$storage->initializeProbeStorage($igniteMissileProbe);
+$igniteMissileProbe->excludeFromStats = true;
+$probes->save($igniteMissileProbe);
+$igniteMissileManny = $mannies->createForProbe($igniteMissileProbe->id, 'Canonical missile operator', uid: 'mny-canonical-missile-operator');
+$firstIgniteMissileItem = $items->create($igniteMissileProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'canonical-first-missile-item');
+$items->create($igniteMissileProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'canonical-second-missile-item');
+$igniteMissileResponse = $kernel->handle(
+    'POST',
+    '/api/probe/' . $igniteMissileProbe->id . '/mannies/' . rawurlencode($igniteMissileManny->uid) . '/ignite_missile',
+    $multiProbeHeaders,
+    json_encode(['targetId' => (string) $secondaryProbe->id], JSON_THROW_ON_ERROR),
+);
+$test->assertEquals(202, $igniteMissileResponse->status, 'POST /api/probe/{probeId}/mannies/{mannyId}/ignite_missile accepts a target-only payload');
+$igniteMissileId = $igniteMissileResponse->body['missile']['id'] ?? null;
+$igniteMissileRowStatement = $pdo->prepare('SELECT * FROM missile_launches WHERE public_id = :public_id');
+$igniteMissileRowStatement->execute(['public_id' => $igniteMissileId]);
+$igniteMissileRow = $igniteMissileRowStatement->fetch();
+$igniteMissileRowStatement->closeCursor();
+$test->assertEquals($firstIgniteMissileItem->id, isset($igniteMissileRow['probe_item_id']) ? (int) $igniteMissileRow['probe_item_id'] : null, 'target-only missile preparation reserves the first available probe missile');
+$test->assertEquals('preparing_missile', $mannies->findById($igniteMissileManny->id)?->currentTask, 'canonical missile preparation occupies the path-selected Manny');
+$test->assertEquals(
+    60,
+    strtotime((string) ($igniteMissileResponse->body['missile']['launchAt'] ?? '')) - strtotime((string) ($igniteMissileResponse->body['missile']['createdAt'] ?? '')),
+    'canonical Manny missile preparation lasts exactly one minute',
+);
+$igniteMissileMannyAfterTest = $mannies->findById($igniteMissileManny->id);
+if ($igniteMissileMannyAfterTest !== null) {
+    $igniteMissileMannyAfterTest->currentTask = null;
+    $igniteMissileMannyAfterTest->taskStartedAt = null;
+    $igniteMissileMannyAfterTest->taskEndsAt = null;
+    $igniteMissileMannyAfterTest->taskPayload = ['lastTask' => Manny::TASK_PREPARING_MISSILE, 'result' => 'test_fixture_cleaned'];
+    $mannies->save($igniteMissileMannyAfterTest);
+}
+$pdo->prepare("UPDATE missile_launches SET status = 'failed', result = 'test_fixture_cleaned' WHERE public_id = :public_id")
+    ->execute(['public_id' => $igniteMissileId]);
 $missileAlertManny = $mannies->createForProbe($secondaryProbe->id, 'Missile alert operator', uid: 'mny-missile-alert-operator');
 $missileAlertItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'missile-alert-test-item');
 $preparedAlertMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
@@ -2811,7 +2864,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(124, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(125, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
@@ -9885,6 +9938,7 @@ foreach ([
     'POST /api/probe/1/asteroids/mtr_missing/trajectories',
     'GET /api/probe/1/asteroid-trajectories/atr_missing',
     'POST /api/probe/1/missiles',
+    'POST /api/probe/1/mannies/mny_missing/ignite_missile',
     'GET /api/probe/1/missiles/missile_missing',
     'GET /api/others',
     'GET /api/others/alerts',
