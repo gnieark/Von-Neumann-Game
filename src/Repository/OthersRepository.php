@@ -241,9 +241,11 @@ final class OthersRepository
     public function findShipsByFleetId(int $fleetId): array
     {
         $stmt = $this->pdo->prepare(
-            "SELECT s.*, COUNT(a.id) AS auxiliary_count,
+            "SELECT s.*, MAX(f.public_id) AS fleet_public_id, COUNT(a.id) AS auxiliary_count,
                     SUM(CASE WHEN a.location_type <> 'embarked' AND a.destroyed_at IS NULL THEN 1 ELSE 0 END) AS deployed_auxiliary_count
-             FROM others_ships s LEFT JOIN others_auxiliaries a ON a.ship_id = s.id AND a.destroyed_at IS NULL
+             FROM others_ships s
+             JOIN others_fleets f ON f.id = s.fleet_id
+             LEFT JOIN others_auxiliaries a ON a.ship_id = s.id AND a.destroyed_at IS NULL
              WHERE s.fleet_id = :fleet_id AND s.destroyed_at IS NULL
              GROUP BY s.id ORDER BY CASE s.type WHEN 'mothership' THEN 0 ELSE 1 END, s.public_id"
         );

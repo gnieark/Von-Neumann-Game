@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-29
+
+### Changed
+
+- API v126 / navigation Others : les coordonnées des vaisseaux sont désormais exposées relativement au secteur home de leur propriétaire, commun à toute la flotte et présenté comme `(0, 0, 0)`. Les auxiliaires séparés de leur porteur exposent leur secteur dans ce même référentiel ; les auxiliaires embarqués ou présents avec leur porteur ne le dupliquent pas.
+- Rupture de contrat Others : le champ `target` de `POST /api/others/ships/{shipId}/move` et `POST /api/others/fleets/{fleetId}/move` désigne désormais la destination relativement au home du propriétaire. Il ne représente plus un déplacement depuis la position courante du vaisseau ou de la mère.
+
 ## 2026-08-28
 
 ### Changed

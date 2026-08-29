@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 125;
+    public const API_VERSION = 126;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -509,7 +509,7 @@ final class ApiKernel
         return new ApiResponse(200, ['fleet' => [
             'id' => (string) $fleet['public_id'],
             'status' => (string) $fleet['status'],
-            'ships' => array_map(fn(array $ship): array => $this->presentOthersShip($ship), $ships),
+            'ships' => array_map(fn(array $ship): array => $this->presentOthersShip($player, $ship), $ships),
             'activeActions' => array_map(fn(array $action): array => $this->presentOthersAction($action), $actions),
             'createdAt' => (string) $fleet['created_at'],
             'updatedAt' => (string) $fleet['updated_at'],
@@ -521,7 +521,7 @@ final class ApiKernel
         $ship = $this->others?->findShipForPlayer($shipId, $player->id);
         return $ship === null
             ? ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.')
-            : new ApiResponse(200, ['ship' => $this->presentOthersShip($ship)]);
+            : new ApiResponse(200, ['ship' => $this->presentOthersShip($player, $ship)]);
     }
 
     private function othersAuxiliariesResponse(Player $player, string $shipId, array $query): ApiResponse
@@ -543,7 +543,7 @@ final class ApiKernel
             $cursor = $decoded;
         }
         $page = $this->others?->findAuxiliariesPageByShipId((int) $ship['id'], $cursor, $limit) ?? ['rows' => [], 'nextCursor' => null];
-        $response = ['auxiliaries' => array_map(fn(array $row): array => $this->presentOthersAuxiliary($row), $page['rows'])];
+        $response = ['auxiliaries' => array_map(fn(array $row): array => $this->presentOthersAuxiliary($player, $ship, $row), $page['rows'])];
         if ($page['nextCursor'] !== null) {
             $response['nextCursor'] = base64_encode((string) $page['nextCursor']);
         }
@@ -559,7 +559,7 @@ final class ApiKernel
         $auxiliary = $this->others?->findAuxiliaryForShip($auxiliaryId, (int) $ship['id']);
         return $auxiliary === null
             ? ApiResponse::error(404, 'others_auxiliary_not_found', 'Others auxiliary not found.')
-            : new ApiResponse(200, ['auxiliary' => $this->presentOthersAuxiliary($auxiliary)]);
+            : new ApiResponse(200, ['auxiliary' => $this->presentOthersAuxiliary($player, $ship, $auxiliary)]);
     }
 
     private function othersAuxiliaryTaskResponse(Player $player, string $shipId, string $auxiliaryId, string $task, ?string $body): ApiResponse
@@ -717,7 +717,7 @@ final class ApiKernel
         if (!is_array($payload)) {
             return ApiResponse::error(400, 'bad_request', 'A JSON object is required.');
         }
-        $action = $this->othersService?->moveShip($ship, $payload) ?? throw new \RuntimeException('Others movement service is unavailable.');
+        $action = $this->othersService?->moveShip($ship, $payload, $player->homeSector) ?? throw new \RuntimeException('Others movement service is unavailable.');
         return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
     }
 
@@ -812,7 +812,7 @@ final class ApiKernel
         if (!is_array($payload)) {
             return ApiResponse::error(400, 'bad_request', 'A JSON object is required.');
         }
-        $result = $this->othersService?->moveFleet($fleet, $payload) ?? throw new \RuntimeException('Others movement service is unavailable.');
+        $result = $this->othersService?->moveFleet($fleet, $payload, $player->homeSector) ?? throw new \RuntimeException('Others movement service is unavailable.');
         return new ApiResponse(202, [
             'actions' => array_map(fn(array $entry): array => ['shipId' => $entry['shipId'], 'action' => $this->presentOthersAction($entry['action'])], $result['created']),
             'ignored' => $result['ignored'], 'blocked' => $result['blocked'],
@@ -905,15 +905,17 @@ final class ApiKernel
         ];
     }
 
-    private function presentOthersShip(array $ship): array
+    private function presentOthersShip(Player $player, array $ship): array
     {
+        $state = in_array((string) $ship['status'], ['transit', 'removed', 'destroyed'], true) ? (string) $ship['status'] : 'in_sector';
         $result = [
             'id' => (string) $ship['public_id'], 'fleetId' => (string) ($ship['fleet_public_id'] ?? ''),
             'type' => (string) $ship['type'], 'status' => (string) $ship['status'],
             'integrity' => (int) $ship['integrity'], 'maxIntegrity' => (int) $ship['max_integrity'],
             'deuterium' => ['amount' => (float) $ship['deuterium_stock'], 'capacity' => (float) $ship['deuterium_capacity']],
             'inventoryCapacityEce' => (float) $ship['inventory_capacity'],
-            'location' => ['state' => in_array((string) $ship['status'], ['transit', 'removed', 'destroyed'], true) ? (string) $ship['status'] : 'in_sector'],
+            'location' => ['state' => $state],
+            'sector' => $state === 'in_sector' ? ['relative' => $this->relativeOthersSector($player, $ship)] : null,
             'createdAt' => (string) $ship['created_at'], 'updatedAt' => (string) $ship['updated_at'],
         ];
         if (isset($ship['auxiliary_count'])) {
@@ -923,7 +925,7 @@ final class ApiKernel
         return $result;
     }
 
-    private function presentOthersAuxiliary(array $auxiliary): array
+    private function presentOthersAuxiliary(Player $player, array $ship, array $auxiliary): array
     {
         $result = [
             'id' => (string) $auxiliary['public_id'], 'status' => (string) $auxiliary['status'],
@@ -934,7 +936,29 @@ final class ApiKernel
         if (!empty($auxiliary['action_public_id'])) {
             $result['action'] = ['id' => (string) $auxiliary['action_public_id'], 'type' => (string) $auxiliary['action_type'], 'status' => (string) $auxiliary['action_status'], 'endsAt' => (string) $auxiliary['action_ends_at']];
         }
+        if (
+            $auxiliary['sector_x'] !== null
+            && $auxiliary['sector_y'] !== null
+            && $auxiliary['sector_z'] !== null
+            && (
+                (string) $ship['status'] === 'transit'
+                || (int) $auxiliary['sector_x'] !== (int) $ship['sector_x']
+                || (int) $auxiliary['sector_y'] !== (int) $ship['sector_y']
+                || (int) $auxiliary['sector_z'] !== (int) $ship['sector_z']
+            )
+        ) {
+            $result['sector'] = ['relative' => $this->relativeOthersSector($player, $auxiliary)];
+        }
         return $result;
+    }
+
+    private function relativeOthersSector(Player $player, array $entity): array
+    {
+        return (new PlayerReferenceFrame($player->homeSector))->globalToRelative(new SectorCoordinates(
+            (int) $entity['sector_x'],
+            (int) $entity['sector_y'],
+            (int) $entity['sector_z'],
+        ));
     }
 
     private function presentOthersAction(array $action): array

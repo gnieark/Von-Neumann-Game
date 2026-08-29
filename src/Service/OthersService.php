@@ -155,9 +155,14 @@ final class OthersService
         $stmt->execute(['public_id' => $publicId, 'player_id' => $playerId]); return $stmt->fetch() ?: null;
     }
 
-    public function moveShip(array $ship, array $payload): array
+    public function moveShip(array $ship, array $payload, SectorCoordinates $homeSector): array
     {
-        $target = $this->relativeTarget($ship, $payload);
+        $target = $this->homeRelativeTarget($homeSector, $payload);
+        return $this->moveShipToTarget($ship, $target, $payload, $homeSector);
+    }
+
+    private function moveShipToTarget(array $ship, SectorCoordinates $target, array $payload, SectorCoordinates $homeSector): array
+    {
         $origin = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
         $distance = $this->grid->getDistance($origin, $target);
         if ($distance === 0) {
@@ -178,7 +183,7 @@ final class OthersService
             throw new OthersActionException(400, 'bad_request', 'leaveAuxiliariesBehind must be a boolean.');
         }
 
-        return $this->others->transaction(function () use ($ship, $target, $origin, $distance, $fuelCost, $leaveBehind): array {
+        return $this->others->transaction(function () use ($ship, $target, $origin, $distance, $fuelCost, $leaveBehind, $homeSector): array {
             $pdo = $this->others->pdo();
             $locked = $this->others->findShipByPublicId((string) $ship['public_id']);
             if ($locked === null || $locked['current_action_id'] !== null || (float) $locked['deuterium_stock'] < $fuelCost) {
@@ -189,7 +194,7 @@ final class OthersService
             $timeline = $this->durations->timeline($cancelableUntil, $distance);
             $action = $this->others->createAction(
                 $locked, 'ship_move', 'others_ship', (string) $locked['public_id'],
-                ['target' => ['x' => $target->getX() - $origin->getX(), 'y' => $target->getY() - $origin->getY(), 'z' => $target->getZ() - $origin->getZ()], 'leaveAuxiliariesBehind' => $leaveBehind],
+                ['target' => $target->subtract($homeSector), 'leaveAuxiliariesBehind' => $leaveBehind],
                 $timeline['arrivalAt']->format('c'), $cancelableUntil->format('c'),
             );
             $stmt = $pdo->prepare(
@@ -245,7 +250,7 @@ final class OthersService
         });
     }
 
-    public function moveFleet(array $fleet, array $payload): array
+    public function moveFleet(array $fleet, array $payload, SectorCoordinates $homeSector): array
     {
         $ships = $this->others->findShipsByFleetId((int) $fleet['id']);
         $mothership = null;
@@ -253,12 +258,11 @@ final class OthersService
         if ($mothership === null) { throw new OthersActionException(409, 'others_mothership_required', 'The fleet has no active mothership.'); }
         $relative = $payload['target'] ?? null;
         if (!is_array($relative)) { throw new OthersActionException(400, 'bad_request', 'JSON body must contain target.'); }
-        $absolute = $this->relativeTarget($mothership, $payload);
+        $absolute = $this->homeRelativeTarget($homeSector, $payload);
         $created = []; $ignored = []; $blocked = [];
         foreach ($ships as $ship) {
-            $shipTarget = ['target' => ['x' => $absolute->getX() - (int) $ship['sector_x'], 'y' => $absolute->getY() - (int) $ship['sector_y'], 'z' => $absolute->getZ() - (int) $ship['sector_z']], 'leaveAuxiliariesBehind' => $payload['leaveAuxiliariesBehind'] ?? false];
             try {
-                $created[] = ['shipId' => (string) $ship['public_id'], 'action' => $this->moveShip($ship, $shipTarget)];
+                $created[] = ['shipId' => (string) $ship['public_id'], 'action' => $this->moveShipToTarget($ship, $absolute, $payload, $homeSector)];
             } catch (OthersActionException $error) {
                 if ($error->errorCode === 'same_destination') { $ignored[] = ['shipId' => (string) $ship['public_id'], 'reason' => 'already_at_destination']; }
                 else { $blocked[] = ['shipId' => (string) $ship['public_id'], 'reason' => $error->errorCode]; }
@@ -1240,14 +1244,14 @@ final class OthersService
         }
     }
 
-    private function relativeTarget(array $ship, array $payload): SectorCoordinates
+    private function homeRelativeTarget(SectorCoordinates $homeSector, array $payload): SectorCoordinates
     {
         $target = $payload['target'] ?? null;
         if (!is_array($target) || array_keys($target) !== ['x', 'y', 'z'] || !is_int($target['x']) || !is_int($target['y']) || !is_int($target['z'])) {
             throw new OthersActionException(400, 'bad_request', 'target must contain integer x, y and z relative coordinates.');
         }
         try {
-            return new SectorCoordinates((int) $ship['sector_x'] + $target['x'], (int) $ship['sector_y'] + $target['y'], (int) $ship['sector_z'] + $target['z']);
+            return $homeSector->add($target['x'], $target['y'], $target['z']);
         } catch (\Throwable) {
             throw new OthersActionException(422, 'invalid_destination', 'The relative destination is invalid.');
         }

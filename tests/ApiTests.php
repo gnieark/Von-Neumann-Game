@@ -1240,6 +1240,9 @@ $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($a
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, '"/api/others/alerts"'), 'Others OpenAPI documents the persistent alert collection');
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'asteroid_impact_damage'), 'Others OpenAPI documents motorized-asteroid victim alerts');
+$test->assert(is_string($openApiOthers) && str_contains($openApiOthers, "owning player's home sector"), 'Others OpenAPI defines movement targets from the owner home');
+$test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'OthersShipResponse'), 'Others OpenAPI documents ship coordinates through a response schema');
+$test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'separated from its carrier'), 'Others OpenAPI documents separated auxiliary coordinates');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -2416,6 +2419,69 @@ $othersAlertPlayer = $players->findById($othersAlertPlayer->id) ?? throw new Run
 $othersAlertHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($othersAlertPlayer)['token']];
 $othersAlertFleet = $others->createFleet($othersAlertPlayer->id, $secondaryProbe->currentSector->getX(), $secondaryProbe->currentSector->getY(), $secondaryProbe->currentSector->getZ());
 $othersVictimShip = $othersAlertFleet['ship'];
+$othersStandardShip = $others->createStandardShip($othersVictimShip);
+$othersHome = $othersAlertPlayer->homeSector;
+$pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,sector_z=:z,deuterium_stock=10 WHERE id=:id')->execute([
+    'x' => $othersHome->getX() + 1,
+    'y' => $othersHome->getY() + 1,
+    'z' => $othersHome->getZ(),
+    'id' => (int) $othersStandardShip['id'],
+]);
+$pdo->prepare('UPDATE others_ships SET deuterium_stock=10 WHERE id=:id')->execute(['id' => (int) $othersVictimShip['id']]);
+$othersStandardShip = $others->findShipByPublicId((string) $othersStandardShip['public_id']) ?? throw new RuntimeException('Others standard ship not found.');
+
+$othersShipCoordinatesResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersStandardShip['public_id']), $othersAlertHeaders);
+$test->assertEquals(200, $othersShipCoordinatesResponse->status, 'GET /api/others/ships/{shipId} returns an owned ship with relative coordinates');
+$test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $othersShipCoordinatesResponse->body['ship']['sector']['relative'] ?? null, 'Others ship coordinates use the owning player home as origin');
+$othersFleetCoordinatesResponse = $kernel->handle('GET', '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']), $othersAlertHeaders);
+$othersFleetShipsById = [];
+foreach (($othersFleetCoordinatesResponse->body['fleet']['ships'] ?? []) as $fleetShip) {
+    $othersFleetShipsById[$fleetShip['id'] ?? ''] = $fleetShip;
+}
+$test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $othersFleetShipsById[$othersVictimShip['public_id']]['sector']['relative'] ?? null, 'fleet detail exposes the mothership at the player-relative origin');
+$test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $othersFleetShipsById[$othersStandardShip['public_id']]['sector']['relative'] ?? null, 'fleet detail exposes every ship in the same player-relative frame');
+$test->assertEquals($othersAlertFleet['public_id'], $othersFleetShipsById[$othersStandardShip['public_id']]['fleetId'] ?? null, 'fleet detail preserves each ship public fleet id');
+
+$othersAuxiliaryPage = $others->findAuxiliariesPageByShipId((int) $othersVictimShip['id'], null, 10);
+$othersDetachedAuxiliary = $othersAuxiliaryPage['rows'][0] ?? throw new RuntimeException('Others auxiliary fixture not found.');
+$othersEmbarkedAuxiliaryResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersVictimShip['public_id']) . '/auxiliaries/' . rawurlencode((string) $othersDetachedAuxiliary['public_id']), $othersAlertHeaders);
+$test->assert(!array_key_exists('sector', $othersEmbarkedAuxiliaryResponse->body['auxiliary'] ?? []), 'an embarked Others auxiliary does not duplicate its carrier sector');
+$pdo->prepare("UPDATE others_auxiliaries SET status='available',location_type='deployed',spatial_state='drifting',sector_x=:x,sector_y=:y,sector_z=:z WHERE id=:id")->execute([
+    'x' => $othersHome->getX() + 1,
+    'y' => $othersHome->getY() - 1,
+    'z' => $othersHome->getZ(),
+    'id' => (int) $othersDetachedAuxiliary['id'],
+]);
+$othersDetachedAuxiliaryResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersVictimShip['public_id']) . '/auxiliaries/' . rawurlencode((string) $othersDetachedAuxiliary['public_id']), $othersAlertHeaders);
+$test->assertEquals(['x' => 1, 'y' => -1, 'z' => 0], $othersDetachedAuxiliaryResponse->body['auxiliary']['sector']['relative'] ?? null, 'an auxiliary separated from its carrier exposes its player-relative sector');
+$othersDetachedAuxiliaryList = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersVictimShip['public_id']) . '/auxiliaries', $othersAlertHeaders);
+$test->assertEquals(['x' => 1, 'y' => -1, 'z' => 0], $othersDetachedAuxiliaryList->body['auxiliaries'][0]['sector']['relative'] ?? null, 'the paginated auxiliary collection exposes separated auxiliary coordinates');
+
+$othersFleetMove = $kernel->handle(
+    'POST',
+    '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/move',
+    $othersAlertHeaders,
+    json_encode(['target' => ['x' => 2, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR),
+);
+$test->assertEquals(202, $othersFleetMove->status, 'fleet movement accepts a destination relative to the owner home');
+$test->assertEquals(2, count($othersFleetMove->body['actions'] ?? []), 'fleet movement schedules every eligible ship toward the common home-relative destination');
+$fleetMoveStatement = $pdo->prepare('SELECT m.target_x,m.target_y,m.target_z,a.payload_json FROM others_movements m JOIN others_actions a ON a.id=m.action_id WHERE a.public_id=:public_id');
+foreach (($othersFleetMove->body['actions'] ?? []) as $fleetMoveEntry) {
+    $fleetMoveActionId = (string) ($fleetMoveEntry['action']['id'] ?? '');
+    $fleetMoveStatement->execute(['public_id' => $fleetMoveActionId]);
+    $fleetMoveRow = $fleetMoveStatement->fetch(PDO::FETCH_ASSOC) ?: throw new RuntimeException('Others fleet movement row not found.');
+    $fleetMoveStatement->closeCursor();
+    $test->assertEquals(
+        [$othersHome->getX() + 2, $othersHome->getY(), $othersHome->getZ()],
+        [(int) $fleetMoveRow['target_x'], (int) $fleetMoveRow['target_y'], (int) $fleetMoveRow['target_z']],
+        'fleet movement resolves its target from the player home rather than the mothership position',
+    );
+    $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], json_decode((string) $fleetMoveRow['payload_json'], true, 512, JSON_THROW_ON_ERROR)['target'] ?? null, 'persisted Others movement payload keeps canonical home-relative coordinates');
+    $fleetMoveCancel = $kernel->handle('DELETE', '/api/others/ships/' . rawurlencode((string) ($fleetMoveEntry['shipId'] ?? '')) . '/move', $othersAlertHeaders);
+    $test->assertEquals(202, $fleetMoveCancel->status, 'a scheduled fleet member movement remains individually cancelable');
+    $canceledFleetMoveAction = $others->findActionByPublicId($fleetMoveActionId) ?? throw new RuntimeException('Canceled Others fleet movement action not found.');
+    $processOthersActionNow($canceledFleetMoveAction);
+}
 $probeToOthersMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'probe-to-others-alert-test-item');
 $probeToOthersMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
     'actorMannyId' => $missileAlertManny->uid,
@@ -2868,7 +2934,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(125, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(126, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
