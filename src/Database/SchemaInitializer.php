@@ -653,6 +653,19 @@ final class SchemaInitializer
                 FOREIGN KEY(player_id) REFERENCES players(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_others_fleets_player_status ON others_fleets(player_id, status, public_id)",
+            "CREATE TABLE IF NOT EXISTS others_visited_sectors (
+                id $id,
+                fleet_id INTEGER NOT NULL,
+                sector_x INTEGER NOT NULL,
+                sector_y INTEGER NOT NULL,
+                sector_z INTEGER NOT NULL,
+                first_visited_at $text NOT NULL,
+                last_visited_at $text NOT NULL,
+                visit_count INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(fleet_id, sector_x, sector_y, sector_z),
+                FOREIGN KEY(fleet_id) REFERENCES others_fleets(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_others_visited_sectors_fleet_last ON others_visited_sectors(fleet_id, last_visited_at, id)",
             "CREATE TABLE IF NOT EXISTS others_ships (
                 id $id,
                 public_id $caseSensitiveText NOT NULL UNIQUE,
@@ -672,6 +685,7 @@ final class SchemaInitializer
                 current_action_id INTEGER NULL,
                 departure_engaged INTEGER NOT NULL DEFAULT 0,
                 laser_next_target_at $nullableText,
+                entered_sector_at $text NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
                 destroyed_at $nullableText,

@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '126'
+  version: '128'
 security:
 - bearerAuth: []
 servers:
@@ -82,6 +82,38 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/OthersFleetResponse"
+        '404':
+          "$ref": "#/components/responses/NotFound"
+  "/api/others/fleets/{fleetId}/visited-sectors":
+    parameters:
+    - "$ref": "#/components/parameters/FleetId"
+    get:
+      tags:
+      - Others
+      summary: List sectors visited by one owned fleet
+      description: >-
+        Returns the fleet's private navigation history in coordinates relative
+        to the owning player's home. This history is independent from probe
+        visited-sector history and is used to provide precise BOB scans.
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+      responses:
+        '200':
+          description: Stable page ordered by latest visit, newest first
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersVisitedSectorsResponse"
         '404':
           "$ref": "#/components/responses/NotFound"
   "/api/others/fleets/{fleetId}/move":
@@ -491,7 +523,7 @@ components:
           "$ref": "#/components/schemas/RelativeCoordinates"
     OthersShip:
       type: object
-      required: [id, fleetId, type, status, integrity, maxIntegrity, deuterium, inventoryCapacityEce, location, sector, createdAt, updatedAt]
+      required: [id, fleetId, type, status, integrity, maxIntegrity, deuterium, inventoryCapacityEce, location, sector, movement, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -530,6 +562,11 @@ components:
           description: >-
             Current sector relative to the owning player's home. Null while the
             ship is between sectors.
+        movement:
+          nullable: true
+          allOf:
+          - "$ref": "#/components/schemas/OthersShipMovement"
+          description: Active movement details, or null while the ship is not moving.
         auxiliaryCount:
           type: integer
         deployedAuxiliaryCount:
@@ -540,6 +577,20 @@ components:
         updatedAt:
           type: string
           format: date-time
+    OthersShipMovement:
+      type: object
+      required: [phase, target, arrivalAt]
+      properties:
+        phase:
+          type: string
+          enum: [waiting_to_depart, transit]
+        target:
+          "$ref": "#/components/schemas/RelativeCoordinates"
+          description: Destination relative to the owning player's home.
+        arrivalAt:
+          type: string
+          format: date-time
+          description: Scheduled arrival date and time.
     OthersShipResponse:
       type: object
       required: [ship]
@@ -574,6 +625,31 @@ components:
       properties:
         fleet:
           "$ref": "#/components/schemas/OthersFleet"
+    OthersVisitedSector:
+      type: object
+      required: [relativeCoordinates, firstVisitedAt, lastVisitedAt, visitCount]
+      properties:
+        relativeCoordinates:
+          "$ref": "#/components/schemas/RelativeCoordinates"
+        firstVisitedAt:
+          type: string
+          format: date-time
+        lastVisitedAt:
+          type: string
+          format: date-time
+        visitCount:
+          type: integer
+          minimum: 1
+    OthersVisitedSectorsResponse:
+      type: object
+      required: [visitedSectors]
+      properties:
+        visitedSectors:
+          type: array
+          items:
+            "$ref": "#/components/schemas/OthersVisitedSector"
+        nextCursor:
+          type: string
     OthersAuxiliary:
       type: object
       required: [id, status, locationType, spatialState, capacityEce, cargo]
@@ -603,9 +679,9 @@ components:
         sector:
           "$ref": "#/components/schemas/RelativeSector"
           description: >-
-            Present only when the auxiliary occupies a sector different from
-            its carrier, or while its carrier is in transit. Coordinates are
-            relative to the owning player's home.
+            Present only when the auxiliary is separated from its carrier, or
+            while its carrier is in transit. Coordinates are relative to the
+            owning player's home.
         action:
           type: object
     OthersAuxiliariesResponse:

@@ -506,6 +506,7 @@ $databaseMigrationScript = file_get_contents($root . '/scripts/migrate-sqlite-to
 $alertIllustrationMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-alert-illustration-images.php');
 $asteroidImpactAlertsMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-asteroid-impact-alerts.php');
 $othersAlertsMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-others-alerts.php');
+$othersVisitedSectorsMigrationScript = file_get_contents($root . '/scripts/one-shot-scripts/migrate-others-visited-sectors.php');
 $sectorPointCloudScript = file_get_contents($root . '/scripts/generate-threejs-point-cloud-sectors.php');
 $translatorSource = file_get_contents($root . '/src/I18n/Translator.php');
 $openApi = file_get_contents($root . '/docs/openapi.yaml');
@@ -1243,6 +1244,27 @@ $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'asteroi
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, "owning player's home sector"), 'Others OpenAPI defines movement targets from the owner home');
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'OthersShipResponse'), 'Others OpenAPI documents ship coordinates through a response schema');
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'separated from its carrier'), 'Others OpenAPI documents separated auxiliary coordinates');
+$test->assert(is_string($openApiOthers) && str_contains($openApiOthers, '/api/others/fleets/{fleetId}/visited-sectors'), 'Others OpenAPI documents fleet-specific visited sectors');
+$othersVisitedSectorsSchema = is_array($openApiOthersDocument) ? ($openApiOthersDocument['components']['schemas']['OthersVisitedSectorsResponse'] ?? null) : null;
+$test->assert(is_array($othersVisitedSectorsSchema), 'Others OpenAPI defines the visited-sector page response');
+$test->assert(
+    is_string($othersVisitedSectorsMigrationScript)
+        && str_contains($othersVisitedSectorsMigrationScript, 'CREATE TABLE others_visited_sectors')
+        && !str_contains($othersVisitedSectorsMigrationScript, 'visited_sectors_json'),
+    'Others visited-sector migration installs relational storage without a JSON history column',
+);
+$othersShipMovementSchema = is_array($openApiOthersDocument) ? ($openApiOthersDocument['components']['schemas']['OthersShipMovement'] ?? null) : null;
+$test->assert(
+    is_array($othersShipMovementSchema)
+        && isset($othersShipMovementSchema['properties']['target'], $othersShipMovementSchema['properties']['arrivalAt']),
+    'Others OpenAPI documents owned ship movement destination and arrival time',
+);
+$observedOthersMovementSchema = is_array($openApiDocument) ? ($openApiDocument['components']['schemas']['SectorObject']['properties']['movement']['properties'] ?? null) : null;
+$test->assertEquals(
+    ['direction'],
+    is_array($observedOthersMovementSchema) ? array_keys($observedOthersMovementSchema) : [],
+    'probe OpenAPI limits observed Others movement telemetry to direction',
+);
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'BEGIN IMMEDIATE'), 'SQLite to MySQL migration script locks the source database');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'SET FOREIGN_KEY_CHECKS=0'), 'SQLite to MySQL migration script can copy relational data into MySQL');
 $test->assert(is_string($databaseMigrationScript) && str_contains($databaseMigrationScript, 'config/database-futur-local.json'), 'SQLite to MySQL migration script targets the future database config by default');
@@ -1505,6 +1527,52 @@ $test->assertEquals(
     $othersAlertSchemaColumns,
     'Others alert table exposes the canonical persistent alert columns',
 );
+$othersVisitedSectorSchemaColumns = array_column($pdo->query('PRAGMA table_info(others_visited_sectors)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assertEquals(
+    ['id', 'fleet_id', 'sector_x', 'sector_y', 'sector_z', 'first_visited_at', 'last_visited_at', 'visit_count'],
+    $othersVisitedSectorSchemaColumns,
+    'Others visited sectors use a normalized fleet-coordinate relation',
+);
+$othersShipSchemaColumns = array_column($pdo->query('PRAGMA table_info(others_ships)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+$test->assert(in_array('entered_sector_at', $othersShipSchemaColumns, true), 'Others ships persist their current-sector entry time for scan readiness');
+
+$othersVisitedMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'others-visited-migration.sqlite';
+$othersVisitedMigrationPdo = new PDO('sqlite:' . $othersVisitedMigrationDbPath);
+$othersVisitedMigrationPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$othersVisitedMigrationPdo->exec('CREATE TABLE others_fleets (id INTEGER PRIMARY KEY)');
+$othersVisitedMigrationPdo->exec(
+    'CREATE TABLE others_ships (
+        id INTEGER PRIMARY KEY,
+        fleet_id INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        sector_x INTEGER NOT NULL,
+        sector_y INTEGER NOT NULL,
+        sector_z INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        destroyed_at TEXT NULL
+    )'
+);
+$othersVisitedMigrationPdo->exec("INSERT INTO others_fleets (id) VALUES (1)");
+$othersVisitedMigrationPdo->exec("INSERT INTO others_ships VALUES (1,1,'inactive',12,-4,2,'2026-08-01T12:00:00+00:00',NULL)");
+$othersVisitedMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'others-visited-migration.json';
+file_put_contents($othersVisitedMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $othersVisitedMigrationDbPath], JSON_THROW_ON_ERROR));
+$othersVisitedMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-others-visited-sectors.php')
+    . ' --database-config=' . escapeshellarg($othersVisitedMigrationConfig);
+exec($othersVisitedMigrationCommand . ' 2>&1', $othersVisitedMigrationOutput, $othersVisitedMigrationStatus);
+$test->assertEquals(0, $othersVisitedMigrationStatus, 'Others visited-sector migration exits successfully');
+$test->assertEquals(
+    '2026-08-01T12:00:00+00:00',
+    $othersVisitedMigrationPdo->query('SELECT entered_sector_at FROM others_ships WHERE id=1')->fetchColumn(),
+    'Others visited-sector migration initializes ship residence from its last known update',
+);
+$migratedOthersVisit = $othersVisitedMigrationPdo->query('SELECT * FROM others_visited_sectors WHERE fleet_id=1')->fetch(PDO::FETCH_ASSOC) ?: [];
+$test->assertEquals([12, -4, 2], [(int) ($migratedOthersVisit['sector_x'] ?? 0), (int) ($migratedOthersVisit['sector_y'] ?? 0), (int) ($migratedOthersVisit['sector_z'] ?? 0)], 'Others visited-sector migration seeds each fleet current sector');
+$replayedOthersVisitedMigrationOutput = [];
+$replayedOthersVisitedMigrationStatus = 0;
+exec($othersVisitedMigrationCommand . ' 2>&1', $replayedOthersVisitedMigrationOutput, $replayedOthersVisitedMigrationStatus);
+$test->assertEquals(0, $replayedOthersVisitedMigrationStatus, 'Others visited-sector migration can be replayed safely');
+$test->assertEquals(1, (int) $othersVisitedMigrationPdo->query('SELECT COUNT(*) FROM others_visited_sectors')->fetchColumn(), 'replayed Others visited-sector migration does not duplicate history');
 
 require_once $root . '/scripts/one-shot-scripts/remove-legacy-probe-resource-stocks.php';
 $legacyStorageMigrationPdo = new PDO('sqlite::memory:');
@@ -2419,6 +2487,11 @@ $othersAlertPlayer = $players->findById($othersAlertPlayer->id) ?? throw new Run
 $othersAlertHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($othersAlertPlayer)['token']];
 $othersAlertFleet = $others->createFleet($othersAlertPlayer->id, $secondaryProbe->currentSector->getX(), $secondaryProbe->currentSector->getY(), $secondaryProbe->currentSector->getZ());
 $othersVictimShip = $othersAlertFleet['ship'];
+$initialOthersVisitedSectors = $kernel->handle('GET', '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/visited-sectors', $othersAlertHeaders);
+$test->assertEquals(200, $initialOthersVisitedSectors->status, 'GET /api/others/fleets/{fleetId}/visited-sectors lists owned fleet history');
+$test->assertEquals([['x' => 0, 'y' => 0, 'z' => 0]], array_column($initialOthersVisitedSectors->body['visitedSectors'] ?? [], 'relativeCoordinates'), 'new Others fleet history starts at the owner-relative home origin');
+$test->assertEquals(1, $initialOthersVisitedSectors->body['visitedSectors'][0]['visitCount'] ?? null, 'new Others fleet records its initial sector once');
+$test->assertEquals(0, $visitedSectors->countVisited($othersAlertPlayer), 'Others navigation history does not alter probe visited-sector statistics');
 $othersStandardShip = $others->createStandardShip($othersVictimShip);
 $othersHome = $othersAlertPlayer->homeSector;
 $pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,sector_z=:z,deuterium_stock=10 WHERE id=:id')->execute([
@@ -2433,6 +2506,7 @@ $othersStandardShip = $others->findShipByPublicId((string) $othersStandardShip['
 $othersShipCoordinatesResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersStandardShip['public_id']), $othersAlertHeaders);
 $test->assertEquals(200, $othersShipCoordinatesResponse->status, 'GET /api/others/ships/{shipId} returns an owned ship with relative coordinates');
 $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $othersShipCoordinatesResponse->body['ship']['sector']['relative'] ?? null, 'Others ship coordinates use the owning player home as origin');
+$test->assertEquals(null, $othersShipCoordinatesResponse->body['ship']['movement'] ?? null, 'an idle Others ship exposes no active movement');
 $othersFleetCoordinatesResponse = $kernel->handle('GET', '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']), $othersAlertHeaders);
 $othersFleetShipsById = [];
 foreach (($othersFleetCoordinatesResponse->body['fleet']['ships'] ?? []) as $fleetShip) {
@@ -2465,6 +2539,127 @@ $othersFleetMove = $kernel->handle(
 );
 $test->assertEquals(202, $othersFleetMove->status, 'fleet movement accepts a destination relative to the owner home');
 $test->assertEquals(2, count($othersFleetMove->body['actions'] ?? []), 'fleet movement schedules every eligible ship toward the common home-relative destination');
+$fleetMoveEntriesByShipId = [];
+foreach (($othersFleetMove->body['actions'] ?? []) as $fleetMoveEntry) {
+    $fleetMoveEntriesByShipId[(string) ($fleetMoveEntry['shipId'] ?? '')] = $fleetMoveEntry;
+}
+$movingMothershipResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersVictimShip['public_id']), $othersAlertHeaders);
+$test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $movingMothershipResponse->body['ship']['movement']['target'] ?? null, 'owned ship detail exposes the active destination in the owner home frame');
+$test->assertEquals('waiting_to_depart', $movingMothershipResponse->body['ship']['movement']['phase'] ?? null, 'owned ship detail exposes the active movement phase');
+$test->assertEquals(
+    $fleetMoveEntriesByShipId[$othersVictimShip['public_id']]['action']['endsAt'] ?? null,
+    $movingMothershipResponse->body['ship']['movement']['arrivalAt'] ?? null,
+    'owned ship detail exposes the scheduled movement arrival date',
+);
+$movingFleetResponse = $kernel->handle('GET', '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']), $othersAlertHeaders);
+foreach (($movingFleetResponse->body['fleet']['ships'] ?? []) as $movingFleetShip) {
+    $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $movingFleetShip['movement']['target'] ?? null, 'fleet detail exposes each active movement destination in the owner home frame');
+    $test->assertEquals(
+        $fleetMoveEntriesByShipId[$movingFleetShip['id'] ?? '']['action']['endsAt'] ?? null,
+        $movingFleetShip['movement']['arrivalAt'] ?? null,
+        'fleet detail exposes each active movement arrival date',
+    );
+}
+$probeOthersMovementSector = $kernel->handle('GET', '/api/probe/' . $secondaryProbe->id . '/sector', $multiProbeHeaders);
+$probeObservedMovingShip = array_values(array_filter(
+    $probeOthersMovementSector->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === $othersVictimShip['public_id'],
+))[0] ?? null;
+$test->assertEquals(['direction' => ['x' => 1.0, 'y' => 0.0, 'z' => 0.0]], $probeObservedMovingShip['movement'] ?? null, 'probe sector detail exposes only the normalized direction of a detected Others movement');
+$probeRelativeOthersSector = (new PlayerReferenceFrame($multiProbePlayer->homeSector))->globalToRelative($secondaryProbe->currentSector);
+$genericOthersMovementSector = $kernel->handle('GET', '/api/sector?' . http_build_query($probeRelativeOthersSector), $multiProbeHeaders);
+$genericObservedMovingShip = array_values(array_filter(
+    $genericOthersMovementSector->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === $othersVictimShip['public_id'],
+))[0] ?? null;
+$test->assertEquals(['direction' => ['x' => 1.0, 'y' => 0.0, 'z' => 0.0]], $genericObservedMovingShip['movement'] ?? null, 'generic probe sector scan exposes the same direction-only Others telemetry');
+$transitingFleetActionId = (string) ($fleetMoveEntriesByShipId[$othersStandardShip['public_id']]['action']['id'] ?? '');
+$transitingFleetAction = $others->findActionByPublicId($transitingFleetActionId) ?? throw new RuntimeException('Others transit test action not found.');
+$processOthersActionNow($transitingFleetAction);
+$transitingShipResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersStandardShip['public_id']), $othersAlertHeaders);
+$test->assertEquals('transit', $transitingShipResponse->body['ship']['location']['state'] ?? null, 'owned ship detail identifies a ship between sectors');
+$test->assertEquals(null, $transitingShipResponse->body['ship']['sector'] ?? null, 'owned ship detail keeps the current sector hidden during transit');
+$test->assertEquals(
+    [
+        'phase' => 'transit',
+        'target' => ['x' => 2, 'y' => 0, 'z' => 0],
+        'arrivalAt' => $fleetMoveEntriesByShipId[$othersStandardShip['public_id']]['action']['endsAt'] ?? null,
+    ],
+    $transitingShipResponse->body['ship']['movement'] ?? null,
+    'owned ship detail retains its relative target and arrival date throughout transit',
+);
+$transitingFleetAction = $others->findActionByPublicId($transitingFleetActionId) ?? throw new RuntimeException('Updated Others transit test action not found.');
+$processOthersActionNow($transitingFleetAction);
+$othersVisitedAfterArrival = $kernel->handle('GET', '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/visited-sectors', $othersAlertHeaders);
+$test->assertEquals(2, count($othersVisitedAfterArrival->body['visitedSectors'] ?? []), 'an Others ship arrival records the destination once for its fleet');
+$test->assertEquals(
+    ['x' => 2, 'y' => 0, 'z' => 0],
+    $othersVisitedAfterArrival->body['visitedSectors'][0]['relativeCoordinates'] ?? null,
+    'fleet visit history exposes an arrived sector in the owner home frame',
+);
+
+$knownOthersBlackHoleSector = $othersHome->add(1000, 1000, 0);
+$originalKnownOthersBlackHoleContent = $sectorService->getOrCreateSector($knownOthersBlackHoleSector);
+$sectorRepository->save(new SectorContent($knownOthersBlackHoleSector, [
+    new BlackHole('others-known-black-hole', 'Known Others black hole', 10.0, 0.01, true, 0.5),
+]));
+$firstKnownVisitAt = gmdate('c', time() + 10);
+$lastKnownVisitAt = gmdate('c', time() + 20);
+$others->markFleetSectorVisited((int) $othersAlertFleet['id'], $knownOthersBlackHoleSector, $firstKnownVisitAt);
+$others->markFleetSectorVisited((int) $othersAlertFleet['id'], $knownOthersBlackHoleSector, $lastKnownVisitAt);
+$knownOthersVisit = $others->findFleetVisitedSectorsPage((int) $othersAlertFleet['id'], null, 10)['rows'][0] ?? [];
+$test->assertEquals(2, (int) ($knownOthersVisit['visit_count'] ?? 0), 'revisiting an Others sector increments one relational history row');
+$test->assertEquals($firstKnownVisitAt, $knownOthersVisit['first_visited_at'] ?? null, 'revisiting an Others sector preserves its first visit time');
+$test->assertEquals($lastKnownVisitAt, $knownOthersVisit['last_visited_at'] ?? null, 'revisiting an Others sector refreshes its last visit time');
+
+$firstOthersVisitedPage = $kernel->handle('GET', '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/visited-sectors?limit=1', $othersAlertHeaders);
+$test->assertEquals(1, count($firstOthersVisitedPage->body['visitedSectors'] ?? []), 'Others visit history honors its page limit');
+$test->assert(isset($firstOthersVisitedPage->body['nextCursor']), 'Others visit history exposes a cursor when another page exists');
+$secondOthersVisitedPage = $kernel->handle(
+    'GET',
+    '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/visited-sectors?' . http_build_query([
+        'limit' => 1,
+        'cursor' => $firstOthersVisitedPage->body['nextCursor'] ?? '',
+    ]),
+    $othersAlertHeaders,
+);
+$test->assertEquals(200, $secondOthersVisitedPage->status, 'Others visit history accepts its opaque cursor');
+$test->assert(
+    ($firstOthersVisitedPage->body['visitedSectors'][0]['relativeCoordinates'] ?? null)
+        !== ($secondOthersVisitedPage->body['visitedSectors'][0]['relativeCoordinates'] ?? null),
+    'Others visit history cursor does not repeat the preceding row',
+);
+
+$knownSectorScan = $kernel->handle(
+    'GET',
+    '/api/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 1000, 'y' => 1000, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$test->assertEquals(200, $knownSectorScan->status, 'an Others BOB scan accepts owner-home-relative coordinates');
+$test->assertEquals('detailed', $knownSectorScan->body['sector']['knowledgeLevel'] ?? null, 'an Others fleet gets precise detail for one of its visited sectors');
+$knownSectorObjects = $knownSectorScan->body['sector']['objects'] ?? [];
+$test->assert(in_array('black_hole', array_column($knownSectorObjects, 'type'), true), 'precise Others historical scans reveal a known black hole');
+
+$isolatedOthersFleet = $others->createFleet(
+    $othersAlertPlayer->id,
+    $knownOthersBlackHoleSector->getX() - 1,
+    $knownOthersBlackHoleSector->getY() - 1,
+    $knownOthersBlackHoleSector->getZ(),
+);
+$isolatedFleetScan = $kernel->handle(
+    'GET',
+    '/api/sector?' . http_build_query(['shipId' => $isolatedOthersFleet['ship']['public_id'], 'x' => 1000, 'y' => 1000, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$test->assertEquals(200, $isolatedFleetScan->status, 'a new Others fleet can perform its initial neighboring scan');
+$test->assertEquals('neighbor_scan', $isolatedFleetScan->body['sector']['knowledgeLevel'] ?? null, 'one fleet cannot reuse another fleet precise visit history');
+$cleanupNow = gmdate('c');
+$pdo->prepare("UPDATE others_ships SET status='removed',destroyed_at=:now,updated_at=:now WHERE fleet_id=:fleet_id")
+    ->execute(['now' => $cleanupNow, 'fleet_id' => (int) $isolatedOthersFleet['id']]);
+$pdo->prepare("UPDATE others_fleets SET status='dissolved',dissolved_at=:now,updated_at=:now WHERE id=:id")
+    ->execute(['now' => $cleanupNow, 'id' => (int) $isolatedOthersFleet['id']]);
+$sectorRepository->save($originalKnownOthersBlackHoleContent);
+$test->assertEquals(0, $visitedSectors->countVisited($othersAlertPlayer), 'Others visits remain absent from probe visit statistics after scans');
 $fleetMoveStatement = $pdo->prepare('SELECT m.target_x,m.target_y,m.target_z,a.payload_json FROM others_movements m JOIN others_actions a ON a.id=m.action_id WHERE a.public_id=:public_id');
 foreach (($othersFleetMove->body['actions'] ?? []) as $fleetMoveEntry) {
     $fleetMoveActionId = (string) ($fleetMoveEntry['action']['id'] ?? '');
@@ -2477,6 +2672,9 @@ foreach (($othersFleetMove->body['actions'] ?? []) as $fleetMoveEntry) {
         'fleet movement resolves its target from the player home rather than the mothership position',
     );
     $test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], json_decode((string) $fleetMoveRow['payload_json'], true, 512, JSON_THROW_ON_ERROR)['target'] ?? null, 'persisted Others movement payload keeps canonical home-relative coordinates');
+    if (($fleetMoveEntry['shipId'] ?? null) === $othersStandardShip['public_id']) {
+        continue;
+    }
     $fleetMoveCancel = $kernel->handle('DELETE', '/api/others/ships/' . rawurlencode((string) ($fleetMoveEntry['shipId'] ?? '')) . '/move', $othersAlertHeaders);
     $test->assertEquals(202, $fleetMoveCancel->status, 'a scheduled fleet member movement remains individually cancelable');
     $canceledFleetMoveAction = $others->findActionByPublicId($fleetMoveActionId) ?? throw new RuntimeException('Canceled Others fleet movement action not found.');
@@ -2934,7 +3132,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(126, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(128, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
@@ -10011,6 +10209,7 @@ foreach ([
     'POST /api/probe/1/mannies/mny_missing/ignite_missile',
     'GET /api/probe/1/missiles/missile_missing',
     'GET /api/others',
+    'GET /api/others/fleets/fleet_missing/visited-sectors',
     'GET /api/others/alerts',
     'PATCH /api/others/alerts/oalert_missing',
     'POST /api/others/ships/ship_missing/missiles',

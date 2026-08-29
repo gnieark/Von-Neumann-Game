@@ -577,8 +577,10 @@ final class OthersService
                 $result = ['outcome' => 'arrived'];
                 $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'running'")->execute(['result' => json_encode($result, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
                 $pdo->prepare("UPDATE others_movements SET phase = 'arrived', updated_at = :now WHERE action_id = :id")->execute(['now' => $now, 'id' => (int) $action['id']]);
-                $pdo->prepare("UPDATE others_ships SET status = 'inactive', sector_x = :x, sector_y = :y, sector_z = :z, current_action_id = NULL, departure_engaged = 0, updated_at = :now WHERE id = :ship_id AND current_action_id = :action_id")->execute(['x' => (int) $action['target_x'], 'y' => (int) $action['target_y'], 'z' => (int) $action['target_z'], 'now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
-                $this->createOthersArrivalAlerts(new SectorCoordinates((int) $action['target_x'], (int) $action['target_y'], (int) $action['target_z']), (string) $action['public_id']);
+                $target = new SectorCoordinates((int) $action['target_x'], (int) $action['target_y'], (int) $action['target_z']);
+                $pdo->prepare("UPDATE others_ships SET status = 'inactive', sector_x = :x, sector_y = :y, sector_z = :z, current_action_id = NULL, departure_engaged = 0, entered_sector_at = :now, updated_at = :now WHERE id = :ship_id AND current_action_id = :action_id")->execute(['x' => $target->getX(), 'y' => $target->getY(), 'z' => $target->getZ(), 'now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
+                $this->others->markFleetSectorVisited((int) $action['fleet_id'], $target, $now);
+                $this->createOthersArrivalAlerts($target, (string) $action['public_id']);
                 return;
             }
         });

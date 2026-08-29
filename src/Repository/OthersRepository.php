@@ -6,6 +6,7 @@ namespace VonNeumannGame\Repository;
 
 use PDO;
 use Throwable;
+use VonNeumannGame\Sector\SectorCoordinates;
 
 final class OthersRepository
 {
@@ -110,9 +111,104 @@ final class OthersRepository
             $stmt->execute(['public_id' => $fleetId, 'player_id' => $playerId, 'status' => 'active', 'created_at' => $now, 'updated_at' => $now]);
             $fleetSqlId = (int) $this->pdo->lastInsertId();
             $ship = $this->createShip($fleetSqlId, 'mothership', $x, $y, $z);
+            $this->markFleetSectorVisited($fleetSqlId, new SectorCoordinates($x, $y, $z), $now);
 
             return ['id' => $fleetSqlId, 'public_id' => $fleetId, 'ship' => $ship];
         });
+    }
+
+    public function markFleetSectorVisited(int $fleetId, SectorCoordinates $coordinates, ?string $visitedAt = null): void
+    {
+        $visitedAt ??= gmdate('c');
+        $params = [
+            'fleet_id' => $fleetId,
+            'x' => $coordinates->getX(),
+            'y' => $coordinates->getY(),
+            'z' => $coordinates->getZ(),
+            'visited_at' => $visitedAt,
+        ];
+        if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO others_visited_sectors (fleet_id,sector_x,sector_y,sector_z,first_visited_at,last_visited_at,visit_count)
+                 VALUES (:fleet_id,:x,:y,:z,:visited_at,:visited_at,1)
+                 ON DUPLICATE KEY UPDATE
+                    first_visited_at=LEAST(first_visited_at,VALUES(first_visited_at)),
+                    last_visited_at=GREATEST(last_visited_at,VALUES(last_visited_at)),
+                    visit_count=visit_count+1'
+            );
+        } else {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO others_visited_sectors (fleet_id,sector_x,sector_y,sector_z,first_visited_at,last_visited_at,visit_count)
+                 VALUES (:fleet_id,:x,:y,:z,:visited_at,:visited_at,1)
+                 ON CONFLICT(fleet_id,sector_x,sector_y,sector_z)
+                 DO UPDATE SET
+                    first_visited_at=MIN(others_visited_sectors.first_visited_at,excluded.first_visited_at),
+                    last_visited_at=MAX(others_visited_sectors.last_visited_at,excluded.last_visited_at),
+                    visit_count=others_visited_sectors.visit_count+1'
+            );
+        }
+        $stmt->execute($params);
+    }
+
+    /** @return array{targetVisited:bool,visitedSectorCount:int} */
+    public function fleetSectorKnowledge(int $fleetId, SectorCoordinates $coordinates): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT
+                EXISTS(
+                    SELECT 1 FROM others_visited_sectors
+                    WHERE fleet_id=:target_fleet_id AND sector_x=:x AND sector_y=:y AND sector_z=:z
+                ) AS target_visited,
+                (SELECT COUNT(*) FROM others_visited_sectors WHERE fleet_id=:count_fleet_id) AS visited_sector_count'
+        );
+        $stmt->execute([
+            'target_fleet_id' => $fleetId,
+            'count_fleet_id' => $fleetId,
+            'x' => $coordinates->getX(),
+            'y' => $coordinates->getY(),
+            'z' => $coordinates->getZ(),
+        ]);
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            throw new \RuntimeException('Unable to read Others fleet sector knowledge.');
+        }
+
+        return [
+            'targetVisited' => (bool) $row['target_visited'],
+            'visitedSectorCount' => (int) $row['visited_sector_count'],
+        ];
+    }
+
+    /**
+     * @param array{lastVisitedAt:string,id:int}|null $cursor
+     * @return array{rows:list<array<string,mixed>>,nextCursor:array{lastVisitedAt:string,id:int}|null}
+     */
+    public function findFleetVisitedSectorsPage(int $fleetId, ?array $cursor, int $limit): array
+    {
+        $limit = max(1, min(500, $limit));
+        $sql = 'SELECT * FROM others_visited_sectors WHERE fleet_id=:fleet_id';
+        $params = ['fleet_id' => $fleetId];
+        if ($cursor !== null) {
+            $sql .= ' AND (last_visited_at < :cursor_time OR (last_visited_at = :cursor_time AND id < :cursor_id))';
+            $params['cursor_time'] = $cursor['lastVisitedAt'];
+            $params['cursor_id'] = $cursor['id'];
+        }
+        $sql .= ' ORDER BY last_visited_at DESC,id DESC LIMIT ' . ($limit + 1);
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        $hasMore = count($rows) > $limit;
+        if ($hasMore) {
+            array_pop($rows);
+        }
+        $last = $rows !== [] ? $rows[array_key_last($rows)] : null;
+
+        return [
+            'rows' => $rows,
+            'nextCursor' => $hasMore && $last !== null
+                ? ['lastVisitedAt' => (string) $last['last_visited_at'], 'id' => (int) $last['id']]
+                : null,
+        ];
     }
 
     public function createStandardShip(array $mothership): array
@@ -174,7 +270,16 @@ final class OthersRepository
 
     public function findShipForPlayer(string $publicId, int $playerId, bool $activeOnly = true): ?array
     {
-        $sql = 'SELECT s.*, f.public_id AS fleet_public_id, f.player_id FROM others_ships s JOIN others_fleets f ON f.id = s.fleet_id WHERE s.public_id = :public_id AND f.player_id = :player_id';
+        $sql = 'SELECT s.*, f.public_id AS fleet_public_id, f.player_id,
+                       m.phase AS movement_phase,
+                       m.target_x AS movement_target_x,
+                       m.target_y AS movement_target_y,
+                       m.target_z AS movement_target_z,
+                       m.arrive_at AS movement_arrive_at
+                FROM others_ships s
+                JOIN others_fleets f ON f.id = s.fleet_id
+                LEFT JOIN others_movements m ON m.action_id = s.current_action_id
+                WHERE s.public_id = :public_id AND f.player_id = :player_id';
         if ($activeOnly) {
             $sql .= " AND f.status = 'active' AND s.destroyed_at IS NULL AND s.status <> 'removed'";
         }
@@ -242,10 +347,16 @@ final class OthersRepository
     {
         $stmt = $this->pdo->prepare(
             "SELECT s.*, MAX(f.public_id) AS fleet_public_id, COUNT(a.id) AS auxiliary_count,
-                    SUM(CASE WHEN a.location_type <> 'embarked' AND a.destroyed_at IS NULL THEN 1 ELSE 0 END) AS deployed_auxiliary_count
+                    SUM(CASE WHEN a.location_type <> 'embarked' AND a.destroyed_at IS NULL THEN 1 ELSE 0 END) AS deployed_auxiliary_count,
+                    MAX(m.phase) AS movement_phase,
+                    MAX(m.target_x) AS movement_target_x,
+                    MAX(m.target_y) AS movement_target_y,
+                    MAX(m.target_z) AS movement_target_z,
+                    MAX(m.arrive_at) AS movement_arrive_at
              FROM others_ships s
              JOIN others_fleets f ON f.id = s.fleet_id
              LEFT JOIN others_auxiliaries a ON a.ship_id = s.id AND a.destroyed_at IS NULL
+             LEFT JOIN others_movements m ON m.action_id = s.current_action_id
              WHERE s.fleet_id = :fleet_id AND s.destroyed_at IS NULL
              GROUP BY s.id ORDER BY CASE s.type WHEN 'mothership' THEN 0 ELSE 1 END, s.public_id"
         );
@@ -262,7 +373,17 @@ final class OthersRepository
 
     public function observableEntitiesBySector(int $x, int $y, int $z): array
     {
-        $ships = $this->pdo->prepare("SELECT public_id, type, status FROM others_ships WHERE sector_x = :x AND sector_y = :y AND sector_z = :z AND destroyed_at IS NULL AND status <> 'removed' AND status <> 'transit' ORDER BY public_id");
+        $ships = $this->pdo->prepare(
+            "SELECT s.public_id, s.type, s.status,
+                    m.target_x - m.source_x AS movement_direction_x,
+                    m.target_y - m.source_y AS movement_direction_y,
+                    m.target_z - m.source_z AS movement_direction_z
+             FROM others_ships s
+             LEFT JOIN others_movements m ON m.action_id = s.current_action_id
+             WHERE s.sector_x = :x AND s.sector_y = :y AND s.sector_z = :z
+               AND s.destroyed_at IS NULL AND s.status <> 'removed' AND s.status <> 'transit'
+             ORDER BY s.public_id"
+        );
         $ships->execute(['x' => $x, 'y' => $y, 'z' => $z]);
         return ['ships' => $ships->fetchAll(), 'projectiles' => $this->movingProjectilesBySector($x, $y, $z)];
     }
@@ -477,10 +598,10 @@ final class OthersRepository
         $fuelCapacity = $type === 'mothership' ? 1000.0 : 50.0;
         $inventoryCapacity = $type === 'mothership' ? 100000.0 : 10000.0;
         $stmt = $this->pdo->prepare(
-            "INSERT INTO others_ships (public_id, fleet_id, type, status, sector_x, sector_y, sector_z, integrity, max_integrity, deuterium_stock, deuterium_capacity, inventory_capacity, inventory_reserved, current_action_id, departure_engaged, laser_next_target_at, created_at, updated_at, destroyed_at)
-             VALUES (:public_id, :fleet_id, :type, 'inactive', :x, :y, :z, :integrity, :max_integrity, 0, :fuel_capacity, :inventory_capacity, 0, NULL, 0, NULL, :created_at, :updated_at, NULL)"
+            "INSERT INTO others_ships (public_id, fleet_id, type, status, sector_x, sector_y, sector_z, integrity, max_integrity, deuterium_stock, deuterium_capacity, inventory_capacity, inventory_reserved, current_action_id, departure_engaged, laser_next_target_at, entered_sector_at, created_at, updated_at, destroyed_at)
+             VALUES (:public_id, :fleet_id, :type, 'inactive', :x, :y, :z, :integrity, :max_integrity, 0, :fuel_capacity, :inventory_capacity, 0, NULL, 0, NULL, :entered_sector_at, :created_at, :updated_at, NULL)"
         );
-        $stmt->execute(['public_id' => $publicId, 'fleet_id' => $fleetId, 'type' => $type, 'x' => $x, 'y' => $y, 'z' => $z, 'integrity' => $maxIntegrity, 'max_integrity' => $maxIntegrity, 'fuel_capacity' => $fuelCapacity, 'inventory_capacity' => $inventoryCapacity, 'created_at' => $now, 'updated_at' => $now]);
+        $stmt->execute(['public_id' => $publicId, 'fleet_id' => $fleetId, 'type' => $type, 'x' => $x, 'y' => $y, 'z' => $z, 'integrity' => $maxIntegrity, 'max_integrity' => $maxIntegrity, 'fuel_capacity' => $fuelCapacity, 'inventory_capacity' => $inventoryCapacity, 'entered_sector_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
         $shipId = (int) $this->pdo->lastInsertId();
         foreach (self::RESOURCE_TYPES as $resourceType) {
             $resource = $this->pdo->prepare('INSERT INTO others_inventory_resources (ship_id, resource_type, amount, reserved_amount, updated_at) VALUES (:ship_id, :resource_type, 0, 0, :updated_at)');

@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v128 / cartographie Others : chaque flotte historise ses secteurs visités dans la table relationnelle dédiée `others_visited_sectors`, sans alimenter les statistiques des sondes. `GET /api/others/fleets/{fleetId}/visited-sectors` expose cet historique paginé dans le référentiel relatif au home du propriétaire, et les scans BOB via `GET /api/sector?shipId=…` retrouvent immédiatement le niveau de détail précis d'un secteur déjà visité par cette flotte seulement. Migration obligatoire avant redémarrage : exécuter `php scripts/one-shot-scripts/migrate-others-visited-sectors.php --database-config=…`.
+- API v127 / mouvements Others : les représentations de vaisseaux détenus exposent désormais `movement`, avec la phase active, la destination relative au home du propriétaire et `arrivalAt`. Les scans de sondes et les scans génériques ne reçoivent pour leur part que le vecteur directionnel normalisé d'un mouvement détecté, sans destination, distance ni échéance.
 - API v126 / navigation Others : les coordonnées des vaisseaux sont désormais exposées relativement au secteur home de leur propriétaire, commun à toute la flotte et présenté comme `(0, 0, 0)`. Les auxiliaires séparés de leur porteur exposent leur secteur dans ce même référentiel ; les auxiliaires embarqués ou présents avec leur porteur ne le dupliquent pas.
 - Rupture de contrat Others : le champ `target` de `POST /api/others/ships/{shipId}/move` et `POST /api/others/fleets/{fleetId}/move` désigne désormais la destination relativement au home du propriétaire. Il ne représente plus un déplacement depuis la position courante du vaisseau ou de la mère.
 
