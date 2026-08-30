@@ -1893,6 +1893,192 @@ $test->assert(in_array('probe_id', $visitedSectorSchemaColumns, true), 'visited 
 $players = new PlayerRepository($pdo);
 $authMethods = new PlayerAuthRepository($pdo);
 $probes = new NeumannProbeRepository($pdo);
+$othersCliConfigPath = $tmp . DIRECTORY_SEPARATOR . 'others-cli-database.json';
+file_put_contents($othersCliConfigPath, json_encode(['driver' => 'sqlite', 'path' => $dbPath], JSON_THROW_ON_ERROR));
+$othersCliPlayer = $players->createPlayer('others-cli-fuel', 'Others CLI Fuel', null, new SectorCoordinates(7, -3, 2));
+$createOthersFleetCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/create-others-fleet.php')
+    . ' --player-id=' . $othersCliPlayer->id
+    . ' --sector-x=7 --sector-y=-3 --sector-z=2'
+    . ' --database-config=' . escapeshellarg($othersCliConfigPath);
+exec($createOthersFleetCommand . ' 2>&1', $createOthersFleetOutput, $createOthersFleetStatus);
+$createOthersFleetText = implode("\n", $createOthersFleetOutput);
+$test->assertEquals(0, $createOthersFleetStatus, 'Others fleet creation CLI exits successfully');
+$test->assert(preg_match('/mothership (mother_[a-f0-9]+)\./', $createOthersFleetText, $createdMothershipMatch) === 1, 'Others fleet creation CLI reports its mothership id');
+$createdMothershipId = $createdMothershipMatch[1] ?? '';
+$createdMothershipStatement = $pdo->prepare('SELECT deuterium_stock,deuterium_capacity FROM others_ships WHERE public_id=:public_id');
+$createdMothershipStatement->execute(['public_id' => $createdMothershipId]);
+$createdMothershipFuel = $createdMothershipStatement->fetch() ?: [];
+$createdMothershipStatement->closeCursor();
+$test->assertEquals(1000.0, (float) ($createdMothershipFuel['deuterium_stock'] ?? -1), 'Others fleet creation CLI fills the mothership deuterium tank');
+$test->assertEquals((float) ($createdMothershipFuel['deuterium_capacity'] ?? -2), (float) ($createdMothershipFuel['deuterium_stock'] ?? -1), 'CLI-created mothership fuel equals its tank capacity');
+$createOthersStandardShipCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/create-others-standard-ship.php')
+    . ' --mothership-id=' . escapeshellarg($createdMothershipId)
+    . ' --database-config=' . escapeshellarg($othersCliConfigPath);
+exec($createOthersStandardShipCommand . ' 2>&1', $createOthersStandardShipOutput, $createOthersStandardShipStatus);
+$createOthersStandardShipText = implode("\n", $createOthersStandardShipOutput);
+$test->assertEquals(0, $createOthersStandardShipStatus, 'Others standard ship creation CLI exits successfully');
+$test->assert(preg_match('/ship (ship_[a-f0-9]+)\./', $createOthersStandardShipText, $createdStandardShipMatch) === 1, 'Others standard ship creation CLI reports its ship id');
+$createdStandardShipId = $createdStandardShipMatch[1] ?? '';
+$createdStandardShipStatement = $pdo->prepare('SELECT deuterium_stock,deuterium_capacity FROM others_ships WHERE public_id=:public_id');
+$createdStandardShipStatement->execute(['public_id' => $createdStandardShipId]);
+$createdStandardShipFuel = $createdStandardShipStatement->fetch() ?: [];
+$createdStandardShipStatement->closeCursor();
+$test->assertEquals(50.0, (float) ($createdStandardShipFuel['deuterium_stock'] ?? -1), 'Others standard ship creation CLI fills the deuterium tank');
+$test->assertEquals((float) ($createdStandardShipFuel['deuterium_capacity'] ?? -2), (float) ($createdStandardShipFuel['deuterium_stock'] ?? -1), 'CLI-created standard ship fuel equals its tank capacity');
+$othersDeletionRepository = new OthersRepository($pdo);
+$deletionMothership = $othersDeletionRepository->findShipByPublicId($createdMothershipId) ?? throw new RuntimeException('CLI deletion mothership fixture not found.');
+$deletionStandardShip = $othersDeletionRepository->findShipByPublicId($createdStandardShipId) ?? throw new RuntimeException('CLI deletion standard ship fixture not found.');
+$deletionAuxiliary = $othersDeletionRepository->findAuxiliariesPageByShipId((int) $deletionStandardShip['id'], null, 1)['rows'][0] ?? throw new RuntimeException('CLI deletion auxiliary fixture not found.');
+$deletionActions = [];
+foreach (['movement', 'transfer', 'craft', 'harvest', 'laser', 'missile'] as $deletionActionType) {
+    $carrier = in_array($deletionActionType, ['craft', 'missile'], true) ? $deletionMothership : $deletionStandardShip;
+    $deletionActions[$deletionActionType] = $othersDeletionRepository->createAction(
+        $carrier,
+        'test_' . $deletionActionType,
+        'others_ship',
+        (string) $carrier['public_id'],
+        ['fixture' => 'fleet_deletion'],
+        gmdate('c', time() + 3600),
+    );
+}
+$deletionNow = gmdate('c');
+$pdo->prepare('INSERT INTO others_movements (action_id,ship_id,source_x,source_y,source_z,target_x,target_y,target_z,fuel_cost,leave_auxiliaries_behind,phase,depart_at,arrive_at,created_at,updated_at) VALUES (:action_id,:ship_id,7,-3,2,8,-2,2,2,0,\'waiting_to_depart\',:now,:later,:now,:now)')->execute([
+    'action_id' => (int) $deletionActions['movement']['id'],
+    'ship_id' => (int) $deletionStandardShip['id'],
+    'now' => $deletionNow,
+    'later' => gmdate('c', time() + 3600),
+]);
+$pdo->prepare('INSERT INTO others_inventory_transfers (public_id,action_id,source_ship_id,target_ship_id,auxiliary_id,kind,resource_type,amount,item_ids_json,status,created_at,updated_at) VALUES (:public_id,:action_id,:source,:target,:auxiliary,\'resource\',\'deuterium\',1,\'[]\',\'queued\',:now,:now)')->execute([
+    'public_id' => 'transfer_cli_deletion',
+    'action_id' => (int) $deletionActions['transfer']['id'],
+    'source' => (int) $deletionMothership['id'],
+    'target' => (int) $deletionStandardShip['id'],
+    'auxiliary' => (int) $deletionAuxiliary['id'],
+    'now' => $deletionNow,
+]);
+$pdo->prepare('INSERT INTO others_crafts (public_id,action_id,ship_id,assistant_auxiliary_id,recipe_id,ingredients_json,output_space,status,created_at,updated_at) VALUES (:public_id,:action_id,:ship_id,:auxiliary,\'standard_ship\',\'{}\',1,\'queued\',:now,:now)')->execute([
+    'public_id' => 'craft_cli_deletion',
+    'action_id' => (int) $deletionActions['craft']['id'],
+    'ship_id' => (int) $deletionMothership['id'],
+    'auxiliary' => (int) $deletionAuxiliary['id'],
+    'now' => $deletionNow,
+]);
+$pdo->prepare('INSERT INTO others_harvests (action_id,ship_id,target_object_id,phase,phase_started_at,auxiliary_count,reserved_capacity,biological_carbon,pending_output_json,created_at,updated_at) VALUES (:action_id,:ship_id,\'planet_cli_deletion\',\'deploying\',:now,1,1,0,NULL,:now,:now)')->execute([
+    'action_id' => (int) $deletionActions['harvest']['id'],
+    'ship_id' => (int) $deletionStandardShip['id'],
+    'now' => $deletionNow,
+]);
+$pdo->prepare('INSERT INTO others_swarm_participants (action_id,auxiliary_id,created_at) VALUES (:action_id,:auxiliary_id,:now)')->execute([
+    'action_id' => (int) $deletionActions['harvest']['id'],
+    'auxiliary_id' => (int) $deletionAuxiliary['id'],
+    'now' => $deletionNow,
+]);
+$pdo->prepare('INSERT INTO others_laser_locks (action_id,ship_id,target_kind,target_public_id,sector_x,sector_y,sector_z,status,started_at,accounted_until,next_damage_at,exhausts_at,created_at,updated_at) VALUES (:action_id,:ship_id,\'probe\',\'999999\',7,-3,2,\'queued\',NULL,NULL,NULL,NULL,:now,:now)')->execute([
+    'action_id' => (int) $deletionActions['laser']['id'],
+    'ship_id' => (int) $deletionStandardShip['id'],
+    'now' => $deletionNow,
+]);
+$pdo->prepare('INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,\'missile\',0.05,:action_id,:now,:now)')->execute([
+    'public_id' => 'item_cli_deletion',
+    'ship_id' => (int) $deletionMothership['id'],
+    'action_id' => (int) $deletionActions['missile']['id'],
+    'now' => $deletionNow,
+]);
+$deletionMissileItemId = (int) $pdo->lastInsertId();
+$pdo->prepare('INSERT INTO missile_launches (public_id,launcher_kind,launcher_public_id,player_id,probe_id,manny_id,probe_item_id,others_action_id,others_item_id,target_public_id,target_kind,sector_x,sector_y,sector_z,status,projectile_public_id,launch_at,impact_at,result,scheduled_event_id,created_at,updated_at) VALUES (\'missile_cli_deletion\',\'others_ship\',:launcher,:player_id,NULL,NULL,NULL,:action_id,:item_id,\'999999\',\'probe\',7,-3,2,\'launched\',\'missile_cli_deletion\',:now,:impact,NULL,NULL,:now,:now)')->execute([
+    'launcher' => $createdMothershipId,
+    'player_id' => $othersCliPlayer->id,
+    'action_id' => (int) $deletionActions['missile']['id'],
+    'item_id' => $deletionMissileItemId,
+    'now' => $deletionNow,
+    'impact' => gmdate('c', time() + 1800),
+]);
+$deletionMissileLaunchId = (int) $pdo->lastInsertId();
+$pdo->prepare('INSERT INTO others_projectiles (public_id,launch_id,action_id,launcher_kind,launcher_public_id,target_public_id,target_kind,sector_x,sector_y,sector_z,status,launched_at,impact_at,created_at,updated_at) VALUES (\'missile_cli_deletion\',:launch_id,:action_id,\'others_ship\',:launcher,\'999999\',\'probe\',7,-3,2,\'moving\',:now,:impact,:now,:now)')->execute([
+    'launch_id' => $deletionMissileLaunchId,
+    'action_id' => (int) $deletionActions['missile']['id'],
+    'launcher' => $createdMothershipId,
+    'now' => $deletionNow,
+    'impact' => gmdate('c', time() + 1800),
+]);
+$deletionProjectileId = (int) $pdo->lastInsertId();
+$deletionScheduler = new ScheduledEventRepository($pdo);
+$deletionMovementEvent = $deletionScheduler->schedule('others.action', 'others_action', (int) $deletionActions['movement']['id'], gmdate('c', time() + 3600));
+$deletionProjectileEvent = $deletionScheduler->schedule('missile.projectile', 'missile_projectile', $deletionProjectileId, gmdate('c', time() + 1800));
+$pdo->prepare('UPDATE others_actions SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $deletionMovementEvent->id, 'id' => (int) $deletionActions['movement']['id']]);
+$pdo->prepare('UPDATE others_actions SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $deletionProjectileEvent->id, 'id' => (int) $deletionActions['missile']['id']]);
+$pdo->prepare('UPDATE missile_launches SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $deletionProjectileEvent->id, 'id' => $deletionMissileLaunchId]);
+$pdo->prepare('INSERT INTO others_projectile_history (projectile_public_id,action_public_id,result,details_json,resolved_at) VALUES (\'historic_cli_deletion\',:action_public_id,\'missed\',\'{}\',:now)')->execute(['action_public_id' => (string) $deletionActions['missile']['public_id'], 'now' => $deletionNow]);
+$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:event_key,\'probe\',\'999999\',5,:now)')->execute(['event_key' => 'laser:' . $deletionActions['laser']['public_id'] . ':' . $deletionNow, 'now' => $deletionNow]);
+$pdo->prepare('INSERT INTO others_cross_store_operations (public_id,action_id,operation_type,payload_json,sql_applied,sector_applied,status,created_at,updated_at) VALUES (\'xstore_cli_deletion\',NULL,\'dormant_auxiliaries\',:payload,1,1,\'succeeded\',:now,:now)')->execute([
+    'payload' => json_encode(['shipId' => $createdStandardShipId, 'auxiliaryIds' => ['former_aux_cli_deletion']], JSON_THROW_ON_ERROR),
+    'now' => $deletionNow,
+]);
+$pdo->prepare('INSERT INTO others_idempotency_keys (player_id,idempotency_key,request_method,request_path,request_body_hash,response_status,response_body_json,action_public_id,created_at) VALUES (:player_id,\'delete-cli-fixture-key\',\'POST\',\'/api/others/test\',\'hash\',202,\'{}\',:action_public_id,:now)')->execute([
+    'player_id' => $othersCliPlayer->id,
+    'action_public_id' => (string) $deletionActions['movement']['public_id'],
+    'now' => $deletionNow,
+]);
+$pdo->prepare('INSERT INTO others_idempotency_keys (player_id,idempotency_key,request_method,request_path,request_body_hash,response_status,response_body_json,action_public_id,created_at) VALUES (:player_id,\'delete-cli-fleet-path-key\',\'POST\',:request_path,\'hash2\',202,\'{}\',NULL,:now)')->execute([
+    'player_id' => $othersCliPlayer->id,
+    'request_path' => '/api/others/fleets/' . $deletionMothership['fleet_public_id'] . '/move',
+    'now' => $deletionNow,
+]);
+$othersDeletionRepository->createAlert($othersCliPlayer->id, $createdMothershipId, 'test', 'fixture', 'delete-cli-alert', 'Deletion fixture alert');
+$pdo->prepare('INSERT INTO missile_launches (public_id,launcher_kind,launcher_public_id,player_id,probe_id,manny_id,probe_item_id,others_action_id,others_item_id,target_public_id,target_kind,sector_x,sector_y,sector_z,status,projectile_public_id,launch_at,impact_at,result,scheduled_event_id,created_at,updated_at) VALUES (\'external_targeting_cli_fleet\',\'probe\',\'999999\',:player_id,NULL,NULL,NULL,NULL,NULL,:target,\'others_ship\',7,-3,2,\'queued\',NULL,:now,NULL,NULL,NULL,:now,:now)')->execute([
+    'player_id' => $othersCliPlayer->id,
+    'target' => $createdMothershipId,
+    'now' => $deletionNow,
+]);
+
+$refusedDeleteOthersFleetCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/delete_others_fleet.php')
+    . ' --mothership-id=' . escapeshellarg($createdStandardShipId)
+    . ' --database-config=' . escapeshellarg($othersCliConfigPath);
+exec($refusedDeleteOthersFleetCommand . ' 2>&1', $refusedDeleteOthersFleetOutput, $refusedDeleteOthersFleetStatus);
+$test->assertEquals(1, $refusedDeleteOthersFleetStatus, 'Others fleet deletion CLI rejects a standard ship id');
+$test->assertEquals(1, (int) $pdo->query('SELECT COUNT(*) FROM others_fleets WHERE id=' . (int) $deletionMothership['fleet_id'])->fetchColumn(), 'refused standard-ship deletion leaves the fleet intact');
+
+$deleteOthersFleetCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/delete_others_fleet.php')
+    . ' --mothership-id=' . escapeshellarg($createdMothershipId)
+    . ' --database-config=' . escapeshellarg($othersCliConfigPath);
+exec($deleteOthersFleetCommand . ' 2>&1', $deleteOthersFleetOutput, $deleteOthersFleetStatus);
+$test->assertEquals(0, $deleteOthersFleetStatus, 'Others fleet deletion CLI exits successfully');
+$test->assert(str_contains(implode("\n", $deleteOthersFleetOutput), 'Deleted Others fleet ' . $deletionMothership['fleet_public_id']), 'Others fleet deletion CLI reports the deleted fleet');
+$test->assertEquals(0, (int) $pdo->query('SELECT COUNT(*) FROM others_fleets WHERE id=' . (int) $deletionMothership['fleet_id'])->fetchColumn(), 'Others fleet deletion removes the fleet row');
+$test->assertEquals(0, (int) $pdo->query('SELECT COUNT(*) FROM others_ships WHERE fleet_id=' . (int) $deletionMothership['fleet_id'])->fetchColumn(), 'Others fleet deletion removes every ship');
+$test->assertEquals(0, (int) $pdo->query('SELECT COUNT(*) FROM others_actions WHERE fleet_id=' . (int) $deletionMothership['fleet_id'])->fetchColumn(), 'Others fleet deletion removes every action');
+$deletedActionIdsSql = implode(',', array_map(static fn(array $action): int => (int) $action['id'], $deletionActions));
+foreach (['others_movements', 'others_inventory_transfers', 'others_crafts', 'others_harvests', 'others_swarm_participants', 'others_laser_locks'] as $deletedActionChildTable) {
+    $test->assertEquals(
+        0,
+        (int) $pdo->query("SELECT COUNT(*) FROM {$deletedActionChildTable} WHERE action_id IN ({$deletedActionIdsSql})")->fetchColumn(),
+        "Others fleet deletion removes rows from {$deletedActionChildTable}",
+    );
+}
+$deletedShipIdsSql = (int) $deletionMothership['id'] . ',' . (int) $deletionStandardShip['id'];
+foreach (['others_auxiliaries', 'others_inventory_items', 'others_inventory_resources'] as $deletedShipChildTable) {
+    $test->assertEquals(
+        0,
+        (int) $pdo->query("SELECT COUNT(*) FROM {$deletedShipChildTable} WHERE ship_id IN ({$deletedShipIdsSql})")->fetchColumn(),
+        "Others fleet deletion removes rows from {$deletedShipChildTable}",
+    );
+}
+$test->assertEquals(0, (int) $pdo->query('SELECT COUNT(*) FROM others_visited_sectors WHERE fleet_id=' . (int) $deletionMothership['fleet_id'])->fetchColumn(), 'Others fleet deletion removes visited-sector history');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM scheduled_events WHERE id IN ({$deletionMovementEvent->id},{$deletionProjectileEvent->id})")->fetchColumn(), 'Others fleet deletion removes action and projectile scheduler events');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM missile_launches WHERE public_id='missile_cli_deletion'")->fetchColumn(), 'Others fleet deletion removes missiles launched by the fleet');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM others_projectiles WHERE public_id='missile_cli_deletion'")->fetchColumn(), 'Others fleet deletion removes active projectiles launched by the fleet');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM others_projectile_history WHERE action_public_id='" . $deletionActions['missile']['public_id'] . "'")->fetchColumn(), 'Others fleet deletion removes projectile history linked to its actions');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM others_cross_store_operations WHERE public_id='xstore_cli_deletion'")->fetchColumn(), 'Others fleet deletion removes linked cross-store operation records');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM others_idempotency_keys WHERE idempotency_key IN ('delete-cli-fixture-key','delete-cli-fleet-path-key')")->fetchColumn(), 'Others fleet deletion removes idempotency records linked by action or request path');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM others_damage_events WHERE event_key LIKE 'laser:%'")->fetchColumn(), 'Others fleet deletion removes damage-event history emitted by its actions');
+$test->assertEquals(0, (int) $pdo->query("SELECT COUNT(*) FROM others_alerts WHERE ship_public_id=" . $pdo->quote($createdMothershipId))->fetchColumn(), 'Others fleet deletion removes alerts attached to its ships');
+$test->assertEquals(1, (int) $pdo->query("SELECT COUNT(*) FROM missile_launches WHERE public_id='external_targeting_cli_fleet'")->fetchColumn(), 'Others fleet deletion preserves an external missile targeting the removed fleet');
+$test->assertEquals(1, (int) $pdo->query("SELECT COUNT(*) FROM others_operator_audit WHERE command='delete_fleet' AND outcome='accepted' AND entity_public_id=" . $pdo->quote($createdMothershipId))->fetchColumn(), 'Others fleet deletion preserves an accepted operator audit entry');
+$pdo->exec("DELETE FROM missile_launches WHERE public_id='external_targeting_cli_fleet'");
 $scheduledEvents = new ScheduledEventRepository($pdo);
 $scheduledEventSchemaColumns = array_map(
     static fn(array $row): string => (string) $row['name'],

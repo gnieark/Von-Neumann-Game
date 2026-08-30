@@ -26,6 +26,7 @@ final class OthersAdminService
         try {
             $result = $this->others->transaction(function () use ($playerId, $sector): array {
                 $fleet = $this->others->createFleet($playerId, $sector->getX(), $sector->getY(), $sector->getZ());
+                $fleet['ship'] = $this->others->fillShipDeuteriumTank((string) $fleet['ship']['public_id']);
                 $this->players->setOthersControl($playerId, true);
                 return $fleet;
             });
@@ -44,7 +45,10 @@ final class OthersAdminService
             $this->audit->record(null, 'cli', 'create_standard_ship', 'refused', $mothershipPublicId, ['reason' => 'mothership_not_found']);
             throw new \InvalidArgumentException('Active Others mothership not found.');
         }
-        $ship = $this->others->createStandardShip($mothership);
+        $ship = $this->others->transaction(function () use ($mothership): array {
+            $createdShip = $this->others->createStandardShip($mothership);
+            return $this->others->fillShipDeuteriumTank((string) $createdShip['public_id']);
+        });
         $this->audit->record((int) $mothership['player_id'], 'cli', 'create_standard_ship', 'accepted', (string) $ship['public_id']);
         return $ship;
     }
@@ -59,6 +63,25 @@ final class OthersAdminService
         $auxiliary = $this->others->createAuxiliary((int) $ship['id']);
         $this->audit->record((int) $ship['player_id'], 'cli', 'create_auxiliary', 'accepted', (string) $auxiliary['public_id']);
         return $auxiliary;
+    }
+
+    /** @return array<string, int|string> */
+    public function deleteFleet(string $mothershipPublicId): array
+    {
+        $mothership = $this->others->findShipByPublicId($mothershipPublicId);
+        if ($mothership === null || $mothership['type'] !== 'mothership') {
+            $this->audit->record(null, 'cli', 'delete_fleet', 'refused', $mothershipPublicId, ['reason' => 'mothership_not_found']);
+            throw new \InvalidArgumentException('Others mothership not found.');
+        }
+
+        try {
+            $result = $this->others->deleteFleetByMothershipPublicId($mothershipPublicId);
+            $this->audit->record((int) $mothership['player_id'], 'cli', 'delete_fleet', 'accepted', $mothershipPublicId, $result);
+            return $result;
+        } catch (\Throwable $error) {
+            $this->audit->record((int) $mothership['player_id'], 'cli', 'delete_fleet', 'refused', $mothershipPublicId, ['reason' => $error->getMessage()]);
+            throw $error;
+        }
     }
 
     public function setControl(int $playerId, bool $enabled): void

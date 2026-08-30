@@ -7,6 +7,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - Contrôle Others : ajout de `scripts/others_control/defense_etoile_attente.py`, qui maintient jusqu'à douze sentinelles autour d'un vaisseau mère, évite les destinations déjà occupées ou réservées par un mouvement, rappelle progressivement les vaisseaux hors formation et exclut seulement les trous noirs confirmés par un scan détaillé. Sa boucle se cale sur les échéances de mouvement et conserve un contrôle de veille plafonné à cinq minutes.
+- Outils Others : `create-others-fleet.php` et `create-others-standard-ship.php` remplissent désormais le réservoir de deutérium du vaisseau créé à sa capacité maximale. Les créations issues du gameplay restent inchangées.
+- Outils Others : ajout de `scripts/delete_others_fleet.php`, qui supprime transactionnellement une flotte désignée par son vaisseau mère, ses vaisseaux, auxiliaires, actions, inventaires, missiles lancés et événements scheduler associés. Les missiles adverses visant la flotte et l'audit opérateur sont conservés.
 
 ## 2026-08-29
 
