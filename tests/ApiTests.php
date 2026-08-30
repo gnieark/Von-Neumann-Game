@@ -526,6 +526,13 @@ $test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId
 $openApiDocument = is_string($openApi) ? yaml_parse($openApi) : false;
 $deprecatedProbeMissileOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/missiles']['post'] ?? null) : null;
 $igniteMissileOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/mannies/{mannyId}/ignite_missile']['post'] ?? null) : null;
+$probeAutonomousUnitsOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/sector/autonomous-units']['get'] ?? null) : null;
+$test->assert(
+    is_array($probeAutonomousUnitsOperation)
+        && ($probeAutonomousUnitsOperation['tags'] ?? null) === ['sectors']
+        && (($probeAutonomousUnitsOperation['responses']['200']['content']['application/json']['schema']['$ref'] ?? null) === '#/components/schemas/AutonomousUnitObservationResponse'),
+    'OpenAPI documents probe-local autonomous-unit observation under the sectors tag',
+);
 $test->assert(
     is_array($deprecatedProbeMissileOperation)
         && ($deprecatedProbeMissileOperation['deprecated'] ?? false) === true
@@ -634,6 +641,7 @@ $expectedOpenApiTagsByPath = [
     '/api/probe/{probeId}/visited-sectors' => 'sectors',
     '/api/visited-sectors' => 'sectors',
     '/api/probe/{probeId}/sector' => 'sectors',
+    '/api/probe/{probeId}/sector/autonomous-units' => 'sectors',
     '/api/sector' => 'sectors',
     '/api/probe/{probeId}/move' => 'movement',
     '/api/probe/{probeId}/asteroids/{asteroidId}/trajectories' => 'motorized-asteroids',
