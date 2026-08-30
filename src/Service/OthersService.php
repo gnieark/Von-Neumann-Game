@@ -10,6 +10,7 @@ use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
@@ -46,6 +47,8 @@ final class OthersService
         private readonly ?ProbeDamageWarningRepository $alerts = null,
         private readonly ?MannyRepository $mannies = null,
         private readonly ?ProbeItemRepository $items = null,
+        private readonly ?ScutNetworkService $scut = null,
+        private readonly ?PlayerRepository $players = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->movementConfig = Config::getArray($gameplayConfig, 'movement', $gameplayConfig);
@@ -832,7 +835,11 @@ final class OthersService
             $start = new \DateTimeImmutable($now); $exhausts = $start->modify('+' . max(1, (int) round((float) $lock['deuterium_stock'] * 60)) . ' seconds'); $damage = $start->modify('+10 minutes'); $next = $damage < $exhausts ? $damage : $exhausts;
             $pdo->prepare("UPDATE others_laser_locks SET status='active',started_at=:now,accounted_until=:now,next_damage_at=:damage,exhausts_at=:exhausts,updated_at=:now WHERE id=:id AND status='queued'")->execute(['now' => $now, 'damage' => $damage->format('c'), 'exhausts' => $exhausts->format('c'), 'id' => (int) $lock['id']]);
             $pdo->prepare("UPDATE others_actions SET status='running',ends_at=:ends,updated_at=:now WHERE id=:id AND status='queued'")->execute(['ends' => $next->format('c'), 'now' => $now, 'id' => (int) $action['id']]);
-            $this->createWeaponAlerts(new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z']), (string) $action['public_id'], $target['kind'] === 'manny' ? 'Laser lock: the exposed Manny will be destroyed in ten minutes unless it is embarked.' : 'Laser lock detected: a probe target may lose 5 integrity points every ten minutes.', $damage->format('c'));
+            $lockSector = new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z']);
+            $this->createWeaponAlerts($lockSector, (string) $action['public_id'], $target['kind'] === 'manny' ? 'Laser lock: the exposed Manny will be destroyed in ten minutes unless it is embarked.' : 'Laser lock detected: a probe target may lose 5 integrity points every ten minutes.', $damage->format('c'));
+            if ($target['kind'] === 'manny') {
+                $this->createRemoteMannyLaserAlert($lockSector, (string) $target['id'], (string) $action['public_id'], $damage->format('c'));
+            }
             $this->scheduleExistingAction($action, $next->format('c'), 'running'); return;
         }
         $ship = $this->others->findShipByPublicId((string) $lock['ship_public_id']);
@@ -1184,6 +1191,39 @@ final class OthersService
                     : ProbeDamageWarning::PHASE_WEAPON;
             $this->alerts->createOthersAlert($probe->id, null, ProbeDamageWarning::TYPE_OTHERS_WEAPON, 'weapon-' . $eventKey, $sector, $message, $phase, $scheduledAt);
         }
+    }
+
+    private function createRemoteMannyLaserAlert(SectorCoordinates $sector, string $mannyId, string $eventKey, string $scheduledAt): void
+    {
+        if ($this->mannies === null || $this->probes === null || $this->alerts === null || $this->scut === null || $this->players === null) {
+            return;
+        }
+        $manny = $this->mannies->findByUid($mannyId);
+        if ($manny === null || $manny->probeId === null || $manny->sector === null || !$manny->sector->equals($sector)) {
+            return;
+        }
+        $ownerProbe = $this->probes->findById($manny->probeId);
+        if ($ownerProbe === null || $ownerProbe->currentSector->equals($sector) || !$this->scut->canSectorsCommunicate($ownerProbe->currentSector, $sector)) {
+            return;
+        }
+        $owner = $this->players->findById($ownerProbe->playerId);
+        if ($owner === null) {
+            return;
+        }
+        $relative = $sector->subtract($owner->homeSector);
+        $message = 'Laser lock detected on Manny ' . $manny->name
+            . ' in relative sector (' . $relative['x'] . ', ' . $relative['y'] . ', ' . $relative['z'] . '). '
+            . 'Unless the laser ceases, this Manny will be destroyed in ten minutes.';
+        $this->alerts->createOthersAlert(
+            $ownerProbe->id,
+            null,
+            ProbeDamageWarning::TYPE_OTHERS_WEAPON,
+            'weapon-' . $eventKey,
+            $sector,
+            $message,
+            ProbeDamageWarning::PHASE_WEAPON_TARGETED,
+            $scheduledAt,
+        );
     }
 
     /** @param array<string, mixed> $target */

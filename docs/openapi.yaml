@@ -7316,7 +7316,7 @@ components:
         phase:
           type: string
           enum: [acceleration_end, deceleration_start, arrival, detection, manny_report, instance_switch, probe_loss, ignition, blueprint_share, weapon, weapon_targeted, weapon_result, weapon_damage]
-          description: Missile and motorized-asteroid impact alerts use `weapon_result` for a launcher still present in the impact sector and `weapon_damage` for an impacted victim. A missile also uses `weapon_targeted` when the selected probe is its suspected target; other weapon detections use `weapon`.
+          description: Missile and motorized-asteroid impact alerts use `weapon_result` for a launcher still present in the impact sector and `weapon_damage` for an impacted victim. `weapon_targeted` identifies either a probe selected as a missile target or the owner probe of a remotely targeted Manny reachable through the same SCUT network; other weapon detections use `weapon`.
         scheduledAt:
           type: string
           format: date-time

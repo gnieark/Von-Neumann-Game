@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Combat Others : lorsqu’une Manny distante est verrouillée par un laser, sa sonde propriétaire reçoit désormais une alerte critique si les deux secteurs communiquent par le même réseau SCUT. L’alerte nomme la Manny, indique son secteur relatif et rappelle sa destruction après dix minutes si le laser ne cesse pas.
 - Documentation OpenAPI : ajout de la route sonde `GET /api/probe/{probeId}/sector/autonomous-units` dans la catégorie `sectors`, avec son contrat de pagination et la représentation minimale des Mannys et auxiliaires Others détectés localement.
 - Contrôle Others : ajout de `scripts/others_control/defense_etoile_attente.py`, qui maintient jusqu'à douze sentinelles autour d'un vaisseau mère, évite les destinations déjà occupées ou réservées par un mouvement, rappelle progressivement les vaisseaux hors formation et exclut seulement les trous noirs confirmés par un scan détaillé. Sa boucle se cale sur les échéances de mouvement et conserve un contrôle de veille plafonné à cinq minutes.
 - Outils Others : `create-others-fleet.php` et `create-others-standard-ship.php` remplissent désormais le réservoir de deutérium du vaisseau créé à sa capacité maximale. Les créations issues du gameplay restent inchangées.

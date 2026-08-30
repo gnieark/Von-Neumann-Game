@@ -2330,6 +2330,8 @@ $othersService = new OthersService(
     alerts: $damageWarnings,
     mannies: $mannies,
     items: $items,
+    scut: $scut,
+    players: $players,
 );
 $testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTrajectories, new PhaseHandlerRegistry([
     new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, 600),
@@ -2411,6 +2413,72 @@ $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
     asteroidTrajectories: $asteroidTrajectories,
     asteroidTrajectoryService: $asteroidTrajectoryService,
 ), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService);
+
+$remoteLaserPlayer = $players->createPlayer('remote-laser-manny-owner', 'Remote Laser Manny Owner', null, new SectorCoordinates(200, 0, 0));
+$remoteLaserProbe = $probes->createForPlayer($remoteLaserPlayer->id, 'Remote laser alert probe', $remoteLaserPlayer->homeSector);
+$remoteLaserProbe->excludeFromStats = true;
+$probes->save($remoteLaserProbe);
+$remoteLaserHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($remoteLaserPlayer)['token']];
+$remoteLaserSector = new SectorCoordinates(202, 0, 0);
+$remoteLaserManny = $mannies->createForProbe($remoteLaserProbe->id, 'SCUT Laser Courier', uid: 'mny-scut-laser-courier');
+$remoteLaserManny->locationType = Manny::LOCATION_SECTOR;
+$remoteLaserManny->sector = $remoteLaserSector;
+$mannies->save($remoteLaserManny);
+$remoteLaserRelay = $scut->createOffRelay($remoteLaserProbe->currentSector, $remoteLaserProbe->id);
+$scut->turnOnRelay($remoteLaserRelay->id, 'Remote laser alerts');
+$remoteLaserOthersPlayer = $players->createPlayer('remote-laser-others', 'Remote Laser Others', null, $remoteLaserSector);
+$remoteLaserFleet = $others->createFleet($remoteLaserOthersPlayer->id, $remoteLaserSector->getX(), $remoteLaserSector->getY(), $remoteLaserSector->getZ());
+$pdo->prepare('UPDATE others_ships SET deuterium_stock=20 WHERE id=:id')->execute(['id' => (int) $remoteLaserFleet['ship']['id']]);
+$remoteLaserShip = $others->findShipByPublicId((string) $remoteLaserFleet['ship']['public_id']) ?? throw new RuntimeException('Remote laser alert ship not found.');
+$remoteLaserAction = $othersService->startLaser($remoteLaserShip, ['targetId' => $remoteLaserManny->uid]);
+$processOthersActionNow($remoteLaserAction);
+$remoteLaserAlertResponse = $kernel->handle('GET', '/api/probe/' . $remoteLaserProbe->id . '/alerts', $remoteLaserHeaders);
+$remoteLaserAlerts = array_values(array_filter(
+    $remoteLaserAlertResponse->body['alerts'] ?? [],
+    static fn(array $alert): bool => ($alert['type'] ?? null) === ProbeDamageWarning::TYPE_OTHERS_WEAPON
+        && ($alert['phase'] ?? null) === ProbeDamageWarning::PHASE_WEAPON_TARGETED,
+));
+$test->assertEquals(200, $remoteLaserAlertResponse->status, 'a probe can read its remote Manny laser alert');
+$test->assertEquals(1, count($remoteLaserAlerts), 'a remote Manny laser lock reaches its owner probe through their shared SCUT network');
+$test->assertEquals(['x' => 2, 'y' => 0, 'z' => 0], $remoteLaserAlerts[0]['sector']['relative'] ?? null, 'the remote Manny laser alert exposes only its owner-relative sector');
+$test->assertEquals(
+    'Laser lock detected on Manny SCUT Laser Courier in relative sector (2, 0, 0). Unless the laser ceases, this Manny will be destroyed in ten minutes.',
+    $remoteLaserAlerts[0]['message'] ?? null,
+    'the remote Manny laser alert names the Manny, its relative sector and the ten-minute deadline',
+);
+
+$unlinkedLaserSector = new SectorCoordinates(222, 0, 0);
+$unlinkedLaserManny = $mannies->createForProbe($remoteLaserProbe->id, 'Unlinked Laser Courier', uid: 'mny-unlinked-laser-courier');
+$unlinkedLaserManny->locationType = Manny::LOCATION_SECTOR;
+$unlinkedLaserManny->sector = $unlinkedLaserSector;
+$mannies->save($unlinkedLaserManny);
+$unlinkedLaserOthersPlayer = $players->createPlayer('unlinked-laser-others', 'Unlinked Laser Others', null, $unlinkedLaserSector);
+$unlinkedLaserFleet = $others->createFleet($unlinkedLaserOthersPlayer->id, $unlinkedLaserSector->getX(), $unlinkedLaserSector->getY(), $unlinkedLaserSector->getZ());
+$pdo->prepare('UPDATE others_ships SET deuterium_stock=20 WHERE id=:id')->execute(['id' => (int) $unlinkedLaserFleet['ship']['id']]);
+$unlinkedLaserShip = $others->findShipByPublicId((string) $unlinkedLaserFleet['ship']['public_id']) ?? throw new RuntimeException('Unlinked laser alert ship not found.');
+$unlinkedLaserAction = $othersService->startLaser($unlinkedLaserShip, ['targetId' => $unlinkedLaserManny->uid]);
+$processOthersActionNow($unlinkedLaserAction);
+$unlinkedLaserAlerts = array_values(array_filter(
+    $damageWarnings->findByProbeId($remoteLaserProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === 'weapon-' . $unlinkedLaserAction['public_id'],
+));
+$test->assertEquals(0, count($unlinkedLaserAlerts), 'a remote Manny laser lock does not reach its owner probe outside a shared SCUT network');
+$remoteLaserRelay = $scutRelays->findById($remoteLaserRelay->id) ?? throw new RuntimeException('Remote laser alert relay not found.');
+$remoteLaserNetworkId = $remoteLaserRelay->networkId;
+$others->deleteFleetByMothershipPublicId((string) $remoteLaserFleet['ship']['public_id']);
+$others->deleteFleetByMothershipPublicId((string) $unlinkedLaserFleet['ship']['public_id']);
+$scutRelays->delete($remoteLaserRelay->id);
+if ($remoteLaserNetworkId !== null) {
+    $scutNetworks->delete($remoteLaserNetworkId);
+}
+$pdo->prepare('DELETE FROM mannies WHERE probe_id=:probe_id')->execute(['probe_id' => $remoteLaserProbe->id]);
+$pdo->prepare('UPDATE players SET default_probe_id=NULL WHERE id=:id')->execute(['id' => $remoteLaserPlayer->id]);
+$pdo->prepare('DELETE FROM neumann_probes WHERE id=:id')->execute(['id' => $remoteLaserProbe->id]);
+$pdo->prepare('DELETE FROM sessions WHERE player_id=:player_id')->execute(['player_id' => $remoteLaserPlayer->id]);
+$deleteRemoteLaserPlayer = $pdo->prepare('DELETE FROM players WHERE id=:id');
+foreach ([$remoteLaserPlayer->id, $remoteLaserOthersPlayer->id, $unlinkedLaserOthersPlayer->id] as $remoteLaserFixturePlayerId) {
+    $deleteRemoteLaserPlayer->execute(['id' => $remoteLaserFixturePlayerId]);
+}
 
 $trajectoryColumns = array_column($pdo->query('PRAGMA table_info(asteroid_trajectories)')->fetchAll(PDO::FETCH_ASSOC), 'name');
 $test->assert(in_array('uid', $trajectoryColumns, true) && in_array('current_sector_x', $trajectoryColumns, true) && in_array('launcher_probe_id', $trajectoryColumns, true), 'asteroid trajectory SQL schema includes the canonical launcher reference');
@@ -9301,8 +9369,8 @@ if ($createdProbe !== null) {
         $timeoutProbeMannies = $mannies->findByProbeId($timeoutProbe->id);
         $timeoutManny = $timeoutProbeMannies[0] ?? throw new RuntimeException('Expected timeout test Manny.');
         $core = $storageContainers->findByUidForProbe($timeoutProbe->id, 'probe-core') ?? throw new RuntimeException('Expected timeout test core container.');
-        // Configure stock before moving the target Manny out of storage: the
-        // storage helper repairs unplaced probe Mannies as part of setup.
+        $storage->releaseMannyFromStorage($timeoutManny);
+        $mannies->save($timeoutManny);
         $timeoutProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $timeoutProbe, ['metals' => $storedMetals]);
         $timeoutProbeMannies = $mannies->findByProbeId($timeoutProbe->id);
         $timeoutManny = $timeoutProbeMannies[0] ?? throw new RuntimeException('Expected timeout test Manny.');
@@ -9313,7 +9381,6 @@ if ($createdProbe !== null) {
             $storedManny->sector = null;
             $mannies->save($storedManny);
         }
-        $storage->releaseMannyFromStorage($timeoutManny);
         $timeoutManny->locationType = Manny::LOCATION_SECTOR;
         $timeoutManny->sector = $timeoutProbe->currentSector;
         $timeoutManny->currentTask = Manny::TASK_WAITING_FOR_SPACE;
@@ -9331,7 +9398,7 @@ if ($createdProbe !== null) {
         return [$timeoutProbe, $timeoutManny];
     };
 
-    [$cargoTimeoutProbe, $cargoTimeoutManny] = $prepareExpiredWaitingManny('waiting-timeout-docks', 0.95);
+    [$cargoTimeoutProbe, $cargoTimeoutManny] = $prepareExpiredWaitingManny('waiting-timeout-docks', 0.5);
     $cargoTimeoutEventId = $cargoTimeoutManny->taskScheduledEventId;
     $processScheduledMannyNow($cargoTimeoutManny->id);
     $cargoTimeoutResult = $mannies->findById($cargoTimeoutManny->id);
@@ -9339,10 +9406,10 @@ if ($createdProbe !== null) {
     $test->assertEquals(null, $cargoTimeoutResult?->currentTask, 'a Manny that docks after its timeout becomes idle');
     $test->assertEquals(0.0, $cargoTimeoutResult?->cargoMetals, 'the seven-day timeout abandons Manny resource cargo');
     $test->assertEquals('returned_after_cargo_abandonment', $cargoTimeoutResult?->taskPayload['result'] ?? null, 'timed-out docking records cargo abandonment');
-    $test->assertEquals(0.95, $storage->resourceStock($cargoTimeoutProbe, ResourceComposition::METALS), 'automatically abandoned cargo is not transferred into probe storage');
+    $test->assertEquals(0.5, $storage->resourceStock($cargoTimeoutProbe, ResourceComposition::METALS), 'automatically abandoned cargo is not transferred into probe storage');
     $test->assertEquals('done', $cargoTimeoutEventId !== null ? $scheduledEvents->findById($cargoTimeoutEventId)?->status : null, 'successful timeout docking completes its scheduler event');
 
-    [$abandonedTimeoutProbe, $abandonedTimeoutManny] = $prepareExpiredWaitingManny('waiting-timeout-abandoned', 0.99);
+    [$abandonedTimeoutProbe, $abandonedTimeoutManny] = $prepareExpiredWaitingManny('waiting-timeout-abandoned', 0.51);
     $abandonedTimeoutEventId = $abandonedTimeoutManny->taskScheduledEventId;
     $processScheduledMannyNow($abandonedTimeoutManny->id);
     $abandonedTimeoutResult = $mannies->findById($abandonedTimeoutManny->id);
@@ -9543,6 +9610,7 @@ if ($createdProbe !== null) {
              current_task = :current_task,
              task_started_at = :started,
              task_ends_at = NULL,
+             task_scheduled_event_id = NULL,
              cargo_deuterium = 0,
              cargo_metals = 0,
              cargo_ice = 0,

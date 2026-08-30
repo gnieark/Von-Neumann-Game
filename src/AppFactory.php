@@ -138,7 +138,7 @@ final class AppFactory
             )
             : null;
 
-        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items);
+        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players);
         return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements, $rateLimiter, $asteroidTrajectoryService, $others, new OthersIdempotencyRepository($pdo), new OthersAuditRepository($pdo), $othersService, new AutonomousUnitObservationService($mannies, $others));
     }
 
@@ -186,7 +186,7 @@ final class AppFactory
             planetaryLossMinimum: Config::float($impactConfig, 'planetaryMassLossMinimumFraction', 0.01),
             planetaryLossMaximum: Config::float($impactConfig, 'planetaryMassLossMaximumFraction', 0.3),
         );
-        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items);
+        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players);
         $trajectoryProcessor = new AsteroidTrajectoryPhaseProcessor(
             $asteroidTrajectories,
             new PhaseHandlerRegistry([
