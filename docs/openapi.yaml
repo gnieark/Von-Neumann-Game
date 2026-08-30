@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '125'
+  version: '128'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -50,7 +50,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 125
+                apiVersion: 128
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1624,6 +1624,52 @@ paths:
           $ref: '#/paths/~1api~1probe~1sector/get/responses/409'
         '400':
           $ref: '#/paths/~1api~1probe~1sector/get/responses/400'
+  /api/probe/{probeId}/sector/autonomous-units:
+    get:
+      tags: [sectors]
+      summary: Observe autonomous units deployed in the probe sector
+      description: >
+        Returns every deployed Manny and active Others auxiliary physically
+        present in the selected probe's current sector, regardless of the
+        unit's owner. The observer probe must belong to the authenticated
+        player and must not be dead or moving. Absolute sector coordinates are
+        never exposed.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of autonomous units to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor returned as `nextCursor` by the preceding page.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Locally deployed autonomous units, without absolute coordinates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousUnitObservationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Autonomous-unit observation is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/probe/{probeId}/move:
     post:
       tags: [movement]
@@ -5409,7 +5455,7 @@ paths:
       tags: [sectors]
       summary: Observe a sector by player-relative coordinates
       description: >
-        Coordinates are relative to the authenticated player's reference frame.
+        Coordinates are relative to the authenticated player's home sector.
         Absolute sector coordinates are never exposed. Detail depends on whether
         the sector is current, visited, or only passively scanned from a reachable
         probe. When another owned probe is reachable from the default probe and
@@ -5418,12 +5464,15 @@ paths:
         `sector.distances` lists the distance
         from every owned probe and marks the probe whose sensors produced the
         scan. During blind cruise, only already visited sectors can be consulted
-        as historical cartography.
+        as historical cartography. With `shipId`, the scan uses the closest
+        available ship of the designated ship's fleet. A sector previously
+        entered by that fleet is returned with precise historical detail; this
+        fleet history is isolated from probe histories and from other fleets.
       parameters:
         - name: shipId
           in: query
           required: false
-          description: Owned Others ship used as the private BOB-equivalent scan source; requires can_control_others.
+          description: Owned Others ship designating the fleet used for the private BOB-equivalent scan; requires can_control_others.
           schema:
             type: string
         - name: x
@@ -8336,6 +8385,40 @@ components:
               type: number
               minimum: 0
               maximum: 1
+    AutonomousUnitObservationResponse:
+      type: object
+      required: [autonomousUnits]
+      properties:
+        autonomousUnits:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutonomousUnitObservation'
+        nextCursor:
+          type: string
+          description: Opaque cursor for the next page. Omitted on the last page.
+    AutonomousUnitObservation:
+      type: object
+      required: [id, kind, carrier, spatialState]
+      properties:
+        id:
+          type: string
+          description: Opaque public identifier of the deployed unit.
+        kind:
+          type: string
+          enum: [manny, others_auxiliary]
+        carrier:
+          type: object
+          required: [id, kind]
+          properties:
+            id:
+              type: string
+              description: Public identifier of the unit's carrier.
+            kind:
+              type: string
+              enum: [probe, others_ship]
+        spatialState:
+          type: string
+          enum: [moving_to_sector_object, returning_to_carrier, drifting, landed_on_sector_object]
     SectorObservationProbeDistance:
       type: object
       required: [probeId, probeName, distance, isDefault, usedForScan]
@@ -8376,8 +8459,32 @@ components:
           enum: [star, planet, asteroid, dust_cloud, black_hole, solar_system, manny, drifting_item, detached_container, deuterium_refuel_station, dormant_construct, scut_relay, missile]
         observedClass:
           type: string
-          enum: [suspected_missile]
-          description: Present on detected missile objects so they can also be selected as weapon targets.
+          enum: [suspected_missile, large_ship, ship]
+          description: Present on detected missiles and Others ships.
+        movement:
+          type: object
+          description: >-
+            Observational movement telemetry for a detected Others ship. Probe
+            APIs expose only its normalized direction, never its destination,
+            distance or timing.
+          required: [direction]
+          properties:
+            direction:
+              type: object
+              required: [x, y, z]
+              properties:
+                x:
+                  type: number
+                  minimum: -1
+                  maximum: 1
+                y:
+                  type: number
+                  minimum: -1
+                  maximum: 1
+                z:
+                  type: number
+                  minimum: -1
+                  maximum: 1
         name:
           type: string
           nullable: true

@@ -57,15 +57,51 @@ final class SectorObservationService
 
     public function observe(Player $player, NeumannProbe $probe, SectorCoordinates $target): SectorObservation
     {
+        return $this->observeWithKnowledge(
+            $player,
+            $probe,
+            $target,
+            $this->visitedSectors->hasVisited($player, $target),
+            $this->skipsInitialNeighborDelay($player, $this->grid->getDistance($probe->currentSector, $target)),
+        );
+    }
+
+    public function observeForOthers(
+        Player $player,
+        NeumannProbe $observer,
+        SectorCoordinates $target,
+        bool $fleetHasVisitedTarget,
+        int $fleetVisitedSectorCount,
+    ): SectorObservation
+    {
+        $distance = $this->grid->getDistance($observer->currentSector, $target);
+
+        return $this->observeWithKnowledge(
+            $player,
+            $observer,
+            $target,
+            $fleetHasVisitedTarget,
+            $distance === 1
+                && $fleetVisitedSectorCount === $this->scanInt('initialNeighborDelayBypassVisitedCount', 1),
+        );
+    }
+
+    private function observeWithKnowledge(
+        Player $player,
+        NeumannProbe $probe,
+        SectorCoordinates $target,
+        bool $visited,
+        bool $skipInitialNeighborDelay,
+    ): SectorObservation
+    {
         $frame = new PlayerReferenceFrame($player->homeSector);
         $relative = $frame->globalToRelative($target);
         $distance = $this->grid->getDistance($probe->currentSector, $target);
         $residenceSeconds = $this->residenceSeconds($probe);
-        $requiredSeconds = $this->skipsInitialNeighborDelay($player, $distance)
+        $requiredSeconds = $skipInitialNeighborDelay
             ? 0
             : $this->requiredResidenceSeconds($distance);
         $content = $this->abandonOrphanedForgottenMannies($this->sectors->getOrCreateSector($target));
-        $visited = $this->visitedSectors->hasVisited($player, $target);
         $current = $probe->currentSector->equals($target);
         $scan = $this->scanMetadata($residenceSeconds, $requiredSeconds);
 

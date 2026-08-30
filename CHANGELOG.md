@@ -2,6 +2,24 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-30
+
+### Changed
+
+- Documentation OpenAPI : ajout de la route sonde `GET /api/probe/{probeId}/sector/autonomous-units` dans la catégorie `sectors`, avec son contrat de pagination et la représentation minimale des Mannys et auxiliaires Others détectés localement.
+- Contrôle Others : ajout de `scripts/others_control/defense_etoile_attente.py`, qui maintient jusqu'à douze sentinelles autour d'un vaisseau mère, évite les destinations déjà occupées ou réservées par un mouvement, rappelle progressivement les vaisseaux hors formation et exclut seulement les trous noirs confirmés par un scan détaillé. Sa boucle se cale sur les échéances de mouvement et conserve un contrôle de veille plafonné à cinq minutes.
+- Outils Others : `create-others-fleet.php` et `create-others-standard-ship.php` remplissent désormais le réservoir de deutérium du vaisseau créé à sa capacité maximale. Les créations issues du gameplay restent inchangées.
+- Outils Others : ajout de `scripts/delete_others_fleet.php`, qui supprime transactionnellement une flotte désignée par son vaisseau mère, ses vaisseaux, auxiliaires, actions, inventaires, missiles lancés et événements scheduler associés. Les missiles adverses visant la flotte et l'audit opérateur sont conservés.
+
+## 2026-08-29
+
+### Changed
+
+- API v128 / cartographie Others : chaque flotte historise ses secteurs visités dans la table relationnelle dédiée `others_visited_sectors`, sans alimenter les statistiques des sondes. `GET /api/others/fleets/{fleetId}/visited-sectors` expose cet historique paginé dans le référentiel relatif au home du propriétaire, et les scans BOB via `GET /api/sector?shipId=…` retrouvent immédiatement le niveau de détail précis d'un secteur déjà visité par cette flotte seulement. Migration obligatoire avant redémarrage : exécuter `php scripts/one-shot-scripts/migrate-others-visited-sectors.php --database-config=…`.
+- API v127 / mouvements Others : les représentations de vaisseaux détenus exposent désormais `movement`, avec la phase active, la destination relative au home du propriétaire et `arrivalAt`. Les scans de sondes et les scans génériques ne reçoivent pour leur part que le vecteur directionnel normalisé d'un mouvement détecté, sans destination, distance ni échéance.
+- API v126 / navigation Others : les coordonnées des vaisseaux sont désormais exposées relativement au secteur home de leur propriétaire, commun à toute la flotte et présenté comme `(0, 0, 0)`. Les auxiliaires séparés de leur porteur exposent leur secteur dans ce même référentiel ; les auxiliaires embarqués ou présents avec leur porteur ne le dupliquent pas.
+- Rupture de contrat Others : le champ `target` de `POST /api/others/ships/{shipId}/move` et `POST /api/others/fleets/{fleetId}/move` désigne désormais la destination relativement au home du propriétaire. Il ne représente plus un déplacement depuis la position courante du vaisseau ou de la mère.
+
 ## 2026-08-28
 
 ### Changed

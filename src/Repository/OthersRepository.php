@@ -6,6 +6,7 @@ namespace VonNeumannGame\Repository;
 
 use PDO;
 use Throwable;
+use VonNeumannGame\Sector\SectorCoordinates;
 
 final class OthersRepository
 {
@@ -110,9 +111,104 @@ final class OthersRepository
             $stmt->execute(['public_id' => $fleetId, 'player_id' => $playerId, 'status' => 'active', 'created_at' => $now, 'updated_at' => $now]);
             $fleetSqlId = (int) $this->pdo->lastInsertId();
             $ship = $this->createShip($fleetSqlId, 'mothership', $x, $y, $z);
+            $this->markFleetSectorVisited($fleetSqlId, new SectorCoordinates($x, $y, $z), $now);
 
             return ['id' => $fleetSqlId, 'public_id' => $fleetId, 'ship' => $ship];
         });
+    }
+
+    public function markFleetSectorVisited(int $fleetId, SectorCoordinates $coordinates, ?string $visitedAt = null): void
+    {
+        $visitedAt ??= gmdate('c');
+        $params = [
+            'fleet_id' => $fleetId,
+            'x' => $coordinates->getX(),
+            'y' => $coordinates->getY(),
+            'z' => $coordinates->getZ(),
+            'visited_at' => $visitedAt,
+        ];
+        if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO others_visited_sectors (fleet_id,sector_x,sector_y,sector_z,first_visited_at,last_visited_at,visit_count)
+                 VALUES (:fleet_id,:x,:y,:z,:visited_at,:visited_at,1)
+                 ON DUPLICATE KEY UPDATE
+                    first_visited_at=LEAST(first_visited_at,VALUES(first_visited_at)),
+                    last_visited_at=GREATEST(last_visited_at,VALUES(last_visited_at)),
+                    visit_count=visit_count+1'
+            );
+        } else {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO others_visited_sectors (fleet_id,sector_x,sector_y,sector_z,first_visited_at,last_visited_at,visit_count)
+                 VALUES (:fleet_id,:x,:y,:z,:visited_at,:visited_at,1)
+                 ON CONFLICT(fleet_id,sector_x,sector_y,sector_z)
+                 DO UPDATE SET
+                    first_visited_at=MIN(others_visited_sectors.first_visited_at,excluded.first_visited_at),
+                    last_visited_at=MAX(others_visited_sectors.last_visited_at,excluded.last_visited_at),
+                    visit_count=others_visited_sectors.visit_count+1'
+            );
+        }
+        $stmt->execute($params);
+    }
+
+    /** @return array{targetVisited:bool,visitedSectorCount:int} */
+    public function fleetSectorKnowledge(int $fleetId, SectorCoordinates $coordinates): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT
+                EXISTS(
+                    SELECT 1 FROM others_visited_sectors
+                    WHERE fleet_id=:target_fleet_id AND sector_x=:x AND sector_y=:y AND sector_z=:z
+                ) AS target_visited,
+                (SELECT COUNT(*) FROM others_visited_sectors WHERE fleet_id=:count_fleet_id) AS visited_sector_count'
+        );
+        $stmt->execute([
+            'target_fleet_id' => $fleetId,
+            'count_fleet_id' => $fleetId,
+            'x' => $coordinates->getX(),
+            'y' => $coordinates->getY(),
+            'z' => $coordinates->getZ(),
+        ]);
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            throw new \RuntimeException('Unable to read Others fleet sector knowledge.');
+        }
+
+        return [
+            'targetVisited' => (bool) $row['target_visited'],
+            'visitedSectorCount' => (int) $row['visited_sector_count'],
+        ];
+    }
+
+    /**
+     * @param array{lastVisitedAt:string,id:int}|null $cursor
+     * @return array{rows:list<array<string,mixed>>,nextCursor:array{lastVisitedAt:string,id:int}|null}
+     */
+    public function findFleetVisitedSectorsPage(int $fleetId, ?array $cursor, int $limit): array
+    {
+        $limit = max(1, min(500, $limit));
+        $sql = 'SELECT * FROM others_visited_sectors WHERE fleet_id=:fleet_id';
+        $params = ['fleet_id' => $fleetId];
+        if ($cursor !== null) {
+            $sql .= ' AND (last_visited_at < :cursor_time OR (last_visited_at = :cursor_time AND id < :cursor_id))';
+            $params['cursor_time'] = $cursor['lastVisitedAt'];
+            $params['cursor_id'] = $cursor['id'];
+        }
+        $sql .= ' ORDER BY last_visited_at DESC,id DESC LIMIT ' . ($limit + 1);
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        $hasMore = count($rows) > $limit;
+        if ($hasMore) {
+            array_pop($rows);
+        }
+        $last = $rows !== [] ? $rows[array_key_last($rows)] : null;
+
+        return [
+            'rows' => $rows,
+            'nextCursor' => $hasMore && $last !== null
+                ? ['lastVisitedAt' => (string) $last['last_visited_at'], 'id' => (int) $last['id']]
+                : null,
+        ];
     }
 
     public function createStandardShip(array $mothership): array
@@ -127,6 +223,260 @@ final class OthersRepository
             (int) $mothership['sector_y'],
             (int) $mothership['sector_z'],
         ));
+    }
+
+    /** @return array<string, mixed> */
+    public function fillShipDeuteriumTank(string $shipPublicId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE others_ships
+             SET deuterium_stock = deuterium_capacity, updated_at = :updated_at
+             WHERE public_id = :public_id AND destroyed_at IS NULL'
+        );
+        $stmt->execute(['updated_at' => gmdate('c'), 'public_id' => $shipPublicId]);
+        if ($stmt->rowCount() !== 1) {
+            throw new \RuntimeException('Unable to fill Others ship deuterium tank.');
+        }
+
+        $ship = $this->findShipByPublicId($shipPublicId);
+        if ($ship === null) {
+            throw new \RuntimeException('Others ship disappeared after refueling.');
+        }
+
+        return $ship;
+    }
+
+    /**
+     * @return array<string, int|string>
+     */
+    public function deleteFleetByMothershipPublicId(string $mothershipPublicId): array
+    {
+        return $this->transaction(function () use ($mothershipPublicId): array {
+            $mothership = $this->findShipByPublicId($mothershipPublicId);
+            if ($mothership === null || $mothership['type'] !== 'mothership') {
+                throw new \InvalidArgumentException('Others mothership not found.');
+            }
+
+            $fleetId = (int) $mothership['fleet_id'];
+            $shipRows = $this->fetchRowsByValues('others_ships', 'fleet_id', [$fleetId], 'id,public_id');
+            $shipIds = array_map(static fn(array $row): int => (int) $row['id'], $shipRows);
+            $shipPublicIds = array_map(static fn(array $row): string => (string) $row['public_id'], $shipRows);
+            $auxiliaryRows = $this->fetchRowsByValues('others_auxiliaries', 'ship_id', $shipIds, 'id,public_id');
+            $auxiliaryIds = array_map(static fn(array $row): int => (int) $row['id'], $auxiliaryRows);
+            $auxiliaryPublicIds = array_map(static fn(array $row): string => (string) $row['public_id'], $auxiliaryRows);
+            $actionRows = $this->fetchRowsByValues('others_actions', 'fleet_id', [$fleetId], 'id,public_id,scheduled_event_id');
+            $actionIds = array_map(static fn(array $row): int => (int) $row['id'], $actionRows);
+            $actionPublicIds = array_map(static fn(array $row): string => (string) $row['public_id'], $actionRows);
+
+            $launchRowsById = [];
+            foreach ($this->fetchRowsByValues('missile_launches', 'others_action_id', $actionIds, 'id,public_id,scheduled_event_id') as $row) {
+                $launchRowsById[(int) $row['id']] = $row;
+            }
+            foreach ($this->fetchRowsByValues('missile_launches', 'launcher_public_id', $shipPublicIds, 'id,public_id,scheduled_event_id', "launcher_kind='others_ship'") as $row) {
+                $launchRowsById[(int) $row['id']] = $row;
+            }
+            $launchRows = array_values($launchRowsById);
+            $launchIds = array_map(static fn(array $row): int => (int) $row['id'], $launchRows);
+            $launchPublicIds = array_map(static fn(array $row): string => (string) $row['public_id'], $launchRows);
+            $projectileRows = $this->fetchRowsByValues('others_projectiles', 'launch_id', $launchIds, 'id,public_id');
+            $projectileIds = array_map(static fn(array $row): int => (int) $row['id'], $projectileRows);
+
+            $counts = [
+                'scheduledEvents' => 0,
+                'probeAlerts' => 0,
+                'alerts' => 0,
+                'idempotencyKeys' => 0,
+                'damageEvents' => 0,
+                'crossStoreOperations' => 0,
+                'projectileHistory' => 0,
+                'projectiles' => 0,
+                'missileLaunches' => 0,
+                'swarmParticipants' => 0,
+                'movements' => 0,
+                'inventoryTransfers' => 0,
+                'crafts' => 0,
+                'harvests' => 0,
+                'laserLocks' => 0,
+                'actions' => 0,
+                'auxiliaries' => 0,
+                'inventoryItems' => 0,
+                'inventoryResources' => 0,
+                'visitedSectors' => 0,
+                'ships' => 0,
+                'fleets' => 0,
+            ];
+
+            $scheduledEventIds = [];
+            foreach ([...$actionRows, ...$launchRows] as $row) {
+                if ($row['scheduled_event_id'] !== null) {
+                    $scheduledEventIds[] = (int) $row['scheduled_event_id'];
+                }
+            }
+            $counts['scheduledEvents'] += $this->deleteRowsByValues('scheduled_events', 'id', array_values(array_unique($scheduledEventIds)));
+            $counts['scheduledEvents'] += $this->deleteScheduledEventsByEntity('others_action', $actionIds);
+            $counts['scheduledEvents'] += $this->deleteScheduledEventsByEntity('missile_projectile', $projectileIds);
+
+            $probeAlertKeys = [];
+            foreach ($actionPublicIds as $actionPublicId) {
+                $probeAlertKeys[] = 'others-arrival-' . $actionPublicId;
+                $probeAlertKeys[] = 'weapon-' . $actionPublicId;
+            }
+            $othersAlertKeys = [];
+            foreach ($launchPublicIds as $launchPublicId) {
+                $probeAlertKeys[] = 'weapon-' . $launchPublicId;
+                $probeAlertKeys[] = 'weapon-result-' . $launchPublicId;
+                $probeAlertKeys[] = 'weapon-damage-' . $launchPublicId;
+                $othersAlertKeys[] = 'weapon-result-' . $launchPublicId;
+                $othersAlertKeys[] = 'weapon-damage-' . $launchPublicId;
+            }
+            $counts['probeAlerts'] += $this->deleteRowsByValues('probe_damage_warnings', 'object_id', array_values(array_unique($probeAlertKeys)));
+            $counts['alerts'] += $this->deleteRowsByValues('others_alerts', 'ship_public_id', $shipPublicIds);
+            $counts['alerts'] += $this->deleteRowsByValues('others_alerts', 'event_key', array_values(array_unique($othersAlertKeys)));
+            $idempotencyKeyIds = $this->idempotencyKeyIdsForFleet(
+                (int) $mothership['player_id'],
+                (string) $mothership['fleet_public_id'],
+                $shipPublicIds,
+                $actionPublicIds,
+            );
+            $counts['idempotencyKeys'] += $this->deleteRowsByValues('others_idempotency_keys', 'id', $idempotencyKeyIds);
+
+            $counts['damageEvents'] += $this->deleteRowsByValues('others_damage_events', 'target_public_id', [...$shipPublicIds, ...$auxiliaryPublicIds]);
+            $damageEventIds = [];
+            $actionPublicIdSet = array_fill_keys($actionPublicIds, true);
+            $launchPublicIdSet = array_fill_keys($launchPublicIds, true);
+            $damageCandidates = $this->pdo->query("SELECT id,event_key FROM others_damage_events WHERE event_key LIKE 'laser:%' OR event_key LIKE 'missile:%'")->fetchAll();
+            foreach ($damageCandidates as $candidate) {
+                $parts = explode(':', (string) $candidate['event_key']);
+                if (($parts[0] ?? null) === 'laser' && isset($actionPublicIdSet[$parts[1] ?? ''])) {
+                    $damageEventIds[] = (int) $candidate['id'];
+                }
+                if (($parts[0] ?? null) === 'missile' && isset($launchPublicIdSet[$parts[1] ?? ''])) {
+                    $damageEventIds[] = (int) $candidate['id'];
+                }
+            }
+            $counts['damageEvents'] += $this->deleteRowsByValues('others_damage_events', 'id', array_values(array_unique($damageEventIds)));
+
+            $crossStoreOperationIds = $this->crossStoreOperationIdsForShips($shipPublicIds);
+            $counts['crossStoreOperations'] += $this->deleteRowsByValues('others_cross_store_operations', 'action_id', $actionIds);
+            $counts['crossStoreOperations'] += $this->deleteRowsByValues('others_cross_store_operations', 'id', $crossStoreOperationIds);
+            $counts['projectileHistory'] += $this->deleteRowsByValues('others_projectile_history', 'projectile_public_id', $launchPublicIds);
+            $counts['projectileHistory'] += $this->deleteRowsByValues('others_projectile_history', 'action_public_id', $actionPublicIds);
+            $counts['projectiles'] += $this->deleteRowsByValues('others_projectiles', 'id', $projectileIds);
+            $counts['missileLaunches'] += $this->deleteRowsByValues('missile_launches', 'id', $launchIds);
+            $counts['swarmParticipants'] += $this->deleteRowsByValues('others_swarm_participants', 'action_id', $actionIds);
+            $counts['movements'] += $this->deleteRowsByValues('others_movements', 'action_id', $actionIds);
+            $counts['inventoryTransfers'] += $this->deleteRowsByValues('others_inventory_transfers', 'action_id', $actionIds);
+            $counts['crafts'] += $this->deleteRowsByValues('others_crafts', 'action_id', $actionIds);
+            $counts['harvests'] += $this->deleteRowsByValues('others_harvests', 'action_id', $actionIds);
+            $counts['laserLocks'] += $this->deleteRowsByValues('others_laser_locks', 'action_id', $actionIds);
+            $counts['actions'] += $this->deleteRowsByValues('others_actions', 'id', $actionIds);
+            $counts['auxiliaries'] += $this->deleteRowsByValues('others_auxiliaries', 'id', $auxiliaryIds);
+            $counts['inventoryItems'] += $this->deleteRowsByValues('others_inventory_items', 'ship_id', $shipIds);
+            $counts['inventoryResources'] += $this->deleteRowsByValues('others_inventory_resources', 'ship_id', $shipIds);
+            $counts['visitedSectors'] += $this->deleteRowsByValues('others_visited_sectors', 'fleet_id', [$fleetId]);
+            $counts['ships'] += $this->deleteRowsByValues('others_ships', 'id', $shipIds);
+            $counts['fleets'] += $this->deleteRowsByValues('others_fleets', 'id', [$fleetId]);
+
+            return [
+                'fleetId' => (string) $mothership['fleet_public_id'],
+                'mothershipId' => $mothershipPublicId,
+                'playerId' => (int) $mothership['player_id'],
+            ] + $counts;
+        });
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function fetchRowsByValues(string $table, string $column, array $values, string $selection = '*', string $extraWhere = ''): array
+    {
+        if ($values === []) {
+            return [];
+        }
+        $rows = [];
+        foreach (array_chunk(array_values(array_unique($values, SORT_REGULAR)), 400) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $sql = "SELECT {$selection} FROM {$table} WHERE {$column} IN ({$placeholders})";
+            if ($extraWhere !== '') {
+                $sql .= ' AND ' . $extraWhere;
+            }
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($chunk);
+            array_push($rows, ...$stmt->fetchAll());
+        }
+        return $rows;
+    }
+
+    private function deleteRowsByValues(string $table, string $column, array $values): int
+    {
+        if ($values === []) {
+            return 0;
+        }
+        $deleted = 0;
+        foreach (array_chunk(array_values(array_unique($values, SORT_REGULAR)), 400) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->pdo->prepare("DELETE FROM {$table} WHERE {$column} IN ({$placeholders})");
+            $stmt->execute($chunk);
+            $deleted += $stmt->rowCount();
+        }
+        return $deleted;
+    }
+
+    private function deleteScheduledEventsByEntity(string $entityType, array $entityIds): int
+    {
+        if ($entityIds === []) {
+            return 0;
+        }
+        $deleted = 0;
+        foreach (array_chunk(array_values(array_unique($entityIds, SORT_REGULAR)), 400) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->pdo->prepare("DELETE FROM scheduled_events WHERE entity_type = ? AND entity_id IN ({$placeholders})");
+            $stmt->execute([$entityType, ...$chunk]);
+            $deleted += $stmt->rowCount();
+        }
+        return $deleted;
+    }
+
+    /** @return list<int> */
+    private function crossStoreOperationIdsForShips(array $shipPublicIds): array
+    {
+        if ($shipPublicIds === []) {
+            return [];
+        }
+        $shipPublicIdSet = array_fill_keys($shipPublicIds, true);
+        $ids = [];
+        $stmt = $this->pdo->query("SELECT id,payload_json FROM others_cross_store_operations WHERE operation_type='dormant_auxiliaries'");
+        foreach ($stmt->fetchAll() as $row) {
+            $payload = json_decode((string) $row['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($payload)) {
+                throw new \RuntimeException('Invalid Others cross-store operation payload.');
+            }
+            if (isset($shipPublicIdSet[(string) ($payload['shipId'] ?? '')])) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+        return $ids;
+    }
+
+    /** @return list<int> */
+    private function idempotencyKeyIdsForFleet(int $playerId, string $fleetPublicId, array $shipPublicIds, array $actionPublicIds): array
+    {
+        $entityPublicIdSet = array_fill_keys([$fleetPublicId, ...$shipPublicIds], true);
+        $actionPublicIdSet = array_fill_keys($actionPublicIds, true);
+        $ids = [];
+        $stmt = $this->pdo->prepare('SELECT id,request_path,action_public_id FROM others_idempotency_keys WHERE player_id=:player_id');
+        $stmt->execute(['player_id' => $playerId]);
+        foreach ($stmt->fetchAll() as $row) {
+            if (isset($actionPublicIdSet[(string) ($row['action_public_id'] ?? '')])) {
+                $ids[] = (int) $row['id'];
+                continue;
+            }
+            foreach (explode('/', trim((string) $row['request_path'], '/')) as $pathSegment) {
+                if (isset($entityPublicIdSet[rawurldecode($pathSegment)])) {
+                    $ids[] = (int) $row['id'];
+                    break;
+                }
+            }
+        }
+        return $ids;
     }
 
     public function createAuxiliary(int $shipId): array
@@ -174,7 +524,16 @@ final class OthersRepository
 
     public function findShipForPlayer(string $publicId, int $playerId, bool $activeOnly = true): ?array
     {
-        $sql = 'SELECT s.*, f.public_id AS fleet_public_id, f.player_id FROM others_ships s JOIN others_fleets f ON f.id = s.fleet_id WHERE s.public_id = :public_id AND f.player_id = :player_id';
+        $sql = 'SELECT s.*, f.public_id AS fleet_public_id, f.player_id,
+                       m.phase AS movement_phase,
+                       m.target_x AS movement_target_x,
+                       m.target_y AS movement_target_y,
+                       m.target_z AS movement_target_z,
+                       m.arrive_at AS movement_arrive_at
+                FROM others_ships s
+                JOIN others_fleets f ON f.id = s.fleet_id
+                LEFT JOIN others_movements m ON m.action_id = s.current_action_id
+                WHERE s.public_id = :public_id AND f.player_id = :player_id';
         if ($activeOnly) {
             $sql .= " AND f.status = 'active' AND s.destroyed_at IS NULL AND s.status <> 'removed'";
         }
@@ -241,9 +600,17 @@ final class OthersRepository
     public function findShipsByFleetId(int $fleetId): array
     {
         $stmt = $this->pdo->prepare(
-            "SELECT s.*, COUNT(a.id) AS auxiliary_count,
-                    SUM(CASE WHEN a.location_type <> 'embarked' AND a.destroyed_at IS NULL THEN 1 ELSE 0 END) AS deployed_auxiliary_count
-             FROM others_ships s LEFT JOIN others_auxiliaries a ON a.ship_id = s.id AND a.destroyed_at IS NULL
+            "SELECT s.*, MAX(f.public_id) AS fleet_public_id, COUNT(a.id) AS auxiliary_count,
+                    SUM(CASE WHEN a.location_type <> 'embarked' AND a.destroyed_at IS NULL THEN 1 ELSE 0 END) AS deployed_auxiliary_count,
+                    MAX(m.phase) AS movement_phase,
+                    MAX(m.target_x) AS movement_target_x,
+                    MAX(m.target_y) AS movement_target_y,
+                    MAX(m.target_z) AS movement_target_z,
+                    MAX(m.arrive_at) AS movement_arrive_at
+             FROM others_ships s
+             JOIN others_fleets f ON f.id = s.fleet_id
+             LEFT JOIN others_auxiliaries a ON a.ship_id = s.id AND a.destroyed_at IS NULL
+             LEFT JOIN others_movements m ON m.action_id = s.current_action_id
              WHERE s.fleet_id = :fleet_id AND s.destroyed_at IS NULL
              GROUP BY s.id ORDER BY CASE s.type WHEN 'mothership' THEN 0 ELSE 1 END, s.public_id"
         );
@@ -260,7 +627,17 @@ final class OthersRepository
 
     public function observableEntitiesBySector(int $x, int $y, int $z): array
     {
-        $ships = $this->pdo->prepare("SELECT public_id, type, status FROM others_ships WHERE sector_x = :x AND sector_y = :y AND sector_z = :z AND destroyed_at IS NULL AND status <> 'removed' AND status <> 'transit' ORDER BY public_id");
+        $ships = $this->pdo->prepare(
+            "SELECT s.public_id, s.type, s.status,
+                    m.target_x - m.source_x AS movement_direction_x,
+                    m.target_y - m.source_y AS movement_direction_y,
+                    m.target_z - m.source_z AS movement_direction_z
+             FROM others_ships s
+             LEFT JOIN others_movements m ON m.action_id = s.current_action_id
+             WHERE s.sector_x = :x AND s.sector_y = :y AND s.sector_z = :z
+               AND s.destroyed_at IS NULL AND s.status <> 'removed' AND s.status <> 'transit'
+             ORDER BY s.public_id"
+        );
         $ships->execute(['x' => $x, 'y' => $y, 'z' => $z]);
         return ['ships' => $ships->fetchAll(), 'projectiles' => $this->movingProjectilesBySector($x, $y, $z)];
     }
@@ -475,10 +852,10 @@ final class OthersRepository
         $fuelCapacity = $type === 'mothership' ? 1000.0 : 50.0;
         $inventoryCapacity = $type === 'mothership' ? 100000.0 : 10000.0;
         $stmt = $this->pdo->prepare(
-            "INSERT INTO others_ships (public_id, fleet_id, type, status, sector_x, sector_y, sector_z, integrity, max_integrity, deuterium_stock, deuterium_capacity, inventory_capacity, inventory_reserved, current_action_id, departure_engaged, laser_next_target_at, created_at, updated_at, destroyed_at)
-             VALUES (:public_id, :fleet_id, :type, 'inactive', :x, :y, :z, :integrity, :max_integrity, 0, :fuel_capacity, :inventory_capacity, 0, NULL, 0, NULL, :created_at, :updated_at, NULL)"
+            "INSERT INTO others_ships (public_id, fleet_id, type, status, sector_x, sector_y, sector_z, integrity, max_integrity, deuterium_stock, deuterium_capacity, inventory_capacity, inventory_reserved, current_action_id, departure_engaged, laser_next_target_at, entered_sector_at, created_at, updated_at, destroyed_at)
+             VALUES (:public_id, :fleet_id, :type, 'inactive', :x, :y, :z, :integrity, :max_integrity, 0, :fuel_capacity, :inventory_capacity, 0, NULL, 0, NULL, :entered_sector_at, :created_at, :updated_at, NULL)"
         );
-        $stmt->execute(['public_id' => $publicId, 'fleet_id' => $fleetId, 'type' => $type, 'x' => $x, 'y' => $y, 'z' => $z, 'integrity' => $maxIntegrity, 'max_integrity' => $maxIntegrity, 'fuel_capacity' => $fuelCapacity, 'inventory_capacity' => $inventoryCapacity, 'created_at' => $now, 'updated_at' => $now]);
+        $stmt->execute(['public_id' => $publicId, 'fleet_id' => $fleetId, 'type' => $type, 'x' => $x, 'y' => $y, 'z' => $z, 'integrity' => $maxIntegrity, 'max_integrity' => $maxIntegrity, 'fuel_capacity' => $fuelCapacity, 'inventory_capacity' => $inventoryCapacity, 'entered_sector_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
         $shipId = (int) $this->pdo->lastInsertId();
         foreach (self::RESOURCE_TYPES as $resourceType) {
             $resource = $this->pdo->prepare('INSERT INTO others_inventory_resources (ship_id, resource_type, amount, reserved_amount, updated_at) VALUES (:ship_id, :resource_type, 0, 0, :updated_at)');
