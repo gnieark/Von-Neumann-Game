@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-30
+
+### Changed
+
+- Contrôle Others : ajout de `scripts/others_control/defense_etoile_attente.py`, qui maintient jusqu'à douze sentinelles autour d'un vaisseau mère, évite les destinations déjà occupées ou réservées par un mouvement, rappelle progressivement les vaisseaux hors formation et exclut seulement les trous noirs confirmés par un scan détaillé. Sa boucle se cale sur les échéances de mouvement et conserve un contrôle de veille plafonné à cinq minutes.
+
 ## 2026-08-29
 
 ### Changed

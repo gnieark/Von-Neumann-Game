@@ -21,6 +21,7 @@
     "test": [
       "php tests/ApiTests.php",
       "php tests/SectorTests.php",
+      "python3 scripts/others_control/test_defense_etoile_attente.py",
       "python3 tests/DeprecatedEndpointLogAuditTests.py"
     ],
     "init-db": "php scripts/init-db.php"
