@@ -9,7 +9,7 @@ import json
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 from urllib.error import HTTPError, URLError
@@ -21,6 +21,17 @@ CONFIG_PATH = Path(__file__).with_name("config.json")
 TIMEOUT_SECONDS = 10.0
 IDLE_REFRESH_SECONDS = 300.0
 MAX_MOVEMENT_DISTANCE = 10
+LASER_ENGAGEMENT_SECONDS = 600
+LASER_DEUTERIUM_THRESHOLD = 12.0
+FLOATING_OBJECT_TYPES = {"drifting_item", "detached_container"}
+EVENT_PRIORITY = {
+    "hostile_missile": 0,
+    "asteroid_trajectory": 1,
+    "deployed_manny": 2,
+    "ejected_manny": 3,
+    "floating_object_change": 4,
+    "waypoint_change": 5,
+}
 NEIGHBOR_OFFSETS = (
     (1, 1, 0),
     (1, -1, 0),
@@ -74,6 +85,25 @@ class OthersApi(Protocol):
 
     def scan_sector(self, ship_id: str, coordinates: Coordinates) -> dict[str, Any]: ...
 
+    def get_autonomous_units(self, ship_id: str) -> list[dict[str, Any]]: ...
+
+    def get_inventory(self, ship_id: str) -> dict[str, Any]: ...
+
+    def launch_missile(
+        self,
+        ship_id: str,
+        missile_item_id: str,
+        target_id: str,
+        event_key: str,
+    ) -> dict[str, Any]: ...
+
+    def start_laser(
+        self,
+        ship_id: str,
+        target_id: str,
+        event_key: str,
+    ) -> dict[str, Any]: ...
+
     def move_ship(
         self,
         ship: dict[str, Any],
@@ -106,6 +136,66 @@ class HttpOthersApi:
         )
         body = self._request("GET", f"/api/others/sector?{query}")
         return require_mapping(body.get("sector"), "sector")
+
+    def get_autonomous_units(self, ship_id: str) -> list[dict[str, Any]]:
+        units: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            query = {"limit": 500}
+            if cursor is not None:
+                query["cursor"] = cursor
+            body = self._request(
+                "GET",
+                f"/api/others/ships/{quote(ship_id, safe='')}/sector/autonomous-units?{urlencode(query)}",
+            )
+            page = body.get("autonomousUnits")
+            if not isinstance(page, list):
+                raise ApiContractError("autonomousUnits doit être une liste.")
+            units.extend(require_mapping(unit, "autonomousUnits[]") for unit in page)
+            next_cursor = body.get("nextCursor")
+            if next_cursor is None:
+                return units
+            cursor = require_string(next_cursor, "nextCursor")
+
+    def get_inventory(self, ship_id: str) -> dict[str, Any]:
+        body = self._request(
+            "GET",
+            f"/api/others/ships/{quote(ship_id, safe='')}/inventory",
+        )
+        return require_mapping(body.get("inventory"), "inventory")
+
+    def launch_missile(
+        self,
+        ship_id: str,
+        missile_item_id: str,
+        target_id: str,
+        event_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(ship_id, safe='')}/missiles",
+            payload={"missileItemId": missile_item_id, "targetId": target_id},
+            idempotency_key=command_idempotency_key(
+                "defense-missile", ship_id, missile_item_id, target_id, event_key
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
+
+    def start_laser(
+        self,
+        ship_id: str,
+        target_id: str,
+        event_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(ship_id, safe='')}/weapons/laser",
+            payload={"targetId": target_id},
+            idempotency_key=command_idempotency_key(
+                "defense-laser", ship_id, target_id, event_key
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
 
     def move_ship(
         self,
@@ -204,6 +294,34 @@ class CycleResult:
         return min(idle_refresh_seconds, min(future_delays))
 
 
+@dataclass(frozen=True)
+class EngagementEvent:
+    kind: str
+    key: str
+    primary_target_id: str | None = None
+    probe_target_id: str | None = None
+
+
+@dataclass
+class ScoutObservation:
+    coordinates: Coordinates
+    autonomous_units: dict[str, tuple[str, str]]
+    ejected_mannies: dict[str, str]
+    missiles: dict[str, str]
+    trajectories: dict[str, str]
+    floating_objects: dict[str, str]
+    waypoints: dict[str, str]
+    probe_ids: tuple[str, ...]
+
+
+@dataclass
+class ScoutState:
+    observation: ScoutObservation | None = None
+    pending_events: list[EngagementEvent] = field(default_factory=list)
+    return_required: bool = False
+    laser_return_due: datetime | None = None
+
+
 class DefenseEtoileAttente:
     def __init__(
         self,
@@ -212,6 +330,7 @@ class DefenseEtoileAttente:
         mothership_id: str | None = None,
         fleet_id: str | None = None,
         logger: Callable[[str], None] = print,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         if (mothership_id is None) == (fleet_id is None):
             raise ConfigurationError(
@@ -224,9 +343,11 @@ class DefenseEtoileAttente:
         self.mothership_id = mothership_id.strip() if mothership_id is not None else None
         self.fleet_id = fleet_id.strip() if fleet_id is not None else None
         self.log = logger
+        self.now = now or (lambda: datetime.now(timezone.utc))
         self.known_black_holes: set[Coordinates] = set()
         self.known_safe_sectors: set[Coordinates] = set()
         self.uncertain_sectors: set[Coordinates] = set()
+        self.scout_states: dict[str, ScoutState] = {}
 
     def run_cycle(self) -> CycleResult:
         result = CycleResult()
@@ -314,6 +435,7 @@ class DefenseEtoileAttente:
             if coordinates is None:
                 continue
             if coordinates == center:
+                self._clear_completed_return(ship_id)
                 if self._is_movable(ship):
                     home_candidates.append(ship)
                 continue
@@ -322,15 +444,20 @@ class DefenseEtoileAttente:
                 continue
             recall_candidates.append((ship, coordinates))
 
+        guards: dict[Coordinates, dict[str, Any]] = {}
         for coordinates, ships_in_sector in residents.items():
-            if len(ships_in_sector) <= 1:
+            if not ships_in_sector:
                 continue
             ordered = sorted(
                 ships_in_sector,
                 key=lambda ship: (self._is_movable(ship), str(ship.get("id", ""))),
             )
+            guards[coordinates] = ordered[0]
             for surplus_ship in ordered[1:]:
                 recall_candidates.append((surplus_ship, coordinates))
+
+        for coordinates, guard in guards.items():
+            self._reconcile_scout_engagement(guard, coordinates, center, result)
 
         known_black_holes = {
             coordinates
@@ -391,6 +518,390 @@ class DefenseEtoileAttente:
             raise ApiContractError("Le vaisseau retourné ne correspond pas à l'identifiant demandé.")
         if ship.get("type") != "mothership":
             raise ConfigurationError(f"{expected_id} n'est pas un vaisseau mère.")
+
+    def _clear_completed_return(self, ship_id: str) -> None:
+        state = self.scout_states.get(ship_id)
+        if state is None:
+            return
+        state.observation = None
+        state.pending_events.clear()
+        state.return_required = False
+        state.laser_return_due = None
+
+    def _reconcile_scout_engagement(
+        self,
+        ship: dict[str, Any],
+        coordinates: Coordinates,
+        center: Coordinates,
+        result: CycleResult,
+    ) -> None:
+        ship_id = require_string(ship.get("id"), "guard ship.id")
+        state = self.scout_states.setdefault(ship_id, ScoutState())
+        if state.observation is not None and state.observation.coordinates != coordinates:
+            state.observation = None
+            state.pending_events.clear()
+            state.return_required = False
+            state.laser_return_due = None
+
+        if state.return_required:
+            if state.laser_return_due is not None and self.now() < state.laser_return_due:
+                result.event_dates.append(state.laser_return_due)
+                return
+            if not self._is_movable(ship):
+                self.log(f"Retour tactique différé pour {ship_id} : vaisseau occupé.")
+                return
+            if self._move(ship, center, result):
+                self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
+                state.observation = None
+                state.pending_events.clear()
+                state.return_required = False
+                state.laser_return_due = None
+            return
+
+        observation = self._observe_scout(ship_id, coordinates)
+        new_events = self._detect_engagement_events(state.observation, observation)
+        state.observation = observation
+        pending_keys = {event.key for event in state.pending_events}
+        state.pending_events.extend(event for event in new_events if event.key not in pending_keys)
+        state.pending_events.sort(key=lambda event: (EVENT_PRIORITY[event.kind], event.key))
+
+        while state.pending_events and not state.return_required:
+            event = state.pending_events.pop(0)
+            self._execute_engagement_event(ship, event, state, result)
+
+        if not state.return_required:
+            return
+        if state.laser_return_due is not None:
+            result.event_dates.append(state.laser_return_due)
+            return
+        if not self._is_movable(ship):
+            self.log(f"Retour tactique différé pour {ship_id} : vaisseau occupé.")
+            return
+        if self._move(ship, center, result):
+            self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
+            state.observation = None
+            state.pending_events.clear()
+            state.return_required = False
+
+    def _observe_scout(
+        self,
+        ship_id: str,
+        coordinates: Coordinates,
+    ) -> ScoutObservation:
+        autonomous_units: dict[str, tuple[str, str]] = {}
+        for unit in self.api.get_autonomous_units(ship_id):
+            if unit.get("kind") != "manny":
+                continue
+            unit_id = identifier_string(unit.get("id"), "autonomousUnits[].id")
+            carrier = require_mapping(unit.get("carrier"), f"autonomous unit {unit_id}.carrier")
+            if carrier.get("kind") != "probe":
+                raise ApiContractError(f"La Manny {unit_id} doit avoir une sonde porteuse.")
+            carrier_id = identifier_string(
+                carrier.get("id"), f"autonomous unit {unit_id}.carrier.id"
+            )
+            spatial_state = require_string(
+                unit.get("spatialState"), f"autonomous unit {unit_id}.spatialState"
+            )
+            autonomous_units[unit_id] = (carrier_id, spatial_state)
+
+        sector = self.api.scan_sector(ship_id, coordinates)
+        probes_value = sector.get("probes", [])
+        if not isinstance(probes_value, list):
+            raise ApiContractError("sector.probes doit être une liste lorsqu'il est présent.")
+        probe_ids = tuple(
+            sorted(
+                {
+                    identifier_string(probe.get("id"), "sector.probes[].id")
+                    for probe in probes_value
+                    if isinstance(probe, dict) and probe.get("id") is not None
+                }
+            )
+        )
+
+        ejected_mannies: dict[str, str] = {}
+        missiles: dict[str, str] = {}
+        trajectories: dict[str, str] = {}
+        floating_objects: dict[str, str] = {}
+        waypoints: dict[str, str] = {}
+        objects_value = sector.get("objects", [])
+        if not isinstance(objects_value, list):
+            raise ApiContractError("sector.objects doit être une liste lorsqu'il est présent.")
+        for context, sector_object in observed_sector_objects(objects_value):
+            object_type = sector_object.get("type")
+            object_id = identifier_string(
+                sector_object.get("id"), f"{context}.id"
+            )
+            if object_type == "manny":
+                manny_uid = identifier_string(
+                    sector_object.get("mannyUid"), f"sector object {object_id}.mannyUid"
+                )
+                ejected_mannies[manny_uid] = stable_signature(sector_object)
+            if object_type == "missile" and sector_object.get("launcherKind") == "probe":
+                missiles[object_id] = stable_signature(
+                    {
+                        "targetKind": sector_object.get("targetKind"),
+                        "targetId": sector_object.get("targetId"),
+                        "launchedAt": sector_object.get("launchedAt"),
+                        "impactAt": sector_object.get("impactAt"),
+                    }
+                )
+            trajectory = sector_object.get("trajectory")
+            if object_type == "asteroid" and isinstance(trajectory, dict):
+                trajectories[object_id] = stable_signature(
+                    {
+                        "id": trajectory.get("id"),
+                        "mode": trajectory.get("mode"),
+                        "targetObjectId": trajectory.get("targetObjectId"),
+                        "targetSpeedC": trajectory.get("targetSpeedC"),
+                        "plannedRevolutions": trajectory.get("plannedRevolutions"),
+                        "direction": trajectory.get("direction"),
+                        "maximumSectorCrossings": trajectory.get("maximumSectorCrossings"),
+                    }
+                )
+            if object_type in FLOATING_OBJECT_TYPES:
+                floating_objects[object_id] = stable_signature(sector_object)
+            if "waypointBookmarks" in sector_object:
+                waypoints[object_id] = stable_signature(sector_object["waypointBookmarks"])
+
+        return ScoutObservation(
+            coordinates=coordinates,
+            autonomous_units=autonomous_units,
+            ejected_mannies=ejected_mannies,
+            missiles=missiles,
+            trajectories=trajectories,
+            floating_objects=floating_objects,
+            waypoints=waypoints,
+            probe_ids=probe_ids,
+        )
+
+    def _detect_engagement_events(
+        self,
+        previous: ScoutObservation | None,
+        current: ScoutObservation,
+    ) -> list[EngagementEvent]:
+        events: list[EngagementEvent] = []
+        default_probe = current.probe_ids[0] if current.probe_ids else None
+
+        previous_units = previous.autonomous_units if previous is not None else {}
+        for manny_id, (carrier_id, spatial_state) in current.autonomous_units.items():
+            if previous is not None and previous_units.get(manny_id) == (carrier_id, spatial_state):
+                continue
+            events.append(
+                EngagementEvent(
+                    "deployed_manny",
+                    event_key("deployed_manny", manny_id, carrier_id, spatial_state),
+                    primary_target_id=manny_id,
+                    probe_target_id=carrier_id,
+                )
+            )
+
+        previous_missiles = previous.missiles if previous is not None else {}
+        for missile_id, signature in current.missiles.items():
+            if previous is not None and previous_missiles.get(missile_id) == signature:
+                continue
+            events.append(
+                EngagementEvent(
+                    "hostile_missile",
+                    event_key("hostile_missile", missile_id, signature),
+                    primary_target_id=missile_id,
+                    probe_target_id=default_probe,
+                )
+            )
+
+        previous_trajectories = previous.trajectories if previous is not None else {}
+        for asteroid_id, signature in current.trajectories.items():
+            if previous is not None and previous_trajectories.get(asteroid_id) == signature:
+                continue
+            events.append(
+                EngagementEvent(
+                    "asteroid_trajectory",
+                    event_key("asteroid_trajectory", asteroid_id, signature),
+                    primary_target_id=asteroid_id,
+                    probe_target_id=default_probe,
+                )
+            )
+
+        previous_ejected = previous.ejected_mannies if previous is not None else {}
+        for manny_id, signature in current.ejected_mannies.items():
+            if previous is not None and manny_id in previous_ejected:
+                continue
+            events.append(
+                EngagementEvent(
+                    "ejected_manny",
+                    event_key("ejected_manny", manny_id, signature),
+                    primary_target_id=manny_id,
+                )
+            )
+
+        if previous is not None:
+            changed_floating_ids = sorted(
+                object_id
+                for object_id in set(previous.floating_objects) | set(current.floating_objects)
+                if previous.floating_objects.get(object_id)
+                != current.floating_objects.get(object_id)
+            )
+            for object_id in changed_floating_ids:
+                events.append(
+                    EngagementEvent(
+                        "floating_object_change",
+                        event_key(
+                            "floating_object_change",
+                            object_id,
+                            current.floating_objects.get(object_id, "removed"),
+                        ),
+                        probe_target_id=default_probe,
+                    )
+                )
+
+            changed_waypoint_ids = sorted(
+                object_id
+                for object_id in set(previous.waypoints) | set(current.waypoints)
+                if previous.waypoints.get(object_id) != current.waypoints.get(object_id)
+            )
+            for object_id in changed_waypoint_ids:
+                events.append(
+                    EngagementEvent(
+                        "waypoint_change",
+                        event_key(
+                            "waypoint_change",
+                            object_id,
+                            current.waypoints.get(object_id, "removed"),
+                        ),
+                        probe_target_id=default_probe,
+                    )
+                )
+        return events
+
+    def _execute_engagement_event(
+        self,
+        ship: dict[str, Any],
+        event: EngagementEvent,
+        state: ScoutState,
+        result: CycleResult,
+    ) -> None:
+        ship_id = require_string(ship.get("id"), "engagement ship.id")
+        missiles = self._available_missiles(ship_id)
+        if event.kind == "deployed_manny":
+            has_missiles = bool(missiles)
+            self._fire_at_targets(ship_id, missiles, event, result)
+            if not has_missiles and deuterium_amount(ship) > LASER_DEUTERIUM_THRESHOLD:
+                if event.primary_target_id is not None and self._start_laser(
+                    ship_id, event.primary_target_id, event.key, result
+                ):
+                    state.laser_return_due = self.now() + timedelta(
+                        seconds=LASER_ENGAGEMENT_SECONDS + 1
+                    )
+                    self.log(
+                        f"Laser de {ship_id} verrouillé sur la Manny {event.primary_target_id} "
+                        "pour dix minutes."
+                    )
+            state.return_required = True
+            return
+
+        if event.kind == "hostile_missile":
+            self._fire_at_targets(ship_id, missiles, event, result)
+            state.return_required = True
+            return
+
+        if event.kind == "ejected_manny":
+            self._fire_at_targets(ship_id, missiles, event, result, include_probe=False)
+            return
+
+        if event.kind == "asteroid_trajectory":
+            self._fire_at_targets(ship_id, missiles, event, result)
+            return
+
+        if event.kind in {"floating_object_change", "waypoint_change"}:
+            self._fire_at_targets(ship_id, missiles, event, result, include_primary=False)
+            state.return_required = True
+            return
+        raise RuntimeError(f"Type d'engagement inconnu : {event.kind}.")
+
+    def _available_missiles(self, ship_id: str) -> list[str]:
+        inventory = self.api.get_inventory(ship_id)
+        items = inventory.get("items")
+        if not isinstance(items, list):
+            raise ApiContractError("inventory.items doit être une liste.")
+        missiles = []
+        for index, value in enumerate(items):
+            item = require_mapping(value, f"inventory.items[{index}]")
+            if item.get("type") == "missile":
+                missiles.append(identifier_string(item.get("id"), f"inventory.items[{index}].id"))
+        return sorted(missiles)
+
+    def _fire_at_targets(
+        self,
+        ship_id: str,
+        missiles: list[str],
+        event: EngagementEvent,
+        result: CycleResult,
+        *,
+        include_primary: bool = True,
+        include_probe: bool = True,
+    ) -> int:
+        targets = []
+        if include_primary and event.primary_target_id is not None:
+            targets.append(event.primary_target_id)
+        if include_probe and event.probe_target_id is not None:
+            targets.append(event.probe_target_id)
+        fired = 0
+        for target_id in targets:
+            if not missiles:
+                break
+            missile_id = missiles[0]
+            if not self._launch_missile(
+                ship_id, missile_id, target_id, event.key, result
+            ):
+                continue
+            missiles.pop(0)
+            fired += 1
+        return fired
+
+    def _launch_missile(
+        self,
+        ship_id: str,
+        missile_id: str,
+        target_id: str,
+        event_key_value: str,
+        result: CycleResult,
+    ) -> bool:
+        try:
+            action = self.api.launch_missile(
+                ship_id, missile_id, target_id, event_key_value
+            )
+        except ApiRequestError as error:
+            if error.status in {404, 409, 422}:
+                self.log(
+                    f"Tir de {ship_id} ignoré vers {target_id} : "
+                    f"{error.code} ({error.message})."
+                )
+                return False
+            raise
+        result.accepted_commands += 1
+        result.add_event_date(action.get("endsAt"), f"missile action for {ship_id}.endsAt")
+        self.log(f"Missile {missile_id} de {ship_id} lancé vers {target_id}.")
+        return True
+
+    def _start_laser(
+        self,
+        ship_id: str,
+        target_id: str,
+        event_key_value: str,
+        result: CycleResult,
+    ) -> bool:
+        try:
+            action = self.api.start_laser(ship_id, target_id, event_key_value)
+        except ApiRequestError as error:
+            if error.status in {404, 409, 422}:
+                self.log(
+                    f"Laser de {ship_id} ignoré vers {target_id} : "
+                    f"{error.code} ({error.message})."
+                )
+                return False
+            raise
+        result.accepted_commands += 1
+        result.add_event_date(action.get("endsAt"), f"laser action for {ship_id}.endsAt")
+        return True
 
     def _sector_certainly_has_black_hole(
         self,
@@ -463,6 +974,59 @@ class DefenseEtoileAttente:
     @staticmethod
     def _is_movable(ship: dict[str, Any]) -> bool:
         return ship.get("movement") is None and ship.get("status") in {"inactive", "available"}
+
+
+def identifier_string(value: Any, context: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ApiContractError(f"{context} doit être un identifiant chaîne ou entier.")
+    result = str(value)
+    if not result:
+        raise ApiContractError(f"{context} doit être un identifiant non vide.")
+    return result
+
+
+def stable_signature(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def event_key(kind: str, *parts: str) -> str:
+    return command_idempotency_key(kind, *parts)
+
+
+def command_idempotency_key(prefix: str, *parts: str) -> str:
+    digest = hashlib.sha256("\0".join(parts).encode()).hexdigest()
+    return f"{prefix}-{digest}"
+
+
+def deuterium_amount(ship: dict[str, Any]) -> float:
+    ship_id = ship.get("id", "?")
+    deuterium = require_mapping(ship.get("deuterium"), f"ship {ship_id}.deuterium")
+    amount = deuterium.get("amount")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+        raise ApiContractError(f"ship {ship_id}.deuterium.amount doit être numérique.")
+    return float(amount)
+
+
+def observed_sector_objects(
+    objects: list[Any],
+) -> list[tuple[str, dict[str, Any]]]:
+    observed: list[tuple[str, dict[str, Any]]] = []
+    for index, value in enumerate(objects):
+        context = f"sector.objects[{index}]"
+        sector_object = require_mapping(value, context)
+        observed.append((context, sector_object))
+        for collection_name in ("minableTargets", "bookmarkTargets"):
+            if collection_name not in sector_object:
+                continue
+            targets = sector_object[collection_name]
+            if not isinstance(targets, list):
+                raise ApiContractError(f"{context}.{collection_name} doit être une liste.")
+            for target_index, target in enumerate(targets):
+                target_context = f"{context}.{collection_name}[{target_index}]"
+                observed.append((target_context, require_mapping(target, target_context)))
+    return observed
 
 
 def load_config(path: Path) -> tuple[str, str]:

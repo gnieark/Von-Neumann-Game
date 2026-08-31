@@ -42,6 +42,30 @@ d'un mouvement sont automatiquement découpés en étapes de dix secteurs. Un
 vaisseau seul déjà immobilisé dans un secteur contenant un trou noir n'est pas
 encore rappelé dans cette version.
 
+Chaque sentinelle compare aussi ses observations locales d'un cycle au suivant
+et applique les procédures d'engagement suivantes :
+
+- une Manny déployée nouvelle ou dont l'état spatial change reçoit le premier
+  missile disponible, puis sa sonde porteuse le second ; à défaut de missile et
+  avec plus de 12 unités de deutérium, la sentinelle maintient un laser pendant
+  dix minutes. Elle retourne ensuite auprès du vaisseau mère ;
+- un missile lancé par une sonde est intercepté en priorité, puis la sonde est
+  visée si un second missile reste disponible, avant le retour ;
+- une Manny éjectée reçoit un missile sans provoquer de retour ;
+- l'apparition, la modification ou la disparition d'un objet à la dérive ou
+  d'un conteneur détaché déclenche un missile vers une sonde locale puis le
+  retour ;
+- le démarrage ou la modification des paramètres d'une trajectoire d'astéroïde
+  motorisé déclenche un missile vers l'astéroïde puis un autre vers une sonde,
+  sans repli de la sentinelle ;
+- un changement de marqueurs de navigation déclenche un missile vers une sonde
+  locale puis le retour.
+
+Une seule munition respecte toujours l'ordre de priorité indiqué. Les missiles
+déjà lancés par les Others sont ignorés et les alertes d'impact ne provoquent
+aucune action supplémentaire.
+
 Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
 comme désignateur de flotte. La précision du scan et l'historique de visite
-restent propres à cette flotte.
+restent propres à cette flotte. Les Mannys déployées sont suivies par la route
+`autonomous-units` de la sentinelle et les stocks par son inventaire.

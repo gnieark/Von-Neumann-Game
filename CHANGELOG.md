@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Contrôle Others « défense étoile — attente » : les sentinelles réagissent désormais aux activités des Mannys, missiles de sondes, objets éjectés ou récupérés, trajectoires d'astéroïdes motorisés et marqueurs de navigation. Elles appliquent l'ordre de priorité missile/laser demandé, poursuivent le laser dix minutes avant repli et conservent sur place les éclaireurs engagés contre une Manny éjectée ou un astéroïde motorisé.
 - API v129 / scans Others : les observations de flotte utilisent désormais la route dédiée `GET /api/others/sector?shipId=…&x=…&y=…&z=…`. `GET /api/sector` redevient exclusivement un scan de sondes et refuse `shipId`. La précision du nouveau point d’API conserve les règles de distance, de temps de résidence et d’historique privé de la flotte ; les sondes et vaisseaux détectés, accompagnés de leur statut courant, ne sont exposés que lorsqu’un vaisseau actif de cette flotte est physiquement présent dans le secteur interrogé.
 
 ## 2026-08-30
