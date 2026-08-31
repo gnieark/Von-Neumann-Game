@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 128;
+    public const API_VERSION = 129;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -138,6 +138,7 @@ final class ApiKernel
         return [
             ApiRoute::regex('#^/api/others/alerts/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAlertReadResponse($player, $ctx->stringParam(0)))),
             ApiRoute::path('/api/others/alerts', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAlertsResponse($player, $ctx->query))),
+            ApiRoute::path('/api/others/sector', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersSectorResponse($player, $ctx->query))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersMissileCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->missileResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->probeMissileCreateResponse($player, $probe, $ctx->body)), $ctx->intParam(0), ['POST'])),
@@ -2234,7 +2235,7 @@ final class ApiKernel
         }
 
         if (isset($query['shipId'])) {
-            return $this->othersSectorResponse($player, (string) $query['shipId'], (int) $query['x'], (int) $query['y'], (int) $query['z']);
+            return ApiResponse::error(400, 'bad_request', 'shipId is not supported by /api/sector; use /api/others/sector.');
         }
 
         $probe = $this->movements->refreshProbeMovementState($this->requiredProbe($player));
@@ -2246,17 +2247,31 @@ final class ApiKernel
         ]);
     }
 
-    private function othersSectorResponse(Player $player, string $shipId, int $x, int $y, int $z): ApiResponse
+    private function othersSectorResponse(Player $player, array $query): ApiResponse
     {
-        if (!$player->canControlOthers) {
-            return ApiResponse::error(403, 'others_permission_required', 'This account is not allowed to control Others fleets.');
+        foreach (['x', 'y', 'z'] as $field) {
+            if (!isset($query[$field]) || !is_numeric($query[$field]) || (string) (int) $query[$field] !== (string) $query[$field]) {
+                return ApiResponse::error(400, 'bad_request', 'Query parameters x, y and z must be integer relative coordinates.');
+            }
         }
+        if (!$this->validRelativeCoordinateParity((int) $query['x'], (int) $query['y'], (int) $query['z'])) {
+            return $this->invalidRelativeCoordinateResponse();
+        }
+        $shipId = isset($query['shipId']) ? trim((string) $query['shipId']) : '';
+        if ($shipId === '') {
+            return ApiResponse::error(400, 'bad_request', 'Query parameter shipId is required.');
+        }
+
         $designated = $this->others?->findShipForPlayer($shipId, $player->id);
         if ($designated === null) {
             return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.');
         }
         try {
-            $target = (new PlayerReferenceFrame($player->homeSector))->relativeToGlobal($x, $y, $z);
+            $target = (new PlayerReferenceFrame($player->homeSector))->relativeToGlobal(
+                (int) $query['x'],
+                (int) $query['y'],
+                (int) $query['z'],
+            );
         } catch (\Throwable) {
             return ApiResponse::error(422, 'invalid_destination', 'The relative sector coordinates are invalid.');
         }
@@ -2288,8 +2303,66 @@ final class ApiKernel
             $knowledge['visitedSectorCount'],
         )->toArray();
         $sector['scan']['source'] = ['kind' => 'others_ship', 'id' => (string) $source['public_id']];
-        $sector = $this->addObservedOthersEntities($sector, $target);
+        $sector = $this->addObservedEntitiesForOthersScan($sector, $target, $sourceSector->equals($target));
         return new ApiResponse(200, ['sector' => $sector]);
+    }
+
+    private function addObservedEntitiesForOthersScan(array $sector, SectorCoordinates $target, bool $hasLocalFleetShip): array
+    {
+        if (($sector['knowledgeLevel'] ?? null) !== 'detailed') {
+            return $sector;
+        }
+
+        $sector['objects'] = is_array($sector['objects'] ?? null) ? $sector['objects'] : [];
+        $entities = $this->others?->observableEntitiesBySector(
+            $target->getX(),
+            $target->getY(),
+            $target->getZ(),
+        ) ?? ['ships' => [], 'projectiles' => []];
+
+        if ($hasLocalFleetShip) {
+            foreach ($entities['ships'] as $ship) {
+                $observedShip = [
+                    'id' => (string) $ship['public_id'],
+                    'observedClass' => $ship['type'] === 'mothership' ? 'large_ship' : 'ship',
+                    'status' => (string) $ship['status'],
+                    'estimated' => false,
+                ];
+                $direction = $this->observedOthersMovementDirection($ship);
+                if ($direction !== null) {
+                    $observedShip['movement'] = ['direction' => $direction];
+                }
+                $sector['objects'][] = $observedShip;
+            }
+            $sector['probes'] = $this->observedProbesForOthers($target);
+        }
+
+        foreach ($entities['projectiles'] as $projectile) {
+            $sector['objects'][] = $this->observedMovingMissileArray($projectile);
+        }
+
+        return $sector;
+    }
+
+    /** @return list<array{id:int, name:string, status:string}> */
+    private function observedProbesForOthers(SectorCoordinates $sector): array
+    {
+        $observed = [];
+        foreach ($this->probes->findObservableCandidatesBySector($sector) as $probe) {
+            $probe = $this->movements->refreshProbeMovementState($probe);
+            $movement = $this->movements->activeMovementForProbe($probe);
+            $observableSector = $this->movements->observableSectorFor($probe, $movement);
+            if ($observableSector === null || !$observableSector->equals($sector)) {
+                continue;
+            }
+            $observed[] = [
+                'id' => $probe->id,
+                'name' => $probe->name,
+                'status' => $probe->status->value,
+            ];
+        }
+
+        return $observed;
     }
 
     private function addObservedOthersEntities(array $sector, SectorCoordinates $target, bool $includeProjectiles = true): array

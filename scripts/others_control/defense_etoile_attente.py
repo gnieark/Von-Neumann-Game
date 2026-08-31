@@ -104,7 +104,7 @@ class HttpOthersApi:
                 "z": coordinates[2],
             }
         )
-        body = self._request("GET", f"/api/sector?{query}")
+        body = self._request("GET", f"/api/others/sector?{query}")
         return require_mapping(body.get("sector"), "sector")
 
     def move_ship(
@@ -208,12 +208,21 @@ class DefenseEtoileAttente:
     def __init__(
         self,
         api: OthersApi,
-        mothership_id: str,
         *,
+        mothership_id: str | None = None,
+        fleet_id: str | None = None,
         logger: Callable[[str], None] = print,
     ) -> None:
+        if (mothership_id is None) == (fleet_id is None):
+            raise ConfigurationError(
+                "Renseignez exactement un identifiant : vaisseau mère ou flotte."
+            )
+        selected_id = mothership_id if mothership_id is not None else fleet_id
+        if not isinstance(selected_id, str) or not selected_id.strip():
+            raise ConfigurationError("L'identifiant sélectionné doit être une chaîne non vide.")
         self.api = api
-        self.mothership_id = mothership_id
+        self.mothership_id = mothership_id.strip() if mothership_id is not None else None
+        self.fleet_id = fleet_id.strip() if fleet_id is not None else None
         self.log = logger
         self.known_black_holes: set[Coordinates] = set()
         self.known_safe_sectors: set[Coordinates] = set()
@@ -221,29 +230,49 @@ class DefenseEtoileAttente:
 
     def run_cycle(self) -> CycleResult:
         result = CycleResult()
-        mothership = self.api.get_ship(self.mothership_id)
-        self._validate_mothership(mothership)
+        if self.mothership_id is not None:
+            mothership = self.api.get_ship(self.mothership_id)
+            self._validate_mothership(mothership, self.mothership_id)
+            mothership_movement = optional_mapping(mothership.get("movement"), "ship.movement")
+            if mothership_movement is not None:
+                result.add_event_date(
+                    mothership_movement.get("arrivalAt"),
+                    "ship.movement.arrivalAt",
+                )
+                self.log(
+                    "Le vaisseau mère est en mouvement : formation suspendue jusqu'à son arrivée."
+                )
+                return result
+            fleet_id = require_string(mothership.get("fleetId"), "ship.fleetId")
+        else:
+            fleet_id = require_string(self.fleet_id, "fleet_id")
 
-        mothership_movement = optional_mapping(mothership.get("movement"), "ship.movement")
-        if mothership_movement is not None:
-            result.add_event_date(mothership_movement.get("arrivalAt"), "ship.movement.arrivalAt")
-            self.log("Le vaisseau mère est en mouvement : formation suspendue jusqu'à son arrivée.")
-            return result
-
-        fleet_id = require_string(mothership.get("fleetId"), "ship.fleetId")
         fleet = self.api.get_fleet(fleet_id)
         if require_string(fleet.get("id"), "fleet.id") != fleet_id:
-            raise ApiContractError("La flotte retournée ne correspond pas au fleetId du vaisseau mère.")
+            raise ApiContractError("La flotte retournée ne correspond pas à l'identifiant demandé.")
         ships_value = fleet.get("ships")
         if not isinstance(ships_value, list):
             raise ApiContractError("fleet.ships doit être une liste.")
         ships = [require_mapping(ship, "fleet.ships[]") for ship in ships_value]
-        fleet_mothership = next(
-            (ship for ship in ships if ship.get("id") == self.mothership_id),
-            None,
-        )
-        if fleet_mothership is None:
-            raise ApiContractError("Le vaisseau mère demandé est absent de sa flotte.")
+        if self.mothership_id is not None:
+            fleet_mothership = next(
+                (ship for ship in ships if ship.get("id") == self.mothership_id),
+                None,
+            )
+            if fleet_mothership is None:
+                raise ApiContractError("Le vaisseau mère demandé est absent de sa flotte.")
+        else:
+            motherships = [ship for ship in ships if ship.get("type") == "mothership"]
+            if not motherships:
+                raise ConfigurationError(
+                    f"La flotte {fleet_id} ne contient aucun vaisseau mère actif."
+                )
+            if len(motherships) > 1:
+                raise ApiContractError("fleet.ships contient plusieurs vaisseaux mères.")
+            fleet_mothership = motherships[0]
+
+        mothership_id = require_string(fleet_mothership.get("id"), "mothership.id")
+        self._validate_mothership(fleet_mothership, mothership_id)
         fleet_movement = optional_mapping(fleet_mothership.get("movement"), "mothership.movement")
         if fleet_movement is not None:
             result.add_event_date(fleet_movement.get("arrivalAt"), "mothership.movement.arrivalAt")
@@ -265,7 +294,7 @@ class DefenseEtoileAttente:
 
         for ship in ships:
             ship_id = require_string(ship.get("id"), "fleet.ships[].id")
-            if ship_id == self.mothership_id:
+            if ship_id == mothership_id:
                 continue
             if ship.get("type") == "mothership":
                 continue
@@ -308,6 +337,7 @@ class DefenseEtoileAttente:
             for coordinates in neighbors
             if self._sector_certainly_has_black_hole(
                 coordinates,
+                mothership_id=mothership_id,
                 has_stationed_ship=bool(residents[coordinates]),
             )
         }
@@ -355,17 +385,18 @@ class DefenseEtoileAttente:
         )
         return result
 
-    def _validate_mothership(self, ship: dict[str, Any]) -> None:
+    def _validate_mothership(self, ship: dict[str, Any], expected_id: str) -> None:
         ship_id = require_string(ship.get("id"), "ship.id")
-        if ship_id != self.mothership_id:
+        if ship_id != expected_id:
             raise ApiContractError("Le vaisseau retourné ne correspond pas à l'identifiant demandé.")
         if ship.get("type") != "mothership":
-            raise ConfigurationError(f"{self.mothership_id} n'est pas un vaisseau mère.")
+            raise ConfigurationError(f"{expected_id} n'est pas un vaisseau mère.")
 
     def _sector_certainly_has_black_hole(
         self,
         coordinates: Coordinates,
         *,
+        mothership_id: str,
         has_stationed_ship: bool,
     ) -> bool:
         if coordinates in self.known_black_holes:
@@ -376,7 +407,7 @@ class DefenseEtoileAttente:
             return False
 
         try:
-            sector = self.api.scan_sector(self.mothership_id, coordinates)
+            sector = self.api.scan_sector(mothership_id, coordinates)
         except ApiRequestError as error:
             if error.code == "insufficient_scan_data":
                 self.uncertain_sectors.add(coordinates)
@@ -580,7 +611,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Maintient douze sentinelles autour d'un vaisseau mère Others.",
     )
-    parser.add_argument("mothership_id", help="Identifiant public du vaisseau mère")
+    identifier = parser.add_mutually_exclusive_group(required=True)
+    identifier.add_argument(
+        "--mothership-id",
+        help="Identifiant public du vaisseau mère",
+    )
+    identifier.add_argument(
+        "--fleet-id",
+        help="Identifiant public de la flotte",
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -620,7 +659,8 @@ def main(argv: list[str] | None = None) -> int:
         base_url, api_token = load_config(arguments.config)
         controller = DefenseEtoileAttente(
             HttpOthersApi(base_url, api_token, arguments.timeout_seconds),
-            arguments.mothership_id,
+            mothership_id=arguments.mothership_id,
+            fleet_id=arguments.fleet_id,
             logger=timestamped_logger,
         )
     except ConfigurationError as error:

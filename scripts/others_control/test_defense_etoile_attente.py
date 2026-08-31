@@ -10,10 +10,13 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from defense_etoile_attente import (
+    ApiContractError,
     ApiRequestError,
+    ConfigurationError,
     DefenseEtoileAttente,
     NEIGHBOR_OFFSETS,
     add_coordinates,
+    build_argument_parser,
     coordinate_distance,
     movement_hop,
 )
@@ -64,9 +67,11 @@ class FakeApi:
         self.scans = scans or {}
         self.scan_calls: list[Coordinates] = []
         self.moves: list[tuple[str, Coordinates]] = []
+        self.ship_calls = 0
         self.fleet_calls = 0
 
     def get_ship(self, ship_id: str) -> dict[str, Any]:
+        self.ship_calls += 1
         return next(item for item in self.ships if item["id"] == ship_id)
 
     def get_fleet(self, fleet_id: str) -> dict[str, Any]:
@@ -115,7 +120,11 @@ class DefenseEtoileAttenteTests(unittest.TestCase):
                 }
             },
         )
-        controller = DefenseEtoileAttente(api, "mother", logger=lambda _: None)
+        controller = DefenseEtoileAttente(
+            api,
+            mothership_id="mother",
+            logger=lambda _: None,
+        )
 
         result = controller.run_cycle()
 
@@ -144,7 +153,11 @@ class DefenseEtoileAttenteTests(unittest.TestCase):
             },
         )
 
-        DefenseEtoileAttente(api, "mother", logger=lambda _: None).run_cycle()
+        DefenseEtoileAttente(
+            api,
+            mothership_id="mother",
+            logger=lambda _: None,
+        ).run_cycle()
 
         self.assertEqual([("home", target)], api.moves)
 
@@ -163,13 +176,21 @@ class DefenseEtoileAttenteTests(unittest.TestCase):
             },
         )
 
-        DefenseEtoileAttente(api, "mother", logger=lambda _: None).run_cycle()
+        DefenseEtoileAttente(
+            api,
+            mothership_id="mother",
+            logger=lambda _: None,
+        ).run_cycle()
 
         self.assertEqual([("home", target)], api.moves)
 
     def test_uncertain_empty_neighbors_are_not_scanned_again_without_arrival(self) -> None:
         api = FakeApi([ship("mother", (0, 0, 0), ship_type="mothership")])
-        controller = DefenseEtoileAttente(api, "mother", logger=lambda _: None)
+        controller = DefenseEtoileAttente(
+            api,
+            mothership_id="mother",
+            logger=lambda _: None,
+        )
 
         controller.run_cycle()
         controller.run_cycle()
@@ -189,11 +210,71 @@ class DefenseEtoileAttenteTests(unittest.TestCase):
             ]
         )
 
-        result = DefenseEtoileAttente(api, "mother", logger=lambda _: None).run_cycle()
+        result = DefenseEtoileAttente(
+            api,
+            mothership_id="mother",
+            logger=lambda _: None,
+        ).run_cycle()
 
         self.assertEqual(0, api.fleet_calls)
         self.assertEqual([], api.moves)
         self.assertEqual(1, len(result.event_dates))
+
+    def test_fleet_id_resolves_mothership_without_ship_request(self) -> None:
+        center = (0, 0, 0)
+        target = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"), ship("home", center)]
+        )
+
+        DefenseEtoileAttente(
+            api,
+            fleet_id="fleet_test",
+            logger=lambda _: None,
+        ).run_cycle()
+
+        self.assertEqual(0, api.ship_calls)
+        self.assertEqual(1, api.fleet_calls)
+        self.assertEqual([("home", target)], api.moves)
+
+    def test_fleet_id_requires_exactly_one_mothership(self) -> None:
+        without_mothership = FakeApi([ship("standard", (0, 0, 0))])
+        with self.assertRaises(ConfigurationError):
+            DefenseEtoileAttente(
+                without_mothership,
+                fleet_id="fleet_test",
+                logger=lambda _: None,
+            ).run_cycle()
+
+        duplicate_motherships = FakeApi(
+            [
+                ship("mother-a", (0, 0, 0), ship_type="mothership"),
+                ship("mother-b", (0, 0, 0), ship_type="mothership"),
+            ]
+        )
+        with self.assertRaises(ApiContractError):
+            DefenseEtoileAttente(
+                duplicate_motherships,
+                fleet_id="fleet_test",
+                logger=lambda _: None,
+            ).run_cycle()
+
+    def test_cli_accepts_exactly_one_identifier_kind(self) -> None:
+        parser = build_argument_parser()
+
+        mothership_arguments = parser.parse_args(["--mothership-id", "mother"])
+        fleet_arguments = parser.parse_args(["--fleet-id", "fleet_test"])
+
+        self.assertEqual("mother", mothership_arguments.mothership_id)
+        self.assertIsNone(mothership_arguments.fleet_id)
+        self.assertEqual("fleet_test", fleet_arguments.fleet_id)
+        self.assertIsNone(fleet_arguments.mothership_id)
+        with self.assertRaises(SystemExit):
+            parser.parse_args([])
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                ["--mothership-id", "mother", "--fleet-id", "fleet_test"]
+            )
 
     def test_long_recall_hops_are_canonical_and_converge(self) -> None:
         current = (101, -35, 20)

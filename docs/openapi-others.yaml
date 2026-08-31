@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '128'
+  version: '129'
 security:
 - bearerAuth: []
 servers:
@@ -58,6 +58,66 @@ paths:
           "$ref": "#/components/responses/Unauthorized"
         '403':
           "$ref": "#/components/responses/Forbidden"
+  "/api/others/sector":
+    get:
+      tags:
+      - Others
+      summary: Observe a sector using one owned Others fleet
+      description: >-
+        The coordinates are relative to the owning player's home; absolute
+        coordinates are never exposed. shipId designates the owned fleet, and
+        the closest active fleet ship supplies the scan. Precision follows the
+        same distance, residence-time and visited-sector rules as GET
+        /api/sector, using only this fleet's private visit history. A detailed
+        observation includes detected probes and ships, with their current
+        statuses, only when at least one active ship of the designated fleet is
+        physically present in the requested sector. The probes property and
+        detected ship objects are otherwise omitted, including from precise
+        historical observations.
+      parameters:
+      - name: shipId
+        in: query
+        required: true
+        description: Public identifier of an owned ship designating its fleet.
+        schema:
+          type: string
+      - name: x
+        in: query
+        required: true
+        description: X coordinate relative to the owning player's home.
+        schema:
+          type: integer
+      - name: y
+        in: query
+        required: true
+        description: Y coordinate relative to the owning player's home.
+        schema:
+          type: integer
+      - name: z
+        in: query
+        required: true
+        description: Z coordinate relative to the owning player's home.
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Sector observation with fleet-specific knowledge
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersSectorResponse"
+        '400':
+          description: Invalid coordinates or insufficient scan data
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+        '404':
+          "$ref": "#/components/responses/NotFound"
+        '409':
+          description: No active ship in the designated fleet can supply the scan
+        '422':
+          description: Relative coordinates cannot be converted to a valid sector
   "/api/others/fleets":
     get:
       tags:
@@ -515,6 +575,122 @@ components:
               targetId:
                 type: string
   schemas:
+    OthersSectorResponse:
+      type: object
+      required: [sector]
+      properties:
+        sector:
+          "$ref": "#/components/schemas/OthersSectorObservation"
+    OthersSectorObservation:
+      type: object
+      required: [relativeCoordinates, distance, knowledgeLevel, confidence, scan]
+      properties:
+        relativeCoordinates:
+          "$ref": "#/components/schemas/RelativeCoordinates"
+        distance:
+          type: integer
+          minimum: 0
+          description: Distance from the closest active ship in the designated fleet.
+        knowledgeLevel:
+          type: string
+          enum: [detailed, neighbor_scan, distant_scan, long_range_estimation]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        objects:
+          type: array
+          description: >-
+            Detailed natural sector content and observable moving projectiles.
+            Detected ship entries are included only when a ship of the
+            designated fleet is physically present in this sector.
+          items:
+            "$ref": "#/components/schemas/OthersObservedSectorObject"
+        probes:
+          type: array
+          description: >-
+            Probes physically observable in the sector and their live status.
+            Present, possibly empty, only when a ship of the designated fleet is
+            physically present in the requested sector.
+          items:
+            "$ref": "#/components/schemas/OthersObservedProbe"
+        estimatedObjects:
+          type: object
+          additionalProperties: true
+        possibleObjects:
+          type: array
+          items:
+            type: string
+        navigationalRisk:
+          type: string
+        message:
+          type: string
+        scan:
+          type: object
+          required: [currentSectorResidenceSeconds, requiredResidenceSeconds, scanQuality, source]
+          properties:
+            currentSectorResidenceSeconds:
+              type: integer
+              minimum: 0
+            requiredResidenceSeconds:
+              type: integer
+              minimum: 0
+            scanQuality:
+              type: number
+              minimum: 0
+              maximum: 1
+            source:
+              type: object
+              required: [kind, id]
+              properties:
+                kind:
+                  type: string
+                  enum: [others_ship]
+                id:
+                  type: string
+                  description: Public identifier of the fleet ship supplying the scan.
+    OthersObservedProbe:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [idle, preparing, accelerating, cruising, decelerating, orbiting, disabled, trapped_by_black_hole, dead]
+    OthersObservedSectorObject:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          oneOf:
+          - type: string
+          - type: integer
+        type:
+          type: string
+        observedClass:
+          type: string
+          description: Present on dynamically observed ships and projectiles.
+        status:
+          type: string
+          description: Current status of a dynamically observed ship.
+        estimated:
+          type: boolean
+        movement:
+          type: object
+          properties:
+            direction:
+              type: object
+              required: [x, y, z]
+              properties:
+                x:
+                  type: number
+                y:
+                  type: number
+                z:
+                  type: number
     RelativeSector:
       type: object
       required: [relative]

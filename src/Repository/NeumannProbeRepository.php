@@ -143,6 +143,37 @@ final class NeumannProbeRepository
     }
 
     /**
+     * Returns probes whose persisted sector or active movement destination may
+     * make them observable in the requested sector. The movement service must
+     * still resolve the live phase and final observable sector.
+     *
+     * @return array<NeumannProbe>
+     */
+    public function findObservableCandidatesBySector(SectorCoordinates $sector): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT DISTINCT p.*
+             FROM neumann_probes p
+             LEFT JOIN probe_movements m
+               ON m.probe_id = p.id
+              AND m.status IN ('preparing', 'accelerating', 'cruising', 'decelerating')
+             WHERE (p.sector_x = :current_x AND p.sector_y = :current_y AND p.sector_z = :current_z)
+                OR (m.target_x = :target_x AND m.target_y = :target_y AND m.target_z = :target_z)
+             ORDER BY p.id ASC"
+        );
+        $stmt->execute([
+            'current_x' => $sector->getX(),
+            'current_y' => $sector->getY(),
+            'current_z' => $sector->getZ(),
+            'target_x' => $sector->getX(),
+            'target_y' => $sector->getY(),
+            'target_z' => $sector->getZ(),
+        ]);
+
+        return array_map(fn(array $row): NeumannProbe => $this->hydrate($row), $stmt->fetchAll());
+    }
+
+    /**
      * @return array<NeumannProbe>
      */
     public function findWithinRange(SectorCoordinates $sector, int $radius, ?int $excludeId = null): array

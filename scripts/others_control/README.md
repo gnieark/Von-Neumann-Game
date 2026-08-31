@@ -20,13 +20,20 @@ incertain n'interdit donc pas un déploiement.
 Lancez le mode continu avec l'identifiant public du vaisseau mère :
 
 ```console
-python3 scripts/others_control/defense_etoile_attente.py ship_0123456789abcdefabcd
+python3 scripts/others_control/defense_etoile_attente.py --mothership-id ship_0123456789abcdefabcd
+```
+
+Vous pouvez aussi désigner directement la flotte ; son vaisseau mère est alors
+identifié automatiquement :
+
+```console
+python3 scripts/others_control/defense_etoile_attente.py --fleet-id fleet_0123456789abcdefabcd
 ```
 
 Pour vérifier une seule réconciliation sans maintenir le processus en attente :
 
 ```console
-python3 scripts/others_control/defense_etoile_attente.py --once ship_0123456789abcdefabcd
+python3 scripts/others_control/defense_etoile_attente.py --once --fleet-id fleet_0123456789abcdefabcd
 ```
 
 Le contrôleur attend au plus cinq minutes entre deux contrôles et se réveille
@@ -34,3 +41,7 @@ plus tôt lorsque `arrivalAt` annonce une arrivée. Les rappels dépassant la po
 d'un mouvement sont automatiquement découpés en étapes de dix secteurs. Un
 vaisseau seul déjà immobilisé dans un secteur contenant un trou noir n'est pas
 encore rappelé dans cette version.
+
+Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
+comme désignateur de flotte. La précision du scan et l'historique de visite
+restent propres à cette flotte.

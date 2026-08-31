@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-08-31
+
+### Changed
+
+- API v129 / scans Others : les observations de flotte utilisent désormais la route dédiée `GET /api/others/sector?shipId=…&x=…&y=…&z=…`. `GET /api/sector` redevient exclusivement un scan de sondes et refuse `shipId`. La précision du nouveau point d’API conserve les règles de distance, de temps de résidence et d’historique privé de la flotte ; les sondes et vaisseaux détectés, accompagnés de leur statut courant, ne sont exposés que lorsqu’un vaisseau actif de cette flotte est physiquement présent dans le secteur interrogé.
+
 ## 2026-08-30
 
 ### Changed

@@ -524,6 +524,18 @@ $test->assert(is_string($openApi) && !str_contains($openApi, 'openapi-others'), 
 $test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId}/missiles:'), 'main OpenAPI document retains probe missile endpoints without an external reference');
 $test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId}/mannies/{mannyId}/ignite_missile:'), 'main OpenAPI document exposes the canonical Manny missile endpoint');
 $openApiDocument = is_string($openApi) ? yaml_parse($openApi) : false;
+$openApiOthersDocument = is_string($openApiOthers) ? yaml_parse($openApiOthers) : false;
+$othersSectorOperation = is_array($openApiOthersDocument) ? ($openApiOthersDocument['paths']['/api/others/sector']['get'] ?? null) : null;
+$test->assert(
+    is_array($othersSectorOperation)
+        && (($othersSectorOperation['responses']['200']['content']['application/json']['schema']['$ref'] ?? null) === '#/components/schemas/OthersSectorResponse'),
+    'Others OpenAPI documents the dedicated sector observation endpoint and response schema',
+);
+$test->assert(
+    is_array($openApiDocument)
+        && !in_array('shipId', array_column($openApiDocument['paths']['/api/sector']['get']['parameters'] ?? [], 'name'), true),
+    'main OpenAPI no longer advertises Others scans on GET /api/sector',
+);
 $deprecatedProbeMissileOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/missiles']['post'] ?? null) : null;
 $igniteMissileOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/mannies/{mannyId}/ignite_missile']['post'] ?? null) : null;
 $probeAutonomousUnitsOperation = is_array($openApiDocument) ? ($openApiDocument['paths']['/api/probe/{probeId}/sector/autonomous-units']['get'] ?? null) : null;
@@ -2765,6 +2777,113 @@ $pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,sector_z=:z,deute
 $pdo->prepare('UPDATE others_ships SET deuterium_stock=10 WHERE id=:id')->execute(['id' => (int) $othersVictimShip['id']]);
 $othersStandardShip = $others->findShipByPublicId((string) $othersStandardShip['public_id']) ?? throw new RuntimeException('Others standard ship not found.');
 
+$localOthersSectorScan = $kernel->handle(
+    'GET',
+    '/api/others/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 0, 'y' => 0, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$test->assertEquals(200, $localOthersSectorScan->status, 'GET /api/others/sector scans in owner-home-relative coordinates');
+$localObservedProbesById = [];
+foreach (($localOthersSectorScan->body['sector']['probes'] ?? []) as $observedProbe) {
+    $localObservedProbesById[$observedProbe['id'] ?? 0] = $observedProbe;
+}
+$test->assertEquals('idle', $localObservedProbesById[$secondaryProbe->id]['status'] ?? null, 'a local Others fleet ship detects probes and their current status');
+$movingObservationPlayer = $players->createPlayer('others-sector-moving-probe', 'Others Sector Moving Probe', null, $othersHome);
+$movingObservationProbe = $probes->createForPlayer($movingObservationPlayer->id, 'Moving scan target', $othersHome);
+$movingObservationProbe->excludeFromStats = true;
+$probes->save($movingObservationProbe);
+$movingObservationTarget = $othersHome->add(1, 1, 0);
+$movingObservationNow = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+$movingObservationMovement = $movements->create(
+    $movingObservationProbe->id,
+    $othersHome,
+    $movingObservationTarget,
+    1,
+    [
+        'startedAt' => $movingObservationNow->modify('-2 minutes'),
+        'preparationEndsAt' => $movingObservationNow->modify('-1 minute'),
+        'accelerationEndsAt' => $movingObservationNow->modify('+1 minute'),
+        'cruiseEndsAt' => $movingObservationNow->modify('+2 minutes'),
+        'decelerationEndsAt' => $movingObservationNow->modify('+3 minutes'),
+        'arrivalAt' => $movingObservationNow->modify('+4 minutes'),
+    ],
+    0.0,
+);
+$acceleratingProbeScan = $kernel->handle(
+    'GET',
+    '/api/others/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 0, 'y' => 0, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$acceleratingObservedProbe = array_values(array_filter(
+    $acceleratingProbeScan->body['sector']['probes'] ?? [],
+    static fn(array $probe): bool => ($probe['id'] ?? null) === $movingObservationProbe->id,
+))[0] ?? null;
+$test->assertEquals('accelerating', $acceleratingObservedProbe['status'] ?? null, 'a local Others scan computes an accelerating probe status without waiting for persistence');
+
+$pdo->prepare(
+    'UPDATE probe_movements
+     SET preparation_ends_at=:preparation,acceleration_ends_at=:acceleration,cruise_ends_at=:cruise,deceleration_ends_at=:deceleration,arrival_at=:arrival
+     WHERE id=:id'
+)->execute([
+    'preparation' => $movingObservationNow->modify('-4 minutes')->format('c'),
+    'acceleration' => $movingObservationNow->modify('-3 minutes')->format('c'),
+    'cruise' => $movingObservationNow->modify('+1 minute')->format('c'),
+    'deceleration' => $movingObservationNow->modify('+2 minutes')->format('c'),
+    'arrival' => $movingObservationNow->modify('+3 minutes')->format('c'),
+    'id' => $movingObservationMovement->id,
+]);
+$cruisingProbeScan = $kernel->handle(
+    'GET',
+    '/api/others/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 0, 'y' => 0, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$test->assert(
+    !in_array($movingObservationProbe->id, array_column($cruisingProbeScan->body['sector']['probes'] ?? [], 'id'), true),
+    'a probe in blind cruise is not observable from its persisted origin sector',
+);
+
+$pdo->prepare(
+    'UPDATE probe_movements
+     SET preparation_ends_at=:preparation,acceleration_ends_at=:acceleration,cruise_ends_at=:cruise,deceleration_ends_at=:deceleration,arrival_at=:arrival
+     WHERE id=:id'
+)->execute([
+    'preparation' => $movingObservationNow->modify('-4 minutes')->format('c'),
+    'acceleration' => $movingObservationNow->modify('-3 minutes')->format('c'),
+    'cruise' => $movingObservationNow->modify('-2 minutes')->format('c'),
+    'deceleration' => $movingObservationNow->modify('+1 minute')->format('c'),
+    'arrival' => $movingObservationNow->modify('+2 minutes')->format('c'),
+    'id' => $movingObservationMovement->id,
+]);
+$deceleratingProbeScan = $kernel->handle(
+    'GET',
+    '/api/others/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 1, 'y' => 1, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$deceleratingObservedProbe = array_values(array_filter(
+    $deceleratingProbeScan->body['sector']['probes'] ?? [],
+    static fn(array $probe): bool => ($probe['id'] ?? null) === $movingObservationProbe->id,
+))[0] ?? null;
+$test->assertEquals('decelerating', $deceleratingObservedProbe['status'] ?? null, 'a local Others scan detects a decelerating probe in its destination sector');
+$localObservedShipsById = [];
+foreach (($localOthersSectorScan->body['sector']['objects'] ?? []) as $observedObject) {
+    if (isset($observedObject['observedClass'])) {
+        $localObservedShipsById[$observedObject['id'] ?? ''] = $observedObject;
+    }
+}
+$test->assertEquals('inactive', $localObservedShipsById[$othersVictimShip['public_id']]['status'] ?? null, 'a local Others sector scan exposes detected ship status');
+$test->assertEquals(
+    'others_ship',
+    $localOthersSectorScan->body['sector']['scan']['source']['kind'] ?? null,
+    'an Others sector scan identifies its nearest fleet sensor source',
+);
+$legacyOthersSectorScan = $kernel->handle(
+    'GET',
+    '/api/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 0, 'y' => 0, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$test->assertEquals(400, $legacyOthersSectorScan->status, 'GET /api/sector rejects the removed Others shipId contract');
+$test->assert(str_contains((string) ($legacyOthersSectorScan->body['error']['message'] ?? ''), '/api/others/sector'), 'removed Others scan contract points callers to the dedicated endpoint');
+
 $othersShipCoordinatesResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersStandardShip['public_id']), $othersAlertHeaders);
 $test->assertEquals(200, $othersShipCoordinatesResponse->status, 'GET /api/others/ships/{shipId} returns an owned ship with relative coordinates');
 $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $othersShipCoordinatesResponse->body['ship']['sector']['relative'] ?? null, 'Others ship coordinates use the owning player home as origin');
@@ -2894,13 +3013,18 @@ $test->assert(
 
 $knownSectorScan = $kernel->handle(
     'GET',
-    '/api/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 1000, 'y' => 1000, 'z' => 0]),
+    '/api/others/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 1000, 'y' => 1000, 'z' => 0]),
     $othersAlertHeaders,
 );
 $test->assertEquals(200, $knownSectorScan->status, 'an Others BOB scan accepts owner-home-relative coordinates');
 $test->assertEquals('detailed', $knownSectorScan->body['sector']['knowledgeLevel'] ?? null, 'an Others fleet gets precise detail for one of its visited sectors');
 $knownSectorObjects = $knownSectorScan->body['sector']['objects'] ?? [];
 $test->assert(in_array('black_hole', array_column($knownSectorObjects, 'type'), true), 'precise Others historical scans reveal a known black hole');
+$test->assert(!array_key_exists('probes', $knownSectorScan->body['sector'] ?? []), 'a precise non-local Others scan omits probes');
+$test->assert(
+    array_values(array_filter($knownSectorObjects, static fn(array $object): bool => isset($object['observedClass']))) === [],
+    'a precise non-local Others scan omits ships',
+);
 
 $isolatedOthersFleet = $others->createFleet(
     $othersAlertPlayer->id,
@@ -2910,7 +3034,7 @@ $isolatedOthersFleet = $others->createFleet(
 );
 $isolatedFleetScan = $kernel->handle(
     'GET',
-    '/api/sector?' . http_build_query(['shipId' => $isolatedOthersFleet['ship']['public_id'], 'x' => 1000, 'y' => 1000, 'z' => 0]),
+    '/api/others/sector?' . http_build_query(['shipId' => $isolatedOthersFleet['ship']['public_id'], 'x' => 1000, 'y' => 1000, 'z' => 0]),
     $othersAlertHeaders,
 );
 $test->assertEquals(200, $isolatedFleetScan->status, 'a new Others fleet can perform its initial neighboring scan');
@@ -3394,10 +3518,12 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(128, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(129, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');
+$othersSectorForbidden = $kernel->handle('GET', '/api/others/sector?shipId=ship_missing&x=0&y=0&z=0', $multiProbeHeaders);
+$test->assertEquals(403, $othersSectorForbidden->status, 'Others sector endpoint requires the canonical Others permission');
 $apiVersionWrongMethod = $kernel->handle('POST', '/api/version');
 $test->assertEquals(405, $apiVersionWrongMethod->status, 'POST /api/version is rejected');
 $removedInspectAsteroid = $kernel->handle('POST', '/api/probe/mannies/mny_missing/inspect-asteroid');
@@ -10471,6 +10597,7 @@ foreach ([
     'POST /api/probe/1/mannies/mny_missing/ignite_missile',
     'GET /api/probe/1/missiles/missile_missing',
     'GET /api/others',
+    'GET /api/others/sector?shipId=ship_missing&x=0&y=0&z=0',
     'GET /api/others/fleets/fleet_missing/visited-sectors',
     'GET /api/others/alerts',
     'PATCH /api/others/alerts/oalert_missing',
