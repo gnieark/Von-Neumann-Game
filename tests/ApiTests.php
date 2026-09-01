@@ -987,6 +987,19 @@ $test->assert(
     && str_contains($inventoriesScript, '"scut_transit_beacon",'),
     'inventories JS always exposes SCUT relays and transit beacons in storage-rule filters'
 );
+$test->assert(
+    is_string($inventoriesScript)
+    && preg_match('/const defaultStorageRuleTypes = \[(.*?)\];/s', $inventoriesScript, $defaultStorageRuleTypesMatch) === 1
+    && str_contains($defaultStorageRuleTypesMatch[1], '"solar_panel",')
+    && str_contains($defaultStorageRuleTypesMatch[1], '"missile",'),
+    'inventories JS always exposes solar panels and missiles in storage-rule filters'
+);
+$test->assert(
+    is_string($inventoriesScript)
+    && str_contains($inventoriesScript, '"solar_panel": tr("solarPanel", "Solar panel")')
+    && str_contains($inventoriesScript, '"missile": tr("missileItem", "Missile")'),
+    'inventories JS labels permanent solar-panel and missile storage-rule options'
+);
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'inventory-container-rename-form'), 'inventories JS renames containers through an inline form');
 $test->assert(is_string($inventoriesScript) && !str_contains($inventoriesScript, 'window.prompt'), 'inventories JS does not use prompt for container rename');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'probeApiPath("/storage-containers/" + encodeURIComponent(containerId))'), 'inventories JS renames containers through the selected-probe storage-container PATCH endpoint');

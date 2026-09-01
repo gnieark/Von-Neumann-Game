@@ -122,8 +122,10 @@
             "linear_actuator": tr("linearActuator", "Linear actuator"),
             "atomic_printer_part": tr("atomicPrinterPart", "Atomic printer part"),
             "deuterium_engine": tr("deuteriumEngine", "Deuterium engine"),
+            "solar_panel": tr("solarPanel", "Solar panel"),
             "scut_relay": tr("scutRelayObject", "SCUT relay"),
             "scut_transit_beacon": tr("scutTransitBeacon", "SCUT transit beacon"),
+            "missile": tr("missileItem", "Missile"),
             "manny": tr("mannyObject", "Manny"),
         }[type] || fallback || type || "-";
     }
@@ -433,8 +435,10 @@
         "battery_pack",
         "linear_actuator",
         "deuterium_engine",
+        "solar_panel",
         "scut_relay",
         "scut_transit_beacon",
+        "missile",
     ];
     const excludedStorageRuleTypes = new Set([
         "atomic_3d_printer",
