@@ -799,6 +799,10 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'functio
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'Number(entry.probeId) === selectedProbeId'), 'sensors JS reads the selected probe distance from sector distances');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function objectSummaryLabel'), 'sensors JS centralizes sector object summary rendering');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'object.type === "scut_relay" && object.isTransitBeacon === true'), 'sensors JS mentions installed transit beacons on SCUT relay objects');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, '["ship", "large_ship"].includes(object.observedClass)'), 'sensors JS labels detected Others ships from their canonical observed class');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function othersFleetSummary'), 'sensors JS summarizes detected Others fleet composition');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'othersFleetSummary(sector.objects)'), 'sensors JS includes Others fleet presence in the detailed sector summary');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorOthersFleetSummaryBoth' => 'Flotte Others détectée"), 'French translations include the Others fleet summary');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'inaccessible'"), 'French translations include the unreachable probe selector suffix');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'unreachable'"), 'English translations include the unreachable probe selector suffix');
@@ -1255,7 +1259,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260828-manny-ignite-missile"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260831-sensors-others-fleet"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
@@ -2436,6 +2440,10 @@ $remoteLaserManny = $mannies->createForProbe($remoteLaserProbe->id, 'SCUT Laser 
 $remoteLaserManny->locationType = Manny::LOCATION_SECTOR;
 $remoteLaserManny->sector = $remoteLaserSector;
 $mannies->save($remoteLaserManny);
+$localLaserObserverPlayer = $players->createPlayer('local-laser-observer', 'Local Laser Observer', null, $remoteLaserSector);
+$localLaserObserverProbe = $probes->createForPlayer($localLaserObserverPlayer->id, 'Local laser observer probe', $remoteLaserSector);
+$localLaserObserverProbe->excludeFromStats = true;
+$probes->save($localLaserObserverProbe);
 $remoteLaserRelay = $scut->createOffRelay($remoteLaserProbe->currentSector, $remoteLaserProbe->id);
 $scut->turnOnRelay($remoteLaserRelay->id, 'Remote laser alerts');
 $remoteLaserOthersPlayer = $players->createPlayer('remote-laser-others', 'Remote Laser Others', null, $remoteLaserSector);
@@ -2444,6 +2452,16 @@ $pdo->prepare('UPDATE others_ships SET deuterium_stock=20 WHERE id=:id')->execut
 $remoteLaserShip = $others->findShipByPublicId((string) $remoteLaserFleet['ship']['public_id']) ?? throw new RuntimeException('Remote laser alert ship not found.');
 $remoteLaserAction = $othersService->startLaser($remoteLaserShip, ['targetId' => $remoteLaserManny->uid]);
 $processOthersActionNow($remoteLaserAction);
+$localLaserAlerts = array_values(array_filter(
+    $damageWarnings->findByProbeId($localLaserObserverProbe->id),
+    static fn(ProbeDamageWarning $alert): bool => $alert->objectId === 'weapon-' . $remoteLaserAction['public_id'],
+));
+$test->assertEquals(1, count($localLaserAlerts), 'a local probe receives the Manny laser lock alert');
+$test->assertEquals(
+    'Laser lock: the exposed Manny SCUT Laser Courier will be destroyed in ten minutes unless it is embarked.',
+    $localLaserAlerts[0]->message ?? null,
+    'the local laser lock alert names the exposed Manny',
+);
 $remoteLaserAlertResponse = $kernel->handle('GET', '/api/probe/' . $remoteLaserProbe->id . '/alerts', $remoteLaserHeaders);
 $remoteLaserAlerts = array_values(array_filter(
     $remoteLaserAlertResponse->body['alerts'] ?? [],

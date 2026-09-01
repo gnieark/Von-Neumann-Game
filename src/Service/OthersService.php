@@ -836,7 +836,10 @@ final class OthersService
             $pdo->prepare("UPDATE others_laser_locks SET status='active',started_at=:now,accounted_until=:now,next_damage_at=:damage,exhausts_at=:exhausts,updated_at=:now WHERE id=:id AND status='queued'")->execute(['now' => $now, 'damage' => $damage->format('c'), 'exhausts' => $exhausts->format('c'), 'id' => (int) $lock['id']]);
             $pdo->prepare("UPDATE others_actions SET status='running',ends_at=:ends,updated_at=:now WHERE id=:id AND status='queued'")->execute(['ends' => $next->format('c'), 'now' => $now, 'id' => (int) $action['id']]);
             $lockSector = new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z']);
-            $this->createWeaponAlerts($lockSector, (string) $action['public_id'], $target['kind'] === 'manny' ? 'Laser lock: the exposed Manny will be destroyed in ten minutes unless it is embarked.' : 'Laser lock detected: a probe target may lose 5 integrity points every ten minutes.', $damage->format('c'));
+            $message = $target['kind'] === 'manny'
+                ? 'Laser lock: the exposed Manny ' . $target['name'] . ' will be destroyed in ten minutes unless it is embarked.'
+                : 'Laser lock detected: a probe target may lose 5 integrity points every ten minutes.';
+            $this->createWeaponAlerts($lockSector, (string) $action['public_id'], $message, $damage->format('c'));
             if ($target['kind'] === 'manny') {
                 $this->createRemoteMannyLaserAlert($lockSector, (string) $target['id'], (string) $action['public_id'], $damage->format('c'));
             }
@@ -1084,7 +1087,7 @@ final class OthersService
     {
         $x = (int) $ship['sector_x']; $y = (int) $ship['sector_y']; $z = (int) $ship['sector_z'];
         if (ctype_digit($targetId) && $this->probes !== null) { $probe = $this->probes->findById((int) $targetId); if ($probe !== null && $probe->currentSector->toKey() === "$x:$y:$z" && !in_array($probe->status->value, ['dead','accelerating','cruising','decelerating'], true)) { return ['kind' => 'probe', 'id' => $targetId]; } }
-        if ($this->mannies !== null) { $manny = $this->mannies->findByUid($targetId); if ($manny !== null && $manny->locationType === 'sector' && $manny->sector?->toKey() === "$x:$y:$z") { return ['kind' => 'manny', 'id' => $targetId]; } }
+        if ($this->mannies !== null) { $manny = $this->mannies->findByUid($targetId); if ($manny !== null && $manny->locationType === 'sector' && $manny->sector?->toKey() === "$x:$y:$z") { return ['kind' => 'manny', 'id' => $targetId, 'name' => $manny->name]; } }
         if ($this->sectors !== null) { $object = $this->sectors->getOrCreateSector(new SectorCoordinates($x, $y, $z))->findObjectById($targetId); if ($object instanceof Planet) { return ['kind' => 'planet', 'id' => $targetId]; } if ($object instanceof Asteroid) { return ['kind' => 'asteroid', 'id' => $targetId]; } }
         return null;
     }

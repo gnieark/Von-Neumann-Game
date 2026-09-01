@@ -48,6 +48,8 @@
             "deuterium_refuel_station": tr("deuteriumRefuelStationObject", "Deuterium refuel station"),
             "scut_relay": tr("scutRelayObject", "SCUT relay"),
             "missile": tr("suspectedMissileObject", "Detected missile"),
+            "ship": tr("othersShipObject", "Others ship"),
+            "large_ship": tr("othersLargeShipObject", "Others mothership"),
             "object": tr("object", "Object"),
             "unknown": tr("unknownObject", "Unknown object"),
         }[type] || type || tr("unknownObject", "Unknown object");
@@ -56,6 +58,9 @@
     function observedObjectTypeLabel(object) {
         if (object && object.type === "asteroid" && object.distinctiveFeature === "Sculpted in the shape of a duck") {
             return tr("duckAsteroidObject", "Duck-shaped asteroid");
+        }
+        if (object && ["ship", "large_ship"].includes(object.observedClass)) {
+            return objectTypeLabel(object.observedClass);
         }
 
         return objectTypeLabel(object && object.type || "unknown");
@@ -167,6 +172,12 @@
         const summary = observationSummaryLabel(object && object.summary || "");
         if (object && object.type === "scut_relay" && object.isTransitBeacon === true) {
             return [summary, tr("observationSummaryScutRelayTransitBeacon", "Transit beacon installed.")].filter(Boolean).join(" ");
+        }
+        if (!summary && object && object.observedClass === "large_ship") {
+            return tr("observationSummaryOthersLargeShip", "Others mothership detected.");
+        }
+        if (!summary && object && object.observedClass === "ship") {
+            return tr("observationSummaryOthersShip", "Others ship detected.");
         }
 
         return summary;
@@ -388,6 +399,42 @@
         return window.VNG.formatText(tr("sectorSummaryObjects", "Occupied sector: {count} objects detected."), {"count": objects.length});
     }
 
+    function othersFleetSummary(objects) {
+        const motherships = objects.filter((object) => object && object.observedClass === "large_ship").length;
+        const ships = objects.filter((object) => object && object.observedClass === "ship").length;
+        if (motherships === 0 && ships === 0) {
+            return "";
+        }
+        if (motherships > 0 && ships > 0) {
+            return window.VNG.formatText(
+                tr("sectorOthersFleetSummaryBoth", "Others fleet detected: {motherships} {mothershipWord} and {ships} {shipWord}."),
+                {
+                    "motherships": motherships,
+                    "mothershipWord": pluralWord(motherships, "othersMothershipSingular", "mothership", "othersMothershipPlural", "motherships"),
+                    "ships": ships,
+                    "shipWord": pluralWord(ships, "othersShipSingular", "ship", "othersShipPlural", "ships"),
+                }
+            );
+        }
+        if (motherships > 0) {
+            return window.VNG.formatText(
+                tr("sectorOthersFleetSummaryMotherships", "Others fleet detected: {count} {word}."),
+                {
+                    "count": motherships,
+                    "word": pluralWord(motherships, "othersMothershipSingular", "mothership", "othersMothershipPlural", "motherships"),
+                }
+            );
+        }
+
+        return window.VNG.formatText(
+            tr("sectorOthersFleetSummaryShips", "Others fleet detected: {count} {word}."),
+            {
+                "count": ships,
+                "word": pluralWord(ships, "othersShipSingular", "ship", "othersShipPlural", "ships"),
+            }
+        );
+    }
+
     function estimatedSectorSummary(estimate) {
         if (Number(estimate.blackHoleProbability || 0) >= 0.5) {
             return tr("sectorSummaryBlackHoleLikely", "Strong gravity signature: black hole likely.");
@@ -425,7 +472,7 @@
             return tr("sectorSummarySensorsDegradedMovement", "Sensors are too degraded by travel velocity; inventory impossible.");
         }
         if (Array.isArray(sector.objects)) {
-            return detailedSectorSummary(sector.objects);
+            return [detailedSectorSummary(sector.objects), othersFleetSummary(sector.objects)].filter(Boolean).join(" ");
         }
         if (sector.estimatedObjects && typeof sector.estimatedObjects === "object") {
             return estimatedSectorSummary(sector.estimatedObjects);
