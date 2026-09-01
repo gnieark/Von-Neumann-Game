@@ -21,7 +21,10 @@ def timestamped_logger(message: str) -> None:
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Maintient douze sentinelles autour d'un vaisseau mère Others.",
+        description=(
+            "Maintient douze sentinelles et la logistique autour d'un "
+            "vaisseau mère Others."
+        ),
     )
     identifier = parser.add_mutually_exclusive_group(required=True)
     identifier.add_argument("--mothership-id", help="Identifiant public du vaisseau mère")

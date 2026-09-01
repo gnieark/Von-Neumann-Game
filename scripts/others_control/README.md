@@ -65,6 +65,28 @@ Une seule munition respecte toujours l'ordre de priorité indiqué. Les missiles
 déjà lancés par les Others sont ignorés et les alertes d'impact ne provoquent
 aucune action supplémentaire.
 
+En parallèle de cette formation, le vaisseau mère entretient sa logistique :
+
+- les crafts abordables sont lancés avant la moisson, avec priorité aux
+  auxiliaires jusqu'à un total projeté de 20, puis aux missiles jusqu'à 60 ;
+- les crafts déjà actifs comptent dans ces objectifs afin d'éviter une
+  surproduction ;
+- jusqu'à dix auxiliaires embarqués encore disponibles moissonnent une planète
+  locale dont le scan Others indique `harvestable: true` ; avec un seul
+  auxiliaire, celui-ci crafte dès que la recette d'un auxiliaire est abordable,
+  sinon il moissonne ;
+- les actions de moisson canoniques sont relancées au fil de leur achèvement et
+  regroupées en fenêtres d'une heure. Une action encore active à la fin d'une
+  fenêtre n'est pas annulée, notamment pour ne pas perdre la progression sur
+  une planète habitée ;
+- une fois 20 auxiliaires et 60 missiles atteints, la moisson continue jusqu'à
+  conserver les matières premières de 10 auxiliaires et 10 missiles, soit 250
+  ECE de métaux, 25 de glace, 60 de composés carbonés et 10,5 de deutérium.
+
+La capacité libre de la soute et les réservations en cours limitent toujours la
+taille de l'essaim. Les planètes non habitées sont choisies avant les planètes
+habitées lorsque plusieurs cibles sont disponibles.
+
 Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
 comme désignateur de flotte. La précision du scan et l'historique de visite
 restent propres à cette flotte. Les Mannys déployées sont suivies par la route
@@ -74,8 +96,8 @@ restent propres à cette flotte. Les Mannys déployées sont suivies par la rout
 
 `defense_etoile_attente.py` est uniquement le point d'entrée canonique. Le
 paquet `defense_etoile` sépare la CLI et le transport HTTP de la logique de
-formation, d'observation, de détection des événements, d'engagement et de
-connaissance des dangers. Les modules tactiques dépendent du protocole
+formation, de logistique, d'observation, de détection des événements,
+d'engagement et de connaissance des dangers. Les modules tactiques dépendent du protocole
 `OthersApi`, ce qui permet de les tester sans serveur ni base de données.
 
 La suite Python se lance depuis la racine du projet :

@@ -61,6 +61,91 @@ class HttpOthersApi:
         body = self._request("GET", f"/api/others/ships/{quote(ship_id, safe='')}/inventory")
         return require_mapping(body.get("inventory"), "inventory")
 
+    def get_auxiliaries(self, ship_id: str) -> list[dict[str, Any]]:
+        auxiliaries: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            query: dict[str, int | str] = {"limit": 500}
+            if cursor is not None:
+                query["cursor"] = cursor
+            body = self._request(
+                "GET",
+                f"/api/others/ships/{quote(ship_id, safe='')}/auxiliaries?{urlencode(query)}",
+            )
+            page = body.get("auxiliaries")
+            if not isinstance(page, list):
+                raise ApiContractError("auxiliaries doit être une liste.")
+            auxiliaries.extend(require_mapping(item, "auxiliaries[]") for item in page)
+            next_cursor = body.get("nextCursor")
+            if next_cursor is None:
+                return auxiliaries
+            cursor = require_string(next_cursor, "nextCursor")
+
+    def get_crafting_recipes(self) -> list[dict[str, Any]]:
+        body = self._request("GET", "/api/others/crafting/recipes")
+        recipes = body.get("recipes")
+        if not isinstance(recipes, list):
+            raise ApiContractError("recipes doit être une liste.")
+        return [require_mapping(recipe, "recipes[]") for recipe in recipes]
+
+    def get_crafts(self, ship_id: str) -> list[dict[str, Any]]:
+        body = self._request(
+            "GET",
+            f"/api/others/ships/{quote(ship_id, safe='')}/crafts",
+        )
+        crafts = body.get("crafts")
+        if not isinstance(crafts, list):
+            raise ApiContractError("crafts doit être une liste.")
+        return [require_mapping(craft, "crafts[]") for craft in crafts]
+
+    def start_craft(
+        self,
+        ship_id: str,
+        recipe_id: str,
+        assistant_auxiliary_id: str,
+        operation_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(ship_id, safe='')}/crafts",
+            payload={
+                "recipeId": recipe_id,
+                "assistantAuxiliaryId": assistant_auxiliary_id,
+            },
+            idempotency_key=command_idempotency_key(
+                "defense-craft",
+                ship_id,
+                recipe_id,
+                assistant_auxiliary_id,
+                operation_key,
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
+
+    def start_harvest(
+        self,
+        ship_id: str,
+        target_object_id: str,
+        auxiliary_count: int,
+        operation_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(ship_id, safe='')}/harvest",
+            payload={
+                "targetObjectId": target_object_id,
+                "auxiliaryCount": auxiliary_count,
+            },
+            idempotency_key=command_idempotency_key(
+                "defense-harvest",
+                ship_id,
+                target_object_id,
+                str(auxiliary_count),
+                operation_key,
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
+
     def launch_missile(
         self,
         ship_id: str,

@@ -531,6 +531,14 @@ $test->assert(
         && (($othersSectorOperation['responses']['200']['content']['application/json']['schema']['$ref'] ?? null) === '#/components/schemas/OthersSectorResponse'),
     'Others OpenAPI documents the dedicated sector observation endpoint and response schema',
 );
+$othersSectorObjectProperties = is_array($openApiOthersDocument)
+    ? ($openApiOthersDocument['components']['schemas']['OthersObservedSectorObject']['properties'] ?? null)
+    : null;
+$test->assert(
+    is_array($othersSectorObjectProperties)
+        && (($othersSectorObjectProperties['harvestable']['type'] ?? null) === 'boolean'),
+    'Others OpenAPI documents local planet harvestability',
+);
 $test->assert(
     is_array($openApiDocument)
         && !in_array('shipId', array_column($openApiDocument['paths']['/api/sector']['get']['parameters'] ?? [], 'name'), true),
@@ -2894,6 +2902,92 @@ $test->assertEquals(
     $localOthersSectorScan->body['sector']['scan']['source']['kind'] ?? null,
     'an Others sector scan identifies its nearest fleet sensor source',
 );
+
+$harvestabilitySector = $othersHome->add(60, 0, 0);
+$harvestabilityRemoteSector = $othersHome->add(62, 0, 0);
+$harvestableAmounts = ['deuterium' => 0.0001, 'metals' => 5.0, 'ice' => 0.0, 'carbon_compounds' => 0.0];
+$thresholdAmounts = ['deuterium' => 0.0, 'metals' => 5.0, 'ice' => 0.0, 'carbon_compounds' => 0.0];
+$sectorRepository->save(new SectorContent($harvestabilitySector, [
+    new Planet('others-harvestable-top', 'Rich top-level planet', 'rocky', 1.0, 1.0, true, 0.2, ['metals'], resourceAmounts: $harvestableAmounts),
+    new Planet('others-harvest-threshold-top', 'Threshold top-level planet', 'rocky', 1.0, 1.0, true, 0.2, ['metals'], resourceAmounts: $thresholdAmounts),
+    new SolarSystem(
+        'others-harvestability-system',
+        'Harvestability system',
+        new Star('others-harvestability-star', 'Harvestability star', 'G', 1.0, 5778, 1.0, 1.0),
+        null,
+        [
+            new OrbitingBody(
+                new Planet('others-harvestable-nested', 'Rich nested planet', 'rocky', 0.01, 0.1, true, 0.2, ['metals'], resourceAmounts: $harvestableAmounts),
+                new OrbitDescriptor(1.0, 0.01, 0.0),
+            ),
+            new OrbitingBody(
+                new Planet('others-harvest-threshold-nested', 'Threshold nested planet', 'rocky', 0.01, 0.1, true, 0.2, ['metals'], resourceAmounts: $thresholdAmounts),
+                new OrbitDescriptor(1.5, 0.01, 0.0),
+            ),
+        ],
+        1.02,
+        1.5,
+    ),
+]));
+$sectorRepository->save(new SectorContent($harvestabilityRemoteSector, [
+    new Planet('others-harvestable-remote', 'Known remote planet', 'rocky', 1.0, 1.0, true, 0.2, ['metals'], resourceAmounts: $harvestableAmounts),
+]));
+$harvestabilityFleet = $others->createFleet(
+    $othersAlertPlayer->id,
+    $harvestabilitySector->getX(),
+    $harvestabilitySector->getY(),
+    $harvestabilitySector->getZ(),
+);
+$others->markFleetSectorVisited((int) $harvestabilityFleet['id'], $harvestabilityRemoteSector);
+$localHarvestabilityScan = $kernel->handle(
+    'GET',
+    '/api/others/sector?' . http_build_query(['shipId' => $harvestabilityFleet['ship']['public_id'], 'x' => 60, 'y' => 0, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$localHarvestabilityObjects = [];
+foreach ($localHarvestabilityScan->body['sector']['objects'] ?? [] as $object) {
+    $localHarvestabilityObjects[(string) ($object['id'] ?? '')] = $object;
+}
+$test->assertEquals(true, $localHarvestabilityObjects['others-harvestable-top']['harvestable'] ?? null, 'a local Others scan marks a planet containing more than 5 ECE as harvestable');
+$test->assertEquals(false, $localHarvestabilityObjects['others-harvest-threshold-top']['harvestable'] ?? null, 'the Others harvestable threshold is strictly greater than 5 ECE');
+$nestedBookmarkTargets = [];
+foreach ($localHarvestabilityObjects['others-harvestability-system']['bookmarkTargets'] ?? [] as $target) {
+    $nestedBookmarkTargets[(string) ($target['id'] ?? '')] = $target;
+}
+$nestedMinableTargets = [];
+foreach ($localHarvestabilityObjects['others-harvestability-system']['minableTargets'] ?? [] as $target) {
+    $nestedMinableTargets[(string) ($target['id'] ?? '')] = $target;
+}
+$test->assertEquals(true, $nestedBookmarkTargets['others-harvestable-nested']['harvestable'] ?? null, 'local Others bookmark targets expose nested planet harvestability');
+$test->assertEquals(false, $nestedMinableTargets['others-harvest-threshold-nested']['harvestable'] ?? null, 'local Others minable targets expose the strict planet harvestability threshold');
+
+$harvestabilityProbePlayer = $players->createPlayer('harvestability-probe-owner', 'Harvestability Probe Owner', null, $harvestabilitySector);
+$harvestabilityProbe = $probes->createForPlayer($harvestabilityProbePlayer->id, 'Harvestability probe', $harvestabilitySector);
+$harvestabilityProbe->excludeFromStats = true;
+$probes->save($harvestabilityProbe);
+$harvestabilityProbeHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($harvestabilityProbePlayer)['token']];
+$probeHarvestabilityScan = $kernel->handle('GET', '/api/probe/' . $harvestabilityProbe->id . '/sector', $harvestabilityProbeHeaders);
+$test->assert(
+    !str_contains(json_encode($probeHarvestabilityScan->body, JSON_THROW_ON_ERROR), '"harvestable"'),
+    'probe sector endpoints never expose Others harvestability',
+);
+
+$remoteHarvestabilityScan = $kernel->handle(
+    'GET',
+    '/api/others/sector?' . http_build_query(['shipId' => $harvestabilityFleet['ship']['public_id'], 'x' => 62, 'y' => 0, 'z' => 0]),
+    $othersAlertHeaders,
+);
+$test->assertEquals('detailed', $remoteHarvestabilityScan->body['sector']['knowledgeLevel'] ?? null, 'a visited non-local Others harvestability fixture remains detailed');
+$test->assert(
+    !str_contains(json_encode($remoteHarvestabilityScan->body, JSON_THROW_ON_ERROR), '"harvestable"'),
+    'a non-local Others sector scan omits planet harvestability',
+);
+$harvestabilityCleanupNow = gmdate('c');
+$pdo->prepare("UPDATE others_ships SET status='removed',destroyed_at=:now,updated_at=:now WHERE fleet_id=:fleet_id")
+    ->execute(['now' => $harvestabilityCleanupNow, 'fleet_id' => (int) $harvestabilityFleet['id']]);
+$pdo->prepare("UPDATE others_fleets SET status='dissolved',dissolved_at=:now,updated_at=:now WHERE id=:id")
+    ->execute(['now' => $harvestabilityCleanupNow, 'id' => (int) $harvestabilityFleet['id']]);
+
 $legacyOthersSectorScan = $kernel->handle(
     'GET',
     '/api/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 0, 'y' => 0, 'z' => 0]),
@@ -3536,7 +3630,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(129, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(130, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $othersForbidden = $kernel->handle('GET', '/api/others', $multiProbeHeaders);
 $test->assertEquals(403, $othersForbidden->status, 'Others branch rejects an authenticated account without the canonical permission');
 $test->assertEquals('others_permission_required', $othersForbidden->body['error']['code'] ?? null, 'Others permission refusal exposes its stable business code');

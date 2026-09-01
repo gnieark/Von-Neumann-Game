@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '129'
+  version: '130'
 security:
 - bearerAuth: []
 servers:
@@ -71,9 +71,11 @@ paths:
         /api/sector, using only this fleet's private visit history. A detailed
         observation includes detected probes and ships, with their current
         statuses, only when at least one active ship of the designated fleet is
-        physically present in the requested sector. The probes property and
-        detected ship objects are otherwise omitted, including from precise
-        historical observations.
+        physically present in the requested sector. In that local case, every
+        planet representation also exposes harvestable, which is true only
+        while its remaining resources total more than 5 ECE. The probes
+        property, detected ship objects and harvestable fields are otherwise
+        omitted, including from precise historical observations.
       parameters:
       - name: shipId
         in: query
@@ -678,6 +680,13 @@ components:
           description: Current status of a dynamically observed ship.
         estimated:
           type: boolean
+        harvestable:
+          type: boolean
+          description: >-
+            Present only on planets observed locally by an Others fleet ship,
+            including planet entries nested in bookmarkTargets and
+            minableTargets. True when remaining planetary resources total
+            strictly more than 5 ECE.
         movement:
           type: object
           properties:

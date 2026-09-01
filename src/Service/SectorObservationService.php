@@ -63,6 +63,7 @@ final class SectorObservationService
             $target,
             $this->visitedSectors->hasVisited($player, $target),
             $this->skipsInitialNeighborDelay($player, $this->grid->getDistance($probe->currentSector, $target)),
+            false,
         );
     }
 
@@ -83,6 +84,7 @@ final class SectorObservationService
             $fleetHasVisitedTarget,
             $distance === 1
                 && $fleetVisitedSectorCount === $this->scanInt('initialNeighborDelayBypassVisitedCount', 1),
+            true,
         );
     }
 
@@ -92,6 +94,7 @@ final class SectorObservationService
         SectorCoordinates $target,
         bool $visited,
         bool $skipInitialNeighborDelay,
+        bool $includeOthersHarvestability,
     ): SectorObservation
     {
         $frame = new PlayerReferenceFrame($player->homeSector);
@@ -111,7 +114,13 @@ final class SectorObservationService
                 $distance,
                 SectorKnowledgeLevel::Detailed,
                 1.0,
-                ['objects' => $this->detailedObjects($content, $current, $relative, $player->id)],
+                ['objects' => $this->detailedObjects(
+                    $content,
+                    $current,
+                    $relative,
+                    $player->id,
+                    $includeOthersHarvestability && $current,
+                )],
                 $scan,
             );
         }
@@ -226,7 +235,12 @@ final class SectorObservationService
         ];
     }
 
-    private function detailedObject(UniverseObject $object, SectorCoordinates $sector, array $relativeCoordinates): array
+    private function detailedObject(
+        UniverseObject $object,
+        SectorCoordinates $sector,
+        array $relativeCoordinates,
+        bool $includeOthersHarvestability,
+    ): array
     {
         $data = [
             'id' => $object->getId(),
@@ -250,8 +264,8 @@ final class SectorObservationService
             $data['starCount'] = count($object->getStars());
             $data['planetCount'] = $planetCount;
             $data['orbitalBodyCount'] = count($object->getOrbitalBodies());
-            $data['bookmarkTargets'] = $this->bookmarkTargets($object, $sector, $relativeCoordinates);
-            $data['minableTargets'] = $this->minableTargets($object, $sector, $relativeCoordinates);
+            $data['bookmarkTargets'] = $this->bookmarkTargets($object, $sector, $relativeCoordinates, $includeOthersHarvestability);
+            $data['minableTargets'] = $this->minableTargets($object, $sector, $relativeCoordinates, $includeOthersHarvestability);
         }
 
         if ($object instanceof Star) {
@@ -283,6 +297,9 @@ final class SectorObservationService
                 $data['category'] = $object->getCategory();
                 $data['habitabilityScore'] = $object->getHabitabilityScore();
                 $data['intelligentLife'] = $object->hasIntelligentLife();
+                if ($includeOthersHarvestability) {
+                    $data['harvestable'] = $this->isOthersHarvestable($object);
+                }
             }
         }
 
@@ -334,7 +351,13 @@ final class SectorObservationService
     /**
      * @return array<array<string, mixed>>
      */
-    private function detailedObjects(SectorContent $content, bool $isCurrentSector, array $relativeCoordinates, int $playerId): array
+    private function detailedObjects(
+        SectorContent $content,
+        bool $isCurrentSector,
+        array $relativeCoordinates,
+        int $playerId,
+        bool $includeOthersHarvestability,
+    ): array
     {
         $objects = [];
         foreach ($content->getObjects() as $object) {
@@ -346,7 +369,7 @@ final class SectorObservationService
             if ($activeTrajectory !== null && $this->asteroidTrajectoryService?->isOcculted($activeTrajectory) === true) {
                 continue;
             }
-            $public = $this->detailedObject($object, $content->getCoordinates(), $relativeCoordinates);
+            $public = $this->detailedObject($object, $content->getCoordinates(), $relativeCoordinates, $includeOthersHarvestability);
             if ($activeTrajectory !== null && $this->asteroidTrajectoryService !== null) {
                 $public['trajectory'] = $this->asteroidTrajectoryService->publicArray($activeTrajectory);
             }
@@ -357,7 +380,7 @@ final class SectorObservationService
                 continue;
             }
 
-            $objects[] = $this->detailedObject($container, $content->getCoordinates(), $relativeCoordinates);
+            $objects[] = $this->detailedObject($container, $content->getCoordinates(), $relativeCoordinates, $includeOthersHarvestability);
         }
 
         if ($isCurrentSector && $this->asteroidTrajectories !== null && $this->asteroidTrajectoryService !== null) {
@@ -366,7 +389,7 @@ final class SectorObservationService
                     continue;
                 }
                 $asteroid = Asteroid::fromArray($trajectory->asteroidSnapshot);
-                $public = $this->detailedObject($asteroid, $content->getCoordinates(), $relativeCoordinates);
+                $public = $this->detailedObject($asteroid, $content->getCoordinates(), $relativeCoordinates, $includeOthersHarvestability);
                 $public['inTransit'] = true;
                 $public['trajectory'] = $this->asteroidTrajectoryService->publicArray($trajectory);
                 $objects[] = $public;
@@ -430,7 +453,12 @@ final class SectorObservationService
         return $content;
     }
 
-    private function minableTargets(SolarSystem $system, SectorCoordinates $sector, array $relativeCoordinates): array
+    private function minableTargets(
+        SolarSystem $system,
+        SectorCoordinates $sector,
+        array $relativeCoordinates,
+        bool $includeOthersHarvestability,
+    ): array
     {
         $targets = [];
         foreach ($system->getOrbitalBodies() as $body) {
@@ -478,6 +506,9 @@ final class SectorObservationService
                 $target['category'] = $object->getCategory();
                 $target['habitabilityScore'] = $object->getHabitabilityScore();
                 $target['intelligentLife'] = $object->hasIntelligentLife();
+                if ($includeOthersHarvestability) {
+                    $target['harvestable'] = $this->isOthersHarvestable($object);
+                }
             }
             $targets[] = $target;
         }
@@ -485,14 +516,19 @@ final class SectorObservationService
         return $targets;
     }
 
-    private function bookmarkTargets(SolarSystem $system, SectorCoordinates $sector, array $relativeCoordinates): array
+    private function bookmarkTargets(
+        SolarSystem $system,
+        SectorCoordinates $sector,
+        array $relativeCoordinates,
+        bool $includeOthersHarvestability,
+    ): array
     {
         $targets = [];
         foreach ($system->getStars() as $star) {
-            $targets[] = $this->bookmarkTargetArray($star, $sector, $relativeCoordinates);
+            $targets[] = $this->bookmarkTargetArray($star, $sector, $relativeCoordinates, $includeOthersHarvestability);
         }
         foreach ($system->getOrbitalBodies() as $body) {
-            $target = $this->bookmarkTargetArray($body->getObject(), $sector, $relativeCoordinates);
+            $target = $this->bookmarkTargetArray($body->getObject(), $sector, $relativeCoordinates, $includeOthersHarvestability);
             if ($target !== null) {
                 $targets[] = $target;
             }
@@ -501,7 +537,12 @@ final class SectorObservationService
         return $targets;
     }
 
-    private function bookmarkTargetArray(UniverseObject $object, SectorCoordinates $sector, array $relativeCoordinates): ?array
+    private function bookmarkTargetArray(
+        UniverseObject $object,
+        SectorCoordinates $sector,
+        array $relativeCoordinates,
+        bool $includeOthersHarvestability,
+    ): ?array
     {
         $activeTrajectory = $object instanceof Asteroid ? $this->asteroidTrajectories?->findActiveByAsteroidId($object->getId()) : null;
         if ($activeTrajectory !== null && $this->asteroidTrajectoryService?->isOcculted($activeTrajectory) === true) {
@@ -519,6 +560,9 @@ final class SectorObservationService
             $target['category'] = $object->getCategory();
             $target['habitabilityScore'] = $object->getHabitabilityScore();
             $target['intelligentLife'] = $object->hasIntelligentLife();
+            if ($includeOthersHarvestability) {
+                $target['harvestable'] = $this->isOthersHarvestable($object);
+            }
         }
         if ($object instanceof Asteroid) {
             $target['motorized'] = $object->isMotorized();
@@ -540,6 +584,11 @@ final class SectorObservationService
         }
 
         return $target;
+    }
+
+    private function isOthersHarvestable(Planet $planet): bool
+    {
+        return array_sum($planet->getResourceAmounts()) > 5.0;
     }
 
     /**

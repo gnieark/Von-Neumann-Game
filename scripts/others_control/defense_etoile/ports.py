@@ -18,6 +18,28 @@ class OthersApi(Protocol):
 
     def get_inventory(self, ship_id: str) -> dict[str, Any]: ...
 
+    def get_auxiliaries(self, ship_id: str) -> list[dict[str, Any]]: ...
+
+    def get_crafting_recipes(self) -> list[dict[str, Any]]: ...
+
+    def get_crafts(self, ship_id: str) -> list[dict[str, Any]]: ...
+
+    def start_craft(
+        self,
+        ship_id: str,
+        recipe_id: str,
+        assistant_auxiliary_id: str,
+        operation_key: str,
+    ) -> dict[str, Any]: ...
+
+    def start_harvest(
+        self,
+        ship_id: str,
+        target_object_id: str,
+        auxiliary_count: int,
+        operation_key: str,
+    ) -> dict[str, Any]: ...
+
     def launch_missile(
         self,
         ship_id: str,

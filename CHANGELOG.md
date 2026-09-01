@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API v130 / scans Others : `GET /api/others/sector` expose désormais `harvestable` sur chaque représentation de planète lorsqu'un vaisseau actif de la flotte est présent dans le secteur. Le booléen vaut `true` uniquement si la planète contient encore strictement plus de 5 ECE de ressources ; il reste absent des scans Others non locaux et de tous les endpoints dédiés aux sondes.
+- Contrôle Others « défense étoile — attente » : le vaisseau mère mène désormais en parallèle des fenêtres de moisson d'une heure, relançant les actions canoniques achevées sans interrompre une action longue. Il fabrique prioritairement jusqu'à 20 auxiliaires puis 60 missiles avec les assistants restants, avant de constituer les matières premières nécessaires à 10 auxiliaires et 10 missiles supplémentaires.
 - Combat Others : l’alerte locale signalant qu’une Manny exposée est verrouillée par un laser précise désormais le nom de la Manny ciblée.
 - Contrôle Others « défense étoile — attente » : l’ancien script monolithique est désormais un point d’entrée mince vers un paquet Python séparant configuration, contrat HTTP, géométrie FCC, observations, événements, engagements, dangers et formation. Ses tests sont répartis par responsabilité et conservent les scénarios tactiques existants.
 

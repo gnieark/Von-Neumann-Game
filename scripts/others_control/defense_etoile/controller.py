@@ -11,6 +11,7 @@ from .engagement import EngagementCoordinator
 from .errors import ApiContractError, ConfigurationError
 from .formation import FormationCoordinator
 from .hazards import SectorKnowledge
+from .logistics import LogisticsPolicy, MothershipLogistics
 from .models import CycleResult, DefensePolicy
 from .observation import ScoutObserver
 from .ports import OthersApi
@@ -26,6 +27,7 @@ class DefenseEtoileAttente:
         logger: Callable[[str], None] = print,
         now: Callable[[], datetime] | None = None,
         policy: DefensePolicy | None = None,
+        logistics_policy: LogisticsPolicy | None = None,
     ) -> None:
         if (mothership_id is None) == (fleet_id is None):
             raise ConfigurationError(
@@ -56,6 +58,12 @@ class DefenseEtoileAttente:
             SectorKnowledge(api, logger),
             policy=self.policy,
             logger=logger,
+        )
+        self.logistics = MothershipLogistics(
+            api,
+            logger=logger,
+            now=self.now,
+            policy=logistics_policy,
         )
 
     def run_cycle(self) -> CycleResult:
@@ -97,6 +105,7 @@ class DefenseEtoileAttente:
             self.log("Le vaisseau mère vient d'engager un mouvement : cycle reporté.")
             return result
 
+        self.logistics.reconcile(fleet_mothership, result)
         return self.formation.reconcile(fleet_mothership, ships, result)
 
     def _select_mothership(
