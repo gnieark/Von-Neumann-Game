@@ -7,6 +7,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Changed
 
 - Combat Others : l’alerte locale signalant qu’une Manny exposée est verrouillée par un laser précise désormais le nom de la Manny ciblée.
+- Contrôle Others « défense étoile — attente » : l’ancien script monolithique est désormais un point d’entrée mince vers un paquet Python séparant configuration, contrat HTTP, géométrie FCC, observations, événements, engagements, dangers et formation. Ses tests sont répartis par responsabilité et conservent les scénarios tactiques existants.
 
 ## 2026-08-31
 

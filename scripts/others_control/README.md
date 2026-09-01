@@ -69,3 +69,17 @@ Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
 comme désignateur de flotte. La précision du scan et l'historique de visite
 restent propres à cette flotte. Les Mannys déployées sont suivies par la route
 `autonomous-units` de la sentinelle et les stocks par son inventaire.
+
+### Architecture et tests
+
+`defense_etoile_attente.py` est uniquement le point d'entrée canonique. Le
+paquet `defense_etoile` sépare la CLI et le transport HTTP de la logique de
+formation, d'observation, de détection des événements, d'engagement et de
+connaissance des dangers. Les modules tactiques dépendent du protocole
+`OthersApi`, ce qui permet de les tester sans serveur ni base de données.
+
+La suite Python se lance depuis la racine du projet :
+
+```console
+python3 -B -m unittest discover -s scripts/others_control/tests -v
+```
