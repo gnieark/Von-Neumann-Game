@@ -1369,6 +1369,8 @@ $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
 $test->assert(is_string($probeStorageServiceSource) && str_contains($probeStorageServiceSource, 'private function moveResourceLocked'), 'resource storage moves run through a locked implementation');
 $test->assert(is_string($othersServiceSource) && !str_contains($othersServiceSource, 'MAX(0,'), 'Others service avoids the SQLite-only scalar MAX form in portable SQL');
+$test->assert(is_string($othersServiceSource) && !str_contains($othersServiceSource, 'CAST(:amount AS REAL)'), 'Others resource mutations avoid the SQLite-only REAL cast');
+$test->assert(is_string($othersServiceSource) && str_contains($othersServiceSource, 'CAST(:amount AS DECIMAL(20,4))'), 'Others resource mutations use a numeric cast shared by SQLite and MariaDB');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),

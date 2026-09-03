@@ -303,7 +303,7 @@ final class OthersService
         return $this->others->transaction(function () use ($source, $target, $auxiliary, $kind, $resourceType, $amount, $items, $space, $durationUnits): array {
             $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $endsAt = $now->modify('+' . max(10, $durationUnits * 10) . ' seconds');
             if ($kind === 'resource') {
-                $reserve = $pdo->prepare('UPDATE others_inventory_resources SET reserved_amount = reserved_amount + CAST(:amount AS REAL), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount - reserved_amount >= CAST(:amount AS REAL)');
+                $reserve = $pdo->prepare('UPDATE others_inventory_resources SET reserved_amount = reserved_amount + CAST(:amount AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount - reserved_amount >= CAST(:amount AS DECIMAL(20,4))');
                 $reserve->execute(['amount' => $amount, 'now' => $now->format('c'), 'ship_id' => (int) $source['id'], 'resource_type' => $resourceType]);
                 if ($reserve->rowCount() !== 1) { throw new OthersActionException(422, 'insufficient_resources', 'The source inventory amount is unavailable.'); }
             }
@@ -418,7 +418,7 @@ final class OthersService
         return $this->others->transaction(function () use ($ship, $assistant, $recipeId, $recipe): array {
             $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $ends = $now->modify('+' . (int) $recipe['duration'] . ' seconds');
             foreach ($recipe['ingredients'] as $type => $amount) {
-                $consume = $pdo->prepare('UPDATE others_inventory_resources SET amount=amount-CAST(:amount AS REAL),updated_at=:now WHERE ship_id=:ship_id AND resource_type=:type AND amount-reserved_amount>=CAST(:amount AS REAL)');
+                $consume = $pdo->prepare('UPDATE others_inventory_resources SET amount=amount-CAST(:amount AS DECIMAL(20,4)),updated_at=:now WHERE ship_id=:ship_id AND resource_type=:type AND amount-reserved_amount>=CAST(:amount AS DECIMAL(20,4))');
                 $consume->execute(['amount' => $amount, 'now' => $now->format('c'), 'ship_id' => (int) $ship['id'], 'type' => $type]);
                 if ($consume->rowCount() !== 1) { throw new OthersActionException(422, 'insufficient_resources', 'The mothership inventory lacks recipe ingredients.'); }
             }
@@ -616,7 +616,7 @@ final class OthersService
             return;
         }
         if ($transfer['kind'] === 'resource') {
-            $source = $pdo->prepare('UPDATE others_inventory_resources SET amount = amount - CAST(:amount AS REAL), reserved_amount = reserved_amount - CAST(:amount AS REAL), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount >= CAST(:amount AS REAL) AND reserved_amount >= CAST(:amount AS REAL)');
+            $source = $pdo->prepare('UPDATE others_inventory_resources SET amount = amount - CAST(:amount AS DECIMAL(20,4)), reserved_amount = reserved_amount - CAST(:amount AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount >= CAST(:amount AS DECIMAL(20,4)) AND reserved_amount >= CAST(:amount AS DECIMAL(20,4))');
             $source->execute(['amount' => (float) $transfer['amount'], 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
             if ($source->rowCount() !== 1) { throw new \RuntimeException('Reserved Others inventory resource is inconsistent.'); }
             $pdo->prepare('UPDATE others_inventory_resources SET amount = amount + :amount, updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type')->execute(['amount' => (float) $transfer['amount'], 'now' => $now, 'ship_id' => (int) $transfer['target_ship_id'], 'resource_type' => $transfer['resource_type']]);

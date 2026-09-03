@@ -45,7 +45,9 @@ encore rappelé dans cette version.
 Au lancement, le contrôleur affiche un état de chaque vaisseau de la flotte :
 position relative, état courant, nombre total et déployé d'auxiliaires, nombre
 de missiles en inventaire et éventuel mouvement avec sa destination relative et
-son heure d'arrivée prévue.
+son heure d'arrivée prévue. Une ligne d'inventaire détaille également
+l'occupation et les réservations de la soute, les quantités de ressources et les
+objets regroupés par type.
 
 Chaque sentinelle compare aussi ses observations locales d'un cycle au suivant
 et applique les procédures d'engagement suivantes :

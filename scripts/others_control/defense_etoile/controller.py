@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Any, Callable
 
 from .commands import CommandExecutor
@@ -46,7 +47,6 @@ class DefenseEtoileAttente:
         self.policy = policy or DefensePolicy()
 
         commands = CommandExecutor(api, logger)
-        self.commands = commands
         engagement = EngagementCoordinator(
             ScoutObserver(api),
             commands,
@@ -106,7 +106,8 @@ class DefenseEtoileAttente:
                     f"{context}.deployedAuxiliaryCount ne peut pas dépasser "
                     f"{context}.auxiliaryCount."
                 )
-            missile_count = len(self.commands.available_missiles(ship_id))
+            inventory = self.api.get_inventory(ship_id)
+            missile_count = self._inventory_item_count(inventory, "missile")
             deployed_label = "déployé" if deployed_count == 1 else "déployés"
             lines.append(
                 f"- {ship_id} [{ship_type}] — position relative : "
@@ -114,6 +115,9 @@ class DefenseEtoileAttente:
                 f"auxiliaires : {auxiliary_count} (dont {deployed_count} {deployed_label}) ; "
                 f"missiles : {missile_count} ; mouvement : "
                 f"{self._format_movement(ship, context)}."
+            )
+            lines.append(
+                f"  Inventaire — {self._format_inventory(inventory, ship_id)}."
             )
 
         for line in lines:
@@ -172,6 +176,100 @@ class DefenseEtoileAttente:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ApiContractError(f"{context} doit être un entier positif ou nul.")
         return value
+
+    @staticmethod
+    def _require_non_negative_number(value: Any, context: str) -> float:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+            or value < 0
+        ):
+            raise ApiContractError(f"{context} doit être un nombre positif ou nul.")
+        return float(value)
+
+    @classmethod
+    def _inventory_items(cls, inventory: dict[str, Any]) -> list[dict[str, Any]]:
+        values = inventory.get("items")
+        if not isinstance(values, list):
+            raise ApiContractError("inventory.items doit être une liste.")
+        return [
+            require_mapping(value, f"inventory.items[{index}]")
+            for index, value in enumerate(values)
+        ]
+
+    @classmethod
+    def _inventory_item_count(cls, inventory: dict[str, Any], item_type: str) -> int:
+        return sum(
+            item.get("type") == item_type
+            for item in cls._inventory_items(inventory)
+        )
+
+    @classmethod
+    def _format_inventory(cls, inventory: dict[str, Any], ship_id: str) -> str:
+        capacity = cls._require_non_negative_number(
+            inventory.get("capacityEce"), f"inventory {ship_id}.capacityEce"
+        )
+        used = cls._require_non_negative_number(
+            inventory.get("usedEce"), f"inventory {ship_id}.usedEce"
+        )
+        reserved = cls._require_non_negative_number(
+            inventory.get("reservedEce"), f"inventory {ship_id}.reservedEce"
+        )
+
+        resources = require_mapping(
+            inventory.get("resources"), f"inventory {ship_id}.resources"
+        )
+        resource_labels = {
+            "metals": "métaux",
+            "ice": "glace",
+            "carbon_compounds": "composés carbonés",
+            "deuterium": "deutérium",
+        }
+        resource_parts = []
+        for resource_type, label in resource_labels.items():
+            resource = require_mapping(
+                resources.get(resource_type),
+                f"inventory {ship_id}.resources.{resource_type}",
+            )
+            amount = cls._require_non_negative_number(
+                resource.get("amount"),
+                f"inventory {ship_id}.resources.{resource_type}.amount",
+            )
+            resource_reserved = cls._require_non_negative_number(
+                resource.get("reserved"),
+                f"inventory {ship_id}.resources.{resource_type}.reserved",
+            )
+            resource_parts.append(
+                f"{label} : {cls._format_number(amount)} ECE "
+                f"(dont {cls._format_number(resource_reserved)} réservées)"
+            )
+
+        item_totals: dict[str, tuple[int, float]] = {}
+        for index, item in enumerate(cls._inventory_items(inventory)):
+            item_type = require_string(item.get("type"), f"inventory.items[{index}].type")
+            space = cls._require_non_negative_number(
+                item.get("containerSpaceEce"),
+                f"inventory.items[{index}].containerSpaceEce",
+            )
+            count, total_space = item_totals.get(item_type, (0, 0.0))
+            item_totals[item_type] = (count + 1, total_space + space)
+
+        item_parts = [
+            f"{item_type} × {count} ({cls._format_number(total_space)} ECE)"
+            for item_type, (count, total_space) in sorted(item_totals.items())
+        ]
+        items_text = ", ".join(item_parts) if item_parts else "aucun"
+        return (
+            f"occupation : {cls._format_number(used)} / "
+            f"{cls._format_number(capacity)} ECE ; capacité réservée : "
+            f"{cls._format_number(reserved)} ECE ; ressources : "
+            f"{', '.join(resource_parts)} ; objets : {items_text}"
+        )
+
+    @staticmethod
+    def _format_number(value: float) -> str:
+        return f"{value:.4f}".rstrip("0").rstrip(".")
 
     @staticmethod
     def _format_position(ship: dict[str, Any], context: str) -> str:

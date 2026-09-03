@@ -7,6 +7,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 ### Fixed
 
 - Les fins de moisson, de craft, de transfert et de tir Others libèrent désormais leurs réservations avec une expression SQL commune à SQLite et MariaDB ; elles ne restent plus bloquées sur l'emploi scalaire incompatible de `MAX(0, ...)`. Un script ponctuel permet de réarmer les événements déjà tombés en échec sur cette erreur.
+- Le lancement des crafts et les transferts de ressources Others utilisent désormais un cast numérique commun à SQLite et MariaDB, au lieu de provoquer une erreur 500 sur MariaDB avec `CAST(... AS REAL)`.
+
+### Changed
+
+- Contrôle Others « défense étoile — attente » : l'état initial détaille désormais, pour chaque vaisseau, l'occupation et les réservations de la soute, les ressources disponibles et les objets regroupés par type.
 
 ### Added
 
