@@ -70,7 +70,16 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
             $this->destroyObject($sector, $source->getId());
             $this->sectors->saveSector($sector);
             $relativistic = (float)$trajectory->targetSpeedC >= 0.05;
-            $after = $this->othersService?->damageShip((string)$targetOthers['public_id'], $relativistic ? (int)$targetOthers['integrity'] : 10, 'asteroid-impact:'.$trajectory->uid, $relativistic);
+            $responsiblePlayerId = $trajectory->launcherProbeId !== null
+                ? $this->probes->findById($trajectory->launcherProbeId)?->playerId
+                : null;
+            $after = $this->othersService?->damageShip(
+                (string)$targetOthers['public_id'],
+                $relativistic ? (int)$targetOthers['integrity'] : 10,
+                'asteroid-impact:'.$trajectory->uid,
+                $relativistic,
+                $responsiblePlayerId,
+            );
             $applied = max(0, (int) $targetOthers['integrity'] - (int) ($after['integrity'] ?? 0));
             $details = [
                 'targetDestroyed' => $after === null || $after['destroyed_at'] !== null,

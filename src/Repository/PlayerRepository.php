@@ -94,7 +94,27 @@ final class PlayerRepository
             (bool) ($row['forum_admin'] ?? false),
             (bool) ($row['forum_moderator'] ?? false),
             (bool) ($row['can_control_others'] ?? false),
+            (int) $row['others_ships_destroyed'],
+            (int) $row['others_motherships_destroyed'],
         );
+    }
+
+    public function recordOthersShipDestroyed(int $playerId, bool $mothership): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE players
+             SET others_ships_destroyed = others_ships_destroyed + 1,
+                 others_motherships_destroyed = others_motherships_destroyed + :mothership,
+                 updated_at = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id' => $playerId,
+            'mothership' => $mothership ? 1 : 0,
+            'updated_at' => gmdate('c'),
+        ]);
+
+        return $stmt->rowCount() === 1;
     }
 
     public function setOthersControl(int $playerId, bool $enabled): bool

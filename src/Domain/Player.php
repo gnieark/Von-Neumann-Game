@@ -19,6 +19,8 @@ final class Player
         public bool $forumAdmin = false,
         public bool $forumModerator = false,
         public bool $canControlOthers = false,
+        public readonly int $othersShipsDestroyed = 0,
+        public readonly int $othersMothershipsDestroyed = 0,
     ) {}
 
     public function publicArray(): array

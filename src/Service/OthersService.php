@@ -987,7 +987,7 @@ final class OthersService
     private function applyMissileImpact(array $projectile,array $target): array
     {
         $pdo=$this->others->pdo(); $key='missile:'.$projectile['public_id'].':'.$target['kind'].':'.$target['id']; $damage=match($target['kind']){'probe'=>(12+(int)floor($this->stableFraction($key.'|damage')*7)),'others_ship'=>10,default=>1};
-        if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$ship=$this->damageShip((string)$target['id'],$damage,$key);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
+        if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$responsiblePlayerId=($projectile['launcher_kind']??null)==='probe'?(int)$projectile['player_id']:null;$ship=$this->damageShip((string)$target['id'],$damage,$key,responsiblePlayerId:$responsiblePlayerId);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
         try{$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')]);}catch(\PDOException $e){if(str_contains(strtolower($e->getMessage()),'unique')){return ['damage'=>0,'replayed'=>true];}throw $e;}
         if($target['kind']==='manny'){$pdo->prepare("DELETE FROM mannies WHERE uid=:uid AND location_type='sector'")->execute(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
         if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target);return ['damage'=>1,'destroyed'=>true];}
@@ -1028,21 +1028,22 @@ final class OthersService
     }
 
     /** Applies one idempotent damage event and returns the remaining ship row when it still exists. */
-    public function damageShip(string $shipPublicId,int $damage,string $eventKey,bool $relativistic=false): ?array
+    public function damageShip(string $shipPublicId,int $damage,string $eventKey,bool $relativistic=false,?int $responsiblePlayerId=null): ?array
     {
-        return $this->others->transaction(function()use($shipPublicId,$damage,$eventKey,$relativistic):?array{$pdo=$this->others->pdo();$ship=$this->others->findShipByPublicId($shipPublicId);if($ship===null||$ship['destroyed_at']!==null){return $ship;}
+        return $this->others->transaction(function()use($shipPublicId,$damage,$eventKey,$relativistic,$responsiblePlayerId):?array{$pdo=$this->others->pdo();$ship=$this->others->findShipByPublicId($shipPublicId);if($ship===null||$ship['destroyed_at']!==null){return $ship;}
             $exists=$pdo->prepare('SELECT 1 FROM others_damage_events WHERE event_key=:key');$exists->execute(['key'=>$eventKey]);if($exists->fetchColumn()!==false){return $ship;}
             $applied=$relativistic?(int)$ship['integrity']:min(max(0,$damage),(int)$ship['integrity']);$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,\'others_ship\',:target,:damage,:now)')->execute(['key'=>$eventKey,'target'=>$shipPublicId,'damage'=>$applied,'now'=>gmdate('c')]);
-            $remaining=$relativistic?0:max(0,(int)$ship['integrity']-$applied);$pdo->prepare('UPDATE others_ships SET integrity=:integrity,updated_at=:now WHERE id=:id')->execute(['integrity'=>$remaining,'now'=>gmdate('c'),'id'=>(int)$ship['id']]);if($remaining===0){$this->destroyShip($ship,$eventKey);return $this->others->findShipByPublicId($shipPublicId);}return $this->others->findShipByPublicId($shipPublicId);});
+            $remaining=$relativistic?0:max(0,(int)$ship['integrity']-$applied);$pdo->prepare('UPDATE others_ships SET integrity=:integrity,updated_at=:now WHERE id=:id')->execute(['integrity'=>$remaining,'now'=>gmdate('c'),'id'=>(int)$ship['id']]);if($remaining===0){$this->destroyShip($ship,$responsiblePlayerId);return $this->others->findShipByPublicId($shipPublicId);}return $this->others->findShipByPublicId($shipPublicId);});
     }
 
-    private function destroyShip(array $ship, string $eventKey): void
+    private function destroyShip(array $ship, ?int $responsiblePlayerId): void
     {
         $pdo = $this->others->pdo();
         $now = gmdate('c');
         $ships = $ship['type'] === 'mothership'
             ? $this->others->findActiveShipsByFleetId((int) $ship['fleet_id'])
             : [$ship];
+        $destroyedTarget = false;
         foreach ($ships as $victim) {
             $this->turnDeployedAuxiliariesDormant((int) $victim['id'], $now);
             $pdo->prepare('UPDATE others_actions SET auxiliary_id=NULL WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
@@ -1054,12 +1055,18 @@ final class OthersService
             $pdo->prepare('DELETE FROM others_inventory_items WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
             $pdo->prepare('DELETE FROM others_inventory_resources WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
             $status = (int) $victim['id'] === (int) $ship['id'] ? 'destroyed' : 'removed';
-            $pdo->prepare('UPDATE others_ships SET integrity=0,status=:status,current_action_id=NULL,destroyed_at=:now,updated_at=:now WHERE id=:id AND destroyed_at IS NULL')
-                ->execute(['status' => $status, 'now' => $now, 'id' => (int) $victim['id']]);
+            $destroy = $pdo->prepare('UPDATE others_ships SET integrity=0,status=:status,current_action_id=NULL,destroyed_at=:now,updated_at=:now WHERE id=:id AND destroyed_at IS NULL');
+            $destroy->execute(['status' => $status, 'now' => $now, 'id' => (int) $victim['id']]);
+            if ((int) $victim['id'] === (int) $ship['id'] && $destroy->rowCount() === 1) {
+                $destroyedTarget = true;
+            }
         }
         if ($ship['type'] === 'mothership') {
             $pdo->prepare("UPDATE others_fleets SET status='dissolved',dissolved_at=:now,updated_at=:now WHERE id=:id AND status='active'")
                 ->execute(['now' => $now, 'id' => (int) $ship['fleet_id']]);
+        }
+        if ($destroyedTarget && $responsiblePlayerId !== null && $this->players !== null) {
+            $this->players->recordOthersShipDestroyed($responsiblePlayerId, $ship['type'] === 'mothership');
         }
     }
 

@@ -53,6 +53,8 @@ final class SchemaInitializer
                 forum_admin $boolean,
                 forum_moderator $boolean,
                 can_control_others $boolean,
+                others_ships_destroyed INTEGER NOT NULL DEFAULT 0,
+                others_motherships_destroyed INTEGER NOT NULL DEFAULT 0,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL
             )",

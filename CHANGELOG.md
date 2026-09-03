@@ -8,6 +8,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 - Les fins de moisson, de craft, de transfert et de tir Others libèrent désormais leurs réservations avec une expression SQL commune à SQLite et MariaDB ; elles ne restent plus bloquées sur l'emploi scalaire incompatible de `MAX(0, ...)`. Un script ponctuel permet de réarmer les événements déjà tombés en échec sur cette erreur.
 
+### Added
+
+- Les joueurs disposent désormais de compteurs persistants pour les vaisseaux Others détruits, dont un compteur dédié aux vaisseaux-mères. Une destruction par missile de sonde ou astéroïde motorisé est attribuée au propriétaire de la sonde, sans compter les bâtiments seulement retirés lors de la dissolution d'une flotte.
+
 ## 2026-09-02
 
 ### Changed

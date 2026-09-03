@@ -1823,6 +1823,8 @@ $playerSchemaColumns = array_map(
 $test->assert(in_array('forum_admin', $playerSchemaColumns, true), 'Player table stores forum admin flag');
 $test->assert(in_array('forum_moderator', $playerSchemaColumns, true), 'Player table stores forum moderator flag');
 $test->assert(in_array('default_probe_id', $playerSchemaColumns, true), 'Player table stores the default probe id');
+$test->assert(in_array('others_ships_destroyed', $playerSchemaColumns, true), 'Player table stores the number of destroyed Others ships');
+$test->assert(in_array('others_motherships_destroyed', $playerSchemaColumns, true), 'Player table stores the number of destroyed Others motherships');
 $probeSchemaIndexes = $pdo->query('PRAGMA index_list(neumann_probes)')->fetchAll(PDO::FETCH_ASSOC);
 $uniqueProbePlayerIndexes = [];
 foreach ($probeSchemaIndexes as $index) {
@@ -3300,6 +3302,42 @@ $othersVictimAlertRead = $kernel->handle('PATCH', '/api/others/alerts/' . rawurl
 $test->assertEquals(200, $othersVictimAlertRead->status, 'PATCH /api/others/alerts/{alertId} marks an owned Others alert as read');
 $test->assertEquals('read', $othersVictimAlertRead->body['alert']['status'] ?? null, 'Others alert acknowledgement persists its read status');
 
+$probeMissileVictim = $others->createStandardShip($othersVictimShip);
+$pdo->prepare('UPDATE others_ships SET integrity=10 WHERE id=:id')->execute(['id' => (int) $probeMissileVictim['id']]);
+$probeKillMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'probe-others-kill-counter-item');
+$probeKillMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
+    'actorMannyId' => $missileAlertManny->uid,
+    'missileItemId' => $probeKillMissileItem->uid,
+    'targetId' => (string) $probeMissileVictim['public_id'],
+]);
+$processScheduledMannyNow($missileAlertManny->id);
+$probeKillHistory = $resolveMissileHitNow((string) $probeKillMissile['public_id']);
+$probeKillDetails = json_decode((string) $probeKillHistory['details_json'], true, 512, JSON_THROW_ON_ERROR);
+$probeMissileKiller = $players->findById($multiProbePlayer->id) ?? throw new RuntimeException('Probe missile owner not found.');
+$test->assertEquals(true, $probeKillDetails['destroyed'] ?? null, 'a probe missile can destroy an Others ship');
+$test->assertEquals(1, $probeMissileKiller->othersShipsDestroyed, 'a probe missile kill increments its player Others ship counter');
+$test->assertEquals(0, $probeMissileKiller->othersMothershipsDestroyed, 'destroying a standard Others ship does not increment the mothership counter');
+$othersService->damageShip((string) $probeMissileVictim['public_id'], 10, 'replayed-destroyed-ship', responsiblePlayerId: $multiProbePlayer->id);
+$test->assertEquals(1, $players->findById($multiProbePlayer->id)?->othersShipsDestroyed, 'replaying damage against an already destroyed ship does not count a second kill');
+
+$othersMissileVictim = $others->createStandardShip($othersVictimShip);
+$pdo->prepare('UPDATE others_ships SET integrity=10 WHERE id=:id')->execute(['id' => (int) $othersMissileVictim['id']]);
+$othersKillMissileItemId = OthersRepository::publicId('item');
+$pdo->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,NULL,:now,:now)")
+    ->execute(['public_id' => $othersKillMissileItemId, 'ship_id' => (int) $othersVictimShip['id'], 'now' => gmdate('c')]);
+$othersKillLauncher = $others->findShipByPublicId((string) $othersVictimShip['public_id']) ?? throw new RuntimeException('Others counter-test launcher not found.');
+$othersKillMissile = $othersService->launchOthersMissile($othersKillLauncher, [
+    'missileItemId' => $othersKillMissileItemId,
+    'targetId' => (string) $othersMissileVictim['public_id'],
+]);
+$processOthersActionNow($othersKillMissile['action']);
+$othersKillHistory = $resolveMissileHitNow((string) $othersKillMissile['missile']['public_id']);
+$othersKillDetails = json_decode((string) $othersKillHistory['details_json'], true, 512, JSON_THROW_ON_ERROR);
+$othersMissileOwner = $players->findById($othersAlertPlayer->id) ?? throw new RuntimeException('Others missile owner not found.');
+$test->assertEquals(true, $othersKillDetails['destroyed'] ?? null, 'an Others missile can destroy another Others ship');
+$test->assertEquals(0, $othersMissileOwner->othersShipsDestroyed, 'an Others-fired missile is not attributed to a probe player');
+$test->assertEquals(0, $othersMissileOwner->othersMothershipsDestroyed, 'an Others-fired missile does not increment the mothership counter');
+
 $othersMissileItemId = OthersRepository::publicId('item');
 $pdo->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,NULL,:now,:now)")
     ->execute(['public_id' => $othersMissileItemId, 'ship_id' => (int) $othersVictimShip['id'], 'now' => gmdate('c')]);
@@ -3397,7 +3435,7 @@ $test->assertEquals(true, $fatalProbeImpactDetails['destroyed'] ?? null, 'missil
 $test->assertEquals(ProbeStatus::Dead, $fatalTargetProbeAfterImpact?->status, 'a probe reaching zero integrity becomes dead');
 
 $missileFixtureObjectIds = [];
-foreach ([$probeToOthersMissile['public_id'], $othersToProbeMissile['missile']['public_id'], $departedLauncherMissile['missile']['public_id'], $departedProbeMissile['public_id'], $fatalProbeMissile['public_id']] as $fixtureMissileId) {
+foreach ([$probeToOthersMissile['public_id'], $probeKillMissile['public_id'], $othersKillMissile['missile']['public_id'], $othersToProbeMissile['missile']['public_id'], $departedLauncherMissile['missile']['public_id'], $departedProbeMissile['public_id'], $fatalProbeMissile['public_id']] as $fixtureMissileId) {
     $missileFixtureObjectIds[] = 'weapon-' . $fixtureMissileId;
     $missileFixtureObjectIds[] = 'weapon-result-' . $fixtureMissileId;
     $missileFixtureObjectIds[] = 'weapon-damage-' . $fixtureMissileId;
@@ -3909,6 +3947,8 @@ $player = $auth->registerPlayerWithPassword('remi', 'secret', 'Remi');
 $test->assert($player->id > 0, 'user creation returns a persisted player');
 $test->assert($player->forumAdmin === false, 'new players are not forum admins by default');
 $test->assert($player->forumModerator === false, 'new players are not forum moderators by default');
+$test->assertEquals(0, $player->othersShipsDestroyed, 'new players start with no destroyed Others ships');
+$test->assertEquals(0, $player->othersMothershipsDestroyed, 'new players start with no destroyed Others motherships');
 $player->forumModerator = true;
 $players->save($player);
 $player = $players->findById($player->id) ?? throw new RuntimeException('Expected player to be persisted.');
@@ -8043,6 +8083,9 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
     $test->assertEquals('asteroid_impact_damage', $othersImpactDamageAlert['type'] ?? null, 'an Others ship hit by a motorized asteroid receives a persistent damage alert');
     $test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $othersImpactDamageAlert['phase'] ?? null, 'the Others asteroid victim alert uses the canonical weapon_damage phase');
     $test->assert(str_contains((string) ($othersImpactDamageAlert['message'] ?? ''), 'target destroyed'), 'the Others victim alert summarizes the relativistic impact consequence');
+    $asteroidKiller = $players->findById($impactPlayer->id) ?? throw new RuntimeException('Motorized asteroid owner not found.');
+    $test->assertEquals(1, $asteroidKiller->othersShipsDestroyed, 'a probe-launched asteroid kill increments its player Others ship counter');
+    $test->assertEquals(1, $asteroidKiller->othersMothershipsDestroyed, 'destroying an Others mothership also increments the dedicated player counter');
     $othersImpactAlertsResponse = $kernel->handle('GET', '/api/others/alerts?status=unread', $othersImpactHeaders);
     $othersImpactApiAlert = array_values(array_filter(
         $othersImpactAlertsResponse->body['alerts'] ?? [],
