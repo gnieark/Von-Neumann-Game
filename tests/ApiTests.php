@@ -774,6 +774,7 @@ $test->assert(is_array($openApiOthersDocument) && isset($openApiOthersDocument['
 $test->assert(is_array($openApiOthersDocument) && !isset($openApiOthersDocument['paths']['/api/probe/{probeId}/missiles']), 'Others OpenAPI document only contains Others endpoints');
 $test->assert(!is_file($root . '/docs/openapi-others.json'), 'legacy Others JSON OpenAPI document is removed');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
+$othersServiceSource = file_get_contents($root . '/src/Service/OthersService.php');
 $mannyTaskRefresherSource = file_get_contents($root . '/src/Service/Manny/MannyTaskRefresher.php');
 $probeMovementServiceSource = file_get_contents($root . '/src/Service/ProbeMovementService.php');
 $probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
@@ -810,7 +811,13 @@ $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'object.
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, '["ship", "large_ship"].includes(object.observedClass)'), 'sensors JS labels detected Others ships from their canonical observed class');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function othersFleetSummary'), 'sensors JS summarizes detected Others fleet composition');
 $test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'othersFleetSummary(sector.objects)'), 'sensors JS includes Others fleet presence in the detailed sector summary');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function detectedShipStatusLabel') && str_contains($sensorsScript, 'detectedShipStatusLabel(object.status)'), 'sensors JS displays the observed Others ship status');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'othersShipStatusLowOrbit'), 'sensors JS identifies a harvesting Others ship in low orbit');
+$test->assert(is_string($sensorsScript) && str_contains($sensorsScript, 'function probeStatusLabel') && str_contains($sensorsScript, 'probeStatusLabel(object.status)'), 'sensors JS displays the precise detected probe status');
+$test->assert(is_string($mainScript) && str_contains($mainScript, 'probeStatusLabel(probe && probe.status)'), 'navigation probe-presence alerts display the precise detected probe status');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorOthersFleetSummaryBoth' => 'Flotte Others détectée"), 'French translations include the Others fleet summary');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'othersShipStatusLowOrbit' => 'En orbite basse — moisson planétaire en cours'"), 'French translations describe a harvesting Others ship in low orbit');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorProbeAlertEntry' => '{name} (état : {status})'"), 'French translations label the detected probe status');
 $test->assert(is_string($mainScript) && str_contains($mainScript, 'setProbeUnreachablePanel'), 'main JS can collapse unreachable selected-probe panels');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'inaccessible'"), 'French translations include the unreachable probe selector suffix');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'probeSelectorUnreachable' => 'unreachable'"), 'English translations include the unreachable probe selector suffix');
@@ -1280,7 +1287,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260831-sensors-others-fleet"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260902-sensors-probe-status"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
@@ -1361,6 +1368,7 @@ $test->assert(is_string($mannyTaskRefresherSource) && str_contains($mannyTaskRef
 $test->assert(is_string($mannyServiceSource) && str_contains($mannyServiceSource, '$this->mannies->withMannyLock($manny->id'), 'craft completion locks only its reservation-owning Manny');
 $test->assert(is_string($probeMovementServiceSource) && str_contains($probeMovementServiceSource, 'return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement'), 'probe movement start runs under the probe lock');
 $test->assert(is_string($probeStorageServiceSource) && str_contains($probeStorageServiceSource, 'private function moveResourceLocked'), 'resource storage moves run through a locked implementation');
+$test->assert(is_string($othersServiceSource) && !str_contains($othersServiceSource, 'MAX(0,'), 'Others service avoids the SQLite-only scalar MAX form in portable SQL');
 $wrongAudience = fakeIdToken(['sub' => 'google-openid-subject', 'aud' => 'another-client', 'exp' => time() + 3600]);
 $test->assertThrows(
     fn() => $oauthService->subjectFromAccessToken('google', new AccessToken(['access_token' => 'unused', 'id_token' => $wrongAudience])),
@@ -2451,6 +2459,60 @@ $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
     asteroidTrajectoryService: $asteroidTrajectoryService,
 ), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService);
 
+$portableReservationSector = new SectorCoordinates(210, 10, 0);
+$sectorRepository->save(new SectorContent($portableReservationSector, [
+    new Planet(
+        'portable-reservation-planet',
+        'Portable Reservation Planet',
+        'rocky',
+        1.0,
+        1.0,
+        true,
+        0.2,
+        ['metals'],
+        resourceAmounts: ['deuterium' => 10.0, 'metals' => 100.0, 'ice' => 20.0, 'carbon_compounds' => 30.0],
+    ),
+]));
+$portableReservationPlayer = $players->createPlayer('portable-reservation-owner', 'Portable Reservation Owner', null, $portableReservationSector);
+$portableReservationFleet = $others->createFleet(
+    $portableReservationPlayer->id,
+    $portableReservationSector->getX(),
+    $portableReservationSector->getY(),
+    $portableReservationSector->getZ(),
+);
+$portableReservationShipId = (int) $portableReservationFleet['ship']['id'];
+$portableHarvestAction = $othersService->startHarvest(
+    $portableReservationFleet['ship'],
+    ['targetObjectId' => 'portable-reservation-planet', 'auxiliaryCount' => 1],
+);
+$processOthersActionNow($portableHarvestAction);
+$completedPortableHarvest = $others->findActionByPublicId((string) $portableHarvestAction['public_id']);
+$portableShipAfterHarvest = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id']);
+$test->assertEquals('succeeded', $completedPortableHarvest['status'] ?? null, 'Others harvest completion uses portable reservation clamping SQL');
+$test->assertEquals(0.0, (float) ($portableShipAfterHarvest['inventory_reserved'] ?? -1), 'Others harvest completion releases all reserved inventory capacity');
+
+$recipeResources = ['metals' => 20.0, 'ice' => 2.0, 'carbon_compounds' => 5.0, 'deuterium' => 1.0];
+$setPortableResource = $pdo->prepare('UPDATE others_inventory_resources SET amount=:amount WHERE ship_id=:ship_id AND resource_type=:resource_type');
+foreach ($recipeResources as $resourceType => $amount) {
+    $setPortableResource->execute(['amount' => $amount, 'ship_id' => $portableReservationShipId, 'resource_type' => $resourceType]);
+}
+$portableAssistant = $others->findAuxiliariesPageByShipId($portableReservationShipId, null, 1)['rows'][0]
+    ?? throw new RuntimeException('Portable reservation craft assistant not found.');
+$portableCraft = $othersService->startCraft(
+    $portableShipAfterHarvest ?? throw new RuntimeException('Portable reservation ship not found.'),
+    ['recipeId' => 'missile', 'assistantAuxiliaryId' => $portableAssistant['public_id']],
+);
+$processOthersActionNow($portableCraft['action']);
+$completedPortableCraft = $others->findActionByPublicId((string) $portableCraft['action']['public_id']);
+$portableShipAfterCraft = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id']);
+$portableInventoryAfterCraft = $others->inventory($portableReservationShipId);
+$test->assertEquals('succeeded', $completedPortableCraft['status'] ?? null, 'Others craft completion uses portable reservation clamping SQL');
+$test->assertEquals(0.0, (float) ($portableShipAfterCraft['inventory_reserved'] ?? -1), 'Others craft completion releases all reserved inventory capacity');
+$test->assertEquals(1, count(array_filter(
+    $portableInventoryAfterCraft['items'],
+    static fn(array $item): bool => ($item['type'] ?? null) === 'missile',
+)), 'Others missile craft completion stores its output after releasing portable reservations');
+
 $remoteLaserPlayer = $players->createPlayer('remote-laser-manny-owner', 'Remote Laser Manny Owner', null, new SectorCoordinates(200, 0, 0));
 $remoteLaserProbe = $probes->createForPlayer($remoteLaserPlayer->id, 'Remote laser alert probe', $remoteLaserPlayer->homeSector);
 $remoteLaserProbe->excludeFromStats = true;
@@ -2915,6 +2977,12 @@ $test->assertEquals(
     $localOthersSectorScan->body['sector']['scan']['source']['kind'] ?? null,
     'an Others sector scan identifies its nearest fleet sensor source',
 );
+$idleOthersProbeScan = $kernel->handle('GET', '/api/probe/' . $secondaryProbe->id . '/sector', $multiProbeHeaders);
+$idleObservedOthersShip = array_values(array_filter(
+    $idleOthersProbeScan->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === $othersVictimShip['public_id'],
+))[0] ?? null;
+$test->assertEquals('idle', $idleObservedOthersShip['status'] ?? null, 'probe sector detail identifies a stationary detected Others ship as idle');
 
 $harvestabilitySector = $othersHome->add(60, 0, 0);
 $harvestabilityRemoteSector = $othersHome->add(62, 0, 0);
@@ -2977,13 +3045,27 @@ $test->assertEquals(false, $nestedMinableTargets['others-harvest-threshold-neste
 $harvestabilityProbePlayer = $players->createPlayer('harvestability-probe-owner', 'Harvestability Probe Owner', null, $harvestabilitySector);
 $harvestabilityProbe = $probes->createForPlayer($harvestabilityProbePlayer->id, 'Harvestability probe', $harvestabilitySector);
 $harvestabilityProbe->excludeFromStats = true;
+$harvestabilityProbe->enteredCurrentSectorAt = gmdate('c', time() - 8 * 3600);
 $probes->save($harvestabilityProbe);
+$storage->initializeProbeStorage($harvestabilityProbe);
 $harvestabilityProbeHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($harvestabilityProbePlayer)['token']];
 $probeHarvestabilityScan = $kernel->handle('GET', '/api/probe/' . $harvestabilityProbe->id . '/sector', $harvestabilityProbeHeaders);
 $test->assert(
     !str_contains(json_encode($probeHarvestabilityScan->body, JSON_THROW_ON_ERROR), '"harvestable"'),
     'probe sector endpoints never expose Others harvestability',
 );
+$pdo->prepare("UPDATE others_ships SET status='low_orbit',updated_at=:now WHERE id=:id")
+    ->execute(['now' => gmdate('c'), 'id' => (int) $harvestabilityFleet['ship']['id']]);
+$probeHarvestInProgressScan = $kernel->handle('GET', '/api/probe/' . $harvestabilityProbe->id . '/sector', $harvestabilityProbeHeaders);
+$test->assertEquals(200, $probeHarvestInProgressScan->status, 'probe sector scan remains available while an Others ship is harvesting');
+$test->assertEquals('detailed', $probeHarvestInProgressScan->body['sector']['knowledgeLevel'] ?? null, 'harvesting Others ship fixture has detailed probe scan data');
+$harvestingObservedShip = array_values(array_filter(
+    $probeHarvestInProgressScan->body['sector']['objects'] ?? [],
+    static fn(array $object): bool => ($object['id'] ?? null) === $harvestabilityFleet['ship']['public_id'],
+))[0] ?? null;
+$test->assertEquals('low_orbit', $harvestingObservedShip['status'] ?? null, 'a probe scan detects that an Others ship is in low orbit for a planetary harvest');
+$pdo->prepare("UPDATE others_ships SET status='inactive',updated_at=:now WHERE id=:id")
+    ->execute(['now' => gmdate('c'), 'id' => (int) $harvestabilityFleet['ship']['id']]);
 
 $remoteHarvestabilityScan = $kernel->handle(
     'GET',
@@ -3072,6 +3154,7 @@ $probeObservedMovingShip = array_values(array_filter(
     static fn(array $object): bool => ($object['id'] ?? null) === $othersVictimShip['public_id'],
 ))[0] ?? null;
 $test->assertEquals(['direction' => ['x' => 1.0, 'y' => 0.0, 'z' => 0.0]], $probeObservedMovingShip['movement'] ?? null, 'probe sector detail exposes only the normalized direction of a detected Others movement');
+$test->assertEquals('preparing', $probeObservedMovingShip['status'] ?? null, 'probe sector detail exposes a detected Others ship current departure status');
 $probeRelativeOthersSector = (new PlayerReferenceFrame($multiProbePlayer->homeSector))->globalToRelative($secondaryProbe->currentSector);
 $genericOthersMovementSector = $kernel->handle('GET', '/api/sector?' . http_build_query($probeRelativeOthersSector), $multiProbeHeaders);
 $genericObservedMovingShip = array_values(array_filter(
@@ -3079,6 +3162,7 @@ $genericObservedMovingShip = array_values(array_filter(
     static fn(array $object): bool => ($object['id'] ?? null) === $othersVictimShip['public_id'],
 ))[0] ?? null;
 $test->assertEquals(['direction' => ['x' => 1.0, 'y' => 0.0, 'z' => 0.0]], $genericObservedMovingShip['movement'] ?? null, 'generic probe sector scan exposes the same direction-only Others telemetry');
+$test->assertEquals('preparing', $genericObservedMovingShip['status'] ?? null, 'generic probe sector scan exposes the same detected Others ship motion status');
 $transitingFleetActionId = (string) ($fleetMoveEntriesByShipId[$othersStandardShip['public_id']]['action']['id'] ?? '');
 $transitingFleetAction = $others->findActionByPublicId($transitingFleetActionId) ?? throw new RuntimeException('Others transit test action not found.');
 $processOthersActionNow($transitingFleetAction);
@@ -8006,9 +8090,11 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
 
 $stationaryNeighbor = $auth->registerPlayerWithPassword('stationary-neighbor', 'secret', 'Stationary Neighbor', 'Stationary neighbor probe');
 $movingNeighbor = $auth->registerPlayerWithPassword('moving-neighbor', 'secret', 'Moving Neighbor', 'Moving neighbor probe');
+$deceleratingNeighbor = $auth->registerPlayerWithPassword('decelerating-neighbor', 'secret', 'Decelerating Neighbor', 'Decelerating neighbor probe');
 $stationaryNeighborProbe = $probes->findByPlayerId($stationaryNeighbor->id);
 $movingNeighborProbe = $probes->findByPlayerId($movingNeighbor->id);
-if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighborProbe !== null) {
+$deceleratingNeighborProbe = $probes->findByPlayerId($deceleratingNeighbor->id);
+if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighborProbe !== null && $deceleratingNeighborProbe !== null) {
     $test->assertEquals($createdProbe->id, $players->findById($player->id)?->defaultProbeId, 'main probe remains selected before creating an owned sibling probe');
     $ownedNeighborProbe = $probes->createForPlayer($player->id, 'Owned sector drone', $createdProbe->currentSector);
     $storage->initializeProbeStorage($ownedNeighborProbe);
@@ -8016,18 +8102,28 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $probes->save($stationaryNeighborProbe);
     $movingNeighborProbe->currentSector = $createdProbe->currentSector;
     $probes->save($movingNeighborProbe);
+    $neighborTarget = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
+    $deceleratingNeighborProbe->currentSector = $neighborTarget;
+    $probes->save($deceleratingNeighborProbe);
     $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
         new Planet('message-life-planet', 'Warm Chorus', 'ocean', 1.0, 1.0, true, 0.79, ['water_ice'], intelligentLife: true),
         new Planet('message-empty-planet', 'Quiet Rock', 'rocky', 0.8, 0.9, true, 0.33, ['silicates']),
     ]));
 
-    $neighborTarget = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
     $movements->create(
         $movingNeighborProbe->id,
         $movingNeighborProbe->currentSector,
         $neighborTarget,
         1,
-        (new MovementDurationCalculator())->timeline(new DateTimeImmutable('now', new DateTimeZone('UTC')), 1),
+        (new MovementDurationCalculator())->timeline(new DateTimeImmutable('-6 minutes', new DateTimeZone('UTC')), 1),
+        2.0,
+    );
+    $movements->create(
+        $deceleratingNeighborProbe->id,
+        $neighborTarget,
+        $createdProbe->currentSector,
+        1,
+        (new MovementDurationCalculator())->timeline(new DateTimeImmutable('-31 minutes', new DateTimeZone('UTC')), 1),
         2.0,
     );
 
@@ -8041,9 +8137,12 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $test->assertEquals(true, $detectedProbesById[$ownedNeighborProbe->id]['owned'] ?? null, 'current-sector scan marks owned sibling probes for WebUI alert filtering');
     $test->assertEquals(false, $detectedProbesById[$stationaryNeighborProbe->id]['owned'] ?? null, 'current-sector scan marks foreign probes as not owned');
     $test->assertEquals('Stationary neighbor probe', $detectedProbesById[$stationaryNeighborProbe->id]['name'] ?? null, 'current-sector scan exposes another probe name');
+    $test->assertEquals('idle', $detectedProbesById[$stationaryNeighborProbe->id]['status'] ?? null, 'current-sector scan exposes an idle neighbor probe status');
     $test->assertEquals(false, $detectedProbesById[$stationaryNeighborProbe->id]['moving'] ?? null, 'current-sector scan marks idle neighbor probe as not moving');
     $test->assertEquals('Moving neighbor probe', $detectedProbesById[$movingNeighborProbe->id]['name'] ?? null, 'current-sector scan exposes moving probe name');
+    $test->assertEquals('accelerating', $detectedProbesById[$movingNeighborProbe->id]['status'] ?? null, 'current-sector scan computes an accelerating neighbor probe status');
     $test->assertEquals(true, $detectedProbesById[$movingNeighborProbe->id]['moving'] ?? null, 'current-sector scan marks active neighbor probe as moving');
+    $test->assertEquals('decelerating', $detectedProbesById[$deceleratingNeighborProbe->id]['status'] ?? null, 'current-sector scan detects a decelerating neighbor probe in its destination sector');
 
     $stationarySession = $auth->createSessionForPlayer($stationaryNeighbor);
     $stationaryHeaders = ['Authorization' => 'Bearer ' . $stationarySession['token']];
@@ -10747,6 +10846,64 @@ foreach ([
     $response = $kernel->handle($routeMethod, $path);
     $test->assertEquals(401, $response->status, "protected endpoint $path rejects missing Authorization Bearer");
 }
+
+$reservationRepairDbPath = $tmp . DIRECTORY_SEPARATOR . 'reservation-repair.sqlite';
+$reservationRepairConfigPath = $tmp . DIRECTORY_SEPARATOR . 'reservation-repair-database.json';
+file_put_contents($reservationRepairConfigPath, json_encode(['driver' => 'sqlite', 'path' => $reservationRepairDbPath], JSON_THROW_ON_ERROR));
+$reservationRepairFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $reservationRepairDbPath), $root);
+$reservationRepairPdo = $reservationRepairFactory->create();
+$reservationRepairFactory->initializeSchema($reservationRepairPdo);
+$reservationRepairPlayers = new PlayerRepository($reservationRepairPdo);
+$reservationRepairOthers = new OthersRepository($reservationRepairPdo);
+$reservationRepairScheduledEvents = new ScheduledEventRepository($reservationRepairPdo);
+$reservationRepairPlayer = $reservationRepairPlayers->createPlayer('reservation-repair-owner', 'Reservation Repair Owner', null, new SectorCoordinates(0, 0, 0));
+$reservationRepairFleet = $reservationRepairOthers->createFleet($reservationRepairPlayer->id, 0, 0, 0);
+$reservationRepairAction = $reservationRepairOthers->createAction(
+    $reservationRepairFleet['ship'],
+    'others_craft',
+    'others_ship',
+    (string) $reservationRepairFleet['ship']['public_id'],
+    ['recipeId' => 'missile'],
+);
+$reservationRepairEvent = $reservationRepairScheduledEvents->schedule(
+    SchedulerService::OTHERS_ACTION,
+    'others_action',
+    (int) $reservationRepairAction['id'],
+    gmdate('c'),
+    ['expectedStatus' => 'queued'],
+);
+$reservationRepairPdo->prepare('UPDATE others_actions SET scheduled_event_id=:event_id WHERE id=:id')
+    ->execute(['event_id' => $reservationRepairEvent->id, 'id' => (int) $reservationRepairAction['id']]);
+$reservationRepairPdo->prepare("UPDATE scheduled_events SET status='failed',attempts=1,last_error=:last_error WHERE id=:id")
+    ->execute([
+        'id' => $reservationRepairEvent->id,
+        'last_error' => "SQLSTATE[42000]: Syntax error or access violation: 1064 near 'inventory_reserved-'20')'",
+    ]);
+$reservationRepairScheduledEvents = null;
+$reservationRepairOthers = null;
+$reservationRepairPlayers = null;
+$reservationRepairPdo = null;
+$reservationRepairCommand = PHP_BINARY . ' '
+    . escapeshellarg($root . '/scripts/one-shot-scripts/requeue-failed-others-reservation-events.php')
+    . ' --database-config=' . escapeshellarg($reservationRepairConfigPath);
+$reservationRepairDryRunOutput = [];
+$reservationRepairDryRunStatus = 0;
+exec($reservationRepairCommand . ' --dry-run 2>&1', $reservationRepairDryRunOutput, $reservationRepairDryRunStatus);
+$test->assertEquals(0, $reservationRepairDryRunStatus, 'failed Others reservation-event repair dry-run exits successfully');
+$test->assert(str_contains(implode("\n", $reservationRepairDryRunOutput), 'events=1 dry_run=yes'), 'failed Others reservation-event repair dry-run finds the targeted SQL error');
+$reservationRepairCheckPdo = $reservationRepairFactory->create();
+$test->assertEquals('failed', $reservationRepairCheckPdo->query('SELECT status FROM scheduled_events WHERE id=' . $reservationRepairEvent->id)->fetchColumn(), 'failed Others reservation-event repair dry-run leaves the event unchanged');
+$reservationRepairCheckPdo = null;
+$reservationRepairOutput = [];
+$reservationRepairStatus = 0;
+exec($reservationRepairCommand . ' 2>&1', $reservationRepairOutput, $reservationRepairStatus);
+$test->assertEquals(0, $reservationRepairStatus, 'failed Others reservation-event repair exits successfully');
+$reservationRepairCheckPdo = $reservationRepairFactory->create();
+$requeuedReservationEvent = $reservationRepairCheckPdo->query('SELECT status,attempts,last_error FROM scheduled_events WHERE id=' . $reservationRepairEvent->id)->fetch(PDO::FETCH_ASSOC);
+$test->assertEquals('pending', $requeuedReservationEvent['status'] ?? null, 'failed Others reservation-event repair requeues the targeted event');
+$test->assertEquals(0, (int) ($requeuedReservationEvent['attempts'] ?? -1), 'failed Others reservation-event repair resets its attempt counter');
+$test->assertEquals(null, $requeuedReservationEvent['last_error'] ?? null, 'failed Others reservation-event repair clears its obsolete SQL error');
+$reservationRepairCheckPdo = null;
 
 removeDirectory($tmp);
 exit($test->finish());

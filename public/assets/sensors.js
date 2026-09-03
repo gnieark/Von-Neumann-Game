@@ -123,6 +123,28 @@
         }[state] || state || "-";
     }
 
+    function probeStatusLabel(status) {
+        return {
+            "idle": tr("probeStatusIdle", "Idle"),
+            "preparing": tr("probeStatusPreparing", "Preparing"),
+            "accelerating": tr("probeStatusAccelerating", "Accelerating"),
+            "cruising": tr("probeStatusCruising", "Cruising"),
+            "decelerating": tr("probeStatusDecelerating", "Decelerating"),
+            "dead": tr("probeStatusDead", "Out of service"),
+            "trapped_by_black_hole": tr("probeStatusTrappedByBlackHole", "Trapped by a black hole"),
+        }[status] || status || "-";
+    }
+
+    function detectedShipStatusLabel(status) {
+        return {
+            "idle": tr("probeStatusIdle", "Idle"),
+            "preparing": tr("probeStatusPreparing", "Preparing"),
+            "accelerating": tr("probeStatusAccelerating", "Accelerating"),
+            "decelerating": tr("probeStatusDecelerating", "Decelerating"),
+            "low_orbit": tr("othersShipStatusLowOrbit", "Low orbit — planetary harvest in progress"),
+        }[status] || status || "-";
+    }
+
     function observationSummaryLabel(summary) {
         const value = String(summary || "");
         const solarSystem = value.match(/^Stellar system with (\d+) star\(s\) and (\d+) orbital body\(ies\)\.$/);
@@ -813,6 +835,7 @@
             "estimated": false,
             "summary": "Another probe is present in this sector.",
             "dangerLevel": "low",
+            "status": probe && probe.status ? probe.status : "idle",
             "moving": Boolean(probe && probe.moving),
         }));
     }
@@ -1169,9 +1192,15 @@
         }
         if (object.type === "probe") {
             return "<p>" + window.VNG.escapeHtml(
-                [object.name || tr("unknownProbe", "Unknown probe"), object.moving
-                    ? tr("probeMovementActive", "movement in progress")
-                    : tr("probeMovementInactive", "no movement in progress")].filter(Boolean).join(" - ")
+                [
+                    object.name || tr("unknownProbe", "Unknown probe"),
+                    tr("status", "Status") + ": " + probeStatusLabel(object.status),
+                ].filter(Boolean).join(" - ")
+            ) + "</p>";
+        }
+        if (["ship", "large_ship"].includes(object.observedClass)) {
+            return "<p>" + window.VNG.escapeHtml(
+                tr("status", "Status") + ": " + detectedShipStatusLabel(object.status)
             ) + "</p>";
         }
 

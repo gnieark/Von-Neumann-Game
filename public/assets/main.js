@@ -751,16 +751,23 @@ function sectorAlerts(sector, messages) {
     const probes = (Array.isArray(sector && sector.probes) ? sector.probes : [])
         .filter((probe) => !(probe && probe.owned));
     if (probes.length > 0) {
-        const probeLabels = probes.map((probe) => formatText(t(messages, "sectorProbeAlertEntry", "{name} ({movement})"), {
+        const probeStatusLabel = (status) => ({
+            "idle": t(messages, "probeStatusIdle", "Idle"),
+            "preparing": t(messages, "probeStatusPreparing", "Preparing"),
+            "accelerating": t(messages, "probeStatusAccelerating", "Accelerating"),
+            "cruising": t(messages, "probeStatusCruising", "Cruising"),
+            "decelerating": t(messages, "probeStatusDecelerating", "Decelerating"),
+            "dead": t(messages, "probeStatusDead", "Out of service"),
+            "trapped_by_black_hole": t(messages, "probeStatusTrappedByBlackHole", "Trapped by a black hole"),
+        }[status] || status || "-");
+        const probeLabels = probes.map((probe) => formatText(t(messages, "sectorProbeAlertEntry", "{name} (status: {status})"), {
             "name": probe && probe.name ? probe.name : t(messages, "unknownProbe", "Unknown probe"),
-            "movement": probe && probe.moving
-                ? t(messages, "probeMovementActive", "movement in progress")
-                : t(messages, "probeMovementInactive", "no movement in progress"),
+            "status": probeStatusLabel(probe && probe.status),
         }));
         const signature = probes.map((probe) => [
             probe && probe.id ? probe.id : "unknown",
             probe && probe.name ? probe.name : t(messages, "unknownProbe", "Unknown probe"),
-            probe && probe.moving ? "moving" : "idle",
+            probe && probe.status ? probe.status : "unknown",
         ].join(":")).sort().join("|");
         alerts.push({
             "type": "probe",

@@ -42,6 +42,11 @@ d'un mouvement sont automatiquement découpés en étapes de dix secteurs. Un
 vaisseau seul déjà immobilisé dans un secteur contenant un trou noir n'est pas
 encore rappelé dans cette version.
 
+Au lancement, le contrôleur affiche un état de chaque vaisseau de la flotte :
+position relative, état courant, nombre total et déployé d'auxiliaires, nombre
+de missiles en inventaire et éventuel mouvement avec sa destination relative et
+son heure d'arrivée prévue.
+
 Chaque sentinelle compare aussi ses observations locales d'un cycle au suivant
 et applique les procédures d'engagement suivantes :
 

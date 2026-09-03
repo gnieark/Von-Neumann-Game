@@ -607,7 +607,8 @@ final class OthersService
         }
         if (!$target) {
             if ($transfer['kind'] === 'resource') {
-                $pdo->prepare('UPDATE others_inventory_resources SET reserved_amount = MAX(0, reserved_amount - :amount), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type')->execute(['amount' => (float) $transfer['amount'], 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
+                $amount = (float) $transfer['amount'];
+                $pdo->prepare('UPDATE others_inventory_resources SET reserved_amount = CASE WHEN reserved_amount > :reserved_floor THEN reserved_amount - :reserved_decrease ELSE 0 END, updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type')->execute(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
             } else {
                 $pdo->prepare('UPDATE others_inventory_items SET reserved_action_id = NULL, updated_at = :now WHERE reserved_action_id = :action_id')->execute(['now' => $now, 'action_id' => (int) $action['id']]);
             }
@@ -635,7 +636,7 @@ final class OthersService
         $error = $success ? null : ['code' => $reason, 'message' => 'The inventory transfer could not be completed.'];
         $pdo->prepare('UPDATE others_inventory_transfers SET status = :status, updated_at = :now WHERE id = :id AND status = :expected')->execute(['status' => $status, 'now' => $now, 'id' => (int) $transfer['id'], 'expected' => 'queued']);
         $pdo->prepare('UPDATE others_actions SET status = :status, result_json = :result, error_json = :error, completed_at = :now, updated_at = :now WHERE id = :id AND status = :expected')->execute(['status' => $status, 'result' => $result === null ? null : json_encode($result, JSON_THROW_ON_ERROR), 'error' => $error === null ? null : json_encode($error, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id'], 'expected' => 'queued']);
-        $pdo->prepare('UPDATE others_ships SET inventory_reserved = MAX(0, inventory_reserved - :space), updated_at = :now WHERE id = :id')->execute(['space' => $space, 'now' => $now, 'id' => (int) $transfer['target_ship_id']]);
+        $pdo->prepare('UPDATE others_ships SET inventory_reserved = CASE WHEN inventory_reserved > :reserved_floor THEN inventory_reserved - :reserved_decrease ELSE 0 END, updated_at = :now WHERE id = :id')->execute(['reserved_floor' => $space, 'reserved_decrease' => $space, 'now' => $now, 'id' => (int) $transfer['target_ship_id']]);
         $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $transfer['auxiliary_id'], 'action_id' => (int) $action['id']]);
     }
 
@@ -644,13 +645,13 @@ final class OthersService
         $pdo = $this->others->pdo(); $payload = json_decode((string) $action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
         $target = $this->others->findShipByPublicId((string) $payload['targetShipId']); $amount = (float) $payload['amount'];
         if ($target === null || $target['destroyed_at'] !== null || $target['status'] === 'removed') {
-            $pdo->prepare('UPDATE others_ships SET deuterium_reserved = MAX(0, deuterium_reserved - :amount), updated_at = :now WHERE id = :id')->execute(['amount' => $amount, 'now' => $now, 'id' => (int) $action['ship_id']]);
+            $pdo->prepare('UPDATE others_ships SET deuterium_reserved = CASE WHEN deuterium_reserved > :reserved_floor THEN deuterium_reserved - :reserved_decrease ELSE 0 END, updated_at = :now WHERE id = :id')->execute(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => (int) $action['ship_id']]);
             $pdo->prepare("UPDATE others_actions SET status = 'failed', error_json = :error, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['error' => json_encode(['code' => 'target_unavailable', 'message' => 'The target ship became unavailable.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
         } else {
             $sourceUpdate = $pdo->prepare('UPDATE others_ships SET deuterium_stock = deuterium_stock - :amount, deuterium_reserved = deuterium_reserved - :amount, updated_at = :now WHERE id = :id AND deuterium_stock >= :amount AND deuterium_reserved >= :amount');
             $sourceUpdate->execute(['amount' => $amount, 'now' => $now, 'id' => (int) $action['ship_id']]);
             if ($sourceUpdate->rowCount() !== 1) { throw new \RuntimeException('Reserved Others deuterium is inconsistent.'); }
-            $pdo->prepare('UPDATE others_ships SET deuterium_stock = deuterium_stock + :amount, deuterium_reserved = MAX(0, deuterium_reserved - :amount), updated_at = :now WHERE id = :id')->execute(['amount' => $amount, 'now' => $now, 'id' => (int) $target['id']]);
+            $pdo->prepare('UPDATE others_ships SET deuterium_stock = deuterium_stock + :stock_increase, deuterium_reserved = CASE WHEN deuterium_reserved > :reserved_floor THEN deuterium_reserved - :reserved_decrease ELSE 0 END, updated_at = :now WHERE id = :id')->execute(['stock_increase' => $amount, 'reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => (int) $target['id']]);
             $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['result' => json_encode(['outcome' => 'transferred', 'amount' => $amount], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
         }
         if ($action['auxiliary_id'] !== null) { $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]); }
@@ -782,7 +783,8 @@ final class OthersService
             if ($amount > 0.0) { $pdo->prepare('UPDATE others_inventory_resources SET amount=amount+:amount,updated_at=:now WHERE ship_id=:ship_id AND resource_type=:type')->execute(['amount' => $amount, 'now' => $now, 'ship_id' => (int) $harvest['ship_id'], 'type' => $type]); }
         }
         $pdo->prepare("UPDATE others_auxiliaries SET status='inactive',location_type='embarked',spatial_state='drifting',sector_x=NULL,sector_y=NULL,sector_z=NULL,object_id=NULL,current_action_id=NULL,updated_at=:now WHERE current_action_id=:action_id")->execute(['now' => $now, 'action_id' => (int) $action['id']]);
-        $pdo->prepare("UPDATE others_ships SET status='inactive',current_action_id=NULL,inventory_reserved=MAX(0,inventory_reserved-:capacity),updated_at=:now WHERE id=:id AND current_action_id=:action_id")->execute(['capacity' => (float) $harvest['reserved_capacity'], 'now' => $now, 'id' => (int) $harvest['ship_id'], 'action_id' => (int) $action['id']]);
+        $reservedCapacity = (float) $harvest['reserved_capacity'];
+        $pdo->prepare("UPDATE others_ships SET status='inactive',current_action_id=NULL,inventory_reserved=CASE WHEN inventory_reserved > :reserved_floor THEN inventory_reserved - :reserved_decrease ELSE 0 END,updated_at=:now WHERE id=:id AND current_action_id=:action_id")->execute(['reserved_floor' => $reservedCapacity, 'reserved_decrease' => $reservedCapacity, 'now' => $now, 'id' => (int) $harvest['ship_id'], 'action_id' => (int) $action['id']]);
         $status = $failure !== null ? 'failed' : ($canceled ? 'canceled' : 'succeeded');
         $result = $failure === null ? ['outcome' => $canceled ? 'interrupted' : 'harvested', 'resources' => $output] : null;
         $error = $failure !== null ? ['code' => $failure, 'message' => 'The harvest could not be completed.'] : null;
@@ -815,7 +817,8 @@ final class OthersService
         $pdo->prepare("UPDATE others_crafts SET status='succeeded',updated_at=:now WHERE id=:id AND status='queued'")->execute(['now' => $now, 'id' => (int) $craft['id']]);
         $pdo->prepare("UPDATE others_actions SET status='succeeded',result_json=:result,completed_at=:now,updated_at=:now WHERE id=:id AND status='queued'")->execute(['result' => json_encode(['output' => $output], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
         $pdo->prepare("UPDATE others_auxiliaries SET status='inactive',current_action_id=NULL,updated_at=:now WHERE id=:id AND current_action_id=:action_id")->execute(['now' => $now, 'id' => (int) $craft['assistant_auxiliary_id'], 'action_id' => (int) $action['id']]);
-        if ((float) $craft['output_space'] > 0.0) { $pdo->prepare('UPDATE others_ships SET inventory_reserved=MAX(0,inventory_reserved-:space),updated_at=:now WHERE id=:id')->execute(['space' => (float) $craft['output_space'], 'now' => $now, 'id' => (int) $ship['id']]); }
+        $outputSpace = (float) $craft['output_space'];
+        if ($outputSpace > 0.0) { $pdo->prepare('UPDATE others_ships SET inventory_reserved=CASE WHEN inventory_reserved > :reserved_floor THEN inventory_reserved - :reserved_decrease ELSE 0 END,updated_at=:now WHERE id=:id')->execute(['reserved_floor' => $outputSpace, 'reserved_decrease' => $outputSpace, 'now' => $now, 'id' => (int) $ship['id']]); }
     }
 
     private function createCraftedMissileItem(int $shipId, string $now): array
@@ -850,7 +853,7 @@ final class OthersService
         $target = $this->resolveLocalTarget($ship, (string) $lock['target_public_id'], laserOnly: true);
         if ($target === null || $target['kind'] !== $lock['target_kind']) { $this->stopLaser($action, $lock, $now, 'target_lost'); return; }
         $accounted = new \DateTimeImmutable((string) $lock['accounted_until']); $current = new \DateTimeImmutable($now); $elapsed = max(0, $current->getTimestamp() - $accounted->getTimestamp()); $cost = round($elapsed / 60, 4); $available = (float) $ship['deuterium_stock']; $charged = min($available, $cost);
-        if ($charged > 0.0) { $pdo->prepare('UPDATE others_ships SET deuterium_stock=MAX(0,deuterium_stock-:cost),updated_at=:now WHERE id=:id')->execute(['cost' => $charged, 'now' => $now, 'id' => (int) $ship['id']]); }
+        if ($charged > 0.0) { $pdo->prepare('UPDATE others_ships SET deuterium_stock=CASE WHEN deuterium_stock > :stock_floor THEN deuterium_stock - :stock_decrease ELSE 0 END,updated_at=:now WHERE id=:id')->execute(['stock_floor' => $charged, 'stock_decrease' => $charged, 'now' => $now, 'id' => (int) $ship['id']]); }
         $pdo->prepare('UPDATE others_laser_locks SET accounted_until=:now,updated_at=:now WHERE id=:id')->execute(['now' => $now, 'id' => (int) $lock['id']]);
         if ($available <= $cost + 0.00001 || $current >= new \DateTimeImmutable((string) $lock['exhausts_at'])) { $this->stopLaser($action, $lock, $now, 'deuterium_exhausted'); return; }
         if ($current >= new \DateTimeImmutable((string) $lock['next_damage_at'])) {

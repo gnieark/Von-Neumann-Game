@@ -2,6 +2,19 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-03
+
+### Fixed
+
+- Les fins de moisson, de craft, de transfert et de tir Others libèrent désormais leurs réservations avec une expression SQL commune à SQLite et MariaDB ; elles ne restent plus bloquées sur l'emploi scalaire incompatible de `MAX(0, ...)`. Un script ponctuel permet de réarmer les événements déjà tombés en échec sur cette erreur.
+
+## 2026-09-02
+
+### Changed
+
+- Interface `/sensors` : les vaisseaux Others et les sondes étrangères détectés indiquent désormais leur état précis dans la fiche du secteur et, pour les sondes, dans l’alerte de présence. Un vaisseau Others qui coordonne une moisson est explicitement signalé « en orbite basse — moisson planétaire en cours » ; les API de scan exposent `low_orbit`, les états de déplacement et détectent correctement une sonde en décélération dans son secteur d’arrivée.
+- Contrôle Others « défense étoile — attente » : au lancement, le script affiche désormais un récapitulatif de chaque vaisseau de la flotte avec sa position relative, son état, ses auxiliaires totaux et déployés, ses missiles et son éventuel mouvement en cours.
+
 ## 2026-09-01
 
 ### Changed

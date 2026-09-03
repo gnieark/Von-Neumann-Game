@@ -4153,6 +4153,7 @@ paths:
                   probes:
                     - id: 2
                       name: Probe of nova
+                      status: idle
                       moving: false
                       owned: false
                   scan:
@@ -8428,12 +8429,16 @@ components:
           type: boolean
     SectorProbePresence:
       type: object
-      required: [id, name, moving, owned]
+      required: [id, name, status, moving, owned]
       properties:
         id:
           type: integer
         name:
           type: string
+        status:
+          type: string
+          enum: [idle, preparing, accelerating, cruising, decelerating, dead, trapped_by_black_hole]
+          description: Current observable state of the detected probe.
         moving:
           type: boolean
         owned:
@@ -8649,8 +8654,8 @@ components:
           description: Present only for dormant_construct objects; detailed scans cannot determine whether the structure is a vessel, factory, or another kind of utility.
         status:
           type: string
-          enum: [off, on, moving]
-          description: Relay activation state for SCUT relays, or `moving` for an in-flight missile.
+          enum: [off, on, moving, idle, preparing, accelerating, decelerating, low_orbit]
+          description: Relay activation state, in-flight missile state, or observed state of a detected Others ship. `low_orbit` means that the ship is coordinating an active planetary harvest.
         createdByProbeId:
           type: integer
           nullable: true

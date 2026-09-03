@@ -10,6 +10,7 @@ from .contracts import optional_mapping, require_mapping, require_string
 from .engagement import EngagementCoordinator
 from .errors import ApiContractError, ConfigurationError
 from .formation import FormationCoordinator
+from .geometry import format_coordinates, parse_coordinates
 from .hazards import SectorKnowledge
 from .logistics import LogisticsPolicy, MothershipLogistics
 from .models import CycleResult, DefensePolicy
@@ -45,6 +46,7 @@ class DefenseEtoileAttente:
         self.policy = policy or DefensePolicy()
 
         commands = CommandExecutor(api, logger)
+        self.commands = commands
         engagement = EngagementCoordinator(
             ScoutObserver(api),
             commands,
@@ -66,6 +68,57 @@ class DefenseEtoileAttente:
             policy=logistics_policy,
         )
 
+    def log_fleet_summary(self) -> None:
+        """Affiche une photographie de la flotte avant la première réconciliation."""
+        if self.mothership_id is not None:
+            mothership = self.api.get_ship(self.mothership_id)
+            self._validate_mothership(mothership, self.mothership_id)
+            fleet_id = require_string(mothership.get("fleetId"), "ship.fleetId")
+        else:
+            fleet_id = require_string(self.fleet_id, "fleet_id")
+
+        ships = self._load_fleet_ships(fleet_id)
+        fleet_mothership = self._select_mothership(ships, fleet_id)
+        expected_mothership_id = self.mothership_id or require_string(
+            fleet_mothership.get("id"), "mothership.id"
+        )
+        self._validate_mothership(
+            fleet_mothership,
+            expected_mothership_id,
+        )
+
+        ship_label = "vaisseau" if len(ships) == 1 else "vaisseaux"
+        lines = [f"État initial de la flotte {fleet_id} : {len(ships)} {ship_label}."]
+        for index, ship in enumerate(ships):
+            context = f"fleet.ships[{index}]"
+            ship_id = require_string(ship.get("id"), f"{context}.id")
+            ship_type = require_string(ship.get("type"), f"{context}.type")
+            status = require_string(ship.get("status"), f"{context}.status")
+            auxiliary_count = self._require_count(
+                ship.get("auxiliaryCount"), f"{context}.auxiliaryCount"
+            )
+            deployed_count = self._require_count(
+                ship.get("deployedAuxiliaryCount"),
+                f"{context}.deployedAuxiliaryCount",
+            )
+            if deployed_count > auxiliary_count:
+                raise ApiContractError(
+                    f"{context}.deployedAuxiliaryCount ne peut pas dépasser "
+                    f"{context}.auxiliaryCount."
+                )
+            missile_count = len(self.commands.available_missiles(ship_id))
+            deployed_label = "déployé" if deployed_count == 1 else "déployés"
+            lines.append(
+                f"- {ship_id} [{ship_type}] — position relative : "
+                f"{self._format_position(ship, context)} ; état : {status} ; "
+                f"auxiliaires : {auxiliary_count} (dont {deployed_count} {deployed_label}) ; "
+                f"missiles : {missile_count} ; mouvement : "
+                f"{self._format_movement(ship, context)}."
+            )
+
+        for line in lines:
+            self.log(line)
+
     def run_cycle(self) -> CycleResult:
         result = CycleResult()
         if self.mothership_id is not None:
@@ -86,15 +139,7 @@ class DefenseEtoileAttente:
         else:
             fleet_id = require_string(self.fleet_id, "fleet_id")
 
-        fleet = self.api.get_fleet(fleet_id)
-        if require_string(fleet.get("id"), "fleet.id") != fleet_id:
-            raise ApiContractError(
-                "La flotte retournée ne correspond pas à l'identifiant demandé."
-            )
-        ships_value = fleet.get("ships")
-        if not isinstance(ships_value, list):
-            raise ApiContractError("fleet.ships doit être une liste.")
-        ships = [require_mapping(ship, "fleet.ships[]") for ship in ships_value]
+        ships = self._load_fleet_ships(fleet_id)
         fleet_mothership = self._select_mothership(ships, fleet_id)
 
         mothership_id = require_string(fleet_mothership.get("id"), "mothership.id")
@@ -107,6 +152,66 @@ class DefenseEtoileAttente:
 
         self.logistics.reconcile(fleet_mothership, result)
         return self.formation.reconcile(fleet_mothership, ships, result)
+
+    def _load_fleet_ships(self, fleet_id: str) -> list[dict[str, Any]]:
+        fleet = self.api.get_fleet(fleet_id)
+        if require_string(fleet.get("id"), "fleet.id") != fleet_id:
+            raise ApiContractError(
+                "La flotte retournée ne correspond pas à l'identifiant demandé."
+            )
+        ships_value = fleet.get("ships")
+        if not isinstance(ships_value, list):
+            raise ApiContractError("fleet.ships doit être une liste.")
+        return [
+            require_mapping(ship, f"fleet.ships[{index}]")
+            for index, ship in enumerate(ships_value)
+        ]
+
+    @staticmethod
+    def _require_count(value: Any, context: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ApiContractError(f"{context} doit être un entier positif ou nul.")
+        return value
+
+    @staticmethod
+    def _format_position(ship: dict[str, Any], context: str) -> str:
+        location = require_mapping(ship.get("location"), f"{context}.location")
+        state = require_string(location.get("state"), f"{context}.location.state")
+        if state == "in_sector":
+            sector = require_mapping(ship.get("sector"), f"{context}.sector")
+            return format_coordinates(
+                parse_coordinates(sector.get("relative"), f"{context}.sector.relative")
+            )
+        labels = {
+            "transit": "en transit entre deux secteurs",
+            "removed": "vaisseau retiré",
+            "destroyed": "vaisseau détruit",
+        }
+        if state not in labels:
+            raise ApiContractError(f"{context}.location.state est inconnu : {state}.")
+        return labels[state]
+
+    @staticmethod
+    def _format_movement(ship: dict[str, Any], context: str) -> str:
+        movement = optional_mapping(ship.get("movement"), f"{context}.movement")
+        if movement is None:
+            return "aucun"
+        phase = require_string(movement.get("phase"), f"{context}.movement.phase")
+        phase_label = {
+            "waiting_to_depart": "en attente du départ",
+            "transit": "en transit",
+        }.get(phase)
+        if phase_label is None:
+            raise ApiContractError(
+                f"{context}.movement.phase est inconnue : {phase}."
+            )
+        target = format_coordinates(
+            parse_coordinates(movement.get("target"), f"{context}.movement.target")
+        )
+        arrival_at = require_string(
+            movement.get("arrivalAt"), f"{context}.movement.arrivalAt"
+        )
+        return f"{phase_label} vers {target}, arrivée prévue {arrival_at}"
 
     def _select_mothership(
         self,

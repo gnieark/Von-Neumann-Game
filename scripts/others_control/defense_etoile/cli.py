@@ -77,8 +77,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     retry_delay = 5.0
+    summary_pending = True
     while True:
         try:
+            if summary_pending:
+                controller.log_fleet_summary()
+                summary_pending = False
             result = controller.run_cycle()
             retry_delay = 5.0
         except ApiRequestError as error:

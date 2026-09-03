@@ -2371,7 +2371,12 @@ final class ApiKernel
         if (($sector['knowledgeLevel'] ?? null) === 'detailed') {
             $sector['objects'] ??= [];
             foreach ($entities['ships'] as $ship) {
-                $observedShip = ['id' => (string) $ship['public_id'], 'observedClass' => $ship['type'] === 'mothership' ? 'large_ship' : 'ship', 'estimated' => false];
+                $observedShip = [
+                    'id' => (string) $ship['public_id'],
+                    'observedClass' => $ship['type'] === 'mothership' ? 'large_ship' : 'ship',
+                    'status' => $this->observedOthersMotionStatus($ship),
+                    'estimated' => false,
+                ];
                 $direction = $this->observedOthersMovementDirection($ship);
                 if ($direction !== null) {
                     $observedShip['movement'] = ['direction' => $direction];
@@ -2392,6 +2397,13 @@ final class ApiKernel
             }
         }
         return $sector;
+    }
+
+    private function observedOthersMotionStatus(array $ship): string
+    {
+        return (string) ($ship['status'] ?? '') === 'inactive'
+            ? 'idle'
+            : (string) $ship['status'];
     }
 
     private function observedOthersMovementDirection(array $ship): ?array
@@ -2879,21 +2891,27 @@ final class ApiKernel
     }
 
     /**
-     * @return array<array{id:int, name:string, moving:bool, owned:bool}>
+     * @return array<array{id:int, name:string, status:string, moving:bool, owned:bool}>
      */
     private function observedProbePresence(NeumannProbe $probe, SectorCoordinates $sector): array
     {
         $observed = [];
-        foreach ($this->probes->findBySector($sector, $probe->id) as $otherProbe) {
+        foreach ($this->probes->findObservableCandidatesBySector($sector) as $otherProbe) {
+            if ($otherProbe->id === $probe->id) {
+                continue;
+            }
             $otherProbe = $this->movements->refreshProbeMovementState($otherProbe);
-            if (!$otherProbe->currentSector->equals($sector)) {
+            $movement = $this->movements->activeMovementForProbe($otherProbe);
+            $observableSector = $this->movements->observableSectorFor($otherProbe, $movement);
+            if ($observableSector === null || !$observableSector->equals($sector)) {
                 continue;
             }
 
             $observed[] = [
                 'id' => $otherProbe->id,
                 'name' => $otherProbe->name,
-                'moving' => $this->movements->activeMovementForProbe($otherProbe) !== null,
+                'status' => $otherProbe->status->value,
+                'moving' => $movement !== null,
                 'owned' => $otherProbe->playerId === $probe->playerId,
             ];
         }

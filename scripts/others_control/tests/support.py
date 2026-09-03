@@ -19,6 +19,8 @@ def ship(
     status: str = "inactive",
     movement: dict[str, Any] | None = None,
     deuterium: float = 20.0,
+    auxiliary_count: int = 0,
+    deployed_auxiliary_count: int = 0,
 ) -> dict[str, Any]:
     return {
         "id": ship_id,
@@ -28,6 +30,8 @@ def ship(
         "location": {"state": "transit" if coordinates is None else "in_sector"},
         "sector": None if coordinates is None else sector(coordinates),
         "movement": movement,
+        "auxiliaryCount": auxiliary_count,
+        "deployedAuxiliaryCount": deployed_auxiliary_count,
         "deuterium": {"amount": deuterium, "capacity": 100.0},
         "updatedAt": "2026-08-30T10:00:00+00:00",
     }
