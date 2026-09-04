@@ -29,6 +29,52 @@
         </div>
         <!-- END visitedPodiumMore -->
     </section>
+    <section class="stats-podium" aria-labelledby="stats-others-hunter-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-others-hunter-podium-title">{{t.statsTopOthersShipHunters}}</h2>
+            <p>{{t.statsTopOthersShipHuntersHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN othersHunter -->
+            <li class="stats-podium-rank"{{othersHunter.extraAttributes}}>
+                <span>{{othersHunter.rank}}</span>
+                <strong>{{othersHunter.name}}</strong>
+                <b>{{othersHunter.destroyedShips}} {{othersHunter.destroyedShipsLabel}}</b>
+            </li>
+            <!-- END othersHunter -->
+            <!-- BEGIN emptyOthersHunterPodium -->
+            <li class="stats-podium-empty">{{t.statsTopOthersShipHuntersEmpty}}</li>
+            <!-- END emptyOthersHunterPodium -->
+        </ol>
+        <!-- BEGIN othersHunterPodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END othersHunterPodiumMore -->
+    </section>
+    <section class="stats-podium" aria-labelledby="stats-others-eradicator-podium-title">
+        <div class="stats-podium-heading">
+            <h2 id="stats-others-eradicator-podium-title">{{t.statsTopOthersMothershipEradicators}}</h2>
+            <p>{{t.statsTopOthersMothershipEradicatorsHint}}</p>
+        </div>
+        <ol class="stats-podium-list">
+            <!-- BEGIN othersEradicator -->
+            <li class="stats-podium-rank"{{othersEradicator.extraAttributes}}>
+                <span>{{othersEradicator.rank}}</span>
+                <strong>{{othersEradicator.name}}</strong>
+                <b>{{othersEradicator.destroyedMotherships}} {{othersEradicator.destroyedMothershipsLabel}}</b>
+            </li>
+            <!-- END othersEradicator -->
+            <!-- BEGIN emptyOthersEradicatorPodium -->
+            <li class="stats-podium-empty">{{t.statsTopOthersMothershipEradicatorsEmpty}}</li>
+            <!-- END emptyOthersEradicatorPodium -->
+        </ol>
+        <!-- BEGIN othersEradicatorPodiumMore -->
+        <div class="stats-podium-actions">
+            <button class="button-link stats-podium-more-button" type="button" data-stats-podium-more data-show-more="{{t.statsShowTopNine}}" data-show-less="{{t.statsCollapsePodium}}" aria-expanded="false">{{t.statsShowTopNine}}</button>
+        </div>
+        <!-- END othersEradicatorPodiumMore -->
+    </section>
     <section class="stats-podium" aria-labelledby="stats-furthest-podium-title">
         <div class="stats-podium-heading">
             <h2 id="stats-furthest-podium-title">{{t.statsTopFurthestPlayers}}</h2>

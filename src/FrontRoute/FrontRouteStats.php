@@ -37,6 +37,40 @@ class FrontRouteStats extends FrontRoute{
                 $tpl->addSubBlock(new TplBlock('visitedPodiumMore'));
             }
         }
+        $othersHunterPodium = $this->topOthersShipHunterRows($stats['metrics'], $translator);
+        if ($othersHunterPodium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyOthersHunterPodium'));
+        } else {
+            foreach ($othersHunterPodium as $index => $player) {
+                $tpl->addSubBlock((new TplBlock('othersHunter'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
+                    'rank' => self::e($player['rank']),
+                    'name' => self::e($player['name']),
+                    'destroyedShips' => self::e($player['destroyedShips']),
+                    'destroyedShipsLabel' => self::e($player['destroyedShipsLabel']),
+                ]));
+            }
+            if (count($othersHunterPodium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('othersHunterPodiumMore'));
+            }
+        }
+        $othersEradicatorPodium = $this->topOthersMothershipEradicatorRows($stats['metrics'], $translator);
+        if ($othersEradicatorPodium === []) {
+            $tpl->addSubBlock(new TplBlock('emptyOthersEradicatorPodium'));
+        } else {
+            foreach ($othersEradicatorPodium as $index => $player) {
+                $tpl->addSubBlock((new TplBlock('othersEradicator'))->addVars([
+                    'extraAttributes' => $this->podiumRowExtraAttributes($index),
+                    'rank' => self::e($player['rank']),
+                    'name' => self::e($player['name']),
+                    'destroyedMotherships' => self::e($player['destroyedMotherships']),
+                    'destroyedMothershipsLabel' => self::e($player['destroyedMothershipsLabel']),
+                ]));
+            }
+            if (count($othersEradicatorPodium) > self::PODIUM_VISIBLE_ROWS) {
+                $tpl->addSubBlock(new TplBlock('othersEradicatorPodiumMore'));
+            }
+        }
         $furthestPodium = $this->topFurthestPlayerRows($stats['metrics'], $translator);
         if ($furthestPodium === []) {
             $tpl->addSubBlock(new TplBlock('emptyFurthestPodium'));
@@ -187,6 +221,8 @@ class FrontRouteStats extends FrontRoute{
             'topWaypointPlayers' => [],
             'topScutRelayActivators' => [],
             'topScutNetworksByCoverage' => [],
+            'topOthersShipHunters' => [],
+            'topOthersMothershipEradicators' => [],
         ];
 
         $json = is_file($path) ? file_get_contents($path) : false;
@@ -228,6 +264,75 @@ class FrontRouteStats extends FrontRoute{
                 'name' => trim((string) ($row['playerName'] ?? '')) !== '' ? (string) $row['playerName'] : $translator->get('unknownPlayer'),
                 'visitedSectors' => $this->formatNumber($visitedSectors),
                 'visitedSectorsLabel' => $translator->get($visitedSectors > 1 ? 'statsVisitedSectorsPodiumPlural' : 'statsVisitedSectorsPodiumSingular'),
+            ];
+        }
+
+        return $podium;
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
+     * @return array<int, array{rank:string,name:string,destroyedShips:string,destroyedShipsLabel:string}>
+     */
+    private function topOthersShipHunterRows(array $metrics, Translator $translator): array
+    {
+        return $this->topOthersDestroyerRows(
+            $metrics,
+            $translator,
+            'topOthersShipHunters',
+            'othersShipsDestroyed',
+            'destroyedShips',
+            'statsOthersShipsDestroyedSingular',
+            'statsOthersShipsDestroyedPlural',
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
+     * @return array<int, array{rank:string,name:string,destroyedMotherships:string,destroyedMothershipsLabel:string}>
+     */
+    private function topOthersMothershipEradicatorRows(array $metrics, Translator $translator): array
+    {
+        return $this->topOthersDestroyerRows(
+            $metrics,
+            $translator,
+            'topOthersMothershipEradicators',
+            'othersMothershipsDestroyed',
+            'destroyedMotherships',
+            'statsOthersMothershipsDestroyedSingular',
+            'statsOthersMothershipsDestroyedPlural',
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $metrics
+     * @return array<int, array<string, string>>
+     */
+    private function topOthersDestroyerRows(
+        array $metrics,
+        Translator $translator,
+        string $metricKey,
+        string $sourceCountKey,
+        string $targetCountKey,
+        string $singularTranslationKey,
+        string $pluralTranslationKey,
+    ): array {
+        $rows = is_array($metrics[$metricKey] ?? null) ? $metrics[$metricKey] : [];
+        $podium = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $count = max(0, (int) ($row[$sourceCountKey] ?? 0));
+            $podium[] = [
+                'rank' => '#' . ((int) ($row['rank'] ?? 0) > 0 ? (int) $row['rank'] : $index + 1),
+                'name' => trim((string) ($row['playerName'] ?? '')) !== ''
+                    ? (string) $row['playerName']
+                    : $translator->get('unknownPlayer'),
+                $targetCountKey => $this->formatNumber($count),
+                $targetCountKey . 'Label' => $translator->get(
+                    $count > 1 ? $pluralTranslationKey : $singularTranslationKey,
+                ),
             ];
         }
 

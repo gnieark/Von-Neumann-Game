@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Statistiques publiques : ajout du podium des chasseurs d’Others, classé par nombre total de vaisseaux Others détruits, et du podium des éradicateurs d’Others, consacré aux destructions de vaisseaux mères ; les deux classements sont agrégés par joueur possédant au moins une sonde publique et disponibles en français et en anglais.
 - Contrôle Others « défense étoile — attente » : l’objectif de 60 missiles porte désormais sur toute la flotte. Le vaisseau mère conserve une réserve de 10 missiles et répartit son surplus par vagues équitables entre les vaisseaux locaux, dans la limite de 3 par vaisseau ; une sentinelle voisine vide peut être relevée par un vaisseau local armé, sans interrompre un engagement tactique et avec départ du remplaçant avant le rappel.
 - Documentation OpenAPI Others : `POST /api/others/ships/{shipId}/inventory-transfers` décrit désormais ses payloads canoniques de transfert de ressources et d’items, ainsi que les réponses de création et de consultation d’un transfert.
 - Outil de développement : `scripts/add-inventory-item.php` accepte désormais `--others-ship-id=<id-public>` pour injecter des ressources ou des items dans la soute d’un vaisseau Others, avec contrôle de capacité et encombrement canonique de 2 ECE pour ses missiles.

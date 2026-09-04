@@ -39,6 +39,7 @@ final class UniverseStatsService
         $intelligentLifeStats = $this->intelligentLifeDiscoveryStats();
         $scutStats = $this->scutStats();
         $missionStats = $this->missionTerminalStats();
+        $othersDestructionStats = $this->othersDestructionStats();
 
         $topVisitedPlayers = $this->topVisitedPlayers();
         $topFurthestPlayers = $this->topFurthestPlayersFromHome();
@@ -70,8 +71,102 @@ final class UniverseStatsService
                 'topIntelligentLifeDiscoverers' => $intelligentLifeStats['topDiscoverers'],
                 'topScutRelayActivators' => $scutStats['topActivators'],
                 'topScutNetworksByCoverage' => $scutStats['topNetworks'],
+                'topOthersShipHunters' => $othersDestructionStats['topHunters'],
+                'topOthersMothershipEradicators' => $othersDestructionStats['topEradicators'],
             ],
         ];
+    }
+
+    /**
+     * @return array{
+     *     topHunters: array<int, array{rank:int, playerId:int, playerName:string, othersShipsDestroyed:int}>,
+     *     topEradicators: array<int, array{rank:int, playerId:int, playerName:string, othersMothershipsDestroyed:int}>
+     * }
+     */
+    private function othersDestructionStats(): array
+    {
+        $stmt = $this->pdo->query(
+            'SELECT players.id AS player_id, players.username, players.display_name,
+                    players.others_ships_destroyed, players.others_motherships_destroyed
+             FROM players
+             WHERE (players.others_ships_destroyed > 0 OR players.others_motherships_destroyed > 0)
+               AND EXISTS (
+                   SELECT 1
+                   FROM neumann_probes
+                   WHERE neumann_probes.player_id = players.id
+                     AND neumann_probes.exclude_from_stats = 0
+               )
+             ORDER BY players.id ASC'
+        );
+        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $hunters = [];
+        $eradicators = [];
+        foreach ($rows as $row) {
+            $displayName = trim((string) ($row['display_name'] ?? ''));
+            $username = trim((string) ($row['username'] ?? ''));
+            $rankingRow = [
+                'playerId' => (int) $row['player_id'],
+                'playerName' => $displayName !== '' ? $displayName : $username,
+            ];
+            $destroyedShips = max(0, (int) ($row['others_ships_destroyed'] ?? 0));
+            if ($destroyedShips > 0) {
+                $hunters[] = [
+                    ...$rankingRow,
+                    'othersShipsDestroyed' => $destroyedShips,
+                ];
+            }
+            $destroyedMotherships = max(
+                0,
+                (int) ($row['others_motherships_destroyed'] ?? 0),
+            );
+            if ($destroyedMotherships > 0) {
+                $eradicators[] = [
+                    ...$rankingRow,
+                    'othersMothershipsDestroyed' => $destroyedMotherships,
+                ];
+            }
+        }
+
+        usort($hunters, static fn(array $a, array $b): int => (
+            ($b['othersShipsDestroyed'] <=> $a['othersShipsDestroyed'])
+            ?: strcasecmp($a['playerName'], $b['playerName'])
+            ?: ($a['playerId'] <=> $b['playerId'])
+        ));
+        usort($eradicators, static fn(array $a, array $b): int => (
+            ($b['othersMothershipsDestroyed'] <=> $a['othersMothershipsDestroyed'])
+            ?: strcasecmp($a['playerName'], $b['playerName'])
+            ?: ($a['playerId'] <=> $b['playerId'])
+        ));
+
+        return [
+            'topHunters' => $this->rankedOthersDestroyers(
+                $hunters,
+                'othersShipsDestroyed',
+            ),
+            'topEradicators' => $this->rankedOthersDestroyers(
+                $eradicators,
+                'othersMothershipsDestroyed',
+            ),
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, int|string>> $rows
+     * @return array<int, array<string, int|string>>
+     */
+    private function rankedOthersDestroyers(array $rows, string $countKey): array
+    {
+        $ranked = [];
+        foreach (array_slice($rows, 0, self::PUBLIC_RANKING_LIMIT) as $index => $row) {
+            $ranked[] = [
+                'rank' => $index + 1,
+                'playerId' => (int) $row['playerId'],
+                'playerName' => (string) $row['playerName'],
+                $countKey => (int) $row[$countKey],
+            ];
+        }
+
+        return $ranked;
     }
 
     /**

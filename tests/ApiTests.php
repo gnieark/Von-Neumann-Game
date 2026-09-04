@@ -929,15 +929,21 @@ $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'data-st
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-activator-podium-title'), 'stats view exposes the SCUT activator podium');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-scut-network-coverage-podium-title'), 'stats view exposes the SCUT network coverage podium');
 $test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-furthest-podium-title'), 'stats view exposes the furthest-from-home podium');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-others-hunter-podium-title'), 'stats view exposes the Others hunter podium');
+$test->assert(is_string($statsTemplate) && str_contains($statsTemplate, 'stats-others-eradicator-podium-title'), 'stats view exposes the Others mothership eradicator podium');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'data-stats-podium-extra hidden'), 'stats route renders extra ranking rows as hidden by default');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topVisitedPlayers'), 'stats route reads player-based explorer podium rows');
 $test->assert(is_string($statsRoute) && !str_contains($statsRoute, 'topVisitedProbes'), 'stats route no longer falls back to the legacy visited-probe alias');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutRelayActivatorRows'), 'stats route renders SCUT relay activator rows');
 $test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topScutNetworkCoverageRows'), 'stats route renders SCUT network coverage rows');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topOthersShipHunterRows'), 'stats route renders Others hunter rows');
+$test->assert(is_string($statsRoute) && str_contains($statsRoute, 'topOthersMothershipEradicatorRows'), 'stats route renders Others mothership eradicator rows');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'toutes sondes possédées confondues'), 'French translations describe the player-based explorer podium');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, 'across all owned probes'), 'English translations describe the player-based explorer podium');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Secteurs couverts par au moins un réseau SCUT'"), 'French translations include the SCUT covered-sector metric');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsScutCoveredSectors' => 'Sectors covered by at least one SCUT network'"), 'English translations include the SCUT covered-sector metric');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsTopOthersShipHunters' => 'Others hunter podium'"), 'English translations include the Others hunter podium');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'statsTopOthersMothershipEradicators' => 'Others eradicator podium'"), 'English translations include the Others mothership eradicator podium');
 $test->assert(str_contains($openApi, 'anomaly_detected'), 'OpenAPI documents anomaly-detected alerts');
 $test->assert(str_contains($openApi, 'enum: [probe, planet, unknown]'), 'OpenAPI documents unknown message endpoints');
 $test->assert(str_contains($openApi, 'For scut_relay objects this is the relay integer id serialized as a string'), 'OpenAPI documents SCUT relay SectorObject id conventions');
@@ -1486,6 +1492,18 @@ $statsRankingMissions->markCompleted($statsCompletedMissionOne);
 $statsRankingMissions->markCompleted($statsCompletedMissionTwo);
 $statsRankingMissions->markCompleted($statsHiddenCompletedMission);
 $statsRankingMissions->markFailed($statsFailedMission);
+foreach ([false, false, false, true, true] as $mothership) {
+    $statsRankingPlayers->recordOthersShipDestroyed($statsRankingPlayerRows[1]->id, $mothership);
+}
+foreach ([false, false, false, false, false, false] as $mothership) {
+    $statsRankingPlayers->recordOthersShipDestroyed($statsRankingPlayerRows[2]->id, $mothership);
+}
+foreach ([false, true, true, true] as $mothership) {
+    $statsRankingPlayers->recordOthersShipDestroyed($statsRankingPlayerRows[3]->id, $mothership);
+}
+for ($hiddenKill = 0; $hiddenKill < 10; $hiddenKill++) {
+    $statsRankingPlayers->recordOthersShipDestroyed($statsHiddenMissionPlayer->id, true);
+}
 $statsScutNetworkInsert = $statsRankingPdo->prepare(
     'INSERT INTO scut_networks (name, created_at, updated_at)
      VALUES (:name, :created_at, :updated_at)'
@@ -1569,6 +1587,14 @@ $topScutNetworksByCoverage = $rankingStats['metrics']['topScutNetworksByCoverage
 $test->assertEquals('Stats SCUT Alpha', $topScutNetworksByCoverage[0]['networkName'] ?? null, 'public stats SCUT network coverage podium ranks networks by covered sectors');
 $test->assertEquals(3, $topScutNetworksByCoverage[0]['coveredSectors'] ?? null, 'public stats SCUT network coverage podium exposes covered-sector counts');
 $test->assert(!in_array(5, array_column($topScutNetworksByCoverage, 'coveredSectors'), true), 'public stats SCUT network coverage podium ignores inactive relay coverage');
+$topOthersShipHunters = $rankingStats['metrics']['topOthersShipHunters'] ?? [];
+$test->assertEquals(['Stats Ranking 2', 'Stats Ranking 1', 'Stats Ranking 3'], array_column($topOthersShipHunters, 'playerName'), 'public stats Others hunter podium orders players by destroyed ship count');
+$test->assertEquals([6, 5, 4], array_column($topOthersShipHunters, 'othersShipsDestroyed'), 'public stats Others hunter podium exposes all destroyed Others ships');
+$test->assert(!in_array('Stats Hidden Mission', array_column($topOthersShipHunters, 'playerName'), true), 'public stats Others hunter podium excludes players without a public probe');
+$topOthersMothershipEradicators = $rankingStats['metrics']['topOthersMothershipEradicators'] ?? [];
+$test->assertEquals(['Stats Ranking 3', 'Stats Ranking 1'], array_column($topOthersMothershipEradicators, 'playerName'), 'public stats Others eradicator podium orders players by destroyed mothership count');
+$test->assertEquals([3, 2], array_column($topOthersMothershipEradicators, 'othersMothershipsDestroyed'), 'public stats Others eradicator podium exposes destroyed Others motherships');
+$test->assert(!in_array('Stats Ranking 2', array_column($topOthersMothershipEradicators, 'playerName'), true), 'public stats Others eradicator podium omits zero-kill rows');
 
 $statsDistanceDbPath = $tmp . DIRECTORY_SEPARATOR . 'stats-distance.sqlite';
 $statsDistanceFactory = new DatabaseConnectionFactory(new DatabaseConfig('sqlite', $statsDistanceDbPath), $root);
