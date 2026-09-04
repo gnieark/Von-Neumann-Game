@@ -443,7 +443,7 @@ final class OthersRepository
         }
         $shipPublicIdSet = array_fill_keys($shipPublicIds, true);
         $ids = [];
-        $stmt = $this->pdo->query("SELECT id,payload_json FROM others_cross_store_operations WHERE operation_type='dormant_auxiliaries'");
+        $stmt = $this->pdo->query("SELECT id,payload_json FROM others_cross_store_operations WHERE operation_type IN ('dormant_auxiliaries','mothership_wreck')");
         foreach ($stmt->fetchAll() as $row) {
             $payload = json_decode((string) $row['payload_json'], true, 512, JSON_THROW_ON_ERROR);
             if (!is_array($payload)) {

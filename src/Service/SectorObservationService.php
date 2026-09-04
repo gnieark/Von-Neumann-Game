@@ -272,16 +272,22 @@ final class SectorObservationService
             $data['spectralClass'] = $object->getSpectralType();
         }
 
-        if ($object instanceof Planet || $object instanceof Asteroid) {
-            $resources = $this->objectResourceHints($object);
+        if ($object instanceof Planet || $object instanceof Asteroid || $this->isMothershipWreck($object)) {
             $composition = $this->objectResourceComposition($object);
+            $resources = $this->isMothershipWreck($object)
+                ? ResourceComposition::availableTypes($composition)
+                : $this->objectResourceHints($object);
             $data['resources'] = $resources;
             $data['resourceTypes'] = ResourceComposition::availableTypes($composition);
             $data['resourceComposition'] = $composition;
             $data['mannyMineable'] = $this->isMannyMineable($object);
-            if ($object instanceof Asteroid) {
-                $data['composition'] = $object->toArray()['composition'] ?? null;
+            if ($object instanceof Asteroid || $this->isMothershipWreck($object)) {
+                if ($object instanceof Asteroid) {
+                    $data['composition'] = $object->toArray()['composition'] ?? null;
+                }
                 $data['resourceAmounts'] = $object->getResourceAmounts();
+            }
+            if ($object instanceof Asteroid) {
                 $data['motorized'] = $object->isMotorized();
                 if ($object->isMotorized()) {
                     $data['motorFuelStatus'] = $object->getMotorFuelStatus();
@@ -651,6 +657,7 @@ final class SectorObservationService
     private function massUnit(UniverseObject $object): ?string
     {
         return match (true) {
+            $this->isMothershipWreck($object) => 'kilogram',
             $object instanceof Star,
             $object instanceof BlackHole,
             $object instanceof DustCloud => 'solar_mass',
@@ -663,6 +670,7 @@ final class SectorObservationService
     private function radiusUnit(UniverseObject $object): ?string
     {
         return match (true) {
+            $this->isMothershipWreck($object) => 'meter',
             $object instanceof Star => 'solar_radius',
             $object instanceof Planet,
             $object instanceof Asteroid => 'earth_radius',
@@ -685,7 +693,7 @@ final class SectorObservationService
      */
     private function objectResourceComposition(UniverseObject $object): array
     {
-        if ($object instanceof Asteroid) {
+        if ($object instanceof Asteroid || $this->isMothershipWreck($object)) {
             return ResourceComposition::fromAmounts($object->getResourceAmounts());
         }
 
@@ -697,7 +705,28 @@ final class SectorObservationService
     private function isMannyMineable(UniverseObject $object): bool
     {
         return $object instanceof Asteroid
-            || ($object instanceof Planet && $object->getMass() <= Config::float($this->mannyConfig, 'mineablePlanetMaxMassEarthUnits', self::MANNY_MINEABLE_MAX_MASS));
+            || ($object instanceof Planet && $object->getMass() <= Config::float($this->mannyConfig, 'mineablePlanetMaxMassEarthUnits', self::MANNY_MINEABLE_MAX_MASS))
+            || ($this->isMothershipWreck($object) && $this->hasRemainingConstructResources($object));
+    }
+
+    private function isMothershipWreck(UniverseObject $object): bool
+    {
+        return $object instanceof DormantConstruct
+            && $object->getSubtype() === DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK;
+    }
+
+    private function hasRemainingConstructResources(UniverseObject $object): bool
+    {
+        if (!$object instanceof DormantConstruct) {
+            return false;
+        }
+        foreach ($object->getResourceAmounts() as $amount) {
+            if (is_numeric($amount) && (float) $amount > 0.0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function neighborEstimate(SectorContent $content, float $quality): array

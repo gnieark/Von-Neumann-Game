@@ -2246,7 +2246,21 @@ final class MannyService implements MannyTaskRuntime
     private function isMineableObject(UniverseObject $object): bool
     {
         return $object instanceof Asteroid
-            || ($object instanceof Planet && $object->getMass() <= $this->mineablePlanetMaxMass());
+            || ($object instanceof Planet && $object->getMass() <= $this->mineablePlanetMaxMass())
+            || ($object instanceof DormantConstruct
+                && $object->getSubtype() === DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK
+                && $this->hasRemainingConstructResources($object));
+    }
+
+    private function hasRemainingConstructResources(DormantConstruct $construct): bool
+    {
+        foreach ($construct->getResourceAmounts() as $amount) {
+            if (is_numeric($amount) && (float) $amount > 0.0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function ensureScutRelayNotAlreadyBeingSalvaged(NeumannProbe $probe, ScutRelay $target, int $actorMannyId): void
@@ -2427,7 +2441,7 @@ final class MannyService implements MannyTaskRuntime
         }
         $scenario = $construct->getInspectionScenario();
         if ($scenario === null) {
-            $scenarios = DormantConstruct::inspectionScenarios();
+            $scenarios = DormantConstruct::generatableInspectionScenarios();
             $scenario = $scenarios[random_int(0, count($scenarios) - 1)];
             $construct = $construct->withInspectionScenario($scenario);
             if ($sector->replaceObject($construct)) {
@@ -2471,6 +2485,16 @@ final class MannyService implements MannyTaskRuntime
                 . "Tool marks across the surface reveal a method for removing material without destabilizing the asteroid or compromising its mineral deposits.\n\n"
                 . "Recovered blueprint: Anatiform Asteroid Sculpting.\n\n"
                 . "Blueprint unlocked: Anatiform Asteroid Sculpting. You can now send a Manny to sculpt an asteroid into the shape of a duck.",
+            ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING => "Manny report\n\n"
+                . "Relativistic Path Clearing\n\n"
+                . "The study of the mothership's navigation systems reveals a device whose function had previously been misunderstood.\n\n"
+                . "At relativistic speed, even the smallest particles in the interstellar medium become dangerous. Yet the Others do not appear to have reinforced their hulls against them. They chose another approach.\n\n"
+                . "Their system continuously detects and acts upon matter far ahead of the ship's trajectory. A series of extremely precise impulses slightly alters the course of particles that would otherwise intersect the vessel. At such distances, an infinitesimal deflection is enough.\n\n"
+                . "The exact mechanism remains imperfectly understood. The energy involved appears surprisingly low, suggesting that the Others exploit a phenomenon only partially described by our models.\n\n"
+                . "We do not know exactly how they do it.\n\n"
+                . "We now know how to reproduce the result.\n\n"
+                . "Recovered blueprint: Relativistic Path Clearing.\n\n"
+                . "Probe improvement unlocked: intersector movement no longer causes integrity loss.",
             default => "Manny report\n\nThe structure is artificial, but the recovered data could not be classified.",
         };
     }

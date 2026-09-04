@@ -13,6 +13,12 @@ final class DormantConstruct extends UniverseObject
     public const INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS = 'reinforced_container_couplings';
     public const INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING = 'distributed_thrust_anchoring';
     public const INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING = 'anatiform_asteroid_sculpting';
+    public const INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING = 'relativistic_path_clearing';
+    public const SUBTYPE_OTHERS_MOTHERSHIP_WRECK = 'others_mothership_wreck';
+    public const OTHERS_MOTHERSHIP_WRECK_NAME = 'Destroyed Others mothership';
+    public const OTHERS_MOTHERSHIP_WRECK_DESCRIPTION = "The shattered remains of an Others mothership. Most systems are inert, but fragments of its navigation array still respond to close-range analysis.";
+    public const OTHERS_MOTHERSHIP_WRECK_MASS_KG = 2_500_000_000.0;
+    public const OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS = 400.0;
 
     public const THRUST_ANCHORED_ASTEROID_NAME = 'Thrust-anchored asteroid';
     public const THRUST_ANCHORED_ASTEROID_DESCRIPTION = 'A deuterium engine has been mounted on this otherwise unremarkable asteroid. The engine is cold and inoperative. What stands out is not the engine itself, but the web of anchor points distributing its thrust through the rock without tearing it apart.';
@@ -39,6 +45,18 @@ final class DormantConstruct extends UniverseObject
      * @return list<string>
      */
     public static function inspectionScenarios(): array
+    {
+        return [
+            self::INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION,
+            self::INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS,
+            self::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING,
+            self::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING,
+            self::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING,
+        ];
+    }
+
+    /** @return list<string> */
+    public static function generatableInspectionScenarios(): array
     {
         return [
             self::INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION,
@@ -122,6 +140,27 @@ final class DormantConstruct extends UniverseObject
             resourceAmounts: ['deuterium' => $destroyed ? 0.02 : 0.01, 'metals' => 5.0, 'ice' => 0.0, 'carbon_compounds' => 0.0],
             identified: false,
             originalAuxiliaryId: $auxiliaryId,
+        );
+    }
+
+    /** @param array<string, float> $resourceAmounts */
+    public static function fromOthersMothership(
+        string $shipPublicId,
+        array $resourceAmounts = [],
+        float $massKg = self::OTHERS_MOTHERSHIP_WRECK_MASS_KG,
+        float $radiusMeters = self::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS,
+    ): self {
+        return new self(
+            'others-mothership-wreck-' . substr(hash('sha256', 'others-mothership-wreck|' . $shipPublicId), 0, 20),
+            self::OTHERS_MOTHERSHIP_WRECK_NAME,
+            $massKg,
+            $radiusMeters,
+            self::OTHERS_MOTHERSHIP_WRECK_DESCRIPTION,
+            inspectionScenario: self::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING,
+            subtype: self::SUBTYPE_OTHERS_MOTHERSHIP_WRECK,
+            resourceAmounts: $resourceAmounts,
+            identified: false,
+            originalAuxiliaryId: null,
         );
     }
 

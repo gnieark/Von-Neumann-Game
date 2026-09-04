@@ -932,6 +932,10 @@ final class ProbeMovementService
 
     private function applyIntersectorIntegrityLoss(NeumannProbe $probe, ProbeMovement $movement): void
     {
+        if ($this->improvements?->isDone($probe->id, ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING)) {
+            return;
+        }
+
         $integrityLoss = 0.0;
         for ($sectorIndex = 1; $sectorIndex <= $movement->distance; $sectorIndex++) {
             $payload = implode('|', [

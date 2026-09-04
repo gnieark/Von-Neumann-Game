@@ -577,6 +577,8 @@
             "earth_radius": "R earth",
             "kilometer": "km",
             "astronomical_unit": "AU",
+            "kilogram": "kg",
+            "meter": "m",
         }[unit] || "";
     }
 

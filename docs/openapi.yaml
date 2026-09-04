@@ -1147,7 +1147,7 @@ paths:
           description: Stable identifier of the blueprint to share.
           schema:
             type: string
-            enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
+            enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring, anatiform_asteroid_sculpting, relativistic_path_clearing]
       requestBody:
         required: true
         content:
@@ -2100,11 +2100,11 @@ paths:
       - $ref: '#/components/parameters/MannyId'
     post:
       tags: [mannies, sectors]
-      summary: Start mining a small body with a Manny
+      summary: Start mining a small body or Others mothership wreck with a Manny
       description: >
         Pick objectId from a detailed SectorObject.id or from a solar system
         minableTargets entry. Select resources from resourceTypes. For
-        asteroids, resourceAmounts is the authoritative remaining reserve in
+        asteroids and Others mothership wrecks, resourceAmounts is the authoritative remaining reserve in
         equivalent earth containers; resourceComposition/resourceProfile define
         how a multi-resource targetAmount is split. An idle Manny in another
         sector covered by the same SCUT network can receive this order for its
@@ -4548,11 +4548,11 @@ paths:
   /api/probe/mannies/{mannyId}/mine:
     post:
       tags: [default probe]
-      summary: Start mining a small body with a Manny
+      summary: Start mining a small body or Others mothership wreck with a Manny
       description: >
         Pick objectId from a detailed SectorObject.id or from a solar system
         minableTargets entry. Select resources from resourceTypes. For
-        asteroids, resourceAmounts is the authoritative remaining reserve in
+        asteroids and Others mothership wrecks, resourceAmounts is the authoritative remaining reserve in
         equivalent earth containers; resourceComposition/resourceProfile define
         how a multi-resource targetAmount is split. An idle Manny in another
         sector covered by the same SCUT network can receive this order for its
@@ -6171,7 +6171,8 @@ components:
       additionalProperties: false
       description: >
         Remaining material reserves in equivalent earth containers. Asteroids
-        expose this exact four-key object; mining subtracts from these values.
+        and mineable Others mothership wrecks expose this exact four-key object;
+        mining subtracts from these values.
       properties:
         deuterium:
           type: number
@@ -6194,7 +6195,7 @@ components:
           description: Object id to pass as objectId when starting a mining order.
         type:
           type: string
-          enum: [planet, asteroid]
+          enum: [planet, asteroid, dormant_construct]
         name:
           type: string
           nullable: true
@@ -6203,12 +6204,12 @@ components:
           type: number
         massUnit:
           type: string
-          enum: [earth_mass]
+          enum: [earth_mass, kilogram]
         radius:
           type: number
         radiusUnit:
           type: string
-          enum: [earth_radius]
+          enum: [earth_radius, meter]
         resources:
           $ref: '#/components/schemas/ResourceHintList'
         resourceTypes:
@@ -6736,7 +6737,7 @@ components:
       properties:
         id:
           type: string
-          enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring, anatiform_asteroid_sculpting]
+          enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring, anatiform_asteroid_sculpting, relativistic_path_clearing]
         name:
           type: string
         description:
@@ -6781,6 +6782,9 @@ components:
             fragileContainerRiskAdditionalContainerDiscount:
               type: integer
               description: Number of additional containers ignored before applying the movement break-risk rule.
+            intersectorIntegrityLossImmunity:
+              type: boolean
+              description: True when the installed improvement prevents integrity loss caused by intersector dust.
         createdAt:
           type: string
           format: date-time
@@ -6806,7 +6810,7 @@ components:
           properties:
             id:
               type: string
-              enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
+              enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring, anatiform_asteroid_sculpting, relativistic_path_clearing]
             name:
               type: string
         recipientProbe:
@@ -7425,7 +7429,7 @@ components:
           properties:
             blueprintId:
               type: string
-              enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring]
+              enum: [deuterium_compression, reinforced_container_couplings, distributed_thrust_anchoring, anatiform_asteroid_sculpting, relativistic_path_clearing]
             senderProbe:
               type: object
               required: [id, name]
@@ -7838,7 +7842,7 @@ components:
       properties:
         improvement:
           type: string
-          enum: [deuterium_compression]
+          enum: [deuterium_compression, reinforced_container_couplings, relativistic_path_clearing]
           description: Probe improvement id to install.
     MannyProbeAssemblyRequest:
       type: object
@@ -8494,14 +8498,14 @@ components:
           type: number
         massUnit:
           type: string
-          enum: [solar_mass, earth_mass]
-          description: Unit used by mass when present. Stars, black holes and dust clouds use solar_mass; planets and asteroids use earth_mass.
+          enum: [solar_mass, earth_mass, kilogram]
+          description: Unit used by mass when present. Stars, black holes and dust clouds use solar_mass; planets and asteroids use earth_mass; Others mothership wrecks use kilogram.
         radius:
           type: number
         radiusUnit:
           type: string
-          enum: [solar_radius, earth_radius, kilometer, astronomical_unit]
-          description: Unit used by radius when present. Stars use solar_radius; planets and asteroids use earth_radius; black holes use kilometer; solar systems and dust clouds use astronomical_unit.
+          enum: [solar_radius, earth_radius, kilometer, astronomical_unit, meter]
+          description: Unit used by radius when present. Stars use solar_radius; planets and asteroids use earth_radius; black holes use kilometer; solar systems and dust clouds use astronomical_unit; Others mothership wrecks use meter.
         dangerLevel:
           type: string
           enum: [low, moderate, extreme]
@@ -8521,7 +8525,7 @@ components:
           $ref: '#/components/schemas/ResourceHintList'
         resourceTypes:
           type: array
-          description: Present on planets, asteroids, and deuterium refuel stations; use mineable object values in MannyMineRequest.resources.
+          description: Present on planets, asteroids, mineable Others mothership wrecks, and deuterium refuel stations; use mineable object values in MannyMineRequest.resources.
           items:
             $ref: '#/components/schemas/MineableResourceType'
         resourceComposition:
@@ -8530,7 +8534,7 @@ components:
           $ref: '#/components/schemas/ResourceAmountMap'
         mannyMineable:
           type: boolean
-          description: Present on planets and asteroids; true when a Manny can mine this object.
+          description: Present on planets, asteroids, and Others mothership wrecks; true while a Manny can mine this object. An exhausted wreck remains inspectable.
         composition:
           type: string
           description: Present on asteroids; generator composition class such as iron, silicate, carbonaceous, ice or rare_metals.
@@ -8696,12 +8700,12 @@ components:
           type: number
         massUnit:
           type: string
-          enum: [solar_mass, earth_mass]
+          enum: [solar_mass, earth_mass, kilogram]
         radius:
           type: number
         radiusUnit:
           type: string
-          enum: [solar_radius, earth_radius, kilometer, astronomical_unit]
+          enum: [solar_radius, earth_radius, kilometer, astronomical_unit, meter]
         category:
           type: string
           description: Present for planet targets.

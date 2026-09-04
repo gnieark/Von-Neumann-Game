@@ -371,7 +371,7 @@ final class SectorContentGenerator
 
     private function createDormantConstruct(DeterministicRandom $random, SectorCoordinates $coordinates, string $worldSeed): DormantConstruct
     {
-        $scenarios = DormantConstruct::inspectionScenarios();
+        $scenarios = DormantConstruct::generatableInspectionScenarios();
         $scenario = $scenarios[$random->nextInt(0, count($scenarios) - 1)];
 
         if ($scenario === DormantConstruct::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING) {

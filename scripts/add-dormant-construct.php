@@ -39,7 +39,7 @@ try {
 
     $existing = addDormantConstructExistingObject($sector);
     $objectId = $options['id'] ?? DormantConstruct::objectIdForSector($coordinates, $worldSeed);
-    $construct = addDormantConstructCreate($objectId, $options['type']);
+    $construct = addDormantConstructCreate($objectId, $options['type'], $options['sourceShipId']);
     $action = 'already_present';
     if ($existing === null) {
         $sector->addObject($construct);
@@ -67,7 +67,7 @@ try {
 
 /**
  * @param array<int, string> $argv
- * @return array{x:int,y:int,z:int,id:?string,type:?string,universePath:?string,dryRun:bool,listTypes:bool,help:bool}
+ * @return array{x:int,y:int,z:int,id:?string,type:?string,sourceShipId:?string,universePath:?string,dryRun:bool,listTypes:bool,help:bool}
  */
 function addDormantConstructParseArguments(array $argv): array
 {
@@ -77,6 +77,7 @@ function addDormantConstructParseArguments(array $argv): array
         'z' => 0,
         'id' => null,
         'type' => null,
+        'sourceShipId' => null,
         'universePath' => null,
         'dryRun' => false,
         'listTypes' => false,
@@ -109,6 +110,10 @@ function addDormantConstructParseArguments(array $argv): array
             $options['type'] = addDormantConstructParseType(substr($argument, strlen('--type=')));
             continue;
         }
+        if (str_starts_with($argument, '--source-ship-id=')) {
+            $options['sourceShipId'] = addDormantConstructNonEmpty(substr($argument, strlen('--source-ship-id=')), 'source ship id');
+            continue;
+        }
         if (str_starts_with($argument, '--universe-path=')) {
             $value = substr($argument, strlen('--universe-path='));
             $options['universePath'] = $value !== '' ? $value : null;
@@ -131,6 +136,12 @@ function addDormantConstructParseArguments(array $argv): array
     $options['x'] = addDormantConstructInteger((string) $coordinates[0], 'x');
     $options['y'] = addDormantConstructInteger((string) $coordinates[1], 'y');
     $options['z'] = addDormantConstructInteger((string) $coordinates[2], 'z');
+    if ($options['type'] === DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING && $options['sourceShipId'] === null) {
+        throw new InvalidArgumentException('--source-ship-id is required for relativistic_path_clearing.');
+    }
+    if ($options['type'] !== DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING && $options['sourceShipId'] !== null) {
+        throw new InvalidArgumentException('--source-ship-id is only accepted for relativistic_path_clearing.');
+    }
 
     return $options;
 }
@@ -146,6 +157,7 @@ Usage:
 Options:
   --id=<id>                Object id. Default is opaque and stable for the sector.
   --type=<type>            Force the structure type instead of choosing it on inspection.
+  --source-ship-id=<id>    Stable Others ship id (required only for relativistic_path_clearing).
   --list-types             List the accepted structure types and exit.
   --universe-path=<path>   Use another universe storage path.
   --dry-run                Show what would be written without saving.
@@ -200,8 +212,13 @@ function addDormantConstructParseType(string $value): string
     return $type;
 }
 
-function addDormantConstructCreate(string $objectId, ?string $type): DormantConstruct
+function addDormantConstructCreate(string $objectId, ?string $type, ?string $sourceShipId): DormantConstruct
 {
+    if ($type === DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING) {
+        return DormantConstruct::fromOthersMothership(
+            $sourceShipId ?? throw new InvalidArgumentException('--source-ship-id is required for relativistic_path_clearing.'),
+        );
+    }
     if ($type === DormantConstruct::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING) {
         return new DormantConstruct(
             $objectId,
@@ -228,7 +245,8 @@ function addDormantConstructTypeList(): string
         . '- ' . DormantConstruct::INSPECTION_SCENARIO_DEUTERIUM_COMPRESSION . " (Dormant construct)\n"
         . '- ' . DormantConstruct::INSPECTION_SCENARIO_REINFORCED_CONTAINER_COUPLINGS . " (Dormant construct)\n"
         . '- ' . DormantConstruct::INSPECTION_SCENARIO_DISTRIBUTED_THRUST_ANCHORING . ' (' . DormantConstruct::THRUST_ANCHORED_ASTEROID_NAME . ")\n"
-        . '- ' . DormantConstruct::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING . ' (' . DormantConstruct::ANATIFORM_ASTEROID_NAME . ")\n";
+        . '- ' . DormantConstruct::INSPECTION_SCENARIO_ANATIFORM_ASTEROID_SCULPTING . ' (' . DormantConstruct::ANATIFORM_ASTEROID_NAME . ")\n"
+        . '- ' . DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING . ' (' . DormantConstruct::OTHERS_MOTHERSHIP_WRECK_NAME . ")\n";
 }
 
 function addDormantConstructExistingObject(\VonNeumannGame\Sector\SectorContent $sector): ?DormantConstruct

@@ -77,6 +77,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
                 (string)$targetOthers['public_id'],
                 $relativistic ? (int)$targetOthers['integrity'] : 10,
                 'asteroid-impact:'.$trajectory->uid,
+                ['type' => 'motorized_asteroid', 'asteroidId' => $trajectory->asteroidId, 'trajectoryUid' => $trajectory->uid],
                 $relativistic,
                 $responsiblePlayerId,
             );

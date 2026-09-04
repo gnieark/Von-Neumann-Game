@@ -68,6 +68,28 @@
       "effects": {
         "fragileContainerRiskAdditionalContainerDiscount": 5
       }
+    },
+    "relativistic_path_clearing": {
+      "name": "Relativistic Path Clearing",
+      "description": "Prevents integrity loss caused by intersector dust during movement.",
+      "durationSeconds": 300,
+      "ingredients": [
+        {
+          "type": "integrated_circuit",
+          "quantity": 2,
+          "unit": "item",
+          "kind": "item"
+        }
+      ],
+      "effects": {
+        "intersectorIntegrityLossImmunity": true
+      }
+    }
+  },
+  "others": {
+    "mothershipWreck": {
+      "massKg": 2500000000,
+      "radiusMeters": 400
     }
   },
   "manny": {

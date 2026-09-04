@@ -754,6 +754,24 @@ $test->assertEquals(5.0, $dormantAuxiliary->getResourceAmounts()['metals'] ?? nu
 $test->assertEquals(0.01, $dormantAuxiliary->getResourceAmounts()['deuterium'] ?? null, 'dormant Others auxiliary contains exactly 0.01 ECE of deuterium');
 $destroyedAuxiliary = DormantConstruct::fromOthersAuxiliary('aux_test', true);
 $test->assertEquals(0.02, $destroyedAuxiliary->getResourceAmounts()['deuterium'] ?? null, 'destroyed Others auxiliary wreck contains exactly 0.02 ECE of deuterium');
+$mothershipWreck = DormantConstruct::fromOthersMothership('mother_private_source', [
+    'deuterium' => 12.5,
+    'metals' => 8000.0,
+    'ice' => 400.0,
+    'carbon_compounds' => 1200.0,
+]);
+$sameMothershipWreck = DormantConstruct::fromOthersMothership('mother_private_source');
+$test->assertEquals($mothershipWreck->getId(), $sameMothershipWreck->getId(), 'Others mothership wreck factory produces a stable object id');
+$test->assert(!str_contains($mothershipWreck->getId(), 'mother_private_source'), 'Others mothership wreck id does not expose the source ship id');
+$test->assertEquals('others-mothership-wreck-' . substr(hash('sha256', 'others-mothership-wreck|mother_private_source'), 0, 20), $mothershipWreck->getId(), 'Others mothership wreck id follows the canonical hash derivation');
+$restoredMothershipWreck = DormantConstruct::fromArray($mothershipWreck->toArray());
+$test->assertEquals($mothershipWreck->toArray(), $restoredMothershipWreck->toArray(), 'Others mothership wreck serialization preserves subtype, scenario, dimensions and resources');
+$test->assertEquals(DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK, $restoredMothershipWreck->getSubtype(), 'Others mothership wreck factory persists its canonical subtype');
+$test->assertEquals(DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING, $restoredMothershipWreck->getInspectionScenario(), 'Others mothership wreck factory persists its inspection scenario');
+$test->assertEquals(DormantConstruct::OTHERS_MOTHERSHIP_WRECK_MASS_KG, $restoredMothershipWreck->getMass(), 'Others mothership wreck factory uses its canonical mass');
+$test->assertEquals(DormantConstruct::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS, $restoredMothershipWreck->getRadius(), 'Others mothership wreck factory uses its canonical radius');
+$test->assert(in_array(DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING, DormantConstruct::inspectionScenarios(), true), 'relativistic path clearing is a valid dormant construct inspection scenario');
+$test->assert(!in_array(DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING, DormantConstruct::generatableInspectionScenarios(), true), 'relativistic path clearing is excluded from randomly generated dormant construct scenarios');
 
 $gameplayConfig = json_decode((string) file_get_contents(__DIR__ . '/../config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR);
 $trajectoryConfig = $gameplayConfig['asteroidTrajectories'];

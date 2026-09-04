@@ -12,6 +12,7 @@ final class ProbeImprovementCatalog
     public const REINFORCED_CONTAINER_COUPLINGS = 'reinforced_container_couplings';
     public const DISTRIBUTED_THRUST_ANCHORING = 'distributed_thrust_anchoring';
     public const ANATIFORM_ASTEROID_SCULPTING = 'anatiform_asteroid_sculpting';
+    public const RELATIVISTIC_PATH_CLEARING = 'relativistic_path_clearing';
 
     public const DEUTERIUM_COMPRESSION_DURATION_SECONDS = 300;
     public const DEUTERIUM_COMPRESSION_MAX_DEUTERIUM_PERCENT = 200.0;
@@ -25,6 +26,7 @@ final class ProbeImprovementCatalog
         return [
             self::deuteriumCompression($config),
             self::reinforcedContainerCouplings($config),
+            self::relativisticPathClearing($config),
         ];
     }
 
@@ -185,5 +187,45 @@ final class ProbeImprovementCatalog
                 'kind' => 'resource',
             ],
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private static function relativisticPathClearing(array $config): array
+    {
+        return [
+            'id' => self::RELATIVISTIC_PATH_CLEARING,
+            'name' => (string) Config::value($config, self::RELATIVISTIC_PATH_CLEARING . '.name', 'Relativistic Path Clearing'),
+            'description' => (string) Config::value(
+                $config,
+                self::RELATIVISTIC_PATH_CLEARING . '.description',
+                'Prevents integrity loss caused by intersector dust during movement.',
+            ),
+            'installableOnProbe' => true,
+            'durationSeconds' => Config::int($config, self::RELATIVISTIC_PATH_CLEARING . '.durationSeconds', 300),
+            'ingredients' => self::relativisticPathClearingIngredients($config),
+            'effects' => [
+                'intersectorIntegrityLossImmunity' => Config::bool(
+                    $config,
+                    self::RELATIVISTIC_PATH_CLEARING . '.effects.intersectorIntegrityLossImmunity',
+                    true,
+                ),
+            ],
+        ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private static function relativisticPathClearingIngredients(array $config): array
+    {
+        $configured = Config::value($config, self::RELATIVISTIC_PATH_CLEARING . '.ingredients');
+        if (is_array($configured)) {
+            return array_values(array_filter($configured, 'is_array'));
+        }
+
+        return [[
+            'type' => ProbeItem::TYPE_INTEGRATED_CIRCUIT,
+            'quantity' => 2,
+            'unit' => 'item',
+            'kind' => 'item',
+        ]];
     }
 }

@@ -23,6 +23,7 @@ use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\ProbeMessage;
 use VonNeumannGame\Domain\ProbeModel;
+use VonNeumannGame\Domain\ProbeMovement;
 use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
@@ -394,6 +395,10 @@ $configuredContainerCouplingsImprovement = ProbeImprovementCatalog::find('reinfo
 $test->assertEquals(0.4, $configuredContainerCouplingsImprovement['ingredients'][1]['quantity'] ?? null, 'reinforced container couplings consume carbon compounds');
 $test->assertEquals(5, $configuredContainerCouplingsImprovement['effects']['fragileContainerRiskAdditionalContainerDiscount'] ?? null, 'reinforced container couplings discount five additional containers');
 $test->assertEquals(200.0, $configuredProbeImprovement['effects']['maxDeuteriumPercent'] ?? null, 'deuterium compression raises the tank maximum to 200 percent');
+$configuredPathClearingImprovement = ProbeImprovementCatalog::find('relativistic-path-clearing', $loadedGameplayConfig['probeImprovements'] ?? []);
+$test->assertEquals(300, $configuredPathClearingImprovement['durationSeconds'] ?? null, 'relativistic path clearing uses its canonical five-minute installation duration');
+$test->assertEquals(2, $configuredPathClearingImprovement['ingredients'][0]['quantity'] ?? null, 'relativistic path clearing requires two integrated circuits');
+$test->assertEquals(true, $configuredPathClearingImprovement['effects']['intersectorIntegrityLossImmunity'] ?? null, 'relativistic path clearing exposes its intersector integrity immunity effect');
 
 file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks.json', json_encode([], JSON_THROW_ON_ERROR));
 file_put_contents($testConfigPath . DIRECTORY_SEPARATOR . 'additionalsfooterlinks-local.json', json_encode([
@@ -525,6 +530,14 @@ $test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId
 $test->assert(is_string($openApi) && str_contains($openApi, '/api/probe/{probeId}/mannies/{mannyId}/ignite_missile:'), 'main OpenAPI document exposes the canonical Manny missile endpoint');
 $openApiDocument = is_string($openApi) ? yaml_parse($openApi) : false;
 $openApiOthersDocument = is_string($openApiOthers) ? yaml_parse($openApiOthers) : false;
+$documentedProbeImprovementIds = is_array($openApiDocument)
+    ? ($openApiDocument['components']['schemas']['ProbeImprovement']['properties']['id']['enum'] ?? [])
+    : [];
+$documentedProbeImprovementEffects = is_array($openApiDocument)
+    ? ($openApiDocument['components']['schemas']['ProbeImprovement']['properties']['effects']['properties'] ?? [])
+    : [];
+$test->assert(in_array(ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING, $documentedProbeImprovementIds, true), 'main OpenAPI documents the relativistic path clearing improvement id');
+$test->assertEquals('boolean', $documentedProbeImprovementEffects['intersectorIntegrityLossImmunity']['type'] ?? null, 'main OpenAPI documents the relativistic path clearing immunity effect');
 $othersSectorOperation = is_array($openApiOthersDocument) ? ($openApiOthersDocument['paths']['/api/others/sector']['get'] ?? null) : null;
 $test->assert(
     is_array($othersSectorOperation)
@@ -3376,8 +3389,77 @@ $probeMissileKiller = $players->findById($multiProbePlayer->id) ?? throw new Run
 $test->assertEquals(true, $probeKillDetails['destroyed'] ?? null, 'a probe missile can destroy an Others ship');
 $test->assertEquals(1, $probeMissileKiller->othersShipsDestroyed, 'a probe missile kill increments its player Others ship counter');
 $test->assertEquals(0, $probeMissileKiller->othersMothershipsDestroyed, 'destroying a standard Others ship does not increment the mothership counter');
-$othersService->damageShip((string) $probeMissileVictim['public_id'], 10, 'replayed-destroyed-ship', responsiblePlayerId: $multiProbePlayer->id);
+$othersService->damageShip((string) $probeMissileVictim['public_id'], 10, 'replayed-destroyed-ship', ['type' => 'missile', 'missileId' => 'replayed-destroyed-ship'], responsiblePlayerId: $multiProbePlayer->id);
 $test->assertEquals(1, $players->findById($multiProbePlayer->id)?->othersShipsDestroyed, 'replaying damage against an already destroyed ship does not count a second kill');
+
+$wreckFleet = $others->createFleet($othersAlertPlayer->id, $secondaryProbe->currentSector->getX(), $secondaryProbe->currentSector->getY(), $secondaryProbe->currentSector->getZ());
+$wreckMothership = $wreckFleet['ship'];
+$wreckStandardShip = $others->createStandardShip($wreckMothership);
+$pdo->prepare("UPDATE others_inventory_resources SET amount=CASE resource_type WHEN 'deuterium' THEN 12.5 WHEN 'metals' THEN 8000 WHEN 'ice' THEN 400 WHEN 'carbon_compounds' THEN 1200 ELSE 0 END,reserved_amount=CASE WHEN resource_type='metals' THEN 250 ELSE 0 END WHERE ship_id=:ship_id")
+    ->execute(['ship_id' => (int) $wreckMothership['id']]);
+$pdo->prepare("UPDATE others_inventory_resources SET amount=99 WHERE ship_id=:ship_id AND resource_type='metals'")
+    ->execute(['ship_id' => (int) $wreckStandardShip['id']]);
+$pdo->prepare('UPDATE others_ships SET deuterium_stock=777 WHERE id=:id')->execute(['id' => (int) $wreckMothership['id']]);
+$pdo->prepare('UPDATE others_auxiliaries SET cargo_metals=55,cargo_deuterium=4 WHERE ship_id=:ship_id')
+    ->execute(['ship_id' => (int) $wreckMothership['id']]);
+$wreckItemInsert = $pdo->prepare('INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,:type,:space,:reserved,:now,:now)');
+foreach ([
+    ['id' => 'wreck-free-missile', 'ship' => (int) $wreckMothership['id'], 'type' => 'missile', 'reserved' => null],
+    ['id' => 'wreck-reserved-missile', 'ship' => (int) $wreckMothership['id'], 'type' => 'missile', 'reserved' => 987654],
+    ['id' => 'wreck-unmapped-item', 'ship' => (int) $wreckMothership['id'], 'type' => 'future_others_item', 'reserved' => null],
+    ['id' => 'wreck-standard-missile', 'ship' => (int) $wreckStandardShip['id'], 'type' => 'missile', 'reserved' => null],
+] as $wreckItem) {
+    $wreckItemInsert->execute(['public_id' => $wreckItem['id'], 'ship_id' => $wreckItem['ship'], 'type' => $wreckItem['type'], 'space' => 2.0, 'reserved' => $wreckItem['reserved'], 'now' => gmdate('c')]);
+}
+$wreckObjectId = DormantConstruct::fromOthersMothership((string) $wreckMothership['public_id'])->getId();
+$wreckCounterBefore = $players->findById($multiProbePlayer->id)?->othersMothershipsDestroyed ?? 0;
+$destroyedWreckMothership = $othersService->damageShip(
+    (string) $wreckMothership['public_id'],
+    (int) $wreckMothership['integrity'],
+    'wreck-feature-missile-impact',
+    ['type' => 'missile', 'missileId' => 'missile_wreck_feature'],
+    responsiblePlayerId: $multiProbePlayer->id,
+);
+$test->assert($destroyedWreckMothership !== null && $destroyedWreckMothership['destroyed_at'] !== null, 'destroying an Others mothership completes the canonical ship destruction');
+$wreckSectorAfterDestruction = $sectorRepository->load($secondaryProbe->currentSector);
+$wreckObject = $wreckSectorAfterDestruction->findObjectById($wreckObjectId);
+$test->assert($wreckObject instanceof DormantConstruct, 'destroying an Others mothership creates its persistent dormant construct wreck');
+$test->assertEquals(DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK, $wreckObject instanceof DormantConstruct ? $wreckObject->getSubtype() : null, 'mothership destruction creates only the canonical wreck subtype');
+$test->assertEquals(2_500_000_000.0, $wreckObject instanceof DormantConstruct ? $wreckObject->getMass() : null, 'mothership wreck uses the configured kilogram mass');
+$test->assertEquals(400.0, $wreckObject instanceof DormantConstruct ? $wreckObject->getRadius() : null, 'mothership wreck uses the configured meter radius');
+$test->assertEquals(['deuterium' => 12.5, 'metals' => 8000, 'ice' => 400, 'carbon_compounds' => 1200], $wreckObject instanceof DormantConstruct ? $wreckObject->getResourceAmounts() : null, 'mothership wreck copies physical inventory amounts including reserved material but excludes propulsion fuel and fleet cargo');
+$test->assertEquals(0, (int) $pdo->query('SELECT COUNT(*) FROM others_inventory_resources WHERE ship_id=' . (int) $wreckMothership['id'])->fetchColumn(), 'destroyed mothership SQL resources are removed after the wreck snapshot');
+$wreckMissiles = $wreckSectorAfterDestruction->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE));
+$test->assert($wreckMissiles instanceof SectorDriftingItem, 'compatible mothership components become drifting probe items');
+$test->assertEquals(2, $wreckMissiles instanceof SectorDriftingItem ? $wreckMissiles->getQuantity() : null, 'free and reserved mothership missiles drift while standard-ship inventory is lost');
+$test->assertEquals(0.05, $wreckMissiles instanceof SectorDriftingItem ? $wreckMissiles->getContainerSpace() : null, 'drifting Others missiles use the probe missile cargo volume');
+$wreckScan = $kernel->handle('GET', '/api/probe/' . $secondaryProbe->id . '/sector', $multiProbeHeaders);
+$wreckScanObject = array_values(array_filter($wreckScan->body['sector']['objects'] ?? [], static fn(array $object): bool => ($object['id'] ?? null) === $wreckObjectId))[0] ?? [];
+$test->assertEquals('dormant_construct', $wreckScanObject['type'] ?? null, 'mothership wreck scan exposes only the public dormant construct type');
+$test->assertEquals('Destroyed Others mothership', $wreckScanObject['name'] ?? null, 'mothership wreck scan exposes its canonical public name');
+$test->assertEquals('kilogram', $wreckScanObject['massUnit'] ?? null, 'mothership wreck scan exposes SI mass units');
+$test->assertEquals('meter', $wreckScanObject['radiusUnit'] ?? null, 'mothership wreck scan exposes SI radius units');
+$test->assertEquals(true, $wreckScanObject['mannyMineable'] ?? null, 'resource-bearing mothership wreck is Manny-mineable');
+$test->assert(!array_key_exists('subtype', $wreckScanObject) && !array_key_exists('inspectionScenario', $wreckScanObject), 'mothership wreck scan hides internal subtype and inspection scenario');
+$test->assert(!str_contains(json_encode($wreckScanObject, JSON_THROW_ON_ERROR), (string) $wreckMothership['public_id']), 'mothership wreck scan does not expose its source Others ship id');
+$wreckDetectionAlerts = array_values(array_filter($damageWarnings->findByProbeId($secondaryProbe->id), static fn(ProbeDamageWarning $alert): bool => $alert->objectId === $wreckObjectId));
+$test->assertEquals(1, count($wreckDetectionAlerts), 'a physically present probe receives exactly one persistent mothership wreck detection alert');
+$test->assert(str_contains($wreckDetectionAlerts[0]->message ?? '', 'destroyed by missile missile_wreck_feature'), 'mothership wreck alert reports its structured missile cause');
+$pdo->prepare("UPDATE probe_damage_warnings SET status='read',read_at=:now,updated_at=:now WHERE type='sector_object_detected' AND object_id=:object_id")
+    ->execute(['now' => gmdate('c'), 'object_id' => $wreckObjectId]);
+$othersService->damageShip((string) $wreckMothership['public_id'], 100, 'wreck-feature-missile-impact', ['type' => 'missile', 'missileId' => 'missile_wreck_feature'], responsiblePlayerId: $multiProbePlayer->id);
+$wreckSectorAfterReplay = $sectorRepository->load($secondaryProbe->currentSector);
+$replayedWrecks = array_values(array_filter($wreckSectorAfterReplay->getObjects(), static fn($object): bool => $object instanceof DormantConstruct && $object->getId() === $wreckObjectId));
+$replayedWreckMissiles = $wreckSectorAfterReplay->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE));
+$test->assertEquals(1, count($replayedWrecks), 'replaying mothership damage does not duplicate its wreck');
+$test->assertEquals(2, $replayedWreckMissiles instanceof SectorDriftingItem ? $replayedWreckMissiles->getQuantity() : null, 'replaying mothership damage does not duplicate drifting missiles');
+$test->assertEquals($wreckCounterBefore + 1, $players->findById($multiProbePlayer->id)?->othersMothershipsDestroyed, 'replaying mothership damage does not duplicate victory counters');
+$wreckOperationId = 'xstore-mothership-wreck-' . substr(hash('sha256', (string) $wreckMothership['public_id']), 0, 20);
+$wreckOperationStatement = $pdo->prepare('SELECT operation_type,sector_applied,sql_applied,status FROM others_cross_store_operations WHERE public_id=:id');
+$wreckOperationStatement->execute(['id' => $wreckOperationId]);
+$wreckOperation = $wreckOperationStatement->fetch(PDO::FETCH_ASSOC);
+$wreckOperationStatement->closeCursor();
+$test->assertEquals(['operation_type' => 'mothership_wreck', 'sector_applied' => 1, 'sql_applied' => 1, 'status' => 'succeeded'], $wreckOperation ?: null, 'mothership wreck journal reaches its final cross-store state');
 
 $othersMissileVictim = $others->createStandardShip($othersVictimShip);
 $pdo->prepare('UPDATE others_ships SET integrity=10 WHERE id=:id')->execute(['id' => (int) $othersMissileVictim['id']]);
@@ -4249,11 +4331,36 @@ if ($createdProbe !== null) {
         $test->assert(str_contains($listConstructTypesText, $inspectionScenario), 'add-dormant-construct CLI lists structure type ' . $inspectionScenario);
     }
 
+    $missingWreckSourceCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --type=relativistic_path_clearing'
+        . ' --sector=10:0:0';
+    exec($missingWreckSourceCommand . ' 2>&1', $missingWreckSourceOutput, $missingWreckSourceStatus);
+    $test->assert($missingWreckSourceStatus !== 0, 'add-dormant-construct CLI rejects a relativistic path clearing wreck without source ship id');
+    $test->assert(str_contains(implode("\n", $missingWreckSourceOutput), '--source-ship-id is required'), 'add-dormant-construct CLI explains the required wreck source ship id');
+
+    $cliWreckSourceId = 'mother_cli_private_source';
+    $cliWreckCoordinates = new SectorCoordinates(12, 0, 0);
+    $addWreckCommand = escapeshellarg(PHP_BINARY)
+        . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
+        . ' --type=relativistic_path_clearing'
+        . ' --source-ship-id=' . escapeshellarg($cliWreckSourceId)
+        . ' --sector=12:0:0';
+    exec($addWreckCommand . ' 2>&1', $addWreckOutput, $addWreckStatus);
+    $cliWreckId = DormantConstruct::fromOthersMothership($cliWreckSourceId)->getId();
+    $cliWreck = $cliSectorRepository->load($cliWreckCoordinates)->findObjectById($cliWreckId);
+    $test->assertEquals(0, $addWreckStatus, 'add-dormant-construct CLI accepts relativistic path clearing with a source ship id');
+    $test->assert($cliWreck instanceof DormantConstruct, 'add-dormant-construct CLI creates the dedicated Others mothership wreck');
+    $test->assertEquals(DormantConstruct::INSPECTION_SCENARIO_RELATIVISTIC_PATH_CLEARING, $cliWreck instanceof DormantConstruct ? $cliWreck->getInspectionScenario() : null, 'CLI-created Others wreck persists the imposed inspection scenario');
+    $test->assert(!str_contains($cliWreckId, $cliWreckSourceId), 'CLI-created Others wreck keeps the source ship id opaque');
+
     $invalidConstructTypeCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' --type=definitely-not-a-construct'
-        . ' --sector=10:0:0';
+        . ' --sector=14:0:0';
     exec($invalidConstructTypeCommand . ' 2>&1', $invalidConstructTypeOutput, $invalidConstructTypeStatus);
     $test->assert($invalidConstructTypeStatus !== 0, 'add-dormant-construct CLI rejects an unknown forced structure type');
     $test->assert(str_contains(implode("\n", $invalidConstructTypeOutput), 'Unknown structure type'), 'add-dormant-construct CLI explains an unknown forced structure type');
@@ -7580,6 +7687,8 @@ if ($dormantInspectionProbe !== null) {
         description: DormantConstruct::ANATIFORM_ASTEROID_DESCRIPTION,
         inspectionScenario: ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING,
     ));
+    $dormantInspectionWreck = DormantConstruct::fromOthersMothership('mother_inspection_fixture');
+    $dormantInspectionSector->addObject($dormantInspectionWreck);
     $dormantInspectionSector->addObject(new DormantConstruct('dormant-report-random'));
     $sectorRepository->save($dormantInspectionSector);
 
@@ -7587,9 +7696,9 @@ if ($dormantInspectionProbe !== null) {
     $dormantInspectionObjects = array_values(array_filter(
         $dormantInspectionScan->body['sector']['objects'] ?? [],
         static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct'
-            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-thrust-anchoring', 'dormant-report-anatiform', 'dormant-report-random'], true),
+            && in_array($object['id'] ?? null, ['dormant-report-deuterium', 'dormant-report-couplings', 'dormant-report-thrust-anchoring', 'dormant-report-anatiform', $dormantInspectionWreck->getId(), 'dormant-report-random'], true),
     ));
-    $test->assertEquals(5, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
+    $test->assertEquals(6, count($dormantInspectionObjects), 'dormant construct inspection test exposes all public constructs');
     foreach ($dormantInspectionObjects as $dormantInspectionObject) {
         $test->assert(!array_key_exists('inspectionScenario', $dormantInspectionObject), 'dormant construct inspection scenario is not exposed through sector scans');
     }
@@ -7685,6 +7794,26 @@ if ($dormantInspectionProbe !== null) {
     $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING)?->available, 'anatiform asteroid report unlocks its action blueprint');
     $test->assertEquals(null, ProbeImprovementCatalog::find(ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING), 'anatiform asteroid sculpting remains outside the installable improvement catalog');
 
+    $inspectRelativisticPathClearing = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
+        'objectId' => $dormantInspectionWreck->getId(),
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $inspectRelativisticPathClearing->status, 'Manny can inspect a persistent Others mothership wreck');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute([
+        'id' => $dormantInspectionMannyDbId,
+        'ended' => gmdate('c', time() - 1),
+    ]);
+    $processScheduledMannyNow($dormantInspectionMannyDbId);
+    $relativisticPathAlerts = $kernel->handle('GET', '/api/probe/alerts', $dormantInspectionHeaders);
+    $relativisticPathReports = array_values(array_filter(
+        $relativisticPathAlerts->body['alerts'] ?? [],
+        fn(array $alert): bool => ($alert['type'] ?? null) === 'manny_report'
+            && ($alert['report']['objectId'] ?? null) === $dormantInspectionWreck->getId(),
+    ));
+    $test->assertEquals(1, count($relativisticPathReports), 'completed mothership wreck inspection creates one Manny report alert');
+    $test->assert(str_contains((string) ($relativisticPathReports[0]['message'] ?? ''), 'We now know how to reproduce the result.'), 'mothership wreck report contains the canonical relativistic path clearing conclusion');
+    $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING)?->available, 'mothership wreck inspection unlocks relativistic path clearing for the player');
+    $test->assert($sectorRepository->load($dormantInspectionProbe->currentSector)->findObjectById($dormantInspectionWreck->getId()) instanceof DormantConstruct, 'mothership wreck remains present after inspection');
+
     $inspectDormantRandom = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
         'objectId' => 'dormant-report-random',
     ], JSON_THROW_ON_ERROR));
@@ -7697,7 +7826,7 @@ if ($dormantInspectionProbe !== null) {
     $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
     $storedRandomConstruct = $sectorRepository->load($dormantInspectionProbe->currentSector)->findObjectById('dormant-report-random');
     $storedRandomScenario = $storedRandomConstruct instanceof DormantConstruct ? $storedRandomConstruct->toArray()['inspectionScenario'] ?? null : null;
-    $test->assert(in_array($storedRandomScenario, DormantConstruct::inspectionScenarios(), true), 'dormant construct inspection stores the randomly selected scenario in sector JSON');
+    $test->assert(in_array($storedRandomScenario, DormantConstruct::generatableInspectionScenarios(), true), 'dormant construct inspection stores a randomly generatable scenario in sector JSON');
     $dormantInspectionScanAfterRandom = $kernel->handle('GET', '/api/probe/sector', $dormantInspectionHeaders);
     $storedRandomPublicObject = array_values(array_filter(
         $dormantInspectionScanAfterRandom->body['sector']['objects'] ?? [],
@@ -9105,6 +9234,63 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.1, $riskMethod->invoke($movementService, $completedCouplingsProbe, 10), 'reinforced container couplings start risk at ten additional containers');
     $improvedDamageRule = $kernel->handle('GET', '/api/probe/damage-warnings', $improvementHeaders);
     $test->assertEquals(10, $improvedDamageRule->body['rule']['startsAtAdditionalContainers'] ?? null, 'damage-warning rule reflects reinforced container couplings');
+
+    $probeImprovements->markAvailable($improvementProbe->id, ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING);
+    $pathClearingCatalog = $kernel->handle('GET', '/api/probe/probe-improvements-available', $improvementHeaders);
+    $pathClearingRows = array_values(array_filter(
+        $pathClearingCatalog->body['improvements'] ?? [],
+        static fn(array $improvement): bool => ($improvement['id'] ?? null) === ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING,
+    ));
+    $test->assertEquals(true, $pathClearingRows[0]['installableOnProbe'] ?? null, 'relativistic path clearing is exposed as a probe-local installation');
+    $test->assertEquals(2, $pathClearingRows[0]['ingredients'][0]['quantity'] ?? null, 'relativistic path clearing API exposes its two-circuit cost');
+    $pathCircuitA = $storage->addItem($improvementProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
+    $missingPathCircuit = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(422, $missingPathCircuit->status, 'relativistic path clearing refuses a single available integrated circuit');
+    $pathCircuitB = $storage->addItem($improvementProbe, ProbeItem::TYPE_INTEGRATED_CIRCUIT, ProbeItem::INTEGRATED_CIRCUIT_NAME, 0.001);
+    $installPathClearing = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/improve-probe', $improvementHeaders, json_encode([
+        'improvement' => ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $installPathClearing->status, 'relativistic path clearing installation starts through the generic improve-probe action');
+    $test->assertEquals(2, mannyTaskConsumedItemCount($pdo, $improvementMannyId), 'relativistic path clearing consumes exactly two relational item ingredients');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $pathCircuitA->uid), 'relativistic path clearing consumes its first integrated circuit');
+    $test->assertEquals(null, $items->findByUidForProbe($improvementProbe->id, $pathCircuitB->uid), 'relativistic path clearing consumes its second integrated circuit');
+    $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE id = :id')->execute(['id' => $improvementMannyDbId, 'ended' => gmdate('c', time() - 1)]);
+    $processScheduledMannyNow($improvementMannyDbId);
+    $test->assertEquals(true, $probeImprovements->isDone($improvementProbe->id, ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING), 'relativistic path clearing installation is persisted for the selected probe');
+    $test->assertEquals(false, $probeImprovements->isDone($improvementSecondProbe->id, ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING), 'relativistic path clearing does not install itself on a sibling probe');
+
+    $pathClearingLossMethod = new ReflectionMethod(ProbeMovementService::class, 'applyIntersectorIntegrityLoss');
+    $pathClearingLossMethod->setAccessible(true);
+    $pathClearingMovement = new ProbeMovement(
+        900001,
+        $improvementProbe->id,
+        new SectorCoordinates(0, 0, 0),
+        new SectorCoordinates(10, 0, 0),
+        10,
+        'completed',
+        '2026-01-01T00:00:00+00:00',
+        '2026-01-01T00:01:00+00:00',
+        '2026-01-01T00:02:00+00:00',
+        '2026-01-01T00:03:00+00:00',
+        '2026-01-01T00:04:00+00:00',
+        '2026-01-01T00:04:00+00:00',
+        2.0,
+        null,
+        null,
+        null,
+        '2026-01-01T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
+    );
+    $installedPathProbe = $probes->findById($improvementProbe->id) ?? throw new RuntimeException('Expected path-clearing probe.');
+    $installedIntegrityBefore = $installedPathProbe->integrityPercent;
+    $pathClearingLossMethod->invoke($movementService, $installedPathProbe, $pathClearingMovement);
+    $test->assertEquals($installedIntegrityBefore, $installedPathProbe->integrityPercent, 'installed relativistic path clearing cancels intersector dust integrity loss');
+    $uninstalledPathProbe = $probes->findById($improvementSecondProbe->id) ?? throw new RuntimeException('Expected uninstalled sibling probe.');
+    $uninstalledIntegrityBefore = $uninstalledPathProbe->integrityPercent;
+    $pathClearingLossMethod->invoke($movementService, $uninstalledPathProbe, $pathClearingMovement);
+    $test->assert($uninstalledPathProbe->integrityPercent < $uninstalledIntegrityBefore, 'a sibling probe without relativistic path clearing keeps the deterministic integrity loss');
 
     $sectorRepository->save(new SectorContent($improvementProbe->currentSector, [
         new DeuteriumRefuelStation('improvement-deuterium-station', 'Deuterium refuel station', 'improvement-planet', null, gmdate('c')),

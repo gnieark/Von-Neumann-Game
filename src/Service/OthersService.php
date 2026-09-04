@@ -18,12 +18,15 @@ use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\ProbeItem;
+use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\Planet;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DormantConstruct;
+use VonNeumannGame\Sector\SectorDriftingItem;
 
 final class OthersService
 {
@@ -35,6 +38,7 @@ final class OthersService
     private readonly SectorGrid $grid;
     private readonly MovementDurationCalculator $durations;
     private readonly array $movementConfig;
+    private readonly array $gameplayConfig;
 
     public function __construct(
         private readonly OthersRepository $others,
@@ -51,6 +55,7 @@ final class OthersService
         private readonly ?PlayerRepository $players = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
+        $this->gameplayConfig = $gameplayConfig;
         $this->movementConfig = Config::getArray($gameplayConfig, 'movement', $gameplayConfig);
         $this->durations = $durations ?? new MovementDurationCalculator($this->movementConfig);
     }
@@ -987,7 +992,7 @@ final class OthersService
     private function applyMissileImpact(array $projectile,array $target): array
     {
         $pdo=$this->others->pdo(); $key='missile:'.$projectile['public_id'].':'.$target['kind'].':'.$target['id']; $damage=match($target['kind']){'probe'=>(12+(int)floor($this->stableFraction($key.'|damage')*7)),'others_ship'=>10,default=>1};
-        if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$responsiblePlayerId=($projectile['launcher_kind']??null)==='probe'?(int)$projectile['player_id']:null;$ship=$this->damageShip((string)$target['id'],$damage,$key,responsiblePlayerId:$responsiblePlayerId);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
+        if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$responsiblePlayerId=($projectile['launcher_kind']??null)==='probe'?(int)$projectile['player_id']:null;$ship=$this->damageShip((string)$target['id'],$damage,$key,['type'=>'missile','missileId'=>(string)$projectile['public_id']],responsiblePlayerId:$responsiblePlayerId);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
         try{$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')]);}catch(\PDOException $e){if(str_contains(strtolower($e->getMessage()),'unique')){return ['damage'=>0,'replayed'=>true];}throw $e;}
         if($target['kind']==='manny'){$pdo->prepare("DELETE FROM mannies WHERE uid=:uid AND location_type='sector'")->execute(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
         if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target);return ['damage'=>1,'destroyed'=>true];}
@@ -1028,18 +1033,21 @@ final class OthersService
     }
 
     /** Applies one idempotent damage event and returns the remaining ship row when it still exists. */
-    public function damageShip(string $shipPublicId,int $damage,string $eventKey,bool $relativistic=false,?int $responsiblePlayerId=null): ?array
+    public function damageShip(string $shipPublicId,int $damage,string $eventKey,array $cause,bool $relativistic=false,?int $responsiblePlayerId=null): ?array
     {
-        return $this->others->transaction(function()use($shipPublicId,$damage,$eventKey,$relativistic,$responsiblePlayerId):?array{$pdo=$this->others->pdo();$ship=$this->others->findShipByPublicId($shipPublicId);if($ship===null||$ship['destroyed_at']!==null){return $ship;}
+        return $this->others->transaction(function()use($shipPublicId,$damage,$eventKey,$cause,$relativistic,$responsiblePlayerId):?array{$pdo=$this->others->pdo();$ship=$this->others->findShipByPublicId($shipPublicId);if($ship===null||$ship['destroyed_at']!==null){return $ship;}
             $exists=$pdo->prepare('SELECT 1 FROM others_damage_events WHERE event_key=:key');$exists->execute(['key'=>$eventKey]);if($exists->fetchColumn()!==false){return $ship;}
             $applied=$relativistic?(int)$ship['integrity']:min(max(0,$damage),(int)$ship['integrity']);$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,\'others_ship\',:target,:damage,:now)')->execute(['key'=>$eventKey,'target'=>$shipPublicId,'damage'=>$applied,'now'=>gmdate('c')]);
-            $remaining=$relativistic?0:max(0,(int)$ship['integrity']-$applied);$pdo->prepare('UPDATE others_ships SET integrity=:integrity,updated_at=:now WHERE id=:id')->execute(['integrity'=>$remaining,'now'=>gmdate('c'),'id'=>(int)$ship['id']]);if($remaining===0){$this->destroyShip($ship,$responsiblePlayerId);return $this->others->findShipByPublicId($shipPublicId);}return $this->others->findShipByPublicId($shipPublicId);});
+            $remaining=$relativistic?0:max(0,(int)$ship['integrity']-$applied);$pdo->prepare('UPDATE others_ships SET integrity=:integrity,updated_at=:now WHERE id=:id')->execute(['integrity'=>$remaining,'now'=>gmdate('c'),'id'=>(int)$ship['id']]);if($remaining===0){$this->destroyShip($ship,$responsiblePlayerId,$cause);return $this->others->findShipByPublicId($shipPublicId);}return $this->others->findShipByPublicId($shipPublicId);});
     }
 
-    private function destroyShip(array $ship, ?int $responsiblePlayerId): void
+    private function destroyShip(array $ship, ?int $responsiblePlayerId, array $cause): void
     {
         $pdo = $this->others->pdo();
         $now = gmdate('c');
+        $wreckOperationId = $ship['type'] === 'mothership'
+            ? $this->createMothershipWreck($ship, $cause, $now)
+            : null;
         $ships = $ship['type'] === 'mothership'
             ? $this->others->findActiveShipsByFleetId((int) $ship['fleet_id'])
             : [$ship];
@@ -1067,6 +1075,163 @@ final class OthersService
         }
         if ($destroyedTarget && $responsiblePlayerId !== null && $this->players !== null) {
             $this->players->recordOthersShipDestroyed($responsiblePlayerId, $ship['type'] === 'mothership');
+        }
+        if ($wreckOperationId !== null) {
+            $pdo->prepare("UPDATE others_cross_store_operations SET sql_applied=1,status='succeeded',updated_at=:now WHERE public_id=:id")
+                ->execute(['now' => $now, 'id' => $wreckOperationId]);
+        }
+    }
+
+    /** @param array<string, mixed> $ship @param array<string, mixed> $cause */
+    private function createMothershipWreck(array $ship, array $cause, string $now): string
+    {
+        if ($this->sectors === null) {
+            throw new \RuntimeException('Sector storage is unavailable for an Others mothership wreck.');
+        }
+
+        $causeType = (string) ($cause['type'] ?? '');
+        match ($causeType) {
+            'missile' => isset($cause['missileId']) && (string) $cause['missileId'] !== ''
+                ? true
+                : throw new \InvalidArgumentException('A missile destruction cause requires missileId.'),
+            'motorized_asteroid' => isset($cause['asteroidId'], $cause['trajectoryUid'])
+                && (string) $cause['asteroidId'] !== '' && (string) $cause['trajectoryUid'] !== ''
+                    ? true
+                    : throw new \InvalidArgumentException('A motorized asteroid destruction cause requires asteroidId and trajectoryUid.'),
+            default => throw new \InvalidArgumentException('Unknown Others mothership destruction cause.'),
+        };
+
+        $pdo = $this->others->pdo();
+        $operationId = 'xstore-mothership-wreck-' . substr(hash('sha256', (string) $ship['public_id']), 0, 20);
+        $operationStmt = $pdo->prepare('SELECT * FROM others_cross_store_operations WHERE public_id=:id');
+        $operationStmt->execute(['id' => $operationId]);
+        $operation = $operationStmt->fetch();
+
+        if ($operation === false) {
+            $resourceAmounts = [
+                ResourceComposition::DEUTERIUM => 0.0,
+                ResourceComposition::METALS => 0.0,
+                ResourceComposition::ICE => 0.0,
+                ResourceComposition::CARBON_COMPOUNDS => 0.0,
+            ];
+            $resourceStmt = $pdo->prepare('SELECT resource_type,amount FROM others_inventory_resources WHERE ship_id=:ship_id AND amount>0');
+            $resourceStmt->execute(['ship_id' => (int) $ship['id']]);
+            foreach ($resourceStmt->fetchAll() as $resource) {
+                $type = (string) $resource['resource_type'];
+                if (array_key_exists($type, $resourceAmounts)) {
+                    $resourceAmounts[$type] = round((float) $resource['amount'], 4);
+                }
+            }
+
+            $itemStmt = $pdo->prepare('SELECT type,COUNT(*) AS quantity FROM others_inventory_items WHERE ship_id=:ship_id GROUP BY type');
+            $itemStmt->execute(['ship_id' => (int) $ship['id']]);
+            $driftingItems = [];
+            foreach ($itemStmt->fetchAll() as $item) {
+                switch ((string) $item['type']) {
+                    case 'missile':
+                        $driftingItems[] = [
+                            'type' => ProbeItem::TYPE_MISSILE,
+                            'quantity' => (int) $item['quantity'],
+                            'containerSpace' => Config::float(
+                                $this->gameplayConfig,
+                                'crafting.missile.containerSpace',
+                                CraftingRecipeCatalog::MISSILE_CONTAINER_SPACE,
+                            ),
+                        ];
+                        break;
+                }
+            }
+
+            $wreck = DormantConstruct::fromOthersMothership(
+                (string) $ship['public_id'],
+                $resourceAmounts,
+                Config::float($this->gameplayConfig, 'others.mothershipWreck.massKg', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_MASS_KG),
+                Config::float($this->gameplayConfig, 'others.mothershipWreck.radiusMeters', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS),
+            );
+            $payload = [
+                'shipId' => (string) $ship['public_id'],
+                'objectId' => $wreck->getId(),
+                'sector' => ['x' => (int) $ship['sector_x'], 'y' => (int) $ship['sector_y'], 'z' => (int) $ship['sector_z']],
+                'cause' => $cause,
+                'resourceAmounts' => $resourceAmounts,
+                'driftingItems' => $driftingItems,
+            ];
+            $pdo->prepare("INSERT INTO others_cross_store_operations (public_id,action_id,operation_type,payload_json,sql_applied,sector_applied,status,created_at,updated_at) VALUES (:id,NULL,'mothership_wreck',:payload,0,0,'pending',:now,:now)")
+                ->execute(['id' => $operationId, 'payload' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), 'now' => $now]);
+            $sectorApplied = false;
+        } else {
+            $payload = json_decode((string) $operation['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($payload)) {
+                throw new \RuntimeException('Invalid mothership wreck operation payload.');
+            }
+            $resourceAmounts = is_array($payload['resourceAmounts'] ?? null) ? $payload['resourceAmounts'] : [];
+            $driftingItems = is_array($payload['driftingItems'] ?? null) ? $payload['driftingItems'] : [];
+            $wreck = DormantConstruct::fromOthersMothership(
+                (string) $ship['public_id'],
+                $resourceAmounts,
+                Config::float($this->gameplayConfig, 'others.mothershipWreck.massKg', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_MASS_KG),
+                Config::float($this->gameplayConfig, 'others.mothershipWreck.radiusMeters', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS),
+            );
+            $sectorApplied = (bool) $operation['sector_applied'];
+        }
+
+        $sectorCoordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
+        if (!$sectorApplied) {
+            $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
+            if ($sector->findObjectById($wreck->getId()) === null) {
+                $sector->addObject($wreck);
+                foreach ($driftingItems as $item) {
+                    if (!is_array($item) || ($item['type'] ?? null) !== ProbeItem::TYPE_MISSILE || (int) ($item['quantity'] ?? 0) <= 0) {
+                        continue;
+                    }
+                    $objectId = SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE);
+                    $existing = $sector->findObjectById($objectId);
+                    if ($existing instanceof SectorDriftingItem) {
+                        $sector->replaceObject($existing->withQuantity($existing->getQuantity() + (int) $item['quantity']));
+                    } else {
+                        $sector->addObject(new SectorDriftingItem(
+                            $objectId,
+                            ProbeItem::MISSILE_NAME,
+                            ProbeItem::TYPE_MISSILE,
+                            (int) $item['quantity'],
+                            (float) $item['containerSpace'],
+                        ));
+                    }
+                }
+                $this->sectors->saveSector($sector);
+            }
+            $pdo->prepare('UPDATE others_cross_store_operations SET sector_applied=1,updated_at=:now WHERE public_id=:id')
+                ->execute(['now' => $now, 'id' => $operationId]);
+        }
+
+        $this->createMothershipWreckAlerts($sectorCoordinates, $wreck, $cause);
+
+        return $operationId;
+    }
+
+    /** @param array<string, mixed> $cause */
+    private function createMothershipWreckAlerts(SectorCoordinates $sector, DormantConstruct $wreck, array $cause): void
+    {
+        if ($this->probes === null || $this->alerts === null) {
+            return;
+        }
+        $message = match ((string) ($cause['type'] ?? '')) {
+            'missile' => 'An Others mothership was destroyed by missile ' . (string) $cause['missileId'] . '. Its remains have been detected as a dormant construct. A close inspection by a Manny may be worthwhile.',
+            'motorized_asteroid' => 'An Others mothership was destroyed by the impact of motorized asteroid ' . (string) $cause['asteroidId'] . '. Its remains have been detected as a dormant construct. A close inspection by a Manny may be worthwhile.',
+        };
+        foreach ($this->probes->findBySector($sector) as $probe) {
+            if (!$this->probeIsPresentInSector($probe, $sector)) {
+                continue;
+            }
+            $this->alerts->createSectorObjectDetectedAlert(
+                $probe->id,
+                null,
+                $sector,
+                $wreck->getId(),
+                $wreck->getType()->value,
+                DormantConstruct::OTHERS_MOTHERSHIP_WRECK_NAME,
+                $message,
+            );
         }
     }
 
