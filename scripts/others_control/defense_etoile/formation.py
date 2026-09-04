@@ -34,6 +34,12 @@ class FormationCoordinator:
         self.hazards = hazards
         self.policy = policy
         self.log = logger
+        self.activity_guards: dict[Coordinates, dict[str, Any]] = {}
+        self.activity_center: Coordinates | None = None
+
+    def clear_activity_watch(self) -> None:
+        self.activity_guards = {}
+        self.activity_center = None
 
     def reconcile(
         self,
@@ -43,10 +49,12 @@ class FormationCoordinator:
         *,
         missile_counts: dict[str, int],
     ) -> CycleResult:
+        self.clear_activity_watch()
         mothership_id = require_string(mothership.get("id"), "mothership.id")
         center = ship_sector(mothership)
         if center is None:
             raise ApiContractError("Le vaisseau mère n'a pas de secteur courant exploitable.")
+        self.activity_center = center
         neighbors = tuple(add_coordinates(center, offset) for offset in NEIGHBOR_OFFSETS)
         neighbor_set = set(neighbors)
 
@@ -108,10 +116,13 @@ class FormationCoordinator:
 
         tactically_committed: set[str] = set()
         for coordinates, guard in guards.items():
-            if self.engagement.reconcile(guard, coordinates, center, result):
+            engagement = self.engagement.reconcile(guard, coordinates, center, result)
+            if engagement.engaged:
                 tactically_committed.add(
                     require_string(guard.get("id"), "guard ship.id")
                 )
+            if engagement.remains_on_station:
+                self.activity_guards[coordinates] = guard
 
         known_black_holes = {
             coordinates
@@ -176,6 +187,7 @@ class FormationCoordinator:
                 continue
             claimed_home_ships.add(replacement_id)
             if self.commands.move(guard, center, result):
+                self.activity_guards.pop(coordinates, None)
                 self.log(
                     f"Relève engagée : {guard_id} retourne auprès du vaisseau mère."
                 )
@@ -222,6 +234,21 @@ class FormationCoordinator:
             f"{len(known_black_holes)} trou(s) noir(s) certain(s), "
             f"{result.accepted_commands} commande(s) acceptée(s)."
         )
+        return result
+
+    def reconcile_activity(self, result: CycleResult) -> CycleResult:
+        """Actualise uniquement les observations des sentinelles en poste."""
+        if not self.activity_guards:
+            return result
+        if self.activity_center is None:
+            raise ApiContractError("Le centre tactique de la formation n'est pas disponible.")
+
+        for coordinates, guard in list(self.activity_guards.items()):
+            engagement = self.engagement.reconcile(
+                guard, coordinates, self.activity_center, result
+            )
+            if not engagement.remains_on_station:
+                self.activity_guards.pop(coordinates, None)
         return result
 
 

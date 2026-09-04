@@ -126,6 +126,8 @@ class FakeApi:
         self.inventory_transfers: list[tuple[str, str, str, tuple[str, ...]]] = []
         self.ship_calls = 0
         self.fleet_calls = 0
+        self.autonomous_unit_calls: list[str] = []
+        self.inventory_calls: list[str] = []
 
     def get_ship(self, ship_id: str) -> dict[str, Any]:
         self.ship_calls += 1
@@ -149,9 +151,11 @@ class FakeApi:
         return response
 
     def get_autonomous_units(self, ship_id: str) -> list[dict[str, Any]]:
+        self.autonomous_unit_calls.append(ship_id)
         return self.autonomous_units.get(ship_id, [])
 
     def get_inventory(self, ship_id: str) -> dict[str, Any]:
+        self.inventory_calls.append(ship_id)
         amounts = self.resources.get(ship_id, {})
         resources = {
             resource_type: {

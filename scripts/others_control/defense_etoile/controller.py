@@ -126,6 +126,7 @@ class DefenseEtoileAttente:
             self.log(line)
 
     def run_cycle(self) -> CycleResult:
+        self.formation.clear_activity_watch()
         result = CycleResult()
         if self.mothership_id is not None:
             mothership = self.api.get_ship(self.mothership_id)
@@ -169,6 +170,10 @@ class DefenseEtoileAttente:
             result,
             missile_counts=armament.missile_counts,
         )
+
+    def run_activity_cycle(self) -> CycleResult:
+        """Observe les sentinelles en poste sans relancer la maintenance de flotte."""
+        return self.formation.reconcile_activity(CycleResult())
 
     def _load_fleet_ships(self, fleet_id: str) -> list[dict[str, Any]]:
         fleet = self.api.get_fleet(fleet_id)

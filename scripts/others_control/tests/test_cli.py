@@ -21,6 +21,8 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(mothership_arguments.fleet_id)
         self.assertEqual("fleet_test", fleet_arguments.fleet_id)
         self.assertIsNone(fleet_arguments.mothership_id)
+        self.assertEqual(20.0, fleet_arguments.activity_refresh_seconds)
+        self.assertEqual(300.0, fleet_arguments.idle_refresh_seconds)
         with redirect_stderr(StringIO()):
             with self.assertRaises(SystemExit):
                 parser.parse_args([])
@@ -50,6 +52,40 @@ class CliTests(unittest.TestCase):
         self.assertEqual(["summary", "cycle"], calls)
         self.assertEqual([call()], controller.log_fleet_summary.call_args_list)
         http_api.assert_called_once_with("http://localhost", "token", 10.0)
+
+    @patch("scripts.others_control.defense_etoile.cli.time.sleep")
+    @patch("scripts.others_control.defense_etoile.cli.time.monotonic")
+    @patch("scripts.others_control.defense_etoile.cli.DefenseEtoileAttente")
+    @patch("scripts.others_control.defense_etoile.cli.HttpOthersApi")
+    @patch("scripts.others_control.defense_etoile.cli.load_config")
+    def test_cli_runs_activity_cycles_every_twenty_seconds(
+        self,
+        load_config: Mock,
+        http_api: Mock,
+        controller_class: Mock,
+        monotonic: Mock,
+        sleep: Mock,
+    ) -> None:
+        load_config.return_value = ApiConfiguration("http://localhost", "token")
+        controller = controller_class.return_value
+        controller.run_cycle.return_value = CycleResult()
+        controller.run_activity_cycle.return_value = CycleResult()
+        clock = [0.0]
+        monotonic.side_effect = lambda: clock[0]
+
+        def advance_then_stop(delay: float) -> None:
+            if sleep.call_count == 2:
+                raise KeyboardInterrupt
+            clock[0] += delay
+
+        sleep.side_effect = advance_then_stop
+
+        exit_code = main(["--fleet-id", "fleet_test"])
+
+        self.assertEqual(0, exit_code)
+        controller.run_cycle.assert_called_once_with()
+        controller.run_activity_cycle.assert_called_once_with()
+        self.assertEqual([call(20.0), call(20.0)], sleep.call_args_list)
 
 
 if __name__ == "__main__":

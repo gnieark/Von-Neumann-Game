@@ -8,7 +8,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .config import CONFIG_PATH, IDLE_REFRESH_SECONDS, TIMEOUT_SECONDS, load_config
+from .config import (
+    ACTIVITY_REFRESH_SECONDS,
+    CONFIG_PATH,
+    IDLE_REFRESH_SECONDS,
+    TIMEOUT_SECONDS,
+    load_config,
+)
 from .controller import DefenseEtoileAttente
 from .errors import ApiContractError, ApiRequestError, ConfigurationError
 from .http_api import HttpOthersApi
@@ -39,7 +45,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--idle-refresh-seconds", type=float, default=IDLE_REFRESH_SECONDS,
-        help="Intervalle maximal entre deux contrôles (défaut : 300)",
+        help="Intervalle maximal entre deux contrôles généraux (défaut : 300)",
+    )
+    parser.add_argument(
+        "--activity-refresh-seconds", type=float, default=ACTIVITY_REFRESH_SECONDS,
+        help="Intervalle entre deux détections d'activité de sonde (défaut : 20)",
     )
     parser.add_argument(
         "--timeout-seconds", type=float, default=TIMEOUT_SECONDS,
@@ -53,6 +63,12 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.idle_refresh_seconds < 30:
         print(
             "Erreur : --idle-refresh-seconds doit être supérieur ou égal à 30.",
+            file=sys.stderr,
+        )
+        return 2
+    if arguments.activity_refresh_seconds <= 0:
+        print(
+            "Erreur : --activity-refresh-seconds doit être strictement positif.",
             file=sys.stderr,
         )
         return 2
@@ -78,12 +94,19 @@ def main(argv: list[str] | None = None) -> int:
 
     retry_delay = 5.0
     summary_pending = True
+    next_general_at = 0.0
+    next_activity_at = 0.0
     while True:
+        now = time.monotonic()
+        general_cycle = now >= next_general_at
         try:
             if summary_pending:
                 controller.log_fleet_summary()
                 summary_pending = False
-            result = controller.run_cycle()
+            if general_cycle:
+                result = controller.run_cycle()
+            else:
+                result = controller.run_activity_cycle()
             retry_delay = 5.0
         except ApiRequestError as error:
             if error.status in {401, 403, 404}:
@@ -94,7 +117,11 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.once:
                 return 1
             time.sleep(delay)
-            retry_delay = min(arguments.idle_refresh_seconds, retry_delay * 2)
+            retry_delay = min(
+                arguments.activity_refresh_seconds,
+                arguments.idle_refresh_seconds,
+                retry_delay * 2,
+            )
             continue
         except (ApiContractError, ConfigurationError) as error:
             print(f"Erreur : {error}", file=sys.stderr)
@@ -104,13 +131,30 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.once:
                 return 1
             time.sleep(retry_delay)
-            retry_delay = min(arguments.idle_refresh_seconds, retry_delay * 2)
+            retry_delay = min(
+                arguments.activity_refresh_seconds,
+                arguments.idle_refresh_seconds,
+                retry_delay * 2,
+            )
             continue
 
         if arguments.once:
             return 0
-        delay = result.sleep_seconds(arguments.idle_refresh_seconds)
-        timestamped_logger(f"Prochain contrôle dans {delay:.0f} s.")
+        completed_at = time.monotonic()
+        if general_cycle:
+            next_general_at = completed_at + result.sleep_seconds(
+                arguments.idle_refresh_seconds
+            )
+            next_activity_at = completed_at + arguments.activity_refresh_seconds
+        else:
+            next_activity_at = completed_at + arguments.activity_refresh_seconds
+        delay = max(0.0, min(next_general_at, next_activity_at) - completed_at)
+        timestamped_logger(
+            f"Prochaine détection d'activité dans "
+            f"{max(0.0, next_activity_at - completed_at):.0f} s ; "
+            f"prochain contrôle général dans "
+            f"{max(0.0, next_general_at - completed_at):.0f} s."
+        )
         try:
             time.sleep(delay)
         except KeyboardInterrupt:

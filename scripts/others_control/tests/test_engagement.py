@@ -15,6 +15,54 @@ from scripts.others_control.tests.support import (
 
 
 class EngagementTests(unittest.TestCase):
+    def test_activity_cycle_only_polls_the_two_detection_endpoints(self) -> None:
+        center = (0, 0, 0)
+        guard_sector = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        api = FakeApi([
+            ship("mother", center, ship_type="mothership"),
+            ship("guard", guard_sector),
+        ], scans={guard_sector: detailed_scan()})
+        controller = DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        )
+        controller.run_cycle()
+        initial_ship_calls = api.ship_calls
+        initial_fleet_calls = api.fleet_calls
+        api.scan_calls.clear()
+        api.autonomous_unit_calls.clear()
+        api.inventory_calls.clear()
+
+        controller.run_activity_cycle()
+
+        self.assertEqual(initial_ship_calls, api.ship_calls)
+        self.assertEqual(initial_fleet_calls, api.fleet_calls)
+        self.assertEqual(["guard"], api.autonomous_unit_calls)
+        self.assertEqual([guard_sector], api.scan_calls)
+        self.assertEqual([], api.inventory_calls)
+
+    def test_activity_cycle_can_engage_and_remove_a_returning_guard(self) -> None:
+        center = (0, 0, 0)
+        guard_sector = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        scan = detailed_scan(probes=[{"id": 42, "status": "idle"}])
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"), ship("guard", guard_sector)],
+            scans={guard_sector: scan},
+            inventories={"guard": [missile_item("missile-a")]},
+        )
+        controller = DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        )
+        controller.run_cycle()
+        scan["objects"] = [{"id": "item-a", "type": "drifting_item", "quantity": 1}]
+
+        controller.run_activity_cycle()
+        scans_after_return = len(api.scan_calls)
+        controller.run_activity_cycle()
+
+        self.assertEqual([("guard", "missile-a", "42")], api.missile_launches)
+        self.assertEqual([("guard", center)], api.moves)
+        self.assertEqual(scans_after_return, len(api.scan_calls))
+
     def test_deployed_manny_uses_two_missiles_then_returns(self) -> None:
         center = (0, 0, 0)
         guard_sector = add_coordinates(center, NEIGHBOR_OFFSETS[0])

@@ -36,8 +36,10 @@ Pour vérifier une seule réconciliation sans maintenir le processus en attente 
 python3 scripts/others_control/defense_etoile_attente.py --once --fleet-id fleet_0123456789abcdefabcd
 ```
 
-Le contrôleur attend au plus cinq minutes entre deux contrôles et se réveille
-plus tôt lorsque `arrivalAt` annonce une arrivée. Les rappels dépassant la portée
+Le contrôleur vérifie toutes les vingt secondes les activités attribuables aux
+sondes depuis chaque sentinelle en poste. La réconciliation générale de la flotte
+reste espacée d'au plus cinq minutes et se réveille plus tôt lorsque `arrivalAt`
+annonce une arrivée. Les rappels dépassant la portée
 d'un mouvement sont automatiquement découpés en étapes de dix secteurs. Un
 vaisseau seul déjà immobilisé dans un secteur contenant un trou noir n'est pas
 encore rappelé dans cette version.
@@ -116,6 +118,8 @@ Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
 comme désignateur de flotte. La précision du scan et l'historique de visite
 restent propres à cette flotte. Les Mannys déployées sont suivies par la route
 `autonomous-units` de la sentinelle et les stocks par son inventaire.
+Les deux routes d'observation tactique sont interrogées toutes les vingt secondes ;
+les lectures d'inventaire et les commandes ne sont ajoutées qu'en cas d'engagement.
 
 ### Architecture et tests
 

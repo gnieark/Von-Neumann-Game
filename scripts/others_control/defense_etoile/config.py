@@ -13,6 +13,7 @@ from .errors import ConfigurationError
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 TIMEOUT_SECONDS = 10.0
 IDLE_REFRESH_SECONDS = 300.0
+ACTIVITY_REFRESH_SECONDS = 20.0
 
 
 @dataclass(frozen=True)

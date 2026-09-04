@@ -87,3 +87,9 @@ class ScoutState:
     pending_events: list[EngagementEvent] = field(default_factory=list)
     return_required: bool = False
     laser_return_due: datetime | None = None
+
+
+@dataclass(frozen=True)
+class EngagementResult:
+    engaged: bool
+    remains_on_station: bool
