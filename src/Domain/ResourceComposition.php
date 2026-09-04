@@ -6,6 +6,7 @@ namespace VonNeumannGame\Domain;
 
 final class ResourceComposition
 {
+    public const DEUTERIUM_TANK_POINTS_PER_ECE = 100.0;
     public const DEUTERIUM = 'deuterium';
     public const METALS = 'metals';
     public const ICE = 'ice';

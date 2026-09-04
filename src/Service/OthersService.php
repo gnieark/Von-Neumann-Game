@@ -783,8 +783,18 @@ final class OthersService
     private function finishHarvest(array $action, array $harvest, array $output, string $now, bool $canceled, ?string $failure = null): void
     {
         $pdo = $this->others->pdo(); $stored = is_array($output['stored'] ?? null) ? $output['stored'] : [];
+        $inventoryStored = $stored;
+        if ($failure === null) {
+            $deuteriumAllocation = $this->allocateHarvestedDeuterium(
+                (int) $harvest['ship_id'],
+                (float) ($stored[ResourceComposition::DEUTERIUM] ?? 0.0),
+                $now,
+            );
+            $inventoryStored[ResourceComposition::DEUTERIUM] = $deuteriumAllocation['inventoryEce'];
+            $output['deuteriumAllocation'] = $deuteriumAllocation;
+        }
         foreach (ResourceComposition::TYPES as $type) {
-            $amount = (float) ($stored[$type] ?? 0.0);
+            $amount = (float) ($inventoryStored[$type] ?? 0.0);
             if ($amount > 0.0) { $pdo->prepare('UPDATE others_inventory_resources SET amount=amount+:amount,updated_at=:now WHERE ship_id=:ship_id AND resource_type=:type')->execute(['amount' => $amount, 'now' => $now, 'ship_id' => (int) $harvest['ship_id'], 'type' => $type]); }
         }
         $pdo->prepare("UPDATE others_auxiliaries SET status='inactive',location_type='embarked',spatial_state='drifting',sector_x=NULL,sector_y=NULL,sector_z=NULL,object_id=NULL,current_action_id=NULL,updated_at=:now WHERE current_action_id=:action_id")->execute(['now' => $now, 'action_id' => (int) $action['id']]);
@@ -795,6 +805,49 @@ final class OthersService
         $error = $failure !== null ? ['code' => $failure, 'message' => 'The harvest could not be completed.'] : null;
         $pdo->prepare("UPDATE others_harvests SET phase=:phase,pending_output_json=:output,updated_at=:now WHERE id=:id")->execute(['phase' => $status, 'output' => json_encode($output, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $harvest['id']]);
         $pdo->prepare("UPDATE others_actions SET status=:status,result_json=:result,error_json=:error,completed_at=:now,updated_at=:now WHERE id=:id AND status IN ('queued','running','cancel_requested')")->execute(['status' => $status, 'result' => $result === null ? null : json_encode($result, JSON_THROW_ON_ERROR), 'error' => $error === null ? null : json_encode($error, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+    }
+
+    /** @return array{tankPoints:float,tankEquivalentEce:float,inventoryEce:float} */
+    private function allocateHarvestedDeuterium(int $shipId, float $storedEce, string $now): array
+    {
+        $storedEce = round(max(0.0, $storedEce), 4);
+        $pdo = $this->others->pdo();
+        $sql = 'SELECT deuterium_stock,deuterium_capacity,deuterium_reserved FROM others_ships WHERE id=:id';
+        if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql') {
+            $sql .= ' FOR UPDATE';
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(['id' => $shipId]);
+        $ship = $stmt->fetch();
+        if (!is_array($ship)) {
+            throw new \RuntimeException('Others harvest carrier disappeared before deuterium allocation.');
+        }
+
+        $freeTankPoints = max(
+            0.0,
+            (float) $ship['deuterium_capacity']
+                - (float) $ship['deuterium_stock']
+                - (float) $ship['deuterium_reserved'],
+        );
+        // Harvested resources are canonical to 0.0001 ECE, or 0.01 tank point.
+        $freeTankEce = floor(($freeTankPoints * 100) + 0.00001) / 10000;
+        $tankEquivalentEce = round(min($storedEce, $freeTankEce), 4);
+        $tankPoints = round($tankEquivalentEce * ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE, 4);
+        $inventoryEce = round($storedEce - $tankEquivalentEce, 4);
+
+        if ($tankPoints > 0.0) {
+            $pdo->prepare(
+                'UPDATE others_ships
+                 SET deuterium_stock=deuterium_stock+:tank_points,updated_at=:now
+                 WHERE id=:id'
+            )->execute(['tank_points' => $tankPoints, 'now' => $now, 'id' => $shipId]);
+        }
+
+        return [
+            'tankPoints' => $tankPoints,
+            'tankEquivalentEce' => $tankEquivalentEce,
+            'inventoryEce' => $inventoryEce,
+        ];
     }
 
     private function scheduleExistingAction(array $action, string $runAt, string $expectedStatus): void

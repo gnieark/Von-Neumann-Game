@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Moissons Others : après la consommation opérationnelle de 10 %, le deutérium conservé remplit désormais en priorité le réservoir du vaisseau coordinateur à raison de 100 points par ECE ; seule la quantité excédentaire rejoint la soute, sans empiéter sur la capacité réservée aux transferts de carburant en cours. Le résultat de l’action détaille cette répartition.
 - Destruction d’un vaisseau mère Others : une épave persistante et minable apparaît désormais dans son secteur, reçoit toutes les matières premières encore présentes dans sa soute et met ses missiles compatibles à la dérive pour récupération par une Manny. Toutes les sondes physiquement présentes sont alertées de la cause et peuvent inspecter les restes.
 - Amélioration de sonde `Relativistic Path Clearing` : l’inspection d’une épave de vaisseau mère débloque ce blueprint au niveau du joueur ; son installation sur une sonde coûte deux circuits intégrés et supprime uniquement sa perte d’intégrité due aux poussières intersectorielles, sans neutraliser collisions, containers fragiles, armes, astéroïdes ou trous noirs.
 - Statistiques publiques : ajout du podium des chasseurs d’Others, classé par nombre total de vaisseaux Others détruits, et du podium des éradicateurs d’Others, consacré aux destructions de vaisseaux mères ; les deux classements sont agrégés par joueur possédant au moins une sonde publique et disponibles en français et en anglais.

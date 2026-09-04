@@ -26,7 +26,6 @@ final class ProbeStorageService
 {
     private const ATOMIC_PRINTER_SPACE = 0.3;
     private const ATOMIC_PRINTER_TASK = 'atomic_printing';
-    private const DEUTERIUM_STOCK_PERCENT_PER_ECE = 100.0;
     private const EPSILON = 0.00001;
 
     public function __construct(
@@ -428,10 +427,10 @@ final class ProbeStorageService
         }
         if ($type === ResourceComposition::DEUTERIUM) {
             $maxDeuterium = $this->maxDeuteriumPercent($probe);
-            $result = $this->probes->addDeuteriumStock($probe->id, $amount * self::DEUTERIUM_STOCK_PERCENT_PER_ECE, $maxDeuterium);
+            $result = $this->probes->addDeuteriumStock($probe->id, $amount * ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE, $maxDeuterium);
             $probe->deuteriumStock = $result['stock'];
 
-            return round($result['accepted'] / self::DEUTERIUM_STOCK_PERCENT_PER_ECE, 4);
+            return round($result['accepted'] / ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE, 4);
         }
 
         $this->ensureProbeStorage($probe);
@@ -472,8 +471,8 @@ final class ProbeStorageService
             return 0.0;
         }
         if ($type === ResourceComposition::DEUTERIUM) {
-            $consumed = min($amount, round(max(0.0, $probe->deuteriumStock / self::DEUTERIUM_STOCK_PERCENT_PER_ECE), 4));
-            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - ($consumed * self::DEUTERIUM_STOCK_PERCENT_PER_ECE)), 4);
+            $consumed = min($amount, round(max(0.0, $probe->deuteriumStock / ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE), 4));
+            $probe->deuteriumStock = round(max(0.0, $probe->deuteriumStock - ($consumed * ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE)), 4);
             $this->probes->save($probe);
 
             return $consumed;
@@ -526,7 +525,7 @@ final class ProbeStorageService
     {
         $type = $this->normalizeResourceType($type);
         if ($type === ResourceComposition::DEUTERIUM) {
-            return round(max(0.0, $probe->deuteriumStock / self::DEUTERIUM_STOCK_PERCENT_PER_ECE), 4);
+            return round(max(0.0, $probe->deuteriumStock / ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE), 4);
         }
 
         $this->ensureProbeStorage($probe);

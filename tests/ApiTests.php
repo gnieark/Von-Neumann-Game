@@ -552,6 +552,15 @@ $test->assert(
         && (($othersSectorObjectProperties['harvestable']['type'] ?? null) === 'boolean'),
     'Others OpenAPI documents local planet harvestability',
 );
+$othersHarvestDescription = is_array($openApiOthersDocument)
+    ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/harvest']['post']['description'] ?? null)
+    : null;
+$test->assert(
+    is_string($othersHarvestDescription)
+        && str_contains($othersHarvestDescription, '100 tank points per ECE')
+        && str_contains($othersHarvestDescription, 'deuteriumAllocation'),
+    'Others OpenAPI documents harvested deuterium tank priority and allocation results',
+);
 $othersInventoryTransferCreateOperation = is_array($openApiOthersDocument)
     ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/inventory-transfers']['post'] ?? null)
     : null;
@@ -2546,6 +2555,39 @@ $sectorRepository->save(new SectorContent($portableReservationSector, [
         ['metals'],
         resourceAmounts: ['deuterium' => 10.0, 'metals' => 100.0, 'ice' => 20.0, 'carbon_compounds' => 30.0],
     ),
+    new Planet(
+        'partial-tank-harvest-planet',
+        'Partial Tank Harvest Planet',
+        'icy',
+        1.0,
+        1.0,
+        true,
+        0.0,
+        ['deuterium'],
+        resourceAmounts: ['deuterium' => 10.0, 'metals' => 0.0, 'ice' => 0.0, 'carbon_compounds' => 0.0],
+    ),
+    new Planet(
+        'full-tank-harvest-planet',
+        'Full Tank Harvest Planet',
+        'icy',
+        1.0,
+        1.0,
+        true,
+        0.0,
+        ['deuterium'],
+        resourceAmounts: ['deuterium' => 10.0, 'metals' => 0.0, 'ice' => 0.0, 'carbon_compounds' => 0.0],
+    ),
+    new Planet(
+        'canceled-harvest-planet',
+        'Canceled Harvest Planet',
+        'icy',
+        1.0,
+        1.0,
+        true,
+        0.0,
+        ['deuterium'],
+        resourceAmounts: ['deuterium' => 10.0, 'metals' => 0.0, 'ice' => 0.0, 'carbon_compounds' => 0.0],
+    ),
 ]));
 $portableReservationPlayer = $players->createPlayer('portable-reservation-owner', 'Portable Reservation Owner', null, $portableReservationSector);
 $portableReservationFleet = $others->createFleet(
@@ -2564,6 +2606,84 @@ $completedPortableHarvest = $others->findActionByPublicId((string) $portableHarv
 $portableShipAfterHarvest = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id']);
 $test->assertEquals('succeeded', $completedPortableHarvest['status'] ?? null, 'Others harvest completion uses portable reservation clamping SQL');
 $test->assertEquals(0.0, (float) ($portableShipAfterHarvest['inventory_reserved'] ?? -1), 'Others harvest completion releases all reserved inventory capacity');
+$portableHarvestResult = json_decode((string) ($completedPortableHarvest['result_json'] ?? ''), true);
+$portableInventoryAfterHarvest = $others->inventory($portableReservationShipId);
+$test->assertEquals(11.25, (float) ($portableShipAfterHarvest['deuterium_stock'] ?? -1), 'Others harvest converts retained deuterium ECE into tank points first');
+$test->assertEquals(0.0, (float) ($portableInventoryAfterHarvest['resources']['deuterium']['amount'] ?? -1), 'Others harvest does not store deuterium in inventory while tank capacity remains');
+$test->assertEquals(
+    ['tankPoints' => 11.25, 'tankEquivalentEce' => 0.1125, 'inventoryEce' => 0.0],
+    array_map(static fn(mixed $value): float => (float) $value, $portableHarvestResult['resources']['deuteriumAllocation'] ?? []),
+    'Others harvest result exposes the canonical deuterium tank allocation',
+);
+
+$pdo->prepare('UPDATE others_ships SET deuterium_stock=975,deuterium_reserved=10 WHERE id=:id')
+    ->execute(['id' => $portableReservationShipId]);
+$partialTankShip = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id'])
+    ?? throw new RuntimeException('Partial-tank Others ship not found.');
+$partialTankHarvest = $othersService->startHarvest(
+    $partialTankShip,
+    ['targetObjectId' => 'partial-tank-harvest-planet', 'auxiliaryCount' => 1],
+);
+$processOthersActionNow($partialTankHarvest);
+$completedPartialTankHarvest = $others->findActionByPublicId((string) $partialTankHarvest['public_id']);
+$partialTankShipAfterHarvest = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id']);
+$partialTankInventory = $others->inventory($portableReservationShipId);
+$partialTankResult = json_decode((string) ($completedPartialTankHarvest['result_json'] ?? ''), true);
+$test->assertEquals(990.0, (float) ($partialTankShipAfterHarvest['deuterium_stock'] ?? -1), 'Others harvest leaves room for deuterium already reserved by a concurrent transfer');
+$test->assertEquals(1.65, (float) ($partialTankInventory['resources']['deuterium']['amount'] ?? -1), 'Others harvest stores deuterium overflow in the resource inventory');
+$test->assertEquals(
+    ['tankPoints' => 15.0, 'tankEquivalentEce' => 0.15, 'inventoryEce' => 1.65],
+    array_map(static fn(mixed $value): float => (float) $value, $partialTankResult['resources']['deuteriumAllocation'] ?? []),
+    'Others harvest result separates partial tank fill from inventory overflow',
+);
+
+$pdo->prepare('UPDATE others_ships SET deuterium_stock=deuterium_capacity,deuterium_reserved=0 WHERE id=:id')
+    ->execute(['id' => $portableReservationShipId]);
+$fullTankShip = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id'])
+    ?? throw new RuntimeException('Full-tank Others ship not found.');
+$fullTankHarvest = $othersService->startHarvest(
+    $fullTankShip,
+    ['targetObjectId' => 'full-tank-harvest-planet', 'auxiliaryCount' => 1],
+);
+$processOthersActionNow($fullTankHarvest);
+$completedFullTankHarvest = $others->findActionByPublicId((string) $fullTankHarvest['public_id']);
+$fullTankInventory = $others->inventory($portableReservationShipId);
+$fullTankResult = json_decode((string) ($completedFullTankHarvest['result_json'] ?? ''), true);
+$test->assertEquals(3.45, (float) ($fullTankInventory['resources']['deuterium']['amount'] ?? -1), 'Others harvest sends all retained deuterium to inventory when the tank is full');
+$test->assertEquals(
+    ['tankPoints' => 0.0, 'tankEquivalentEce' => 0.0, 'inventoryEce' => 1.8],
+    array_map(static fn(mixed $value): float => (float) $value, $fullTankResult['resources']['deuteriumAllocation'] ?? []),
+    'Others harvest reports a full-tank deuterium overflow',
+);
+
+$canceledHarvestShip = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id'])
+    ?? throw new RuntimeException('Canceled-harvest Others ship not found.');
+$canceledHarvest = $othersService->startHarvest(
+    $canceledHarvestShip,
+    ['targetObjectId' => 'canceled-harvest-planet', 'auxiliaryCount' => 1],
+);
+$pdo->prepare('UPDATE others_harvests SET phase_started_at=:started WHERE action_id=:action_id')
+    ->execute(['started' => gmdate('c', time() - 601), 'action_id' => (int) $canceledHarvest['id']]);
+$cancelRequestedHarvest = $othersService->cancelHarvest(
+    $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id'])
+        ?? throw new RuntimeException('Active canceled-harvest Others ship not found.'),
+);
+$processOthersActionNow($cancelRequestedHarvest);
+for ($canceledHarvestPhase = 0; $canceledHarvestPhase < 2; $canceledHarvestPhase++) {
+    $cancelRequestedHarvest = $others->findActionByPublicId((string) $canceledHarvest['public_id'])
+        ?? throw new RuntimeException('Canceled Others harvest action not found.');
+    $processOthersActionNow($cancelRequestedHarvest);
+}
+$completedCanceledHarvest = $others->findActionByPublicId((string) $canceledHarvest['public_id']);
+$canceledHarvestInventory = $others->inventory($portableReservationShipId);
+$canceledHarvestResult = json_decode((string) ($completedCanceledHarvest['result_json'] ?? ''), true);
+$test->assertEquals('canceled', $completedCanceledHarvest['status'] ?? null, 'interrupted Others harvest completes its recall as canceled');
+$test->assertEquals(5.25, (float) ($canceledHarvestInventory['resources']['deuterium']['amount'] ?? -1), 'interrupted Others harvest applies the same full-tank deuterium overflow rule');
+$test->assertEquals(
+    ['tankPoints' => 0.0, 'tankEquivalentEce' => 0.0, 'inventoryEce' => 1.8],
+    array_map(static fn(mixed $value): float => (float) $value, $canceledHarvestResult['resources']['deuteriumAllocation'] ?? []),
+    'interrupted Others harvest reports its deuterium allocation',
+);
 
 $recipeResources = ['metals' => 20.0, 'ice' => 2.0, 'carbon_compounds' => 5.0, 'deuterium' => 1.0];
 $setPortableResource = $pdo->prepare('UPDATE others_inventory_resources SET amount=:amount WHERE ship_id=:ship_id AND resource_type=:resource_type');

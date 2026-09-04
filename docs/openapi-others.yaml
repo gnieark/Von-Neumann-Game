@@ -394,6 +394,15 @@ paths:
       tags:
       - Others
       summary: Schedule a planetary swarm harvest
+      description: >-
+        Reserves 2 ECE of inventory capacity per participating auxiliary. After
+        the harvest consumes ten percent of every extracted resource, retained
+        deuterium fills the coordinator ship tank first at the canonical rate
+        of 100 tank points per ECE. Tank capacity already occupied or reserved
+        by in-flight transfers is unavailable; any deuterium overflow is stored
+        as an inventory resource. A terminal action result exposes the split in
+        result.resources.deuteriumAllocation as tankPoints, tankEquivalentEce
+        and inventoryEce.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       responses:
@@ -931,6 +940,7 @@ components:
         deuterium:
           type: object
           required: [amount, capacity]
+          description: Propulsion-tank stock and capacity, expressed in tank points.
           properties:
             amount:
               type: number

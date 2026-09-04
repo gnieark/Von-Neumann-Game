@@ -27,6 +27,8 @@ AGENTS.md
 
 # Logs and cache
 *.log
+__pycache__/
+*.py[cod]
 /cache/
 /tmp/
 .phpunit.result.cache
