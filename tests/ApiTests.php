@@ -539,6 +539,37 @@ $test->assert(
         && (($othersSectorObjectProperties['harvestable']['type'] ?? null) === 'boolean'),
     'Others OpenAPI documents local planet harvestability',
 );
+$othersInventoryTransferCreateOperation = is_array($openApiOthersDocument)
+    ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/inventory-transfers']['post'] ?? null)
+    : null;
+$othersInventoryTransferReadOperation = is_array($openApiOthersDocument)
+    ? ($openApiOthersDocument['paths']['/api/others/inventory-transfers/{transferId}']['get'] ?? null)
+    : null;
+$test->assert(
+    is_array($othersInventoryTransferCreateOperation)
+        && (($othersInventoryTransferCreateOperation['requestBody']['$ref'] ?? null) === '#/components/requestBodies/InventoryTransfer')
+        && (($othersInventoryTransferCreateOperation['responses']['202']['content']['application/json']['schema']['$ref'] ?? null) === '#/components/schemas/OthersInventoryTransferCreateResponse'),
+    'Others OpenAPI documents the inventory-transfer request body and accepted response',
+);
+$test->assert(
+    is_array($othersInventoryTransferReadOperation)
+        && (($othersInventoryTransferReadOperation['responses']['200']['content']['application/json']['schema']['$ref'] ?? null) === '#/components/schemas/OthersInventoryTransferResponse'),
+    'Others OpenAPI documents the inventory-transfer state response',
+);
+$othersInventoryTransferRequest = is_array($openApiOthersDocument)
+    ? ($openApiOthersDocument['components']['schemas']['OthersInventoryTransferRequest'] ?? null)
+    : null;
+$othersInventoryItemTransferRequest = is_array($openApiOthersDocument)
+    ? ($openApiOthersDocument['components']['schemas']['OthersInventoryItemTransferRequest'] ?? null)
+    : null;
+$test->assert(
+    is_array($othersInventoryTransferRequest)
+        && (($othersInventoryTransferRequest['discriminator']['propertyName'] ?? null) === 'kind')
+        && (($othersInventoryItemTransferRequest['required'] ?? null) === ['actorAuxiliaryId', 'targetShipId', 'kind', 'itemIds'])
+        && (($othersInventoryItemTransferRequest['properties']['itemIds']['minItems'] ?? null) === 1)
+        && (($othersInventoryItemTransferRequest['properties']['itemIds']['uniqueItems'] ?? null) === true),
+    'Others OpenAPI documents the canonical item-transfer variant',
+);
 $test->assert(
     is_array($openApiDocument)
         && !in_array('shipId', array_column($openApiDocument['paths']['/api/sector']['get']['parameters'] ?? [], 'name'), true),
@@ -4246,6 +4277,31 @@ if ($createdProbe !== null) {
         ));
         $test->assertEquals(1, count($cliAuxConductors), 'add-inventory-item CLI creates items on the explicit probe');
         $test->assertEquals(0, count($cliDefaultConductors), 'add-inventory-item CLI does not add explicit probe items to the default probe');
+
+        $cliInventoryOthersFleet = $others->createFleet(
+            $cliInventoryPlayer->id,
+            $cliInventoryProbe->currentSector->getX(),
+            $cliInventoryProbe->currentSector->getY(),
+            $cliInventoryProbe->currentSector->getZ(),
+        );
+        $cliInventoryOthersShip = $cliInventoryOthersFleet['ship'];
+        $addOthersMissilesCommand = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg($root . '/scripts/add-inventory-item.php')
+            . ' --database-config=' . escapeshellarg($userinfosDbConfig)
+            . ' --object=' . escapeshellarg(ProbeItem::TYPE_MISSILE)
+            . ' --quantity=2'
+            . ' --others-ship-id=' . escapeshellarg((string) $cliInventoryOthersShip['public_id']);
+        exec($addOthersMissilesCommand . ' 2>&1', $addOthersMissilesOutput, $addOthersMissilesStatus);
+        $addOthersMissilesText = implode("\n", $addOthersMissilesOutput);
+        $test->assertEquals(0, $addOthersMissilesStatus, 'add-inventory-item CLI exits successfully for an Others ship target');
+        $test->assert(str_contains($addOthersMissilesText, 'Others ship ' . $cliInventoryOthersShip['public_id']), 'add-inventory-item CLI reports the Others ship target');
+        $cliOthersItems = $others->inventory((int) $cliInventoryOthersShip['id'])['items'];
+        $test->assertEquals(2, count($cliOthersItems), 'add-inventory-item CLI creates Others inventory item rows');
+        $test->assertEquals(
+            [2.0, 2.0],
+            array_map(static fn(array $item): float => (float) $item['container_space'], $cliOthersItems),
+            'add-inventory-item CLI uses the canonical Others missile inventory space',
+        );
 
         $beforeDryRunCount = count($items->findByProbeId($cliInventoryProbe->id));
         $dryRunInventoryItemCommand = escapeshellarg(PHP_BINARY)

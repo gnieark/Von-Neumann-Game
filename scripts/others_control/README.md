@@ -75,9 +75,19 @@ aucune action supplémentaire.
 En parallèle de cette formation, le vaisseau mère entretient sa logistique :
 
 - les crafts abordables sont lancés avant la moisson, avec priorité aux
-  auxiliaires jusqu'à un total projeté de 20, puis aux missiles jusqu'à 60 ;
+  auxiliaires jusqu'à un total projeté de 20, puis aux missiles jusqu'à un
+  stock global de 60 dans la flotte ;
 - les crafts déjà actifs comptent dans ces objectifs afin d'éviter une
   surproduction ;
+- le vaisseau mère conserve toujours 10 missiles disponibles et confie son
+  surplus, par vagues, aux vaisseaux présents dans son secteur. Les moins armés
+  sont servis en premier afin de réduire les écarts, sans jamais compléter un
+  vaisseau au-delà de 3 missiles ;
+- une vague mobilise au plus un auxiliaire et un missile par destinataire. Le
+  contrôleur se réveille à la fin des transferts avant de poursuivre la
+  répartition ; pendant ce délai, la fabrication d'auxiliaires et la moisson
+  continuent, mais les nouveaux crafts de missiles attendent que le stock
+  global redevienne observable ;
 - jusqu'à dix auxiliaires embarqués encore disponibles moissonnent une planète
   locale dont le scan Others indique `harvestable: true` ; avec un seul
   auxiliaire, celui-ci crafte dès que la recette d'un auxiliaire est abordable,
@@ -94,6 +104,14 @@ La capacité libre de la soute et les réservations en cours limitent toujours l
 taille de l'essaim. Les planètes non habitées sont choisies avant les planètes
 habitées lorsque plusieurs cibles sont disponibles.
 
+Une sentinelle voisine sans missile est relevée lorsqu'un vaisseau armé et
+disponible se trouve auprès du vaisseau mère. Le remplaçant part en premier ; la
+sentinelle vide ne reçoit son ordre de retour qu'après acceptation de ce
+déplacement, afin de ne pas dégarnir le secteur sur un premier échec. Une
+sentinelle engagée tactiquement n'est pas relevée. Comme les transferts
+d'inventaire exigent la présence des deux vaisseaux dans le même secteur, les
+sentinelles voisines sont réarmées exclusivement par cette rotation.
+
 Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
 comme désignateur de flotte. La précision du scan et l'historique de visite
 restent propres à cette flotte. Les Mannys déployées sont suivies par la route
@@ -102,10 +120,11 @@ restent propres à cette flotte. Les Mannys déployées sont suivies par la rout
 ### Architecture et tests
 
 `defense_etoile_attente.py` est uniquement le point d'entrée canonique. Le
-paquet `defense_etoile` sépare la CLI et le transport HTTP de la logique de
-formation, de logistique, d'observation, de détection des événements,
-d'engagement et de connaissance des dangers. Les modules tactiques dépendent du protocole
-`OthersApi`, ce qui permet de les tester sans serveur ni base de données.
+paquet `defense_etoile` sépare la CLI et le transport HTTP de la logique
+d'armement, de formation, de logistique, d'observation, de détection des
+événements, d'engagement et de connaissance des dangers. Les modules tactiques
+dépendent du protocole `OthersApi`, ce qui permet de les tester sans serveur ni
+base de données.
 
 La suite Python se lance depuis la racine du projet :
 

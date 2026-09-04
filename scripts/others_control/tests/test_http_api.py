@@ -87,6 +87,40 @@ class HttpApiTests(unittest.TestCase):
         self.assertTrue(request.get_header("Idempotency-key").startswith("defense-etoile-"))
         self.assertEqual({"endsAt": None}, action)
 
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_inventory_transfer_builds_the_canonical_request(
+        self, urlopen_mock: Mock
+    ) -> None:
+        urlopen_mock.return_value = FakeResponse(
+            {"transfer": {"id": "transfer-a"}, "action": {"endsAt": None}}
+        )
+        api = HttpOthersApi("http://127.0.0.1:8000", "token", 10)
+
+        action = api.start_inventory_item_transfer(
+            "mother", "ship-a", "aux-a", ["missile-a"], "revision-a"
+        )
+
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(
+            "http://127.0.0.1:8000/api/others/ships/mother/inventory-transfers",
+            request.full_url,
+        )
+        self.assertEqual(
+            {
+                "actorAuxiliaryId": "aux-a",
+                "targetShipId": "ship-a",
+                "kind": "item",
+                "itemIds": ["missile-a"],
+            },
+            json.loads(request.data),
+        )
+        self.assertTrue(
+            request.get_header("Idempotency-key").startswith(
+                "defense-inventory-transfer-"
+            )
+        )
+        self.assertEqual({"endsAt": None}, action)
+
 
 if __name__ == "__main__":
     unittest.main()

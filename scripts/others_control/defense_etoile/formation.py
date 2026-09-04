@@ -40,6 +40,8 @@ class FormationCoordinator:
         mothership: dict[str, Any],
         ships: list[dict[str, Any]],
         result: CycleResult,
+        *,
+        missile_counts: dict[str, int],
     ) -> CycleResult:
         mothership_id = require_string(mothership.get("id"), "mothership.id")
         center = ship_sector(mothership)
@@ -94,14 +96,22 @@ class FormationCoordinator:
                 continue
             ordered = sorted(
                 ships_in_sector,
-                key=lambda ship: (is_movable(ship), str(ship.get("id", ""))),
+                key=lambda ship: (
+                    is_movable(ship),
+                    -missile_counts.get(str(ship.get("id", "")), 0),
+                    str(ship.get("id", "")),
+                ),
             )
             guards[coordinates] = ordered[0]
             for surplus_ship in ordered[1:]:
                 recall_candidates.append((surplus_ship, coordinates))
 
+        tactically_committed: set[str] = set()
         for coordinates, guard in guards.items():
-            self.engagement.reconcile(guard, coordinates, center, result)
+            if self.engagement.reconcile(guard, coordinates, center, result):
+                tactically_committed.add(
+                    require_string(guard.get("id"), "guard ship.id")
+                )
 
         known_black_holes = {
             coordinates
@@ -123,6 +133,57 @@ class FormationCoordinator:
             and coordinates not in inbound_neighbors
         ]
 
+        claimed_home_ships: set[str] = set()
+        armed_home_candidates = sorted(
+            (
+                ship
+                for ship in home_candidates
+                if missile_counts.get(str(ship.get("id", "")), 0) > 0
+            ),
+            key=lambda ship: (
+                -missile_counts.get(str(ship.get("id", "")), 0),
+                str(ship.get("id", "")),
+            ),
+        )
+        for coordinates in neighbors:
+            guard = guards.get(coordinates)
+            if guard is None or coordinates in inbound_neighbors:
+                continue
+            guard_id = require_string(guard.get("id"), "guard ship.id")
+            if (
+                missile_counts.get(guard_id, 0) != 0
+                or guard_id in tactically_committed
+                or not is_movable(guard)
+            ):
+                continue
+            replacement = next(
+                (
+                    candidate
+                    for candidate in armed_home_candidates
+                    if require_string(candidate.get("id"), "replacement.id")
+                    not in claimed_home_ships
+                ),
+                None,
+            )
+            if replacement is None:
+                break
+            replacement_id = require_string(replacement.get("id"), "replacement.id")
+            self.log(
+                f"Relève de {guard_id} par {replacement_id} : "
+                "départ prioritaire du vaisseau armé."
+            )
+            if not self.commands.move(replacement, coordinates, result):
+                continue
+            claimed_home_ships.add(replacement_id)
+            if self.commands.move(guard, center, result):
+                self.log(
+                    f"Relève engagée : {guard_id} retourne auprès du vaisseau mère."
+                )
+            else:
+                self.log(
+                    f"Retour de {guard_id} différé ; {replacement_id} maintient la relève."
+                )
+
         recall_candidates.sort(key=lambda item: str(item[0].get("id", "")))
         for ship, origin in recall_candidates:
             ship_id = require_string(ship.get("id"), "recall ship.id")
@@ -142,8 +203,14 @@ class FormationCoordinator:
                 self.log(f"Rappel de {ship_id} vers le secteur du vaisseau mère.")
             self.commands.move(ship, target, result)
 
-        home_candidates.sort(key=lambda ship: str(ship.get("id", "")))
-        for ship, target in zip(home_candidates, missing_neighbors):
+        available_home_candidates = [
+            ship
+            for ship in home_candidates
+            if require_string(ship.get("id"), "deployment ship.id")
+            not in claimed_home_ships
+        ]
+        available_home_candidates.sort(key=lambda ship: str(ship.get("id", "")))
+        for ship, target in zip(available_home_candidates, missing_neighbors):
             ship_id = require_string(ship.get("id"), "deployment ship.id")
             self.log(f"Déploiement de {ship_id} vers {format_coordinates(target)}.")
             self.commands.move(ship, target, result)

@@ -51,7 +51,7 @@ class EngagementCoordinator:
         coordinates: Coordinates,
         center: Coordinates,
         result: CycleResult,
-    ) -> None:
+    ) -> bool:
         ship_id = require_string(ship.get("id"), "guard ship.id")
         state = self.scout_states.setdefault(ship_id, ScoutState())
         if state.observation is not None and state.observation.coordinates != coordinates:
@@ -63,14 +63,14 @@ class EngagementCoordinator:
         if state.return_required:
             if state.laser_return_due is not None and self.now() < state.laser_return_due:
                 result.event_dates.append(state.laser_return_due)
-                return
+                return True
             if not is_movable(ship):
                 self.log(f"Retour tactique différé pour {ship_id} : vaisseau occupé.")
-                return
+                return True
             if self.commands.move(ship, center, result):
                 self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
                 self.clear_completed_return(ship_id)
-            return
+            return True
 
         observation = self.observer.observe(ship_id, coordinates)
         new_events = detect_engagement_events(state.observation, observation)
@@ -78,22 +78,24 @@ class EngagementCoordinator:
         pending_keys = {event.key for event in state.pending_events}
         state.pending_events.extend(event for event in new_events if event.key not in pending_keys)
         state.pending_events.sort(key=lambda event: (event.kind.priority, event.key))
+        engaged = bool(state.pending_events)
 
         while state.pending_events and not state.return_required:
             event = state.pending_events.pop(0)
             self._execute_event(ship, event, state, result)
 
         if not state.return_required:
-            return
+            return engaged
         if state.laser_return_due is not None:
             result.event_dates.append(state.laser_return_due)
-            return
+            return True
         if not is_movable(ship):
             self.log(f"Retour tactique différé pour {ship_id} : vaisseau occupé.")
-            return
+            return True
         if self.commands.move(ship, center, result):
             self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
             self.clear_completed_return(ship_id)
+        return True
 
     def _execute_event(
         self,

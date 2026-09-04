@@ -7,6 +7,7 @@ use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\StorageContainerRepository;
@@ -51,8 +52,9 @@ function addInventoryItemRun(array $argv): int
     $quantity = $options['quantity'] ?? throw new InvalidArgumentException('Missing quantity.');
     $probeId = $options['probeId'] ?? null;
     $playerId = $options['playerId'] ?? null;
-    if ($probeId === null && $playerId === null) {
-        throw new InvalidArgumentException('Missing probe id.');
+    $othersShipId = $options['othersShipId'] ?? null;
+    if ($probeId === null && $playerId === null && $othersShipId === null) {
+        throw new InvalidArgumentException('Missing target: use --probe-id, --player-id or --others-ship-id.');
     }
     // Allow mineable resources (metals, ice, carbon_compounds, deuterium)
     $isResource = false;
@@ -84,6 +86,96 @@ function addInventoryItemRun(array $argv): int
     $items = new ProbeItemRepository($pdo);
     $containers = new StorageContainerRepository($pdo, $gameplayConfig);
     $storage = new ProbeStorageService($containers, $items, $mannies, $probes, $gameplayConfig);
+
+    if ($othersShipId !== null) {
+        $others = new OthersRepository($pdo);
+        $ship = $others->findShipByPublicId($othersShipId)
+            ?? throw new RuntimeException("Others ship {$othersShipId} not found.");
+        if ($ship['destroyed_at'] !== null || $ship['status'] === 'removed') {
+            throw new RuntimeException("Others ship {$othersShipId} is not active.");
+        }
+        if ($type === 'manny') {
+            throw new InvalidArgumentException('Mannies can only be added to probe inventories.');
+        }
+
+        $createdItemUids = [];
+        $addedResource = null;
+        $pdo->beginTransaction();
+        try {
+            $itemSpace = $isResource
+                ? 0.0
+                : ($type === 'missile'
+                    ? 2.0
+                    : round(max(0.0, (float) ($output['containerSpace'] ?? 0.0)), 4));
+            $requiredSpace = $isResource ? (float) $quantity : $itemSpace * $quantity;
+            $usedSpace = $others->inventoryUsage((int) $ship['id']);
+            if ($usedSpace + (float) $ship['inventory_reserved'] + $requiredSpace > (float) $ship['inventory_capacity'] + 0.00001) {
+                throw new RuntimeException('Insufficient Others ship inventory capacity.');
+            }
+
+            $now = gmdate('c');
+            if ($isResource) {
+                $amount = (float) $quantity;
+                $update = $pdo->prepare(
+                    'UPDATE others_inventory_resources '
+                    . 'SET amount = amount + CAST(:amount AS DECIMAL(20,4)), updated_at = :updated_at '
+                    . 'WHERE ship_id = :ship_id AND resource_type = :resource_type'
+                );
+                $update->execute([
+                    'amount' => $amount,
+                    'updated_at' => $now,
+                    'ship_id' => (int) $ship['id'],
+                    'resource_type' => $type,
+                ]);
+                if ($update->rowCount() !== 1) {
+                    throw new RuntimeException("Others inventory resource {$type} not found.");
+                }
+                $addedResource = $amount;
+            } else {
+                $insert = $pdo->prepare(
+                    'INSERT INTO others_inventory_items '
+                    . '(public_id, ship_id, type, container_space, reserved_action_id, created_at, updated_at) '
+                    . 'VALUES (:public_id, :ship_id, :type, :container_space, NULL, :created_at, :updated_at)'
+                );
+                for ($index = 0; $index < $quantity; $index++) {
+                    $publicId = OthersRepository::publicId('item');
+                    $insert->execute([
+                        'public_id' => $publicId,
+                        'ship_id' => (int) $ship['id'],
+                        'type' => $type,
+                        'container_space' => $itemSpace,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                    $createdItemUids[] = $publicId;
+                }
+            }
+
+            if ($options['dryRun']) {
+                $pdo->rollBack();
+            } else {
+                $pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $displayQuantity = $isResource && $addedResource !== null ? $addedResource : $quantity;
+        echo ($options['dryRun'] ? '[dry-run] Would add' : 'Added')
+            . " {$displayQuantity} x " . (string) ($definition['name'] ?? $type)
+            . " ({$type}) to Others ship {$ship['public_id']} for player #{$ship['player_id']}.\n";
+        if ($createdItemUids !== []) {
+            echo '- item uids: ' . implode(', ', $createdItemUids) . "\n";
+        }
+        if ($options['dryRun']) {
+            echo "No data was written.\n";
+        }
+
+        return 0;
+    }
 
     if ($probeId !== null) {
         $probe = $probes->findById($probeId)
@@ -183,7 +275,7 @@ function addInventoryItemRun(array $argv): int
 
 /**
  * @param array<int, string> $argv
- * @return array{object:?string, quantity:?int, probeId:?int, playerId:?int, databaseConfig:?string, dryRun:bool, list:bool, help:bool}
+ * @return array{object:?string, quantity:?int, probeId:?int, playerId:?int, othersShipId:?string, databaseConfig:?string, dryRun:bool, list:bool, help:bool}
  */
 function addInventoryItemParseArguments(array $argv): array
 {
@@ -192,6 +284,7 @@ function addInventoryItemParseArguments(array $argv): array
         'quantity' => null,
         'probeId' => null,
         'playerId' => null,
+        'othersShipId' => null,
         'databaseConfig' => null,
         'dryRun' => false,
         'list' => false,
@@ -233,6 +326,10 @@ function addInventoryItemParseArguments(array $argv): array
             $options['playerId'] = addInventoryItemPositiveInt(substr($argument, strlen('--player-id=')), 'player-id');
             continue;
         }
+        if (str_starts_with($argument, '--others-ship-id=')) {
+            $options['othersShipId'] = addInventoryItemNonEmpty(substr($argument, strlen('--others-ship-id=')), 'others-ship-id');
+            continue;
+        }
         if (str_starts_with($argument, '--')) {
             throw new InvalidArgumentException("Unexpected option: {$argument}");
         }
@@ -252,8 +349,13 @@ function addInventoryItemParseArguments(array $argv): array
     if ($positionals !== []) {
         throw new InvalidArgumentException('Too many positional arguments.');
     }
-    if ($options['probeId'] !== null && $options['playerId'] !== null) {
-        throw new InvalidArgumentException('Use either --probe-id or --player-id, not both.');
+    $targetCount = count(array_filter([
+        $options['probeId'],
+        $options['playerId'],
+        $options['othersShipId'],
+    ], static fn(int|string|null $value): bool => $value !== null));
+    if ($targetCount > 1) {
+        throw new InvalidArgumentException('Use only one of --probe-id, --player-id or --others-ship-id.');
     }
 
     return $options;
@@ -265,20 +367,25 @@ function addInventoryItemUsage(): string
 Usage:
   php scripts/add-inventory-item.php <object> <quantity> <probe-id>
   php scripts/add-inventory-item.php --object=<object> --quantity=<n> --probe-id=<id>
+  php scripts/add-inventory-item.php --object=<object> --quantity=<n> --others-ship-id=<public-id>
 
 Examples:
   php scripts/add-inventory-item.php steel_bar 3 42
   php scripts/add-inventory-item.php "Atmospheric drop kit" 1 --probe-id=42
   php scripts/add-inventory-item.php manny 1 42
+  php scripts/add-inventory-item.php missile 10 --others-ship-id=ship_0123456789abcdefabcd
 
 Options:
   --database-config=<path>  Use another database config.
   --dry-run                 Validate the operation and roll it back.
   --player-id=<id>          Legacy shortcut: target this player's default probe.
+  --others-ship-id=<id>     Target an Others ship by its public id.
   --list                    List supported object names and ids.
   -h, --help                Show this help.
 
-Manny creates real Manny entities. additional_container creates its paired storage container.
+Manny creates real Manny entities and is only available for probes.
+additional_container creates its paired storage container only for probes.
+An Others missile occupies its canonical 2 ECE inventory space.
 
 TEXT;
 }

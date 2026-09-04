@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any, Callable
 
+from .armament import FleetArmamentCoordinator
 from .commands import CommandExecutor
 from .contracts import optional_mapping, require_mapping, require_string
 from .engagement import EngagementCoordinator
@@ -61,6 +62,7 @@ class DefenseEtoileAttente:
             policy=self.policy,
             logger=logger,
         )
+        self.armament = FleetArmamentCoordinator(api, logger=logger)
         self.logistics = MothershipLogistics(
             api,
             logger=logger,
@@ -154,8 +156,19 @@ class DefenseEtoileAttente:
             self.log("Le vaisseau mère vient d'engager un mouvement : cycle reporté.")
             return result
 
-        self.logistics.reconcile(fleet_mothership, result)
-        return self.formation.reconcile(fleet_mothership, ships, result)
+        armament = self.armament.reconcile(fleet_mothership, ships, result)
+        self.logistics.reconcile(
+            fleet_mothership,
+            result,
+            fleet_missile_stock=armament.total_missiles,
+            missile_transfers_active=armament.transfers_active,
+        )
+        return self.formation.reconcile(
+            fleet_mothership,
+            ships,
+            result,
+            missile_counts=armament.missile_counts,
+        )
 
     def _load_fleet_ships(self, fleet_id: str) -> list[dict[str, Any]]:
         fleet = self.api.get_fleet(fleet_id)

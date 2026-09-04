@@ -75,7 +75,14 @@ class MothershipLogistics:
         self._harvest_target_id: str | None = None
         self._command_sequence = 0
 
-    def reconcile(self, mothership: dict[str, Any], result: CycleResult) -> None:
+    def reconcile(
+        self,
+        mothership: dict[str, Any],
+        result: CycleResult,
+        *,
+        fleet_missile_stock: int,
+        missile_transfers_active: bool,
+    ) -> None:
         ship_id = require_string(mothership.get("id"), "mothership.id")
         auxiliaries = self.api.get_auxiliaries(ship_id)
         if not auxiliaries:
@@ -98,7 +105,6 @@ class MothershipLogistics:
         resources = self._available_resources(inventory)
         free_capacity = self._free_capacity(inventory)
         available_auxiliaries = self._available_auxiliaries(auxiliaries)
-        missile_stock = self._missile_stock(inventory)
         pending_auxiliaries = sum(
             craft.get("recipeId") == auxiliary_recipe.identifier for craft in active_crafts
         )
@@ -106,12 +112,15 @@ class MothershipLogistics:
             craft.get("recipeId") == missile_recipe.identifier for craft in active_crafts
         )
         projected_auxiliaries = len(auxiliaries) + pending_auxiliaries
-        projected_missiles = missile_stock + pending_missiles
+        projected_missiles = fleet_missile_stock + pending_missiles
 
         while available_auxiliaries:
             if projected_auxiliaries < self.policy.auxiliary_target:
                 recipe = auxiliary_recipe
-            elif projected_missiles < self.policy.missile_target:
+            elif (
+                projected_missiles < self.policy.missile_target
+                and not missile_transfers_active
+            ):
                 recipe = missile_recipe
             else:
                 break
@@ -254,16 +263,6 @@ class MothershipLogistics:
         used = _non_negative_number(inventory.get("usedEce"), "inventory.usedEce")
         reserved = _non_negative_number(inventory.get("reservedEce"), "inventory.reservedEce")
         return max(0.0, capacity - used - reserved)
-
-    @staticmethod
-    def _missile_stock(inventory: dict[str, Any]) -> int:
-        items = inventory.get("items")
-        if not isinstance(items, list):
-            raise ApiContractError("inventory.items doit être une liste.")
-        return sum(
-            require_mapping(item, "inventory.items[]").get("type") == "missile"
-            for item in items
-        )
 
     @staticmethod
     def _available_auxiliaries(auxiliaries: list[dict[str, Any]]) -> list[dict[str, Any]]:

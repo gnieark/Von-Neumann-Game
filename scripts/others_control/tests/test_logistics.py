@@ -57,6 +57,24 @@ class LogisticsTests(unittest.TestCase):
             now=lambda: self.now_value,
         )
 
+    def reconcile(
+        self,
+        api: FakeApi,
+        result: CycleResult,
+        logistics: MothershipLogistics | None = None,
+    ) -> None:
+        missile_stock = sum(
+            item.get("type") == "missile"
+            for items in api.inventories.values()
+            for item in items
+        )
+        (logistics or self.controller(api)).reconcile(
+            self.mothership,
+            result,
+            fleet_missile_stock=missile_stock,
+            missile_transfers_active=False,
+        )
+
     def test_single_auxiliary_harvests_when_an_auxiliary_craft_is_not_affordable(self) -> None:
         api = FakeApi(
             [self.mothership],
@@ -65,7 +83,7 @@ class LogisticsTests(unittest.TestCase):
         )
 
         result = CycleResult()
-        self.controller(api).reconcile(self.mothership, result)
+        self.reconcile(api, result)
 
         self.assertEqual([], api.craft_starts)
         self.assertEqual([("mother", "planet-a", 1)], api.harvest_starts)
@@ -80,7 +98,7 @@ class LogisticsTests(unittest.TestCase):
             resources={"mother": resource_stock(5.0, 0.5, 1.0, 0.05)},
         )
 
-        self.controller(api).reconcile(self.mothership, CycleResult())
+        self.reconcile(api, CycleResult())
 
         self.assertEqual([("mother", "others_auxiliary", "aux-a")], api.craft_starts)
         self.assertEqual([], api.harvest_starts)
@@ -95,7 +113,7 @@ class LogisticsTests(unittest.TestCase):
             resources={"mother": resource_stock(5.0, 0.5, 1.0, 0.05)},
         )
 
-        self.controller(api).reconcile(self.mothership, CycleResult())
+        self.reconcile(api, CycleResult())
 
         self.assertEqual(
             [("mother", "others_auxiliary", "aux-00")],
@@ -111,7 +129,7 @@ class LogisticsTests(unittest.TestCase):
             resources={"mother": resource_stock(20.0, 2.0, 5.0, 1.0)},
         )
 
-        self.controller(api).reconcile(self.mothership, CycleResult())
+        self.reconcile(api, CycleResult())
 
         self.assertEqual(
             [
@@ -133,7 +151,7 @@ class LogisticsTests(unittest.TestCase):
             resources={"mother": resource_stock(200.0, 20.0, 50.0, 10.0)},
         )
 
-        self.controller(api).reconcile(self.mothership, CycleResult())
+        self.reconcile(api, CycleResult())
 
         self.assertEqual(10, len(api.craft_starts))
         self.assertEqual({"missile"}, {recipe for _, recipe, _ in api.craft_starts})
@@ -157,11 +175,62 @@ class LogisticsTests(unittest.TestCase):
         )
 
         result = CycleResult()
-        self.controller(api).reconcile(self.mothership, result)
+        self.reconcile(api, result)
 
         self.assertEqual([], api.craft_starts)
         self.assertEqual([], api.harvest_starts)
         self.assertEqual(1, len(result.event_dates))
+
+    def test_missile_target_counts_the_whole_fleet(self) -> None:
+        guard = ship("guard", self.center)
+        api = FakeApi(
+            [self.mothership, guard],
+            auxiliaries={
+                "mother": [auxiliary(f"aux-{index:02d}") for index in range(20)]
+            },
+            inventories={
+                "mother": [missile_item(f"mother-{index}") for index in range(10)],
+                "guard": [missile_item(f"guard-{index}") for index in range(50)],
+            },
+            resources={"mother": resource_stock(250.0, 25.0, 60.0, 10.5)},
+        )
+
+        self.reconcile(api, CycleResult())
+
+        self.assertEqual([], api.craft_starts)
+
+    def test_active_inventory_transfer_suspends_only_missile_crafting(self) -> None:
+        transfer = {
+            "id": "transfer-active",
+            "type": "inventory_transfer",
+            "status": "queued",
+            "endsAt": "2026-09-01T12:00:10+00:00",
+        }
+        api = FakeApi(
+            [self.mothership],
+            auxiliaries={
+                "mother": [
+                    auxiliary("aux-busy", status="busy", action=transfer),
+                    *[auxiliary(f"aux-{index:02d}") for index in range(18)],
+                ]
+            },
+            inventories={
+                "mother": [missile_item(f"missile-{index}") for index in range(59)]
+            },
+            resources={"mother": resource_stock(5.0, 0.5, 1.0, 0.05)},
+        )
+
+        self.controller(api).reconcile(
+            self.mothership,
+            CycleResult(),
+            fleet_missile_stock=59,
+            missile_transfers_active=True,
+        )
+
+        self.assertEqual(
+            [("mother", "others_auxiliary", "aux-00")], api.craft_starts
+        )
+        self.assertNotIn("missile", [recipe for _, recipe, _ in api.craft_starts])
 
     def test_complete_targets_keep_raw_resources_for_ten_auxiliaries_and_missiles(self) -> None:
         api = FakeApi(
@@ -173,7 +242,7 @@ class LogisticsTests(unittest.TestCase):
             resources={"mother": resource_stock(250.0, 25.0, 60.0, 10.5)},
         )
 
-        self.controller(api).reconcile(self.mothership, CycleResult())
+        self.reconcile(api, CycleResult())
 
         self.assertEqual([], api.craft_starts)
         self.assertEqual([], api.harvest_starts)
@@ -188,13 +257,13 @@ class LogisticsTests(unittest.TestCase):
         logistics = self.controller(api)
 
         first = CycleResult()
-        logistics.reconcile(self.mothership, first)
+        self.reconcile(api, first, logistics)
         self.now_value += timedelta(minutes=10)
         second = CycleResult()
-        logistics.reconcile(self.mothership, second)
+        self.reconcile(api, second, logistics)
         self.now_value += timedelta(minutes=51)
         third = CycleResult()
-        logistics.reconcile(self.mothership, third)
+        self.reconcile(api, third, logistics)
 
         self.assertEqual(3, len(api.harvest_starts))
         self.assertEqual(2, self.logs.count("Nouveau cycle de moisson d'une heure."))
@@ -223,7 +292,7 @@ class LogisticsTests(unittest.TestCase):
         )
 
         result = CycleResult()
-        self.controller(api).reconcile(self.mothership, result)
+        self.reconcile(api, result)
 
         self.assertEqual([], api.harvest_starts)
         self.assertEqual(2, len(result.event_dates))
@@ -247,6 +316,32 @@ class LogisticsTests(unittest.TestCase):
         self.assertEqual(1, len(api.moves))
         self.assertEqual("sentinel", api.moves[0][0])
         self.assertEqual(2, result.accepted_commands)
+
+    def test_missile_distribution_reserves_its_auxiliary_before_logistics(self) -> None:
+        recipient = ship("recipient", self.center)
+        api = FakeApi(
+            [self.mothership, recipient],
+            auxiliaries={"mother": [auxiliary("aux-a"), auxiliary("aux-b")]},
+            inventories={
+                "mother": [missile_item(f"missile-{index}") for index in range(12)]
+            },
+            resources={"mother": resource_stock(5.0, 0.5, 1.0, 0.05)},
+        )
+
+        DefenseEtoileAttente(
+            api,
+            mothership_id="mother",
+            logger=self.logs.append,
+            now=lambda: self.now_value,
+        ).run_cycle()
+
+        self.assertEqual(
+            [("mother", "recipient", "aux-a", ("missile-0",))],
+            api.inventory_transfers,
+        )
+        self.assertEqual(
+            [("mother", "others_auxiliary", "aux-b")], api.craft_starts
+        )
 
 
 if __name__ == "__main__":

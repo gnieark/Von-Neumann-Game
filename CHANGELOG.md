@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-04
+
+### Changed
+
+- Contrôle Others « défense étoile — attente » : l’objectif de 60 missiles porte désormais sur toute la flotte. Le vaisseau mère conserve une réserve de 10 missiles et répartit son surplus par vagues équitables entre les vaisseaux locaux, dans la limite de 3 par vaisseau ; une sentinelle voisine vide peut être relevée par un vaisseau local armé, sans interrompre un engagement tactique et avec départ du remplaçant avant le rappel.
+- Documentation OpenAPI Others : `POST /api/others/ships/{shipId}/inventory-transfers` décrit désormais ses payloads canoniques de transfert de ressources et d’items, ainsi que les réponses de création et de consultation d’un transfert.
+- Outil de développement : `scripts/add-inventory-item.php` accepte désormais `--others-ship-id=<id-public>` pour injecter des ressources ou des items dans la soute d’un vaisseau Others, avec contrôle de capacité et encombrement canonique de 2 ECE pour ses missiles.
+
 ## 2026-09-03
 
 ### Fixed

@@ -9,7 +9,14 @@ from scripts.others_control.defense_etoile.errors import (
     ConfigurationError,
 )
 from scripts.others_control.defense_etoile.geometry import NEIGHBOR_OFFSETS, add_coordinates
-from scripts.others_control.tests.support import FakeApi, movement, ship
+from scripts.others_control.tests.support import (
+    FakeApi,
+    detailed_scan,
+    missile_item,
+    movement,
+    observed_manny,
+    ship,
+)
 
 
 class FormationTests(unittest.TestCase):
@@ -147,6 +154,104 @@ class FormationTests(unittest.TestCase):
             DefenseEtoileAttente(
                 duplicate_motherships, fleet_id="fleet_test", logger=lambda _: None
             ).run_cycle()
+
+    def test_empty_guard_is_replaced_by_an_armed_local_ship(self) -> None:
+        center = (0, 0, 0)
+        target = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        mother = ship("mother", center, ship_type="mothership")
+        guard = ship("guard-empty", target)
+        replacement = ship("replacement", center)
+        api = FakeApi(
+            [mother, guard, replacement],
+            inventories={"replacement": [missile_item("missile-a")]},
+        )
+
+        result = DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        ).run_cycle()
+
+        self.assertEqual(
+            [("replacement", target), ("guard-empty", center)], api.moves
+        )
+        self.assertEqual(2, result.accepted_commands)
+
+    def test_tactically_committed_empty_guard_is_not_replaced(self) -> None:
+        center = (0, 0, 0)
+        target = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        mother = ship("mother", center, ship_type="mothership")
+        guard = ship("guard-empty", target, deuterium=20.0)
+        replacement = ship("replacement", center)
+        api = FakeApi(
+            [mother, guard, replacement],
+            scans={target: detailed_scan(probes=[{"id": 42, "status": "idle"}])},
+            autonomous_units={"guard-empty": [observed_manny("manny-a", "42")]},
+            inventories={"replacement": [missile_item("missile-a")]},
+        )
+
+        DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        ).run_cycle()
+
+        self.assertNotIn(("replacement", target), api.moves)
+        self.assertNotIn(("guard-empty", center), api.moves)
+        self.assertEqual([("guard-empty", "manny-a")], api.laser_locks)
+
+    def test_failed_replacement_departure_does_not_recall_the_empty_guard(self) -> None:
+        center = (0, 0, 0)
+        target = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        mother = ship("mother", center, ship_type="mothership")
+        guard = ship("guard-empty", target)
+        replacement = ship("replacement", center)
+        api = FakeApi(
+            [mother, guard, replacement],
+            inventories={"replacement": [missile_item("missile-a")]},
+            move_errors={
+                "replacement": ApiRequestError(409, "others_ship_busy", "Busy")
+            },
+        )
+
+        DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        ).run_cycle()
+
+        self.assertEqual([], api.moves)
+
+    def test_failed_empty_guard_recall_keeps_the_armed_replacement_inbound(self) -> None:
+        center = (0, 0, 0)
+        target = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        mother = ship("mother", center, ship_type="mothership")
+        guard = ship("guard-empty", target)
+        replacement = ship("replacement", center)
+        api = FakeApi(
+            [mother, guard, replacement],
+            inventories={"replacement": [missile_item("missile-a")]},
+            move_errors={
+                "guard-empty": ApiRequestError(409, "others_ship_busy", "Busy")
+            },
+        )
+
+        DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        ).run_cycle()
+
+        self.assertEqual([("replacement", target)], api.moves)
+
+    def test_armed_ship_keeps_the_guard_role_after_a_partial_replacement(self) -> None:
+        center = (0, 0, 0)
+        target = add_coordinates(center, NEIGHBOR_OFFSETS[0])
+        mother = ship("mother", center, ship_type="mothership")
+        empty = ship("empty", target)
+        armed = ship("armed", target)
+        api = FakeApi(
+            [mother, empty, armed],
+            inventories={"armed": [missile_item("missile-a")]},
+        )
+
+        DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        ).run_cycle()
+
+        self.assertEqual([("empty", center)], api.moves)
 
 
 if __name__ == "__main__":

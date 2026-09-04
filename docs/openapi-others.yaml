@@ -351,11 +351,22 @@ paths:
       tags:
       - Others
       summary: Schedule an inventory transfer
+      description: >-
+        Uses an available auxiliary embarked on the source ship to transfer
+        resources or inventory items to another owned ship in the same sector.
+        The target inventory capacity and the transferred content are reserved
+        until the scheduler completes the transfer.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        "$ref": "#/components/requestBodies/InventoryTransfer"
       responses:
         '202':
-          "$ref": "#/components/responses/Accepted"
+          description: Transfer accepted for scheduler processing
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersInventoryTransferCreateResponse"
   "/api/others/inventory-transfers/{transferId}":
     parameters:
     - name: transferId
@@ -370,6 +381,10 @@ paths:
       responses:
         '200':
           description: Transfer state
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersInventoryTransferResponse"
         '404':
           "$ref": "#/components/responses/NotFound"
   "/api/others/ships/{shipId}/harvest":
@@ -548,6 +563,15 @@ components:
         minLength: 1
         maxLength: 128
   requestBodies:
+    InventoryTransfer:
+      required: true
+      description: >-
+        The shipId path parameter identifies the source ship. Exactly one
+        canonical transfer variant must be supplied according to kind.
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/OthersInventoryTransferRequest"
     Move:
       required: true
       description: >-
@@ -577,6 +601,187 @@ components:
               targetId:
                 type: string
   schemas:
+    OthersInventoryTransferRequest:
+      oneOf:
+      - "$ref": "#/components/schemas/OthersInventoryResourceTransferRequest"
+      - "$ref": "#/components/schemas/OthersInventoryItemTransferRequest"
+      discriminator:
+        propertyName: kind
+        mapping:
+          resource: "#/components/schemas/OthersInventoryResourceTransferRequest"
+          item: "#/components/schemas/OthersInventoryItemTransferRequest"
+    OthersInventoryResourceTransferRequest:
+      type: object
+      additionalProperties: false
+      required: [actorAuxiliaryId, targetShipId, kind, resourceType, amount]
+      properties:
+        actorAuxiliaryId:
+          type: string
+          description: >-
+            Public id of an available auxiliary embarked on the source ship.
+        targetShipId:
+          type: string
+          description: Public id of an owned ship in the same sector.
+        kind:
+          type: string
+          enum: [resource]
+        resourceType:
+          type: string
+          enum: [deuterium, metals, ice, carbon_compounds]
+        amount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Positive resource quantity expressed in ECE.
+    OthersInventoryItemTransferRequest:
+      type: object
+      additionalProperties: false
+      required: [actorAuxiliaryId, targetShipId, kind, itemIds]
+      properties:
+        actorAuxiliaryId:
+          type: string
+          description: >-
+            Public id of an available auxiliary embarked on the source ship.
+        targetShipId:
+          type: string
+          description: Public id of an owned ship in the same sector.
+        kind:
+          type: string
+          enum: [item]
+        itemIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: >-
+            Public ids of available items in the source inventory. Every item
+            must individually fit in the auxiliary's 2 ECE hold.
+          items:
+            type: string
+    OthersInventoryTransferBase:
+      type: object
+      required: [id, kind, status, actionId, endsAt]
+      properties:
+        id:
+          type: string
+          description: Public transfer identifier.
+        kind:
+          type: string
+          enum: [resource, item]
+        status:
+          type: string
+          enum: [queued, succeeded, failed]
+        actionId:
+          type: string
+          description: Public id of the scheduler-driven auxiliary action.
+        endsAt:
+          type: string
+          format: date-time
+        result:
+          type: object
+          required: [outcome]
+          properties:
+            outcome:
+              type: string
+              enum: [transferred]
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    OthersInventoryResourceTransfer:
+      allOf:
+      - "$ref": "#/components/schemas/OthersInventoryTransferBase"
+      - type: object
+        required: [kind, resourceType, amount]
+        properties:
+          kind:
+            type: string
+            enum: [resource]
+          resourceType:
+            type: string
+            enum: [deuterium, metals, ice, carbon_compounds]
+          amount:
+            type: number
+    OthersInventoryItemTransfer:
+      allOf:
+      - "$ref": "#/components/schemas/OthersInventoryTransferBase"
+      - type: object
+        required: [kind, itemIds]
+        properties:
+          kind:
+            type: string
+            enum: [item]
+          itemIds:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              type: string
+    OthersInventoryTransfer:
+      oneOf:
+      - "$ref": "#/components/schemas/OthersInventoryResourceTransfer"
+      - "$ref": "#/components/schemas/OthersInventoryItemTransfer"
+      discriminator:
+        propertyName: kind
+        mapping:
+          resource: "#/components/schemas/OthersInventoryResourceTransfer"
+          item: "#/components/schemas/OthersInventoryItemTransfer"
+    OthersInventoryTransferAction:
+      type: object
+      required: [id, type, status, actor, createdAt, updatedAt, endsAt]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [inventory_transfer]
+        status:
+          type: string
+          enum: [queued, succeeded, failed]
+        actor:
+          type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [others_auxiliary]
+            id:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        result:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          additionalProperties: true
+    OthersInventoryTransferCreateResponse:
+      type: object
+      required: [transfer, action]
+      properties:
+        transfer:
+          "$ref": "#/components/schemas/OthersInventoryTransfer"
+        action:
+          "$ref": "#/components/schemas/OthersInventoryTransferAction"
+    OthersInventoryTransferResponse:
+      type: object
+      required: [transfer]
+      properties:
+        transfer:
+          "$ref": "#/components/schemas/OthersInventoryTransfer"
     OthersSectorResponse:
       type: object
       required: [sector]

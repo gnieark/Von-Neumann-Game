@@ -107,6 +107,7 @@ class FakeApi:
         auxiliaries: dict[str, list[dict[str, Any]]] | None = None,
         resources: dict[str, dict[str, float]] | None = None,
         crafts: dict[str, list[dict[str, Any]]] | None = None,
+        move_errors: dict[str, Exception] | None = None,
     ) -> None:
         self.ships = ships
         self.scans = scans or {}
@@ -117,10 +118,12 @@ class FakeApi:
         self.auxiliaries = auxiliaries or {}
         self.resources = resources or {}
         self.crafts = crafts or {}
+        self.move_errors = move_errors or {}
         self.missile_launches: list[tuple[str, str, str]] = []
         self.laser_locks: list[tuple[str, str]] = []
         self.craft_starts: list[tuple[str, str, str]] = []
         self.harvest_starts: list[tuple[str, str, int]] = []
+        self.inventory_transfers: list[tuple[str, str, str, tuple[str, ...]]] = []
         self.ship_calls = 0
         self.fleet_calls = 0
 
@@ -211,6 +214,36 @@ class FakeApi:
         self.craft_starts.append((ship_id, recipe_id, assistant_auxiliary_id))
         return {"endsAt": "2099-01-01T00:00:00+00:00"}
 
+    def start_inventory_item_transfer(
+        self,
+        source_ship_id: str,
+        target_ship_id: str,
+        actor_auxiliary_id: str,
+        item_ids: list[str],
+        operation_key: str,
+    ) -> dict[str, Any]:
+        self.inventory_transfers.append(
+            (source_ship_id, target_ship_id, actor_auxiliary_id, tuple(item_ids))
+        )
+        selected = set(item_ids)
+        self.inventories[source_ship_id] = [
+            item
+            for item in self.inventories.get(source_ship_id, [])
+            if item.get("id") not in selected
+        ]
+        action = {
+            "id": f"transfer-{len(self.inventory_transfers)}",
+            "type": "inventory_transfer",
+            "status": "queued",
+            "endsAt": "2099-01-01T00:00:00+00:00",
+        }
+        for item in self.auxiliaries.get(source_ship_id, []):
+            if item.get("id") == actor_auxiliary_id:
+                item["status"] = "busy"
+                item["action"] = action
+                break
+        return action
+
     def start_harvest(
         self,
         ship_id: str,
@@ -246,5 +279,8 @@ class FakeApi:
         return {"endsAt": None}
 
     def move_ship(self, item: dict[str, Any], target: Coordinates) -> dict[str, Any]:
+        error = self.move_errors.get(item["id"])
+        if error is not None:
+            raise error
         self.moves.append((item["id"], target))
         return {"endsAt": "2099-01-01T00:00:00+00:00"}
