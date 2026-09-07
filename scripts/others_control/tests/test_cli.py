@@ -5,7 +5,7 @@ from contextlib import redirect_stderr
 from io import StringIO
 from unittest.mock import Mock, call, patch
 
-from scripts.others_control.defense_etoile.cli import build_argument_parser, main
+from scripts.others_control.defense_etoile.cli import build_argument_parser, main, timestamped_logger
 from scripts.others_control.defense_etoile.config import ApiConfiguration
 from scripts.others_control.defense_etoile.models import CycleResult
 
@@ -51,7 +51,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertEqual(["summary", "cycle"], calls)
         self.assertEqual([call()], controller.log_fleet_summary.call_args_list)
-        http_api.assert_called_once_with("http://localhost", "token", 10.0)
+        http_api.assert_called_once_with(
+            "http://localhost", "token", 10.0, request_interval_seconds=1.0,
+            logger=timestamped_logger,
+        )
 
     @patch("scripts.others_control.defense_etoile.cli.time.sleep")
     @patch("scripts.others_control.defense_etoile.cli.time.monotonic")

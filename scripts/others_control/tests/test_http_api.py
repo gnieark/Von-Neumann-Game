@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
+from urllib.error import HTTPError
 import unittest
 from unittest.mock import Mock, patch
 
 from scripts.others_control.defense_etoile.http_api import HttpOthersApi
+from scripts.others_control.defense_etoile.errors import ApiRequestError
 
 
 class FakeResponse:
@@ -22,6 +25,62 @@ class FakeResponse:
 
 
 class HttpApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        clock = [100.0]
+        def advance(delay: float) -> None:
+            clock[0] += delay
+        self.sleep = self.enterContext(patch(
+            "scripts.others_control.defense_etoile.http_api.time.sleep",
+            side_effect=advance,
+        ))
+        self.enterContext(patch(
+            "scripts.others_control.defense_etoile.http_api.time.monotonic",
+            side_effect=lambda: clock[0],
+        ))
+
+    @staticmethod
+    def rate_limit(retry_after: str | None = None) -> HTTPError:
+        return HTTPError(
+            "http://localhost", 429, "Too many requests",
+            {} if retry_after is None else {"Retry-After": retry_after},
+            BytesIO(b'{"error":{"code":"rate_limit_exceeded"}}'),
+        )
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_429_resumes_failed_page_without_restarting_collection(self, send: Mock) -> None:
+        send.side_effect = [
+            FakeResponse({"auxiliaries": [{"id": "a"}], "nextCursor": "next"}),
+            self.rate_limit("12"),
+            self.rate_limit("2"),
+            FakeResponse({"auxiliaries": [{"id": "b"}]}),
+        ]
+        api = HttpOthersApi("http://localhost", "token", 10, logger=lambda _: None)
+        self.assertEqual([{"id": "a"}, {"id": "b"}], api.get_auxiliaries("mother"))
+        requests = [c.args[0] for c in send.call_args_list]
+        self.assertIs(requests[1], requests[2])
+        self.assertIs(requests[2], requests[3])
+        self.assertIn("cursor=next", requests[3].full_url)
+        self.assertEqual([1.0, 12.0, 2.0], [c.args[0] for c in self.sleep.call_args_list])
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_429_retries_identical_command_with_backoff(self, send: Mock) -> None:
+        send.side_effect = [self.rate_limit(), self.rate_limit(),
+                            FakeResponse({"action": {"id": "done"}})]
+        api = HttpOthersApi("http://localhost", "token", 10, logger=lambda _: None)
+        self.assertEqual({"id": "done"}, api.start_harvest("mother", "planet", 10, "cycle"))
+        requests = [c.args[0] for c in send.call_args_list]
+        self.assertTrue(all(r is requests[0] for r in requests))
+        self.assertIsNotNone(requests[0].get_header("Idempotency-key"))
+        self.assertEqual([5.0, 10.0], [c.args[0] for c in self.sleep.call_args_list])
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_other_http_errors_are_not_replayed(self, send: Mock) -> None:
+        send.side_effect = HTTPError("http://localhost", 503, "Unavailable", {}, BytesIO(b""))
+        api = HttpOthersApi("http://localhost", "token", 10)
+        with self.assertRaises(ApiRequestError):
+            api.get_inventory("mother")
+        self.assertEqual(1, send.call_count)
+
     @patch("scripts.others_control.defense_etoile.http_api.urlopen")
     def test_auxiliary_collection_follows_opaque_pagination(self, urlopen_mock: Mock) -> None:
         urlopen_mock.side_effect = [

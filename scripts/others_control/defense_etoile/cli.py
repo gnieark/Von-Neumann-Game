@@ -7,6 +7,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from math import isfinite
 
 from .config import (
     ACTIVITY_REFRESH_SECONDS,
@@ -55,6 +56,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--timeout-seconds", type=float, default=TIMEOUT_SECONDS,
         help="Délai maximal d'une requête HTTP (défaut : 10)",
     )
+    parser.add_argument(
+        "--request-interval-seconds", type=float, default=1.0,
+        help="Intervalle minimal entre appels HTTP (défaut : 1 seconde)",
+    )
     return parser
 
 
@@ -76,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         print("Erreur : --timeout-seconds doit être strictement positif.", file=sys.stderr)
         return 2
 
+    if not isfinite(arguments.request_interval_seconds) or arguments.request_interval_seconds <= 0:
+        print("Erreur : --request-interval-seconds doit être fini et strictement positif.", file=sys.stderr)
+        return 2
+
     try:
         configuration = load_config(arguments.config)
         controller = DefenseEtoileAttente(
@@ -83,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
                 configuration.base_url,
                 configuration.api_token,
                 arguments.timeout_seconds,
+                request_interval_seconds=arguments.request_interval_seconds,
+                logger=timestamped_logger,
             ),
             mothership_id=arguments.mothership_id,
             fleet_id=arguments.fleet_id,
@@ -108,20 +119,24 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 result = controller.run_activity_cycle()
             retry_delay = 5.0
+        except KeyboardInterrupt:
+            timestamped_logger("Arrêt demandé.")
+            return 0
         except ApiRequestError as error:
             if error.status in {401, 403, 404}:
                 print(f"Erreur API définitive : {error}", file=sys.stderr)
                 return 1
-            delay = error.retry_after_seconds or retry_delay
+            delay = max(error.retry_after_seconds or 0.0, retry_delay,
+                        30.0 if error.status == 429 else 0.0)
             timestamped_logger(f"Erreur API temporaire : {error}. Nouvel essai dans {delay:.0f} s.")
             if arguments.once:
                 return 1
-            time.sleep(delay)
-            retry_delay = min(
-                arguments.activity_refresh_seconds,
-                arguments.idle_refresh_seconds,
-                retry_delay * 2,
-            )
+            try:
+                time.sleep(delay)
+            except KeyboardInterrupt:
+                timestamped_logger("Arrêt demandé.")
+                return 0
+            retry_delay = min(300.0, delay * 2)
             continue
         except (ApiContractError, ConfigurationError) as error:
             print(f"Erreur : {error}", file=sys.stderr)

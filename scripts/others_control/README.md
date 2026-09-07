@@ -121,6 +121,17 @@ restent propres à cette flotte. Les Mannys déployées sont suivies par la rout
 Les deux routes d'observation tactique sont interrogées toutes les vingt secondes ;
 les lectures d'inventaire et les commandes ne sont ajoutées qu'en cas d'engagement.
 
+Les appels HTTP sont espacés d’au moins une seconde, y compris pendant les
+cycles et la pagination. Ce délai se règle avec `--request-interval-seconds`
+(par exemple `2` si plusieurs scripts partagent le token). Après un HTTP 429,
+le contrôleur attend le `Retry-After` indiqué par le serveur, puis rejoue
+uniquement la requête refusée, avec le même corps et la même clé d’idempotence.
+Le cycle reprend à cet endroit, sans refaire les appels déjà réussis (également
+avec `--once`). Sans délai serveur exploitable, l’attente augmente de 5 à 300
+secondes. Ctrl+C permet d’arrêter l’attente. Ces pauses peuvent allonger les
+cycles de surveillance.
+La régulation est locale à chaque instance du script.
+
 ### Architecture et tests
 
 `defense_etoile_attente.py` est uniquement le point d'entrée canonique. Le

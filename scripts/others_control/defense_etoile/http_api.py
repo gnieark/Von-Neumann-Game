@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+import time
+from math import isfinite
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -16,7 +18,15 @@ from .models import Coordinates
 
 
 class HttpOthersApi:
-    def __init__(self, base_url: str, api_token: str, timeout_seconds: float) -> None:
+    def __init__(self, base_url: str, api_token: str, timeout_seconds: float,
+        *, request_interval_seconds: float = 1.0,
+        logger: Callable[[str], None] = print,
+    ) -> None:
+        if not isfinite(request_interval_seconds) or request_interval_seconds <= 0:
+            raise ValueError("L’intervalle HTTP doit être fini et strictement positif.")
+        self.log = logger
+        self.request_interval_seconds = request_interval_seconds
+        self._next_request_at = 0.0
         self.base_url = base_url.rstrip("/")
         self.api_token = api_token
         self.timeout_seconds = timeout_seconds
@@ -245,6 +255,28 @@ class HttpOthersApi:
             headers["Idempotency-Key"] = idempotency_key
 
         request = Request(f"{self.base_url}{path}", data=data, headers=headers, method=method)
+        retry_delay = 5.0
+        while True:
+            delay = self._next_request_at - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            self._next_request_at = time.monotonic() + self.request_interval_seconds
+            try:
+                return self._send_request(request)
+            except ApiRequestError as error:
+                if error.status != 429:
+                    raise
+                delay = error.retry_after_seconds
+                if delay is None or not isfinite(delay) or delay <= 0:
+                    delay = retry_delay
+                self.log(
+                    f"Limite API atteinte (HTTP 429). Même requête rejouée "
+                    f"dans {delay:.0f} s ; cycle conservé."
+                )
+                time.sleep(delay)
+                retry_delay = min(300.0, retry_delay * 2)
+
+    def _send_request(self, request: Request) -> dict[str, Any]:
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 raw_body = response.read()
