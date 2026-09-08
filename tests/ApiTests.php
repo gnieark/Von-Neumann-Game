@@ -568,6 +568,13 @@ $othersDeuteriumTransferOperation = $openApiOthersDocument['paths']['/api/others
 $othersDeuteriumTransferBody = $openApiOthersDocument['components']['requestBodies']['DeuteriumTransfer'] ?? [];
 $othersDeuteriumTransferRequest = $openApiOthersDocument['components']['schemas']['OthersDeuteriumTransferRequest'] ?? [];
 $othersDeuteriumTransferAction = $openApiOthersDocument['components']['schemas']['OthersDeuteriumTransferAction'] ?? [];
+$othersFleetActionsDescription = $openApiOthersDocument['components']['schemas']['OthersFleet']['properties']['activeActions']['description'] ?? '';
+$test->assert(
+    str_contains($othersFleetActionsDescription, 'deuterium_transfer')
+        && str_contains($othersFleetActionsDescription, 'queued or running')
+        && str_contains($othersFleetActionsDescription, 'Terminal actions leave this list'),
+    'Others fleet action telemetry documents the restart-safe refueling barrier',
+);
 $test->assertEquals('#/components/requestBodies/DeuteriumTransfer', $othersDeuteriumTransferOperation['requestBody']['$ref'] ?? null, 'Others deuterium transfer exposes a request body in Swagger');
 $test->assertEquals(true, $othersDeuteriumTransferBody['required'] ?? null, 'Others deuterium transfer requires a body');
 $test->assertEquals('#/components/schemas/OthersDeuteriumTransferRequest', $othersDeuteriumTransferBody['content']['application/json']['schema']['$ref'] ?? null, 'Others deuterium transfer body resolves to its request schema');

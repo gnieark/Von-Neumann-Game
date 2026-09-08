@@ -147,6 +147,19 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual({"endsAt": None}, action)
 
     @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_deuterium_transfer_retries_the_canonical_request(self, send: Mock) -> None:
+        send.side_effect = [self.rate_limit("2"), FakeResponse({"action": {"id": "fuel-action"}})]
+        api = HttpOthersApi("http://localhost", "token", 10, logger=lambda _: None)
+        action = api.start_deuterium_transfer("mother/id", "target", "aux/id", 32.5, "wave")
+        request = send.call_args_list[0].args[0]
+        self.assertEqual("POST", request.method)
+        self.assertEqual("http://localhost/api/others/ships/mother%2Fid/auxiliaries/aux%2Fid/transfer-deuterium", request.full_url)
+        self.assertEqual({"targetShipId": "target", "amount": 32.5}, json.loads(request.data))
+        self.assertTrue(request.get_header("Idempotency-key").startswith("defense-deuterium-transfer-"))
+        self.assertIs(request, send.call_args_list[1].args[0])
+        self.assertEqual({"id": "fuel-action"}, action)
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
     def test_inventory_transfer_builds_the_canonical_request(
         self, urlopen_mock: Mock
     ) -> None:

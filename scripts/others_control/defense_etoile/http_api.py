@@ -108,6 +108,26 @@ class HttpOthersApi:
             raise ApiContractError("crafts doit être une liste.")
         return [require_mapping(craft, "crafts[]") for craft in crafts]
 
+    def start_deuterium_transfer(
+        self,
+        source_ship_id: str,
+        target_ship_id: str,
+        actor_auxiliary_id: str,
+        amount: float,
+        operation_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(source_ship_id, safe='')}"
+            f"/auxiliaries/{quote(actor_auxiliary_id, safe='')}/transfer-deuterium",
+            payload={"targetShipId": target_ship_id, "amount": amount},
+            idempotency_key=command_idempotency_key(
+                "defense-deuterium-transfer", source_ship_id, target_ship_id,
+                actor_auxiliary_id, str(amount), operation_key,
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
+
     def start_inventory_item_transfer(
         self,
         source_ship_id: str,

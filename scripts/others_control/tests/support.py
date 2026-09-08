@@ -108,6 +108,7 @@ class FakeApi:
         resources: dict[str, dict[str, float]] | None = None,
         crafts: dict[str, list[dict[str, Any]]] | None = None,
         move_errors: dict[str, Exception] | None = None,
+        active_actions: list[dict[str, Any]] | None = None,
     ) -> None:
         self.ships = ships
         self.scans = scans or {}
@@ -119,6 +120,8 @@ class FakeApi:
         self.resources = resources or {}
         self.crafts = crafts or {}
         self.move_errors = move_errors or {}
+        self.active_actions = list(active_actions or [])
+        self.deuterium_transfers: list[tuple[str, str, str, float]] = []
         self.missile_launches: list[tuple[str, str, str]] = []
         self.laser_locks: list[tuple[str, str]] = []
         self.craft_starts: list[tuple[str, str, str]] = []
@@ -135,7 +138,7 @@ class FakeApi:
 
     def get_fleet(self, fleet_id: str) -> dict[str, Any]:
         self.fleet_calls += 1
-        return {"id": fleet_id, "ships": self.ships}
+        return {"id": fleet_id, "ships": self.ships, "activeActions": self.active_actions}
 
     def scan_sector(self, ship_id: str, coordinates: Coordinates) -> dict[str, Any]:
         self.scan_calls.append(coordinates)
@@ -217,6 +220,29 @@ class FakeApi:
     ) -> dict[str, Any]:
         self.craft_starts.append((ship_id, recipe_id, assistant_auxiliary_id))
         return {"endsAt": "2099-01-01T00:00:00+00:00"}
+
+    def start_deuterium_transfer(
+        self,
+        source_ship_id: str,
+        target_ship_id: str,
+        actor_auxiliary_id: str,
+        amount: float,
+        operation_key: str,
+    ) -> dict[str, Any]:
+        self.deuterium_transfers.append((source_ship_id, target_ship_id, actor_auxiliary_id, amount))
+        action = {
+            "id": f"deuterium-{len(self.deuterium_transfers)}",
+            "type": "deuterium_transfer",
+            "status": "queued",
+            "endsAt": "2099-01-01T00:00:00+00:00",
+        }
+        self.active_actions.append(action)
+        for item in self.auxiliaries.get(source_ship_id, []):
+            if item.get("id") == actor_auxiliary_id:
+                item["status"] = "busy"
+                item["action"] = action
+                break
+        return action
 
     def start_inventory_item_transfer(
         self,

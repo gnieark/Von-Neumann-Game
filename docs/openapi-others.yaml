@@ -1265,6 +1265,17 @@ components:
             "$ref": "#/components/schemas/OthersShip"
         activeActions:
           type: array
+          description: >-
+            Active auxiliary-backed actions originating in this fleet, with
+            status queued or running. Includes deuterium_transfer actions even
+            when their source is not the mothership or is in another sector.
+            Each action exposes id, type, status, actor, createdAt, updatedAt,
+            and endsAt when scheduled. Terminal actions leave this list; GET
+            /api/others/actions/{actionId} retains their outcome. This is not a
+            complete list of actions performed directly by ships. Clients can
+            wait until no deuterium_transfer remains before recomputing fuel
+            needs from the freshly loaded ships collection, including after
+            a restart without local state.
           items:
             type: object
         createdAt:

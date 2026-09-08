@@ -298,7 +298,7 @@ class LogisticsTests(unittest.TestCase):
         self.assertEqual(2, len(result.event_dates))
 
     def test_logistics_runs_in_parallel_with_sentinel_deployment(self) -> None:
-        sentinel = ship("sentinel", self.center)
+        sentinel = ship("sentinel", self.center, deuterium=100)
         api = FakeApi(
             [self.mothership, sentinel],
             scans={self.center: harvestable_scan("planet-a")},
@@ -318,7 +318,7 @@ class LogisticsTests(unittest.TestCase):
         self.assertEqual(2, result.accepted_commands)
 
     def test_missile_distribution_reserves_its_auxiliary_before_logistics(self) -> None:
-        recipient = ship("recipient", self.center)
+        recipient = ship("recipient", self.center, deuterium=100)
         api = FakeApi(
             [self.mothership, recipient],
             auxiliaries={"mother": [auxiliary("aux-a"), auxiliary("aux-b")]},

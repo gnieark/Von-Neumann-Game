@@ -106,6 +106,27 @@ La capacité libre de la soute et les réservations en cours limitent toujours l
 taille de l'essaim. Les planètes non habitées sont choisies avant les planètes
 habitées lorsque plusieurs cibles sont disponibles.
 
+Le vaisseau mère ravitaille aussi les autres vaisseaux de sa flotte présents
+dans son secteur et sans mouvement engagé. Après la distribution des missiles
+et avant les crafts/moissons, il affecte un auxiliaire embarqué disponible par
+destinataire, dans l'ordre des identifiants publics. Chaque transfert complète
+le réservoir cible, dans la limite du carburant encore disponible sur le
+vaisseau mère : le dernier plein peut donc être partiel. Aucun minimum de
+carburant n'est conservé sur le vaisseau mère ; seule sa réserve de propulsion
+est utilisée, pas le deutérium de sa soute.
+
+À chaque réconciliation générale, le contrôleur recharge les vaisseaux et les
+`activeActions` de la flotte. Tant qu'une action `deuterium_transfer` est
+`queued` ou `running`, quel que soit son vaisseau source ou son secteur, aucun
+nouveau ravitaillement n'est lancé. Cette règle s'applique dès le premier cycle
+après un redémarrage. Une échéance `endsAt` dépassée ne suffit pas : le script
+attend la fin effective de toutes les actions, puis recalcule les besoins à
+partir du nouvel état API. Les transferts durent cinq minutes, sous réserve du
+traitement par l'ordonnanceur. Leurs échéances participent au réveil du cycle.
+Pendant cette attente, la défense, la formation, la distribution de missiles,
+les crafts et la moisson poursuivent leurs propres cycles avec les auxiliaires
+disponibles.
+
 Une sentinelle voisine sans missile est relevée lorsqu'un vaisseau armé et
 disponible se trouve auprès du vaisseau mère. Le remplaçant part en premier ; la
 sentinelle vide ne reçoit son ordre de retour qu'après acceptation de ce
@@ -136,7 +157,7 @@ La régulation est locale à chaque instance du script.
 
 `defense_etoile_attente.py` est uniquement le point d'entrée canonique. Le
 paquet `defense_etoile` sépare la CLI et le transport HTTP de la logique
-d'armement, de formation, de logistique, d'observation, de détection des
+d'armement, de ravitaillement, de formation, de logistique, d'observation, de détection des
 événements, d'engagement et de connaissance des dangers. Les modules tactiques
 dépendent du protocole `OthersApi`, ce qui permet de les tester sans serveur ni
 base de données.

@@ -18,6 +18,7 @@ from .logistics import LogisticsPolicy, MothershipLogistics
 from .models import CycleResult, DefensePolicy
 from .observation import ScoutObserver
 from .ports import OthersApi
+from .refueling import FleetRefuelingCoordinator
 
 
 class DefenseEtoileAttente:
@@ -63,6 +64,7 @@ class DefenseEtoileAttente:
             logger=logger,
         )
         self.armament = FleetArmamentCoordinator(api, logger=logger)
+        self.refueling = FleetRefuelingCoordinator(api, logger=logger)
         self.logistics = MothershipLogistics(
             api,
             logger=logger,
@@ -79,7 +81,7 @@ class DefenseEtoileAttente:
         else:
             fleet_id = require_string(self.fleet_id, "fleet_id")
 
-        ships = self._load_fleet_ships(fleet_id)
+        ships, _ = self._load_fleet_state(fleet_id)
         fleet_mothership = self._select_mothership(ships, fleet_id)
         expected_mothership_id = self.mothership_id or require_string(
             fleet_mothership.get("id"), "mothership.id"
@@ -146,7 +148,7 @@ class DefenseEtoileAttente:
         else:
             fleet_id = require_string(self.fleet_id, "fleet_id")
 
-        ships = self._load_fleet_ships(fleet_id)
+        ships, active_actions = self._load_fleet_state(fleet_id)
         fleet_mothership = self._select_mothership(ships, fleet_id)
 
         mothership_id = require_string(fleet_mothership.get("id"), "mothership.id")
@@ -158,6 +160,7 @@ class DefenseEtoileAttente:
             return result
 
         armament = self.armament.reconcile(fleet_mothership, ships, result)
+        self.refueling.reconcile(fleet_mothership, ships, active_actions, result)
         self.logistics.reconcile(
             fleet_mothership,
             result,
@@ -175,7 +178,9 @@ class DefenseEtoileAttente:
         """Observe les sentinelles en poste sans relancer la maintenance de flotte."""
         return self.formation.reconcile_activity(CycleResult())
 
-    def _load_fleet_ships(self, fleet_id: str) -> list[dict[str, Any]]:
+    def _load_fleet_state(
+        self, fleet_id: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         fleet = self.api.get_fleet(fleet_id)
         if require_string(fleet.get("id"), "fleet.id") != fleet_id:
             raise ApiContractError(
@@ -184,9 +189,15 @@ class DefenseEtoileAttente:
         ships_value = fleet.get("ships")
         if not isinstance(ships_value, list):
             raise ApiContractError("fleet.ships doit être une liste.")
+        actions_value = fleet.get("activeActions")
+        if not isinstance(actions_value, list):
+            raise ApiContractError("fleet.activeActions doit être une liste.")
         return [
             require_mapping(ship, f"fleet.ships[{index}]")
             for index, ship in enumerate(ships_value)
+        ], [
+            require_mapping(action, f"fleet.activeActions[{index}]")
+            for index, action in enumerate(actions_value)
         ]
 
     @staticmethod
