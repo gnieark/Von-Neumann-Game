@@ -319,11 +319,120 @@ paths:
       tags:
       - Others
       summary: Schedule a tank-to-tank deuterium transfer
+      description: >-
+        shipId identifies the source ship and auxiliaryId an undestroyed
+        auxiliary belonging to that ship. The source must belong to the
+        authenticated player, be in an active fleet, and not be destroyed or
+        removed. The target must belong to the same player; a different fleet
+        is allowed. Both ships must have the same sector and neither may be in
+        transit when the order is submitted. The auxiliary must be embarked
+        and have no current action. No mothership-only restriction applies.
+
+        amount is expressed in propulsion-tank points, not inventory ECE.
+        The rounded amount must not exceed the source stock minus its existing
+        reservations, or the target capacity minus its stock and reservations.
+        The server rejects an excessive amount rather than reducing it.
+        There is no additional per-trip cargo limit or minimum fuel reserve
+        imposed on the source. Inventory deuterium is not used.
+
+        Acceptance reserves the amount on both ships and marks the auxiliary
+        busy, without changing either tank's stock yet. The scheduled completion
+        is five minutes after acceptance; actual completion depends on scheduler
+        processing. Poll GET /api/others/actions/{actionId} using action.id.
+        On success the source is debited, the target credited, both reservations
+        released and the auxiliary freed. If the target is missing, destroyed
+        or removed at completion, the action fails with target_unavailable and
+        the source reservation is released without debiting its tank. The
+        completion handler does not recheck sector proximity.
+
+        Ship telemetry exposes deuterium.amount and deuterium.capacity but not
+        reservations. Public action data does not expose targetShipId or the
+        requested amount; retain the submitted order locally. A successful
+        terminal action exposes the transferred amount in result.amount.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        "$ref": "#/components/requestBodies/DeuteriumTransfer"
       responses:
         '202':
-          "$ref": "#/components/responses/Accepted"
+          description: Transfer queued; the response contains an action, not an inventory transfer object.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersDeuteriumTransferResponse"
+              example:
+                action:
+                  id: action_0123456789abcdef0123
+                  type: deuterium_transfer
+                  status: queued
+                  actor:
+                    kind: others_auxiliary
+                    id: aux_0123456789abcdef0123
+                  createdAt: '2026-09-08T12:00:00+00:00'
+                  updatedAt: '2026-09-08T12:00:00+00:00'
+                  endsAt: '2026-09-08T12:05:00+00:00'
+        '400':
+          description: >-
+            bad_request — missing or invalid JSON body; missing/non-string
+            targetShipId; missing, non-numeric or non-positive amount; or an
+            invalid Idempotency-Key header.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+        '404':
+          description: >-
+            others_ship_not_found — source missing, not owned, destroyed,
+            removed or in an inactive fleet; or target missing or owned by
+            another player. others_auxiliary_not_found — auxiliary missing,
+            destroyed or not attached to the source ship.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+        '409':
+          description: >-
+            others_auxiliary_busy — auxiliary has a current action or is not
+            embarked. idempotency_key_conflict — the key is already associated
+            with a different method, path or canonical JSON body for this player.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+        '422':
+          description: >-
+            target_out_of_range — different sectors or at least one ship in
+            transit. insufficient_resources — source unreserved tank stock or
+            target unreserved tank space is insufficient for the full amount.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+              examples:
+                outOfRange:
+                  value:
+                    error:
+                      code: target_out_of_range
+                      message: Both ships must be in the same sector.
+                insufficientResources:
+                  value:
+                    error:
+                      code: insufficient_resources
+                      message: Source stock or target tank capacity is insufficient.
+        '429':
+          "$ref": "#/components/responses/RateLimited"
+        '500':
+          description: internal_error — unexpected server error.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+        '503':
+          "$ref": "#/components/responses/OthersUnavailable"
   "/api/others/ships/{shipId}/sector/autonomous-units":
     parameters:
     - "$ref": "#/components/parameters/ShipId"
@@ -469,9 +578,42 @@ paths:
       tags:
       - Others
       summary: Get one scheduler-driven action
+      description: >-
+        Returns the current persisted action, including terminal failures with
+        HTTP 200. For type deuterium_transfer, action follows
+        OthersDeuteriumTransferAction: endsAt is the scheduled completion,
+        result.amount is present on success, and error describes a failure
+        when available. Read this endpoint to track progress; replaying an
+        idempotent POST returns the originally stored response.
       responses:
         '200':
           description: Persisted action state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [action]
+                properties:
+                  action:
+                    type: object
+                    description: >-
+                      Action fields depend on type. For deuterium_transfer,
+                      see OthersDeuteriumTransferAction.
+                    additionalProperties: true
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+        '404':
+          description: others_action_not_found — action missing or not owned by this player.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+        '429':
+          "$ref": "#/components/responses/RateLimited"
+        '503':
+          "$ref": "#/components/responses/OthersUnavailable"
   "/api/others/ships/{shipId}/weapons/laser":
     parameters:
     - "$ref": "#/components/parameters/ShipId"
@@ -566,12 +708,27 @@ components:
       description: >-
         An optional key chosen by your client that prevents the same command from
         being executed twice if the request is retried after a timeout or network
-        interruption.
+        interruption. Keys are shared by all Others commands for the same player.
+        Reusing a key with the same method, path and canonical JSON body returns
+        the stored HTTP status and body; it does not refresh action state.
+        Reusing it for a different command returns 409 idempotency_key_conflict.
+        After trimming surrounding whitespace, the key must contain 1 to 128
+        visible ASCII characters, with no internal spaces.
       schema:
         type: string
         minLength: 1
         maxLength: 128
+        pattern: '^[!-~]{1,128}$'
   requestBodies:
+    DeuteriumTransfer:
+      required: true
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/OthersDeuteriumTransferRequest"
+          example:
+            targetShipId: ship_0123456789abcdef0123
+            amount: 32.5
     InventoryTransfer:
       required: true
       description: >-
@@ -610,6 +767,103 @@ components:
               targetId:
                 type: string
   schemas:
+    OthersDeuteriumTransferRequest:
+      type: object
+      required: [targetShipId, amount]
+      properties:
+        targetShipId:
+          type: string
+          description: Opaque public id of a target Others ship owned by the same player.
+        amount:
+          description: >-
+            Propulsion-tank points to transfer. Send a positive JSON number.
+            The current parser also accepts PHP-numeric strings whose numeric
+            value is positive. The value is checked for positivity before
+            rounding to four decimal places; values below 0.00005 therefore
+            round to zero. Use at least 0.0001 for a nonzero transfer. No fixed
+            maximum applies beyond source stock and target capacity.
+          oneOf:
+          - type: number
+            minimum: 0
+            exclusiveMinimum: true
+          - type: string
+            description: Must be numeric according to PHP is_numeric and greater than zero.
+    OthersDeuteriumTransferResponse:
+      type: object
+      required: [action]
+      properties:
+        action:
+          "$ref": "#/components/schemas/OthersDeuteriumTransferAction"
+    OthersDeuteriumTransferAction:
+      type: object
+      required: [id, type, status, actor, createdAt, updatedAt, endsAt]
+      properties:
+        id:
+          type: string
+          description: Opaque action id to use with GET /api/others/actions/{actionId}.
+        type:
+          type: string
+          enum: [deuterium_transfer]
+        status:
+          type: string
+          enum: [queued, succeeded, failed]
+        actor:
+          type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [others_auxiliary]
+            id:
+              type: string
+              description: Public id of the source auxiliary.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+          description: Scheduled completion five minutes after acceptance.
+        completedAt:
+          type: string
+          format: date-time
+          description: Present after terminal processing.
+        result:
+          type: object
+          description: Present on successful completion.
+          required: [outcome, amount]
+          properties:
+            outcome:
+              type: string
+              enum: [transferred]
+            amount:
+              type: number
+              description: Transferred amount in tank points, rounded to four decimals.
+        error:
+          description: >-
+            Present when a failure reason was recorded, including
+            target_unavailable if the completion handler finds the target
+            missing, destroyed or removed. Other lifecycle failures may also
+            terminate the action; do not assume every failed action has error.
+          allOf:
+          - "$ref": "#/components/schemas/OthersError"
+    OthersError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    OthersErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          "$ref": "#/components/schemas/OthersError"
     OthersInventoryTransferRequest:
       oneOf:
       - "$ref": "#/components/schemas/OthersInventoryResourceTransferRequest"
@@ -1163,9 +1417,44 @@ components:
       description: Accepted for scheduler processing; no terminal universe effect
         has run inline
     Unauthorized:
-      description: Bearer authentication required
+      description: unauthorized — missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/OthersErrorResponse"
     Forbidden:
-      description: others_permission_required
+      description: others_permission_required — the authenticated account cannot control Others fleets.
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/OthersErrorResponse"
+    RateLimited:
+      description: rate_limit_exceeded — too many API requests for this bearer token.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          description: Window reset time as a Unix timestamp in seconds.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/OthersErrorResponse"
+    OthersUnavailable:
+      description: others_unavailable — Others storage or required idempotency storage is unavailable.
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/OthersErrorResponse"
     NotFound:
       description: Owned resource not found
     Conflict:

@@ -564,6 +564,41 @@ $test->assert(
 $othersInventoryTransferCreateOperation = is_array($openApiOthersDocument)
     ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/inventory-transfers']['post'] ?? null)
     : null;
+$othersDeuteriumTransferOperation = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/transfer-deuterium']['post'] ?? [];
+$othersDeuteriumTransferBody = $openApiOthersDocument['components']['requestBodies']['DeuteriumTransfer'] ?? [];
+$othersDeuteriumTransferRequest = $openApiOthersDocument['components']['schemas']['OthersDeuteriumTransferRequest'] ?? [];
+$othersDeuteriumTransferAction = $openApiOthersDocument['components']['schemas']['OthersDeuteriumTransferAction'] ?? [];
+$test->assertEquals('#/components/requestBodies/DeuteriumTransfer', $othersDeuteriumTransferOperation['requestBody']['$ref'] ?? null, 'Others deuterium transfer exposes a request body in Swagger');
+$test->assertEquals(true, $othersDeuteriumTransferBody['required'] ?? null, 'Others deuterium transfer requires a body');
+$test->assertEquals('#/components/schemas/OthersDeuteriumTransferRequest', $othersDeuteriumTransferBody['content']['application/json']['schema']['$ref'] ?? null, 'Others deuterium transfer body resolves to its request schema');
+$test->assertEquals(['targetShipId', 'amount'], $othersDeuteriumTransferRequest['required'] ?? null, 'Others deuterium transfer documents its two required payload fields');
+$test->assertEquals(true, $othersDeuteriumTransferRequest['properties']['amount']['oneOf'][0]['exclusiveMinimum'] ?? null, 'Others deuterium transfer documents a strictly positive numeric amount');
+$test->assertEquals('#/components/schemas/OthersDeuteriumTransferResponse', $othersDeuteriumTransferOperation['responses']['202']['content']['application/json']['schema']['$ref'] ?? null, 'Others deuterium transfer acceptance exposes the action response schema');
+$test->assertEquals(['deuterium_transfer'], $othersDeuteriumTransferAction['properties']['type']['enum'] ?? null, 'Others deuterium action is distinct from an inventory transfer');
+$test->assertEquals(['outcome', 'amount'], $othersDeuteriumTransferAction['properties']['result']['required'] ?? null, 'Others deuterium action documents its terminal transferred amount');
+foreach ([
+    400 => ['bad_request'],
+    404 => ['others_ship_not_found', 'others_auxiliary_not_found'],
+    409 => ['others_auxiliary_busy', 'idempotency_key_conflict'],
+    422 => ['target_out_of_range', 'insufficient_resources'],
+] as $status => $errorCodes) {
+    $response = $othersDeuteriumTransferOperation['responses'][$status] ?? [];
+    $test->assertEquals('#/components/schemas/OthersErrorResponse', $response['content']['application/json']['schema']['$ref'] ?? null, 'Others deuterium transfer documents the HTTP ' . $status . ' error envelope');
+    foreach ($errorCodes as $errorCode) {
+        $test->assert(str_contains((string) ($response['description'] ?? ''), $errorCode), 'Others deuterium transfer documents error ' . $errorCode);
+    }
+}
+foreach ([401 => 'Unauthorized', 403 => 'Forbidden', 429 => 'RateLimited', 503 => 'OthersUnavailable'] as $status => $component) {
+    $test->assertEquals('#/components/responses/' . $component, $othersDeuteriumTransferOperation['responses'][$status]['$ref'] ?? null, 'Others deuterium transfer documents shared HTTP ' . $status . ' failures');
+    $test->assertEquals('#/components/schemas/OthersErrorResponse', $openApiOthersDocument['components']['responses'][$component]['content']['application/json']['schema']['$ref'] ?? null, 'Others shared ' . $component . ' response exposes its error schema');
+}
+$test->assertEquals('integer', $openApiOthersDocument['components']['responses']['RateLimited']['headers']['Retry-After']['schema']['type'] ?? null, 'Others rate-limit response documents the retry delay');
+$test->assert(
+    str_contains((string) ($othersDeuteriumTransferOperation['description'] ?? ''), 'not reservations')
+        && str_contains((string) ($othersDeuteriumTransferOperation['description'] ?? ''), 'five minutes')
+        && str_contains((string) ($othersDeuteriumTransferOperation['description'] ?? ''), 'GET /api/others/actions/{actionId}'),
+    'Others deuterium transfer documents telemetry limits, scheduled duration and polling',
+);
 $othersInventoryTransferReadOperation = is_array($openApiOthersDocument)
     ? ($openApiOthersDocument['paths']['/api/others/inventory-transfers/{transferId}']['get'] ?? null)
     : null;

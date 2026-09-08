@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-08
+
+### Changed
+
+- Documentation OpenAPI Others : précision du contrat existant de transfert de deutérium entre réservoirs (requête, unités, arrondi, conditions, réservations, durée, réponse et codes d’erreur), du suivi des actions et de l’idempotence. Les limites de la télémétrie publique sont explicitées.
+
 ## 2026-09-04
 
 ### Changed
