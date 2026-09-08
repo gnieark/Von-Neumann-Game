@@ -102,6 +102,22 @@ En parallèle de cette formation, le vaisseau mère entretient sa logistique :
   conserver les matières premières de 10 auxiliaires et 10 missiles, soit 250
   ECE de métaux, 25 de glace, 60 de composés carbonés et 10,5 de deutérium.
 
+Lorsque ces objectifs logistiques sont atteints, les ressources excédant la
+réserve de reconstruction peuvent financer des vaisseaux standards. Le
+contrôleur lance jusqu'à **trois constructions actives simultanément**, avec
+un auxiliaire embarqué libre par construction. Il lit les coûts dans la
+recette API `standard_ship` : actuellement 6 000 ECE de métaux, 1 000 de glace,
+2 000 de composés carbonés et 100 de deutérium de soute, pour sept jours de
+construction. La réserve reste disponible après chaque lancement.
+
+Les crafts `standard_ship` en état `queued` ou `running` sont recomptés depuis
+l'API à chaque cycle, y compris après redémarrage. Une construction achevée
+ou échouée libère une place pour le cycle suivant, sous les mêmes conditions
+de ressources et de disponibilité. Les autres fonctions continuent et la
+production d'auxiliaires/missiles reste prioritaire. La moisson conserve ses
+objectifs existants : elle n'est pas prolongée uniquement pour financer des
+vaisseaux supplémentaires.
+
 La capacité libre de la soute et les réservations en cours limitent toujours la
 taille de l'essaim. Les planètes non habitées sont choisies avant les planètes
 habitées lorsque plusieurs cibles sont disponibles.

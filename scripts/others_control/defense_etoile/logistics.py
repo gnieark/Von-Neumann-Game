@@ -15,6 +15,7 @@ from .ports import OthersApi
 
 RESOURCE_TYPES = ("metals", "ice", "carbon_compounds", "deuterium")
 ACTIVE_STATUSES = {"queued", "running"}
+MAX_ACTIVE_SHIP_CRAFTS = 3
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,10 @@ class MothershipLogistics:
         if production_complete and reserve_complete:
             self._clear_harvest_cycle()
             self.log("Objectifs logistiques atteints : production et réserve de reconstruction complètes.")
+            self._start_ship_constructions(
+                ship_id, recipes["standard_ship"], active_crafts,
+                available_auxiliaries, resources, reserve, free_capacity, result,
+            )
             return
 
         if active_harvest_actions:
@@ -221,6 +226,53 @@ class MothershipLogistics:
         self._add_harvest_cycle_deadline(result)
         self.log(f"Moisson lancée sur {target_id} avec {harvest_count} auxiliaire(s).")
 
+    def _start_ship_constructions(
+        self,
+        ship_id: str,
+        recipe: WorkshopRecipe,
+        active_crafts: list[dict[str, Any]],
+        available_auxiliaries: list[dict[str, Any]],
+        resources: dict[str, float],
+        reserve: dict[str, float],
+        free_capacity: float,
+        result: CycleResult,
+    ) -> None:
+        active_ships = sum(
+            craft.get("recipeId") == recipe.identifier for craft in active_crafts
+        )
+        surplus = {
+            resource_type: max(0.0, resources[resource_type] - reserve[resource_type])
+            for resource_type in RESOURCE_TYPES
+        }
+        while active_ships < MAX_ACTIVE_SHIP_CRAFTS and available_auxiliaries:
+            if not self._can_craft(recipe, surplus, free_capacity):
+                break
+            assistant = available_auxiliaries.pop(0)
+            assistant_id = require_string(assistant.get("id"), "auxiliaries[].id")
+            try:
+                action = self.api.start_craft(
+                    ship_id, recipe.identifier, assistant_id,
+                    self._operation_key("ship-craft"),
+                )
+            except ApiRequestError as error:
+                if error.status in {404, 409, 422}:
+                    self.log(
+                        f"Construction de vaisseau différée avec {assistant_id} : "
+                        f"{error.code} ({error.message})."
+                    )
+                    break
+                raise
+            self._consume_recipe(recipe, surplus)
+            free_capacity -= recipe.output_space_ece
+            active_ships += 1
+            result.accepted_commands += 1
+            result.add_event_date(action.get("endsAt"), "standard_ship craft.endsAt")
+            self.log(
+                f"Construction de vaisseau lancée avec {assistant_id} "
+                f"({active_ships}/{MAX_ACTIVE_SHIP_CRAFTS} actives), "
+                "réserve de reconstruction préservée."
+            )
+
     def _workshop_recipes(self) -> dict[str, WorkshopRecipe]:
         if self._recipes is None:
             self._recipes = {
@@ -230,7 +282,7 @@ class MothershipLogistics:
                     for value in self.api.get_crafting_recipes()
                 )
             }
-            missing = {"others_auxiliary", "missile"} - self._recipes.keys()
+            missing = {"others_auxiliary", "missile", "standard_ship"} - self._recipes.keys()
             if missing:
                 raise ApiContractError(
                     "Recettes Others manquantes : " + ", ".join(sorted(missing)) + "."

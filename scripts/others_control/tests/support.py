@@ -185,6 +185,17 @@ class FakeApi:
     def get_crafting_recipes(self) -> list[dict[str, Any]]:
         return [
             {
+                "id": "standard_ship",
+                "durationSeconds": 604800,
+                "ingredients": {
+                    "metals": 6000.0,
+                    "ice": 1000.0,
+                    "carbon_compounds": 2000.0,
+                    "deuterium": 100.0,
+                },
+                "output": {"kind": "standard_ship", "quantity": 1},
+            },
+            {
                 "id": "others_auxiliary",
                 "durationSeconds": 3600,
                 "ingredients": {

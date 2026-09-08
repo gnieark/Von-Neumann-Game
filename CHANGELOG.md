@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Contrôle Others « défense étoile — attente » : une fois les objectifs logistiques atteints, le vaisseau mère construit des vaisseaux standards avec les ressources excédant sa réserve de reconstruction et ses auxiliaires embarqués libres. Le plafond de trois constructions simultanées tient compte des crafts actifs renvoyés par l’API, y compris après redémarrage ; les autres fonctions continuent.
 - Contrôle Others « défense étoile — attente » : le vaisseau mère ravitaille par auxiliaires les vaisseaux de sa flotte présents dans son secteur, dans la limite du carburant disponible. Chaque nouvelle vague attend la fin effective de tous les transferts de deutérium actifs dans la flotte, y compris après redémarrage, puis recalcule les besoins depuis l’API ; les autres fonctions de défense et de logistique continuent.
 - Documentation OpenAPI Others : précision du contrat existant de transfert de deutérium entre réservoirs (requête, unités, arrondi, conditions, réservations, durée, réponse et codes d’erreur), du suivi des actions et de l’idempotence. Les limites de la télémétrie publique sont explicitées.
 

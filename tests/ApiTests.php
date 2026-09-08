@@ -564,6 +564,17 @@ $test->assert(
 $othersInventoryTransferCreateOperation = is_array($openApiOthersDocument)
     ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/inventory-transfers']['post'] ?? null)
     : null;
+$othersCraftOperation = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/crafts']['post'] ?? [];
+$test->assertEquals(
+    ['recipeId', 'assistantAuxiliaryId'],
+    $othersCraftOperation['requestBody']['content']['application/json']['schema']['required'] ?? null,
+    'Others craft documentation requires a recipe and an assistant auxiliary',
+);
+$test->assertEquals(
+    'standard_ship',
+    $othersCraftOperation['requestBody']['content']['application/json']['example']['recipeId'] ?? null,
+    'Others craft documentation exposes the standard ship construction request',
+);
 $othersDeuteriumTransferOperation = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/transfer-deuterium']['post'] ?? [];
 $othersDeuteriumTransferBody = $openApiOthersDocument['components']['requestBodies']['DeuteriumTransfer'] ?? [];
 $othersDeuteriumTransferRequest = $openApiOthersDocument['components']['schemas']['OthersDeuteriumTransferRequest'] ?? [];

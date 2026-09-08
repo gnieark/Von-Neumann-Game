@@ -541,6 +541,12 @@ paths:
       tags:
       - Others
       summary: List this mothership's crafts
+      description: >-
+        Returns a crafts collection with recipeId, status, actionId and endsAt
+        when scheduled. To count ongoing ship construction, select
+        recipeId standard_ship and status queued or running. Read this state
+        again after restarting a controller; terminal crafts do not occupy an
+        active construction slot.
       responses:
         '200':
           description: Crafts
@@ -548,8 +554,40 @@ paths:
       tags:
       - Others
       summary: Schedule a mothership craft
+      description: >-
+        Requires an owned mothership and an available embarked assistant
+        auxiliary. Ingredients are consumed from unreserved inventory resources
+        at acceptance, including inventory deuterium rather than propulsion
+        fuel. The assistant stays busy until completion. Read canonical costs
+        and durations from GET /api/others/crafting/recipes.
+
+        standard_ship takes 604800 seconds (seven days) and consumes 6000 ECE
+        of metals, 1000 of ice, 2000 of carbon_compounds and 100 of deuterium.
+        On completion it creates a standard ship in the mothership's fleet
+        and current sector, with one auxiliary and an empty 50-point fuel tank.
+        The action result exposes output.kind and output.id. Several crafts
+        can run concurrently using distinct assistants; any reconstruction
+        reserve or three-construction limit is a controller policy, not an
+        API restriction.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipeId, assistantAuxiliaryId]
+              properties:
+                recipeId:
+                  type: string
+                  enum: [standard_ship, others_auxiliary, missile]
+                assistantAuxiliaryId:
+                  type: string
+                  description: Public id of an available auxiliary embarked on the mothership.
+            example:
+              recipeId: standard_ship
+              assistantAuxiliaryId: aux_0123456789abcdef0123
       responses:
         '202':
           "$ref": "#/components/responses/Accepted"
