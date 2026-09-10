@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-10
+
+### Added
+
+- Script administratif ponctuel `relocate-inactive-others-fleet-to-origin.php` : rappel des auxiliaires libres et déplacement immédiat d’une flotte Others inactive à l’origine, avec simulation par défaut, transaction et conservation des états initiaux dans l’audit opérateur.
+
 ## 2026-09-08
 
 ### Changed
