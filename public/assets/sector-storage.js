@@ -7,6 +7,8 @@
         items: [],
         nextCursor: "",
         probeId: null,
+        mannies: [],
+        onboardContainers: [],
         requestSequence: 0,
     };
     let i18n = {};
@@ -116,6 +118,48 @@
         select.disabled = false;
     }
 
+    function idleMannies() {
+        return state.mannies.filter((manny) => (
+            manny
+            && manny.id
+            && manny.currentTask === null
+            && manny.canReceiveOrders !== false
+            && manny.location
+            && manny.location.type === "probe"
+        ));
+    }
+
+    function onboardContainerLabel(container) {
+        if (container && (container.id === "probe-core" || container.kind === "probe")) {
+            return tr("probeCoreContainer", "Probe");
+        }
+        return container && (container.label || container.id)
+            ? (container.label || container.id)
+            : tr("unknownContainer", "Unknown container");
+    }
+
+    function retrieveIcon() {
+        return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m7.5 10 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>';
+    }
+
+    function retrieveButton(kind, id, available, disabled) {
+        const isResource = kind === "resources";
+        const label = isResource
+            ? tr("sectorStorageRetrieveResource", "Retrieve this resource")
+            : tr("sectorStorageRetrieveItem", "Retrieve this item");
+        return '<button class="inventory-icon-button sector-storage-retrieve-button" type="button"'
+            + ' data-retrieve-kind="' + escaped(kind) + '" data-retrieve-id="' + escaped(id) + '"'
+            + (isResource ? ' data-retrieve-available="' + escaped(available) + '"' : "")
+            + (disabled ? ' disabled aria-disabled="true"' : ' aria-expanded="false"')
+            + ' title="' + escaped(label) + '" aria-label="' + escaped(label) + '">' + retrieveIcon() + "</button>";
+    }
+
+    function retrievalUnavailable(kind, available) {
+        return idleMannies().length === 0
+            || (kind !== "deuterium" && state.onboardContainers.length === 0)
+            || !(available > 0);
+    }
+
     function resourceRows() {
         if (state.resources.length === 0) {
             return '<p class="sector-storage-empty">' + escaped(tr("sectorStorageNoResources", "No stored resources.")) + "</p>";
@@ -125,11 +169,12 @@
             const reserved = Math.max(0, Number(resource.reservedAmount) || 0);
             const available = Math.max(0, Number(resource.availableAmount ?? (amount - reserved)) || 0);
             return '<div class="sector-storage-line">'
-                + '<div><strong>' + escaped(resourceLabel(resource.type)) + '</strong><small>' + escaped(resource.type || "") + "</small></div>"
+                + retrieveButton("resources", resource.type || "", available, retrievalUnavailable(resource.type, available))
+                + '<div class="sector-storage-line-name"><strong>' + escaped(resourceLabel(resource.type)) + '</strong><small>' + escaped(resource.type || "") + "</small></div>"
                 + '<dl><div><dt>' + escaped(tr("storedAmount", "Amount")) + '</dt><dd>' + escaped(window.VNG.numberValue(amount)) + ' ECE</dd></div>'
                 + '<div><dt>' + escaped(tr("sectorStorageAvailable", "Available")) + '</dt><dd>' + escaped(window.VNG.numberValue(available)) + ' ECE</dd></div>'
                 + (reserved > 0 ? '<div><dt>' + escaped(tr("sectorStorageReserved", "Reserved")) + '</dt><dd>' + escaped(window.VNG.numberValue(reserved)) + ' ECE</dd></div>' : "")
-                + "</dl></div>";
+                + '</dl><div class="sector-storage-retrieve-slot"></div></div>';
         }).join("") + "</div>";
     }
 
@@ -139,11 +184,107 @@
         }
         return '<div class="sector-storage-lines">' + state.items.map((item) => (
             '<div class="sector-storage-line">'
-                + '<div><strong>' + escaped(item.name || itemTypeLabel(item.type)) + '</strong><small>' + escaped(itemTypeLabel(item.type)) + "</small></div>"
+                + retrieveButton("items", item.id || "", item.available === false ? 0 : 1, retrievalUnavailable("items", item.available === false ? 0 : 1))
+                + '<div class="sector-storage-line-name"><strong>' + escaped(item.name || itemTypeLabel(item.type)) + '</strong><small>' + escaped(itemTypeLabel(item.type)) + "</small></div>"
                 + '<dl><div><dt>' + escaped(tr("containerSpace", "Space")) + '</dt><dd>' + escaped(window.VNG.numberValue(item.containerSpace)) + ' ECE</dd></div>'
                 + '<div><dt>' + escaped(tr("status", "Status")) + '</dt><dd>' + escaped(item.available === false ? tr("sectorStorageReserved", "Reserved") : tr("sectorStorageAvailable", "Available")) + "</dd></div></dl>"
-                + "</div>"
+                + '<div class="sector-storage-retrieve-slot"></div></div>'
         )).join("") + "</div>";
+    }
+
+    function mannyOptions() {
+        return idleMannies().map((manny) => (
+            '<option value="' + escaped(manny.id) + '">' + escaped(manny.name || manny.id) + "</option>"
+        )).join("");
+    }
+
+    function containerOptions() {
+        return state.onboardContainers.map((container) => (
+            '<option value="' + escaped(container.id) + '">' + escaped(onboardContainerLabel(container)) + "</option>"
+        )).join("");
+    }
+
+    function retrievalForm(button) {
+        const kind = button.dataset.retrieveKind;
+        const id = button.dataset.retrieveId || "";
+        const available = Math.max(0, Number(button.dataset.retrieveAvailable) || 0);
+        const deuterium = kind === "resources" && id === "deuterium";
+        return '<form class="sector-storage-retrieve-form" data-retrieve-kind="' + escaped(kind) + '" data-retrieve-id="' + escaped(id) + '"'
+            + (kind === "resources" ? ' data-retrieve-available="' + escaped(available) + '"' : "") + '>'
+            + '<label>' + escaped(tr("actorManny", "Manny")) + '<select name="mannyId" required>' + mannyOptions() + "</select></label>"
+            + (!deuterium ? '<label>' + escaped(tr("onboardContainer", "Onboard container")) + '<select name="containerId" required>' + containerOptions() + "</select></label>" : "")
+            + (kind === "resources" ? '<label>' + escaped(tr("quantity", "Quantity")) + '<span class="sector-storage-quantity"><input name="amount" type="number" min="0.0001" max="' + escaped(available) + '" step="0.0001" required><span>ECE</span></span></label>' : "")
+            + '<div class="sector-storage-retrieve-actions"><button type="submit">' + escaped(deuterium ? tr("startExternalDeuteriumTransfer", "Refuel tank") : tr("sectorStorageRetrieve", "Retrieve")) + '</button>'
+            + '<button class="sector-storage-retrieve-cancel" type="button">' + escaped(tr("cancel", "Cancel")) + "</button></div>"
+            + (deuterium ? '<p>' + escaped(tr("externalDeuteriumDuration", "Duration: five minutes outbound and five minutes returning.")) + "</p>" : "")
+            + "</form>";
+    }
+
+    function closeRetrievalForms() {
+        document.querySelectorAll(".sector-storage-retrieve-form").forEach((form) => form.remove());
+        document.querySelectorAll(".sector-storage-retrieve-button[aria-expanded]").forEach((button) => button.setAttribute("aria-expanded", "false"));
+    }
+
+    function toggleRetrievalForm(button) {
+        const wasOpen = button.getAttribute("aria-expanded") === "true";
+        closeRetrievalForms();
+        if (wasOpen || button.disabled) return;
+        const slot = button.closest(".sector-storage-line")?.querySelector(".sector-storage-retrieve-slot");
+        if (!slot) return;
+        slot.innerHTML = retrievalForm(button);
+        button.setAttribute("aria-expanded", "true");
+        slot.querySelector("select, input")?.focus();
+    }
+
+    async function submitRetrievalForm(form) {
+        const formData = new FormData(form);
+        const mannyId = String(formData.get("mannyId") || "");
+        const kind = form.dataset.retrieveKind;
+        const id = form.dataset.retrieveId || "";
+        const deuterium = kind === "resources" && id === "deuterium";
+        let payload;
+        let endpoint;
+        if (kind === "resources") {
+            const amount = Number(formData.get("amount"));
+            const available = Number(form.dataset.retrieveAvailable || 0);
+            if (!Number.isFinite(amount) || amount <= 0 || amount > available) {
+                setStatus(tr("sectorStorageInvalidQuantity", "Enter an available quantity greater than zero."));
+                return;
+            }
+            payload = deuterium
+                ? {objectId: state.selectedId, amount}
+                : {objectId: state.selectedId, direction: "from_storage", containerId: String(formData.get("containerId") || ""), kind, resources: {[id]: amount}};
+            endpoint = deuterium ? "/transfer-deuterium-from-external-storage" : "/storage-transfers";
+        } else {
+            payload = {objectId: state.selectedId, direction: "from_storage", containerId: String(formData.get("containerId") || ""), kind: "items", itemIds: [id]};
+            endpoint = "/storage-transfers";
+        }
+        const body = JSON.stringify(payload);
+        if (form.dataset.retrieveRequest !== body) {
+            form.dataset.retrieveRequest = body;
+            form.dataset.retrieveKey = crypto.randomUUID();
+        }
+        const submit = form.querySelector('button[type="submit"]');
+        if (submit) submit.disabled = true;
+        setStatus(tr("sectorStorageRetrievalSending", "Sending the Manny..."));
+        try {
+            const response = await window.VNG.apiJson(explicitProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + endpoint), {
+                method: "POST",
+                headers: {"Idempotency-Key": form.dataset.retrieveKey},
+                body,
+            });
+            const tankTransfer = response && response.transfer ? response.transfer.tankTransfer : null;
+            await loadStorages();
+            let message = tr("sectorStorageRetrievalAccepted", "Retrieval order accepted.");
+            if (tankTransfer && tankTransfer.clamped) {
+                message += " " + tr("sectorStorageRefuelClamped", "Tank capacity limited the transfer to {amount} ECE.")
+                    .replace("{amount}", window.VNG.numberValue(tankTransfer.acceptedAmountEce));
+            }
+            setStatus(message);
+        } catch (error) {
+            if (submit) submit.disabled = false;
+            setStatus((error && error.message) || tr("requestDenied", "Request denied"));
+        }
     }
 
     function renderInventory() {
@@ -200,17 +341,23 @@
         const sequence = ++state.requestSequence;
         setStatus(tr("sectorStorageLoading", "Loading sector storage..."));
         try {
-            const [probeData, data] = await Promise.all([
-                window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"}),
-                window.VNG.apiJson(window.VNG.probeApiPath("/sector"), {"method": "GET"}),
-            ]);
+            const probeData = await window.VNG.apiJson(window.VNG.probeApiPath(""), {"method": "GET"});
             if (sequence !== state.requestSequence) return;
             const probeId = Number(probeData && probeData.probe && probeData.probe.id);
             if (!Number.isInteger(probeId) || probeId <= 0) {
                 throw new Error(tr("unknownProbe", "Unknown probe"));
             }
             state.probeId = probeId;
+            const [data, mannyData] = await Promise.all([
+                window.VNG.apiJson(explicitProbeApiPath("/sector"), {"method": "GET"}),
+                window.VNG.apiJson(explicitProbeApiPath("/mannies"), {"method": "GET"}),
+            ]);
+            if (sequence !== state.requestSequence) return;
             const sector = data && data.sector ? data.sector : {};
+            state.mannies = Array.isArray(mannyData && mannyData.mannies) ? mannyData.mannies : [];
+            state.onboardContainers = Array.isArray(probeData && probeData.probe && probeData.probe.inventory && probeData.probe.inventory.containers)
+                ? probeData.probe.inventory.containers
+                : [];
             state.targets = accessibleStorageTargets(sector.objects);
             state.selectedId = state.targets.some((target) => target.id === previousId)
                 ? previousId
@@ -230,6 +377,8 @@
             state.targets = [];
             state.selectedId = "";
             state.probeId = null;
+            state.mannies = [];
+            state.onboardContainers = [];
             renderTargetOptions();
             renderInventory();
             if (!await window.VNG.renderUnreachableProbeTelemetry(error, {"panelId": "sector-storage-panel", "statusId": "sector-storage-status"})) {
@@ -245,6 +394,20 @@
             loadInventory(true);
         });
         document.querySelector('[data-refresh="sector-storage"]')?.addEventListener("click", loadStorages);
+        document.getElementById("sector-storage-inventory")?.addEventListener("click", (event) => {
+            const retrieveButton = event.target.closest(".sector-storage-retrieve-button");
+            if (retrieveButton) {
+                toggleRetrievalForm(retrieveButton);
+                return;
+            }
+            if (event.target.closest(".sector-storage-retrieve-cancel")) closeRetrievalForms();
+        });
+        document.getElementById("sector-storage-inventory")?.addEventListener("submit", (event) => {
+            const form = event.target.closest(".sector-storage-retrieve-form");
+            if (!form) return;
+            event.preventDefault();
+            submitRetrievalForm(form);
+        });
         loadStorages();
     }
 

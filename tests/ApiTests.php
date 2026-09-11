@@ -539,11 +539,18 @@ $test->assert(is_string($sectorStorageRoute) && str_contains($sectorStorageRoute
 $test->assert(is_string($sectorStorageTemplate) && str_contains($sectorStorageTemplate, 'id="sector-storage-inventory"'), 'sector-storage template exposes its inventory region');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'object.inventoryAccessible === true'), 'sector-storage UI lists open accessible sector storage');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, '["drifting", "hidden_on_asteroid"].includes(object.mode)'), 'sector-storage UI lists drifting and player-visible hidden containers');
-$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'window.VNG.probeApiPath("/sector")'), 'sector-storage UI reads selected-probe sector observation');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'explicitProbeApiPath("/sector")'), 'sector-storage UI reads selected-probe sector observation through the canonical explicit route');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, '"/sector-objects/" + encodeURIComponent(objectId) + "/inventory?"'), 'sector-storage UI loads the selected external inventory');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'probeData.probe.id') && str_contains($sectorStorageScript, 'explicitProbeApiPath('), 'sector-storage UI resolves the default probe before calling explicit-only inventory routes');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'data.nextCursor'), 'sector-storage UI supports inventory pagination');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'class="inventory-icon-button sector-storage-retrieve-button"'), 'sector-storage UI renders a retrieval action before each inventory row');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'manny.currentTask === null') && str_contains($sectorStorageScript, 'manny.location.type === "probe"'), 'sector-storage retrieval only offers idle embarked Mannys');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'name="amount"') && str_contains($sectorStorageScript, 'step="0.0001"'), 'sector-storage resource retrieval asks for an ECE quantity at storage precision');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'direction: "from_storage"') && str_contains($sectorStorageScript, 'itemIds: [id]'), 'sector-storage item retrieval submits a whole-object withdrawal');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, '"/transfer-deuterium-from-external-storage"') && str_contains($sectorStorageScript, '"/storage-transfers"'), 'sector-storage retrieval routes raw deuterium to tank refueling and other contents to generic storage transfers');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, '"Idempotency-Key": form.dataset.retrieveKey'), 'sector-storage retrieval sends an idempotency key');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorStoragePageTitle' => 'Stockages dans le secteur'"), 'French translations title the sector-storage page');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorStorageRetrieveResource' => 'Faire récupérer cette ressource'"), 'French translations label sector-storage resource retrieval');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'sectorStoragePageTitle' => 'Storage in the sector'"), 'English translations title the sector-storage page');
 $test->assert(is_string($appCss) && str_contains($appCss, '.button-link.secondary-button-link'), 'inventories sector-storage link has a secondary button style');
 $mainApiDocsHtml = (new FrontRouteApiDocs())->getContent('GET', '/api-docs', null, 'en');
@@ -1437,7 +1444,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260911-sector-storage-explicit-probe"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260911-sector-storage-retrieval"), 'asset version is bumped for visible frontend UI');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');

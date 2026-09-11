@@ -3450,7 +3450,7 @@ button.account-menu-item {
 
 .sector-storage-line {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.5fr);
+    grid-template-columns: auto minmax(180px, 1fr) minmax(260px, 1.5fr);
     gap: 14px;
     align-items: center;
     padding: 10px 12px;
@@ -3458,10 +3458,64 @@ button.account-menu-item {
     background: rgba(0,0,0,.16);
 }
 
-.sector-storage-line > div:first-child {
+.sector-storage-line-name {
     display: grid;
     gap: 2px;
     min-width: 0;
+}
+
+.sector-storage-retrieve-button {
+    align-self: center;
+}
+
+.sector-storage-retrieve-slot {
+    grid-column: 1 / -1;
+}
+
+.sector-storage-retrieve-slot:empty {
+    display: none;
+}
+
+.sector-storage-retrieve-form {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+    gap: 9px 12px;
+    align-items: end;
+    padding: 11px 12px;
+    border-top: 1px solid rgba(255, 214, 90, .24);
+    background: rgba(255, 214, 90, .04);
+}
+
+.sector-storage-retrieve-form label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: .84rem;
+}
+
+.sector-storage-retrieve-form select,
+.sector-storage-retrieve-form input {
+    width: 100%;
+}
+
+.sector-storage-quantity {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+    align-items: center;
+}
+
+.sector-storage-retrieve-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.sector-storage-retrieve-form p {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--muted);
+    font-size: .82rem;
 }
 
 .sector-storage-line strong,
@@ -3500,11 +3554,16 @@ button.account-menu-item {
 
 @media (max-width: 680px) {
     .sector-storage-line {
-        grid-template-columns: 1fr;
+        grid-template-columns: auto minmax(0, 1fr);
     }
 
     .sector-storage-line dl {
+        grid-column: 1 / -1;
         justify-content: flex-start;
+    }
+
+    .sector-storage-retrieve-form {
+        grid-template-columns: 1fr;
     }
 }
 
