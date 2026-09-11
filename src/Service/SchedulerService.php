@@ -30,6 +30,8 @@ final class SchedulerService
         private readonly ?MannyService $mannyService = null,
         private readonly ?AsteroidTrajectoryPhaseProcessor $asteroidTrajectoryProcessor = null,
         private readonly ?OthersService $othersService = null,
+        private readonly ?SectorEffectService $sectorEffects = null,
+        private readonly ?AnomalyBroadcastService $anomalyBroadcasts = null,
     ) {}
 
     /**
@@ -89,10 +91,26 @@ final class SchedulerService
             self::PROBE_STORAGE_CONTAINER_BREAK => $this->processProbeStorageContainerBreak($event),
             self::MANNY_TASK => $this->processMannyTask($event),
             self::ASTEROID_TRAJECTORY_PHASE => $this->processAsteroidTrajectoryPhase($event),
+            'sector.effect' => $this->processSectorEffect($event),
+            'anomaly.broadcast' => $this->processAnomalyBroadcast($event),
             self::OTHERS_ACTION => $this->processOthersAction($event),
             self::MISSILE_PROJECTILE => $this->processMissileProjectile($event),
             default => throw new \RuntimeException('Unsupported scheduled event type: ' . $event->type),
         };
+    }
+
+    private function processSectorEffect(ScheduledEvent $event): bool
+    {
+        if ($this->sectorEffects === null || $event->entityType !== 'sector_effect') { throw new \RuntimeException('Sector effect service unavailable or invalid event.'); }
+        $this->sectorEffects->apply($event->entityId);
+        return true;
+    }
+
+    private function processAnomalyBroadcast(ScheduledEvent $event): bool
+    {
+        if ($this->anomalyBroadcasts === null || $event->entityType !== 'anomaly_broadcast') { throw new \RuntimeException('Anomaly service unavailable or invalid event.'); }
+        $this->anomalyBroadcasts->deliverPage($event->entityId);
+        return true;
     }
 
     private function processProbeMovementPhase(ScheduledEvent $event): bool

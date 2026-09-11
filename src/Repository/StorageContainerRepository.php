@@ -79,9 +79,10 @@ final class StorageContainerRepository
     /**
      * @return array<string, float>
      */
-    public function resourceAmounts(int $containerId): array
+    public function resourceAmounts(int $containerId, bool $availableOnly = false): array
     {
-        $stmt = $this->pdo->prepare('SELECT resource_type, amount FROM storage_container_resources WHERE container_id = :container_id');
+        $amountColumn = $availableOnly ? 'ROUND(amount-reserved_amount,4)' : 'amount';
+        $stmt = $this->pdo->prepare('SELECT resource_type, ' . $amountColumn . ' AS amount FROM storage_container_resources WHERE container_id = :container_id');
         $stmt->execute(['container_id' => $containerId]);
         $amounts = [];
         foreach ($stmt->fetchAll() as $row) {
@@ -94,10 +95,11 @@ final class StorageContainerRepository
     /**
      * @return array<int, array<string, float>>
      */
-    public function resourceAmountsByContainer(int $probeId): array
+    public function resourceAmountsByContainer(int $probeId, bool $availableOnly = false): array
     {
+        $amountColumn = $availableOnly ? 'ROUND(r.amount-r.reserved_amount,4)' : 'r.amount';
         $stmt = $this->pdo->prepare(
-            'SELECT c.id AS container_id, r.resource_type, r.amount
+            'SELECT c.id AS container_id, r.resource_type, ' . $amountColumn . ' AS amount
              FROM storage_containers c
              LEFT JOIN storage_container_resources r ON r.container_id = c.id
              WHERE c.probe_id = :probe_id'
@@ -118,6 +120,11 @@ final class StorageContainerRepository
 
     public function setResourceAmount(int $containerId, string $resourceType, float $amount): void
     {
+        $guard = $this->pdo->prepare('SELECT reserved_amount FROM storage_container_resources WHERE container_id=? AND resource_type=?');
+        $guard->execute([$containerId,$resourceType]);
+        if ((float)$guard->fetchColumn() > round($amount,4)) { throw new \VonNeumannGame\Service\MannyActionException(409,'storage_reserved','This resource is reserved for a transfer.'); }
+        $this->pdo->prepare('UPDATE storage_containers SET storage_version=storage_version+1 WHERE id=?')->execute([$containerId]);
+
         $amount = round(max(0.0, $amount), 4);
         if ($amount <= 0.0) {
             $stmt = $this->pdo->prepare('DELETE FROM storage_container_resources WHERE container_id = :container_id AND resource_type = :resource_type');
@@ -196,6 +203,7 @@ final class StorageContainerRepository
 
     public function delete(StorageContainer $container): void
     {
+        $this->assertNoStorageTransfer($container->id);
         $resources = $this->pdo->prepare('DELETE FROM storage_container_resources WHERE container_id = :container_id');
         $resources->execute(['container_id' => $container->id]);
 
@@ -210,6 +218,20 @@ final class StorageContainerRepository
              WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)'
         );
         $stmt->execute(['probe_id' => $probeId]);
+    }
+
+    public function assertNoStorageTransfer(int $containerId): void
+    {
+        $query=$this->pdo->prepare("SELECT 1 FROM sector_storage_transfers WHERE container_id=? AND status='queued' LIMIT 1");
+        $query->execute([$containerId]);
+        if ($query->fetchColumn() !== false) { throw new \VonNeumannGame\Service\MannyActionException(409,'storage_reserved','This container participates in an active transfer.'); }
+    }
+
+    public function transferCapacityReservations(int $probeId): array
+    {
+        $query=$this->pdo->prepare("SELECT c.id,COALESCE(SUM(r.amount),0) AS amount FROM storage_containers c JOIN sector_storage_capacity_reservations r ON r.inventory_kind='container' AND r.inventory_id=CAST(c.id AS CHAR) WHERE c.probe_id=? GROUP BY c.id");
+        $query->execute([$probeId]);
+        return $query->fetchAll(PDO::FETCH_KEY_PAIR);
     }
 
     public function updateRules(StorageContainer $container, array $priority, array $exclusion, array $strictExclusion): StorageContainer

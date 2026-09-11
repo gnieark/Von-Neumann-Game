@@ -91,7 +91,7 @@ class FrontRouteFactory{
         if (preg_match('#^/(\d+)$#', $routePath, $matches) === 1) {
             return (int) $matches[1];
         }
-        if (preg_match('#^/(?:sensors|inventories|mannies|scut|messaging|alerts)/(\d+)$#', $routePath, $matches) === 1) {
+        if (preg_match('#^/(?:sensors|inventories|sector-storage|mannies|scut|messaging|alerts)/(\d+)$#', $routePath, $matches) === 1) {
             return (int) $matches[1];
         }
         if (preg_match('#^/movement/(\d+)(?:/-?\d+/-?\d+/-?\d+)?$#', $routePath, $matches) === 1) {

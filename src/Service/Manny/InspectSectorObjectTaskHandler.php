@@ -154,7 +154,7 @@ final class InspectSectorObjectTaskHandler implements TaskHandlerInterface
                 'detached_storage_container',
                 $reportScheduledAt,
             );
-        } elseif ($target instanceof DormantConstruct) {
+        } elseif ($target instanceof DormantConstruct || $target instanceof \VonNeumannGame\Sector\SectorGerminationDepot) {
             $report = ($this->dormantConstructInspectionReport)($probe, $sector, $target);
             ($this->createMannyReportAlert)(
                 $probe->id,

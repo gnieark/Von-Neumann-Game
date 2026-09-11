@@ -46,6 +46,7 @@ final class ProbeItemRepository
 
     public function saveStorageContainer(ProbeItem $item, ?int $storageContainerId): void
     {
+        $this->assertUnreserved($item);
         $item->storageContainerId = $storageContainerId;
         $item->updatedAt = gmdate('c');
         $stmt = $this->pdo->prepare(
@@ -67,6 +68,21 @@ final class ProbeItemRepository
         $stmt->execute(['probe_id' => $probeId]);
 
         return array_map(fn(array $row): ProbeItem => $this->hydrate($row), $stmt->fetchAll());
+    }
+
+    public function findConsumableByProbeId(int $probeId): array
+    {
+        $query=$this->pdo->prepare('SELECT * FROM probe_items WHERE probe_id=? AND reserved_transfer_id IS NULL AND (fabricator IS NULL OR fabricator<>\'others\') ORDER BY created_at,id');
+        $query->execute([$probeId]);
+        return array_map(fn(array $row): ProbeItem=>$this->hydrate($row),$query->fetchAll());
+    }
+
+    public function assertUnreserved(ProbeItem $item): void
+    {
+        $query=$this->pdo->prepare('SELECT reserved_transfer_id FROM probe_items WHERE id=?');
+        $query->execute([$item->id]);
+        $reservation=$query->fetchColumn();
+        if ($reservation !== false && $reservation !== null) { throw new \VonNeumannGame\Service\MannyActionException(409,'storage_reserved','This item is reserved for a transfer.'); }
     }
 
     public function findByUidForProbe(int $probeId, string $uid): ?ProbeItem
@@ -92,6 +108,7 @@ final class ProbeItemRepository
 
     public function delete(ProbeItem $item): void
     {
+        $this->assertUnreserved($item);
         $stmt = $this->pdo->prepare('DELETE FROM probe_items WHERE id = :id');
         $stmt->execute(['id' => $item->id]);
     }

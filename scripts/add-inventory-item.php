@@ -102,6 +102,9 @@ function addInventoryItemRun(array $argv): int
         $addedResource = null;
         $pdo->beginTransaction();
         try {
+            $locked=(new \VonNeumannGame\Database\StorageTransaction($pdo))->lock('ship',(int)$ship['id']);
+            if($locked===null){throw new RuntimeException('Others ship disappeared.');}
+            $ship=array_replace($ship,$locked);
             $itemSpace = $isResource
                 ? 0.0
                 : ($type === 'missile'
@@ -134,8 +137,8 @@ function addInventoryItemRun(array $argv): int
             } else {
                 $insert = $pdo->prepare(
                     'INSERT INTO others_inventory_items '
-                    . '(public_id, ship_id, type, container_space, reserved_action_id, created_at, updated_at) '
-                    . 'VALUES (:public_id, :ship_id, :type, :container_space, NULL, :created_at, :updated_at)'
+                    . '(public_id, ship_id, type, container_space, name, metadata_json, reserved_action_id, created_at, updated_at) '
+                    . 'VALUES (:public_id, :ship_id, :type, :container_space, :name, :metadata, NULL, :created_at, :updated_at)'
                 );
                 for ($index = 0; $index < $quantity; $index++) {
                     $publicId = OthersRepository::publicId('item');
@@ -144,6 +147,8 @@ function addInventoryItemRun(array $argv): int
                         'ship_id' => (int) $ship['id'],
                         'type' => $type,
                         'container_space' => $itemSpace,
+                        'name' => $type==='missile'?'Missile Others':(string)$definition['name'],
+                        'metadata' => json_encode(['technology'=>'others','fabricator'=>'others','recipe'=>$definition['id'],'craftedAt'=>$now,'createdBy'=>'inventory_admin'],JSON_THROW_ON_ERROR),
                         'created_at' => $now,
                         'updated_at' => $now,
                     ]);

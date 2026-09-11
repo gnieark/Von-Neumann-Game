@@ -99,6 +99,10 @@ function deleteProbeRun(array $argv): int
         throw new RuntimeException("Probe #{$probe->id} is the player's last probe. Keep the mind-snapshot reassignment flow instead.");
     }
 
+    if (deleteProbeAlertTarget($player->defaultProbeId, $probe, $ownedProbes) === null) {
+        throw new RuntimeException('No surviving probe is available to receive the mind snapshot.');
+    }
+
     $wasDefault = $player->defaultProbeId === $probe->id;
     if ($options['dryRun']) {
         $alertProbe = deleteProbeAlertTarget($player->defaultProbeId, $probe, $ownedProbes);
@@ -174,8 +178,8 @@ function deleteProbeParseArguments(array $argv): array
         }
         if (str_starts_with($argument, '--reason=')) {
             $reason = substr($argument, strlen('--reason='));
-            if (!in_array($reason, [ProbeReinstantiationService::TERMINAL_REASON_COLLISION, ProbeReinstantiationService::TERMINAL_REASON_BLACK_HOLE], true)) {
-                throw new InvalidArgumentException('Reason must be movement_collision or black_hole_trap.');
+            if (!in_array($reason, [ProbeReinstantiationService::TERMINAL_REASON_COLLISION, ProbeReinstantiationService::TERMINAL_REASON_BLACK_HOLE, ProbeReinstantiationService::TERMINAL_REASON_MISSILE, ProbeReinstantiationService::TERMINAL_REASON_LASER, ProbeReinstantiationService::TERMINAL_REASON_ASTEROID, ProbeReinstantiationService::TERMINAL_REASON_DUST], true)) {
+                throw new InvalidArgumentException('Reason must be movement_collision, black_hole_trap, missile_impact, laser_damage, asteroid_impact or intersector_dust.');
             }
             $options['reason'] = $reason;
             continue;
@@ -210,7 +214,7 @@ Usage:
 
 Options:
   --database-config=<path>  Use another database config.
-  --reason=<reason>         movement_collision or black_hole_trap. Default: movement_collision.
+  --reason=<reason>         movement_collision, black_hole_trap, missile_impact, laser_damage, asteroid_impact or intersector_dust. Default: movement_collision.
   --dry-run                 Preview the cleanup without writing data.
   --yes, -y                 Apply the deletion.
   -h, --help                Show this help.

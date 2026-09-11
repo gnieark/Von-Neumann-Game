@@ -1119,7 +1119,7 @@
 
     function missileItems() {
         return Array.isArray(state.currentInventory && state.currentInventory.items)
-            ? state.currentInventory.items.filter((item) => item.type === "missile" && item.id)
+            ? state.currentInventory.items.filter((item) => item.type === "missile" && item.id && item.metadata?.fabricator !== "others")
             : [];
     }
 
@@ -1144,6 +1144,7 @@
             if (["ship", "large_ship", "suspected_missile"].includes(object.observedClass)) {
                 add({"id": object.id, "type": object.observedClass, "name": object.name || ""});
             }
+            if (object.type === "dormant_construct" && object.targetable === true) add(object);
             if (object.type === "manny") {
                 add({"id": object.mannyUid || object.id, "type": "manny", "name": object.name || ""});
             }
@@ -2053,6 +2054,10 @@
         return state.currentMannyMineTargets.find((target) => target.id === (payload && payload.objectId)) || null;
     }
 
+    function renderSectorStorageReport(transferId) {
+        return `<section class="manny-task-panel"><button type="button" class="sector-storage-report" data-transfer-id="${escaped(transferId)}">${escaped(tr("viewStorageReport", "Voir le bilan du transfert"))}</button><div class="sector-storage-report-result" aria-live="polite"></div></section>`;
+    }
+
     function renderMannyTaskPanel(manny) {
         const payload = manny.task || {};
         const progress = progressValueHtml(manny);
@@ -2255,6 +2260,12 @@
                 })) + "</p>"
                 + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                 + "</section>";
+        }
+        if (manny.currentTask === "transferring_sector_storage") {
+            const title = payload.tankTransfer
+                ? tr("externalDeuteriumInProgress", "Ravitaillement en deutérium en cours")
+                : tr("sectorStorageInProgress", "Transfert de contenu en cours");
+            return `<section class="manny-task-panel"><h4>${escaped(title)}</h4><p>${escaped(tr("taskProgress", "Progression"))} ${progress}</p>${renderSectorStorageReport(payload.transferId)}</section>`;
         }
         if (manny.currentTask === "preparing_missile") {
             return "<section class=\"manny-task-panel\">"
@@ -2618,6 +2629,125 @@
 
     function sectorObjectInspectionTargetOptions(selected) {
         return sectorObjectInspectionTargetOptionsForTargets(sectorObjectInspectionTargets(), selected);
+    }
+
+    function sectorStorageTargets() {
+        return (state.currentSectorObjects || []).filter((object) => object && (
+            object.inventoryAccessible === true
+            || (object.type === "detached_container" && ["drifting", "hidden_on_asteroid"].includes(object.mode))
+        ));
+    }
+
+    function renderSectorStorageTransferForm() {
+        const targets = sectorStorageTargets();
+        const options = targets.map((target) => `<option value="${escaped(target.id)}">${escaped(target.name || target.id)}</option>`).join("");
+        const containers = currentStorageContainers().map((container) => `<option value="${escaped(container.id)}">${escaped(storageContainerLabel(container))}</option>`).join("");
+        return `<form class="manny-sector-storage-form manny-form">
+            <label>${escaped(tr("externalStorage", "Stockage du secteur"))}<select name="objectId">${options}</select></label>
+            <label>${escaped(tr("transferDirection", "Sens du transfert"))}<select name="direction"><option value="from_storage">${escaped(tr("withdrawContent", "Retirer du contenu"))}</option><option value="to_storage">${escaped(tr("depositContent", "Déposer du contenu"))}</option></select></label>
+            <label>${escaped(tr("onboardContainer", "Container à bord"))}<select name="containerId">${containers}</select></label>
+            <label>${escaped(tr("contentKind", "Contenu"))}<select name="kind"><option value="resources">${escaped(tr("resources", "Ressources"))}</option><option value="items">${escaped(tr("items", "Objets"))}</option></select></label>
+            <button type="button" class="sector-storage-load" ${targets.length ? "" : "disabled"}>${escaped(tr("loadStorageContent", "Afficher le contenu disponible"))}</button>
+            <div class="sector-storage-content" aria-live="polite"></div>
+            <button type="submit" ${targets.length ? "" : "disabled"}>${escaped(tr("startStorageTransfer", "Lancer le transfert"))}</button>
+        </form>`;
+    }
+
+    function externalDeuteriumTankCapacityEce() {
+        return Math.max(0, state.currentProbeMaxDeuterium - state.currentProbeDeuterium) / 100;
+    }
+
+    function renderExternalDeuteriumRefuelForm() {
+        const targets = sectorStorageTargets();
+        const options = targets.map((target) => `<option value="${escaped(target.id)}">${escaped(target.name || target.id)}</option>`).join("");
+        const capacity = externalDeuteriumTankCapacityEce();
+        const disabled = !targets.length || capacity <= 0;
+        return `<form class="manny-external-deuterium-form manny-form">
+            <label>${escaped(tr("externalStorage", "Stockage du secteur"))}<select name="objectId">${options}</select></label>
+            <p>${escaped(window.VNG.formatText(tr("externalDeuteriumTankState", "Réservoir : {current}/{maximum} points ; capacité restante : {capacity} ECE."), {
+                current: window.VNG.numberValue(state.currentProbeDeuterium),
+                maximum: window.VNG.numberValue(state.currentProbeMaxDeuterium),
+                capacity: window.VNG.numberValue(capacity),
+            }))}</p>
+            <button type="button" class="external-deuterium-load" ${disabled ? "disabled" : ""}>${escaped(tr("loadExternalDeuterium", "Afficher le deutérium disponible"))}</button>
+            <div class="external-deuterium-content" aria-live="polite">${capacity <= 0 ? escaped(tr("probeDeuteriumTankFull", "Le réservoir est plein.")) : ""}</div>
+            <button type="submit" disabled>${escaped(tr("startExternalDeuteriumTransfer", "Ravitailler le réservoir"))}</button>
+            <p>${escaped(tr("externalDeuteriumDuration", "Durée : 5 minutes aller et 5 minutes retour."))}</p>
+        </form>`;
+    }
+
+    function updateExternalDeuteriumPreview(form) {
+        if (!form) return;
+        const input = form.querySelector(".external-deuterium-amount");
+        const submit = form.querySelector('button[type="submit"]');
+        const preview = form.querySelector(".external-deuterium-preview");
+        if (!input || !submit || !preview) return;
+        const requested = Number(input.value);
+        const available = Number(form.dataset.externalDeuteriumAvailable || 0);
+        const capacity = externalDeuteriumTankCapacityEce();
+        const accepted = Number.isFinite(requested) && requested > 0 ? Math.min(requested, capacity) : 0;
+        const valid = accepted > 0 && accepted <= available;
+        submit.disabled = !valid;
+        preview.textContent = valid
+            ? window.VNG.formatText(tr("externalDeuteriumPreview", "Quantité retenue : {amount} ECE, soit {points} points de réservoir{clamped}."), {
+                amount: window.VNG.numberValue(accepted),
+                points: window.VNG.numberValue(accepted * 100),
+                clamped: requested > capacity ? tr("externalDeuteriumClamped", " (plafonnée à la capacité restante)") : "",
+            })
+            : tr("externalDeuteriumEnterAmount", "Indiquez une quantité disponible supérieure à zéro.");
+    }
+
+    async function loadExternalDeuteriumStock(form) {
+        const objectId = form.elements.objectId.value;
+        const signature = String(objectId || "");
+        form.dataset.externalDeuteriumSignature = signature;
+        const data = await window.VNG.apiJson(explicitCurrentProbeApiPath("/sector-objects/" + encodeURIComponent(objectId) + "/inventory"));
+        if (form.dataset.externalDeuteriumSignature !== signature || !form.isConnected) return;
+        const resources = data.resources || data.inventory?.resourceStocks || [];
+        const deuterium = resources.find((resource) => resource.type === "deuterium");
+        const available = Math.max(0, Number(deuterium && (deuterium.availableAmount ?? deuterium.amount)) || 0);
+        form.dataset.externalDeuteriumAvailable = String(available);
+        const content = form.querySelector(".external-deuterium-content");
+        if (available <= 0) {
+            content.textContent = tr("noExternalDeuterium", "Aucun deutérium brut disponible dans ce stockage.");
+            return;
+        }
+        content.innerHTML = `<label>${escaped(window.VNG.formatText(tr("externalDeuteriumAvailable", "Deutérium disponible : {amount} ECE"), {amount: window.VNG.numberValue(available)}))}
+            <input class="external-deuterium-amount" name="amount" type="number" min="0.0001" step="0.0001" required></label>
+            <p class="external-deuterium-preview"></p>`;
+        updateExternalDeuteriumPreview(form);
+    }
+
+    async function loadSectorStorageContent(form, nextPage) {
+        const direction = form.elements.direction.value;
+        const objectId = form.elements.objectId.value;
+        const containerId = form.elements.containerId.value;
+        const kind = form.elements.kind.value;
+        const signature = [direction, objectId, containerId, kind].join("|");
+        form.dataset.storageSignature = signature;
+        const cursor = nextPage ? form.dataset.storageCursor : "";
+        const path = direction === "from_storage"
+            ? "/sector-objects/" + encodeURIComponent(objectId) + "/inventory" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : "")
+            : "/storage-containers/" + encodeURIComponent(containerId);
+        const data = await window.VNG.apiJson(explicitCurrentProbeApiPath(path));
+        if (form.dataset.storageSignature !== signature || !form.isConnected) return;
+        const content = form.querySelector(".sector-storage-content");
+        if (!nextPage) content.replaceChildren();
+        content.querySelector(".sector-storage-next")?.remove();
+        const resources = data.resources || data.inventory?.resourceStocks || [];
+        const items = data.items || data.inventory?.items || [];
+        if (kind === "resources" && !nextPage) {
+            content.innerHTML = resources.filter((resource) => resource.type !== "deuterium").map((resource) => {
+                const available = Number(resource.availableAmount ?? resource.amount) || 0;
+                return `<label>${escaped(inventoryItemTypeLabel(resource.type, resource.type))} (${escaped(window.VNG.numberValue(available))} ECE)<input type="number" min="0" max="${available}" step="0.0001" value="0" data-storage-resource="${escaped(resource.type)}"></label>`;
+            }).join("");
+        } else if (kind === "items") {
+            const selectable = items.filter((item) => !["manny", "atomic_3d_printer", "additional_container"].includes(item.type));
+            content.insertAdjacentHTML("beforeend", selectable.map((item) => `<label><input type="checkbox" name="itemIds" value="${escaped(item.id)}" ${item.available === false ? "disabled" : ""}>${escaped(item.name || item.type)} (${escaped(window.VNG.numberValue(item.containerSpace))} ECE)</label>`).join(""));
+        }
+        form.dataset.storageCursor = data.nextCursor || "";
+        if (kind === "items" && data.nextCursor) content.insertAdjacentHTML("beforeend", `<button type="button" class="sector-storage-next">${escaped(tr("nextPage", "Page suivante"))}</button>`);
+        if (!content.textContent.trim()) content.textContent = tr("emptyStorage", "Aucun contenu disponible.");
     }
 
     function renderInspectSectorObjectFormWithContext(context) {
@@ -3175,7 +3305,7 @@
     function asteroidImpactTargets() {
         const targets = [];
         state.currentSectorObjects.forEach((object) => {
-            if (["star", "planet", "asteroid"].includes(object.type)) targets.push(object);
+            if (["star", "planet", "asteroid"].includes(object.type) || (object.type === "dormant_construct" && object.targetable === true)) targets.push(object);
             (object.bookmarkTargets || []).forEach((target) => {
                 if (["star", "planet", "asteroid"].includes(target.type)) targets.push(target);
             });
@@ -3270,6 +3400,8 @@
             {"id": "transfer-manny", "title": tr("transferMannyToProbeActionTitle", "Transfer Manny to a probe"), "render": () => renderMannyTransferForm(manny)},
             {"id": "mine", "title": tr("miningActionTitle", "Mine the sector"), "render": renderMineForm},
             {"id": "salvage", "title": tr("salvageActionTitle", "Recover a drifting object"), "render": renderSalvageForm},
+            ...(manny.location?.type === "probe" ? [{"id": "sector-storage", "title": tr("sectorStorageTransfer", "Transférer du contenu avec un stockage du secteur"), "render": renderSectorStorageTransferForm}] : []),
+            ...(manny.location?.type === "probe" ? [{"id": "external-deuterium", "title": tr("externalDeuteriumRefuel", "Ravitailler le réservoir depuis un stockage extérieur"), "render": renderExternalDeuteriumRefuelForm}] : []),
             {"id": "inspect-sector-object", "title": tr("inspectSectorObjectActionTitle", "Inspect a sector object"), "render": renderInspectSectorObjectForm},
             {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint bookmark"), "render": renderBookmarkForm},
             {"id": "turn-on-relay", "title": tr("turnOnScutRelayActionTitle", "Activate a SCUT relay"), "render": renderTurnOnRelayForm},
@@ -3564,7 +3696,8 @@
                 + "<label>" + escaped(tr("rename", "Rename")) + "<input name=\"name\" value=\"" + escaped(manny.name || "") + "\" maxlength=\"40\"></label>"
                 + "<button type=\"submit\">" + escaped(tr("rename", "Rename")) + "</button>"
                 + "</form>"
-                + (busy ? renderMannyTaskPanel(manny) : (canReceiveOrders ? renderMannyActionForms(panelId, manny) : (remoteIdleViaScut ? renderRemoteMannyActionForms(panelId, manny) : "")));
+                + (busy ? renderMannyTaskPanel(manny) : (canReceiveOrders ? renderMannyActionForms(panelId, manny) : (remoteIdleViaScut ? renderRemoteMannyActionForms(panelId, manny) : "")))
+                + (!busy && manny.task?.lastTask === "transferring_sector_storage" && manny.task.transferId ? renderSectorStorageReport(manny.task.transferId) : "");
 
         return "<article class=\"manny-card " + rackStatusClass + "\" data-manny-id=\"" + escaped(manny.id) + "\" data-manny-hash=\"" + escaped(manny[MANNY_HASH_FIELD] || "") + "\">"
             + "<button class=\"manny-accordion-trigger\" type=\"button\" aria-expanded=\"" + (expanded ? "true" : "false") + "\" aria-controls=\"" + escaped(panelId) + "\" title=\"" + escaped(buttonTitle) + "\" aria-label=\"" + escaped(buttonTitle) + "\">"
@@ -4484,6 +4617,32 @@
                 "body": JSON.stringify({targetProbeId}),
             });
         }
+        if (form.classList.contains("manny-sector-storage-form")) {
+            const payload = {objectId: formData.get("objectId"), direction: formData.get("direction"), containerId: formData.get("containerId"), kind: formData.get("kind")};
+            if (payload.kind === "resources") {
+                payload.resources = {};
+                form.querySelectorAll("[data-storage-resource]").forEach((input) => { if (Number(input.value) > 0) payload.resources[input.dataset.storageResource] = Number(input.value); });
+            } else payload.itemIds = formData.getAll("itemIds");
+            const body = JSON.stringify(payload);
+            if (form.dataset.storageRequest !== body) { form.dataset.storageRequest = body; form.dataset.storageKey = crypto.randomUUID(); }
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/storage-transfers"), {method: "POST", headers: {"Idempotency-Key": form.dataset.storageKey}, body});
+        }
+        if (form.classList.contains("manny-external-deuterium-form")) {
+            const payload = {objectId: String(formData.get("objectId") || ""), amount: Number(formData.get("amount"))};
+            const accepted = Math.min(payload.amount, externalDeuteriumTankCapacityEce());
+            if (!payload.objectId || !Number.isFinite(payload.amount) || payload.amount <= 0 || accepted <= 0 || accepted > Number(form.dataset.externalDeuteriumAvailable || 0)) {
+                setStatus(tr("invalidExternalDeuteriumOrder", "Quantité de deutérium invalide."));
+                return null;
+            }
+            const body = JSON.stringify(payload);
+            if (form.dataset.externalDeuteriumRequest !== body) {
+                form.dataset.externalDeuteriumRequest = body;
+                form.dataset.externalDeuteriumKey = crypto.randomUUID();
+            }
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/transfer-deuterium-from-external-storage"), {
+                method: "POST", headers: {"Idempotency-Key": form.dataset.externalDeuteriumKey}, body,
+            });
+        }
         if (form.classList.contains("manny-inspect-sector-object-form")) {
             const targetSelect = form.querySelector(".manny-inspect-sector-object-target");
             if (!targetSelect || !targetSelect.value) {
@@ -4809,6 +4968,19 @@
         });
 
         mannyList.addEventListener("change", (event) => {
+            const storageForm = event.target.closest(".manny-sector-storage-form");
+            if (storageForm && event.target.tagName === "SELECT") {
+                delete storageForm.dataset.storageSignature;
+                delete storageForm.dataset.storageCursor;
+                storageForm.querySelector(".sector-storage-content").replaceChildren();
+            }
+            const deuteriumForm = event.target.closest(".manny-external-deuterium-form");
+            if (deuteriumForm && event.target.tagName === "SELECT") {
+                delete deuteriumForm.dataset.externalDeuteriumSignature;
+                delete deuteriumForm.dataset.externalDeuteriumAvailable;
+                deuteriumForm.querySelector(".external-deuterium-content").replaceChildren();
+                deuteriumForm.querySelector('button[type="submit"]').disabled = true;
+            }
             if (event.target.classList.contains("manny-mine-target")) {
                 updateMannyResourceOptions(event.target.closest(".manny-mine-form"));
             }
@@ -4856,6 +5028,9 @@
         });
 
         mannyList.addEventListener("input", (event) => {
+            if (event.target.classList.contains("external-deuterium-amount")) {
+                updateExternalDeuteriumPreview(event.target.closest(".manny-external-deuterium-form"));
+            }
             if (event.target.classList.contains("manny-transfer-deuterium-amount")) {
                 updateDeuteriumTransferForms();
             }
@@ -4865,6 +5040,43 @@
         });
 
         mannyList.addEventListener("click", async (event) => {
+            const reportButton = event.target.closest(".sector-storage-report");
+            if (reportButton) {
+                reportButton.disabled = true;
+                try {
+                    const data = await window.VNG.apiJson(explicitCurrentProbeApiPath("/storage-transfers/" + encodeURIComponent(reportButton.dataset.transferId)));
+                    const transfer = data.transfer;
+                    const rows = [["delivered", tr("storageDelivered", "Livré")], ["lost", tr("storageLost", "Perdu")], ["released", tr("storageReleased", "Libéré")]].map(([key, label]) => {
+                        const content = transfer.result?.[key] || {};
+                        const parts = Object.entries(content.resources || {}).map(([type, amount]) => escaped(inventoryItemTypeLabel(type, type)) + ": " + escaped(window.VNG.numberValue(amount)) + " ECE");
+                        if (content.itemIds?.length) parts.push(escaped(tr("items", "Objets")) + ": " + escaped(content.itemIds.length));
+                        return `<tr><th>${escaped(label)}</th><td>${parts.join(", ") || "—"}</td></tr>`;
+                    }).join("");
+                    const tankPoints = Number(transfer.result?.deliveredTankPoints);
+                    const tankSummary = Number.isFinite(tankPoints)
+                        ? `<p>${escaped(window.VNG.formatText(tr("externalDeuteriumDelivered", "Réservoir crédité de {points} points."), {points: window.VNG.numberValue(tankPoints)}))}</p>`
+                        : "";
+                    reportButton.parentElement.querySelector(".sector-storage-report-result").innerHTML = `<p>${escaped(({queued: tr("storageQueued", "Transfert en cours"), succeeded: tr("storageSucceeded", "Transfert terminé"), failed: tr("storageFailed", "Transfert interrompu"), canceled: tr("storageCanceled", "Transfert annulé")})[transfer.status] || transfer.status)}</p>${tankSummary}<table><tbody>${rows}</tbody></table>`;
+                } catch (error) { setStatus(error.message || tr("storageUnavailable", "Le stockage est indisponible.")); }
+                finally { reportButton.disabled = false; }
+                return;
+            }
+            const storageButton = event.target.closest(".sector-storage-load, .sector-storage-next");
+            if (storageButton) {
+                storageButton.disabled = true;
+                try { await loadSectorStorageContent(storageButton.closest("form"), storageButton.classList.contains("sector-storage-next")); }
+                catch (error) { setStatus(error.message || tr("storageUnavailable", "Le stockage est indisponible.")); }
+                finally { storageButton.disabled = false; }
+                return;
+            }
+            const deuteriumButton = event.target.closest(".external-deuterium-load");
+            if (deuteriumButton) {
+                deuteriumButton.disabled = true;
+                try { await loadExternalDeuteriumStock(deuteriumButton.closest("form")); }
+                catch (error) { setStatus(error.message || tr("storageUnavailable", "Le stockage est indisponible.")); }
+                finally { deuteriumButton.disabled = false; }
+                return;
+            }
             const craftingRecipesRetryButton = event.target.closest(".manny-crafting-recipes-retry");
             if (craftingRecipesRetryButton) {
                 await retryCraftingRecipes();

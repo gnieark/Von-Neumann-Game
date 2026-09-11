@@ -23,6 +23,9 @@ class FrontRouteInventories extends FrontRoute{
         $translator = new Translator(Translator::normalize($language));
         $tpl = new TplBlock();
         $tpl->addPrefixedVars('t', $translator->allEscaped());
+        $tpl->addVars([
+            'sectorStorageHref' => self::e('/sector-storage' . ($this->selectedProbeId !== null ? '/' . $this->selectedProbeId : '')),
+        ]);
 
         return $tpl->applyTplFile($projectRoot . '/templates/inventories.html');
     }

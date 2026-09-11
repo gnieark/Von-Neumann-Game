@@ -120,6 +120,7 @@ final class SectorObservationService
                     $relative,
                     $player->id,
                     $includeOthersHarvestability && $current,
+                    $this->sectors->germinationKnowledge($probe->id, $target),
                 )],
                 $scan,
             );
@@ -363,6 +364,7 @@ final class SectorObservationService
         array $relativeCoordinates,
         int $playerId,
         bool $includeOthersHarvestability,
+        array $germinationKnowledge,
     ): array
     {
         $objects = [];
@@ -371,6 +373,14 @@ final class SectorObservationService
                 continue;
             }
 
+            if ($object instanceof \VonNeumannGame\Sector\SectorGerminationDepot) {
+                $knowledge = $germinationKnowledge[$object->getId()] ?? null;
+                $objects[] = $object->toArray() + [
+                    'targetable' => $isCurrentSector && $knowledge !== null && $knowledge['inspected_at'] !== null && $knowledge['state'] !== 'open',
+                    'inventoryAccessible' => $isCurrentSector && $knowledge !== null && $knowledge['access_discovered_at'] !== null && $knowledge['state'] === 'open',
+                ];
+                continue;
+            }
             $activeTrajectory = $object instanceof Asteroid ? $this->asteroidTrajectories?->findActiveByAsteroidId($object->getId()) : null;
             if ($activeTrajectory !== null && $this->asteroidTrajectoryService?->isOcculted($activeTrajectory) === true) {
                 continue;

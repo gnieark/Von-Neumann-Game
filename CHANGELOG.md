@@ -2,6 +2,31 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-11
+
+### Changed
+
+- Transferts Manny entre container embarqué et stockage du secteur : le deutérium est exclu de `POST /api/probe/{probeId}/mannies/{mannyId}/storage-transfers`, dans les deux sens. Sa présence dans les ressources entraîne un refus `400 bad_request` sans réservation ; le formulaire ne le propose plus. Le ravitaillement du réservoir dispose désormais de son endpoint dédié.
+
+### Fixed
+
+- WebUI des stockages du secteur : `/sector-storage` et les formulaires Manny résolvent désormais l’identifiant réel de la sonde par défaut avant d’appeler les endpoints canoniques qui exigent `{probeId}`, au lieu d’aboutir sur `Endpoint not found`.
+- Destruction des sondes par missile, laser, astéroïde ou usure intersectorielle : suppression de la sonde perdue et basculement de l’instance par défaut vers la sonde survivante la plus proche, avec alerte identifiant la sonde et la cause. La perte d’un drone conserve la sonde par défaut ; l’exploration est préservée.
+- Nettoyage des sondes détruites : détachement des références de l’historique des missiles, annulation des préparations et suppression du journal de bord pour respecter les clés étrangères ; les missiles déjà en vol poursuivent leur trajectoire.
+- Réinstanciation dans une nouvelle sonde réservée à la perte de l’unique sonde du joueur. Le script explicite `scripts/delete-probe.php` accepte les nouvelles causes pour réparer les pertes déjà présentes en base.
+
+### Added
+
+- WebUI `/sector-storage` : chaque ressource et objet disponible propose désormais une action de récupération, avec sélection d’une Manny libre, du container embarqué de destination et de la quantité pour les ressources. Le deutérium utilise directement le ravitaillement du réservoir et conserve le plafonnement à sa capacité restante.
+- Endpoint `POST /api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-from-external-storage` : transfert de deutérium brut d’un stockage extérieur vers le réservoir, à raison de 100 points par ECE. Un aller-retour dure toujours 10 minutes (5 + 5), avec plafonnement explicite à la capacité restante, réservations, idempotence et règlement des interruptions sans duplication.
+- WebUI Manny : formulaire de ravitaillement depuis un stockage extérieur avec lecture du deutérium disponible, état du réservoir, aperçu de la conversion et du plafonnement, durée annoncée et envoi idempotent vers l’endpoint dédié.
+- WebUI `/sector-storage` : page hors navigation principale, accessible depuis le bouton secondaire « Stockages du secteur » de `/inventories`, permettant de sélectionner un container à la dérive, un container caché déjà découvert ou un stockage Others ouvert dans le secteur courant, puis d’en consulter les ressources et les objets avec pagination.
+
+- Dépôts de germination construits par les auxiliaires Others : stockage partagé persistant, transferts par charges de 2 ECE, progression d’inspection propre à chaque sonde et diffusion mondiale durable lors de l’ouverture.
+- Logistique Manny : consultation paginée et transferts de ressources ou d’objets entiers entre un container embarqué et un stockage du secteur accessible, avec suivi durable et interface dédiée dans les actions existantes.
+- Réservations communes, conservation des identités et métadonnées, règlement unique des interruptions, journal des effets secteur et protection des fichiers contre les écritures périmées.
+- Migration explicite `migrate-sector-storage.php`, audit en lecture seule `audit-sector-storage.php` et tests de concurrence SQLite/MariaDB. Procédure de bascule et de reprise dans `docs/sector-storage-operations.md`.
+
 ## 2026-09-10
 
 ### Added

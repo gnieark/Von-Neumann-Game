@@ -481,13 +481,13 @@ final class ProbeStorageService
         $this->ensureProbeStorage($probe);
         $remaining = $amount;
         foreach ($this->containers->findByProbeId($probe->id) as $container) {
-            $resources = $this->containers->resourceAmounts($container->id);
+            $resources = $this->containers->resourceAmounts($container->id, true);
             $available = round(max(0.0, (float) ($resources[$type] ?? 0.0)), 4);
             if ($available <= 0.0) {
                 continue;
             }
             $taken = min($available, $remaining);
-            $this->containers->setResourceAmount($container->id, $type, round($available - $taken, 4));
+            $this->containers->setResourceAmount($container->id, $type, round((float) ($this->containers->resourceAmounts($container->id)[$type] ?? 0.0) - $taken, 4));
             $remaining = round($remaining - $taken, 4);
             if ($remaining <= self::EPSILON) {
                 break;
@@ -509,14 +509,14 @@ final class ProbeStorageService
 
         $this->ensureProbeStorage($probe);
         $container = $this->requiredContainer($probe, $containerUid);
-        $resources = $this->containers->resourceAmounts($container->id);
+        $resources = $this->containers->resourceAmounts($container->id, true);
         $available = round(max(0.0, (float) ($resources[$type] ?? 0.0)), 4);
         $consumed = min($amount, $available);
         if ($consumed <= 0.0) {
             return 0.0;
         }
 
-        $this->containers->setResourceAmount($container->id, $type, round($available - $consumed, 4));
+        $this->containers->setResourceAmount($container->id, $type, round((float) ($this->containers->resourceAmounts($container->id)[$type] ?? 0.0) - $consumed, 4));
 
         return round($consumed, 4);
     }
@@ -530,7 +530,7 @@ final class ProbeStorageService
 
         $this->ensureProbeStorage($probe);
         $total = 0.0;
-        foreach ($this->containers->resourceAmountsByContainer($probe->id) as $resources) {
+        foreach ($this->containers->resourceAmountsByContainer($probe->id, true) as $resources) {
             $total += (float) ($resources[$type] ?? 0.0);
         }
 
@@ -546,9 +546,38 @@ final class ProbeStorageService
 
         $this->ensureProbeStorage($probe);
         $container = $this->requiredContainer($probe, $containerUid);
-        $resources = $this->containers->resourceAmounts($container->id);
+        $resources = $this->containers->resourceAmounts($container->id, true);
 
         return round(max(0.0, (float) ($resources[$type] ?? 0.0)), 4);
+    }
+
+    /** Pending onboard moves share their source with external transfers. The probe lock is held. */
+    public function assertContentsAvailableForTransfer(NeumannProbe $probe, string $uid, array $resources, array $itemIds): void
+    {
+        $container=$this->requiredContainer($probe,$uid);
+        $available=$this->containers->resourceAmounts($container->id,true);
+        foreach($this->mannies->findByProbeId($probe->id) as $actor){
+            if($actor->currentTask!==Manny::TASK_MOVING_STORAGE){continue;}
+            $task=$actor->taskPayload;
+            if(($task['kind']??null)==='resource'&&($task['fromContainerId']??null)===$uid){
+                $type=$task['resourceType'];$available[$type]=($available[$type]??0)-(float)$task['amount'];
+            }
+            if(($task['kind']??null)==='item'&&array_intersect($itemIds,$task['itemIds']??[])!==[]){
+                throw new MannyActionException(409,'storage_reserved','An item is reserved by an onboard move.');
+            }
+        }
+        foreach($resources as $type=>$amount){
+            if(round($available[$type]??0,4)+self::EPSILON<$amount){throw new MannyActionException(422,'insufficient_resources','Resources are reserved by another operation.');}
+        }
+    }
+
+    public function transferContainerCapacity(NeumannProbe $probe, string $uid, array $types): array
+    {
+        $container=$this->requiredContainer($probe,$uid);
+        foreach ($types as $type) {
+            if (in_array($type,$container->strictExclusionFilter,true)) { throw new MannyActionException(422,'storage_exclusion','The destination excludes this content.'); }
+        }
+        return ['container'=>$container,'available'=>$this->freeCapacityForContainer($probe,$container)];
     }
 
     public function freeCargoCapacity(NeumannProbe $probe): float
@@ -797,6 +826,7 @@ final class ProbeStorageService
             throw new MannyActionException(422, 'storage_container_not_detachable', 'Only additional storage containers can be detached.');
         }
 
+        $this->containers->assertNoStorageTransfer($container->id);
         foreach ($this->mannies->findCargoReservationsByProbeId($probe->id) as $reservation) {
             if (
                 $reservation['containerId'] === $container->id
@@ -997,7 +1027,7 @@ final class ProbeStorageService
             return;
         }
         $targetResources = $this->containers->resourceAmounts($move['to']->id);
-        $this->containers->setResourceAmount($move['from']->id, $move['type'], round($move['available'] - $move['amount'], 4));
+        $this->containers->setResourceAmount($move['from']->id, $move['type'], round((float) ($this->containers->resourceAmounts($move['from']->id)[$move['type']] ?? 0.0) - $move['amount'], 4));
         $this->containers->setResourceAmount($move['to']->id, $move['type'], round((float) ($targetResources[$move['type']] ?? 0.0) + $move['amount'], 4));
     }
 
@@ -1101,7 +1131,7 @@ final class ProbeStorageService
         $this->ensureProbeStorage($probe);
         $from = $this->requiredContainer($probe, $fromContainerUid);
         $to = $this->requiredContainer($probe, $toContainerUid);
-        $resources = $this->containers->resourceAmounts($from->id);
+        $resources = $this->containers->resourceAmounts($from->id, true);
         $available = round(max(0.0, (float) ($resources[$type] ?? 0.0)), 4);
         if ($available + self::EPSILON < $amount) {
             throw new MannyActionException(422, 'insufficient_inventory_amount', 'The requested storage move amount is not available.');
@@ -1148,6 +1178,7 @@ final class ProbeStorageService
             if ($item->type === ProbeItem::TYPE_ADDITIONAL_CONTAINER) {
                 throw new MannyActionException(422, 'item_not_movable', 'Additional containers stay linked to the probe storage and cannot be moved into another container.');
             }
+            $this->items->assertUnreserved($item);
             $items[] = $item;
             if ($item->storageContainerId !== $to->id) {
                 $requiredSpace = round($requiredSpace + max(0.0, $item->containerSpace), 4);
@@ -1333,6 +1364,7 @@ final class ProbeStorageService
             }
         }
 
+        foreach ($this->containers->transferCapacityReservations($probe->id) as $id => $amount) { $used[$id] = round((float)($used[$id] ?? 0) + (float)$amount,4); }
         return $used;
     }
 
@@ -1463,20 +1495,25 @@ final class ProbeStorageService
     private function resourceStocks(NeumannProbe $probe, array $containers): array
     {
         $labels = [
+            ResourceComposition::DEUTERIUM => 'Deuterium (cargo)',
             ResourceComposition::METALS => 'Metals',
             ResourceComposition::ICE => 'Ice',
             ResourceComposition::CARBON_COMPOUNDS => 'Carbon compounds',
         ];
         $stocks = [];
+        $rawByContainer=$this->containers->resourceAmountsByContainer($probe->id);
+        $availableByContainer=$this->containers->resourceAmountsByContainer($probe->id, true);
         foreach ($labels as $type => $name) {
             $placements = [];
             $total = 0.0;
+            $available = 0.0;
             foreach ($containers as $container) {
-                $amount = round(max(0.0, (float) ($this->containers->resourceAmounts($container->id)[$type] ?? 0.0)), 4);
+                $amount = round(max(0.0, (float) ($rawByContainer[$container->id][$type] ?? 0.0)), 4);
                 if ($amount <= 0.0) {
                     continue;
                 }
                 $total = round($total + $amount, 4);
+                $available += (float) ($availableByContainer[$container->id][$type] ?? 0.0);
                 $placements[] = [
                     'container' => $this->containerSummary($container),
                     'amount' => $amount,
@@ -1484,11 +1521,14 @@ final class ProbeStorageService
                     'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
                 ];
             }
+            if ($type === ResourceComposition::DEUTERIUM && $total <= 0.0) { continue; }
             $stocks[] = [
                 'id' => 'probe-' . $probe->id . '-stock-' . str_replace('_', '-', $type),
                 'type' => $type,
                 'name' => $name,
                 'amount' => $total,
+                'availableAmount' => round($available, 4),
+                'reservedAmount' => round($total - $available, 4),
                 'containerSpace' => $total,
                 'capacityUnit' => ProbeInventory::CAPACITY_UNIT,
                 'containers' => $placements,
@@ -1830,7 +1870,7 @@ final class ProbeStorageService
         return array_replace($manny->cargoArray(), ['capacity' => $this->mannyCargoCapacity()]);
     }
 
-    private function maxDeuteriumPercent(?NeumannProbe $probe = null): float
+    public function maxDeuteriumPercent(?NeumannProbe $probe = null): float
     {
         $max = ProbeModel::baseMaxDeuteriumPercent(
             $probe?->model ?? ProbeModel::GENERIC,

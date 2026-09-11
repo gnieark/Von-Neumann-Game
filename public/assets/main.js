@@ -471,7 +471,7 @@ function routeHrefForProbe(baseHref, probeId) {
 
 function routeBaseHref(href) {
     const normalized = (String(href || "/").replace(/\/$/, "") || "/");
-    const probeAwareRoute = normalized.match(/^\/(sensors|inventories|mannies|movement|scut|messaging|alerts)(?:\/\d+)?$/);
+    const probeAwareRoute = normalized.match(/^\/(sensors|inventories|sector-storage|mannies|movement|scut|messaging|alerts)(?:\/\d+)?$/);
     if (probeAwareRoute) {
         return "/" + probeAwareRoute[1];
     }
@@ -504,7 +504,7 @@ function currentRouteParts() {
             "coordinates": [],
         };
     }
-    const withProbe = path.match(/^\/(sensors|inventories|mannies|scut|messaging|alerts)\/\d+$/);
+    const withProbe = path.match(/^\/(sensors|inventories|sector-storage|mannies|scut|messaging|alerts)\/\d+$/);
     if (withProbe) {
         return {
             "baseHref": "/" + withProbe[1],

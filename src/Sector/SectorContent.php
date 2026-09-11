@@ -6,6 +6,16 @@ namespace VonNeumannGame\Sector;
 
 final class SectorContent
 {
+    private array $sqlDepots = [];
+    private ?string $persistedRevision = null;
+    private array $appliedEffects = [];
+
+    public function persistedRevision(): ?string { return $this->persistedRevision; }
+    public function markPersisted(string $revision): void { $this->persistedRevision = $revision; }
+    public function hydrateGerminationDepots(array $depots): void { $this->sqlDepots = $depots; }
+    public function hasAppliedEffect(string $id): bool { return isset($this->appliedEffects[$id]); }
+    public function markEffectApplied(string $id): void { $this->appliedEffects[$id] = true; }
+
     /** @var array<string, SectorDetachedContainer|null> */
     private array $detachedContainerChanges = [];
 
@@ -71,7 +81,7 @@ final class SectorContent
      */
     public function getObjects(): array
     {
-        return [...$this->objects, ...$this->detachedContainers];
+        return [...$this->objects, ...$this->detachedContainers, ...$this->sqlDepots];
     }
 
     /**
@@ -123,7 +133,7 @@ final class SectorContent
 
     public function findObjectById(string $id): ?UniverseObject
     {
-        foreach ($this->detachedContainers as $container) {
+        foreach ([...$this->detachedContainers, ...$this->sqlDepots] as $container) {
             if ($container->getId() === $id) {
                 return $container;
             }
@@ -164,6 +174,10 @@ final class SectorContent
 
     public function addObject(UniverseObject $object): void
     {
+        if ($object instanceof SectorGerminationDepot) {
+            $this->sqlDepots[$object->getId()] = $object;
+            return;
+        }
         if ($object instanceof SectorDetachedContainer) {
             $this->addDetachedContainerToCanonicalCollection($object);
             $this->detachedContainerChanges[$object->getId()] = $object;
@@ -531,6 +545,7 @@ final class SectorContent
     public function toArray(): array
     {
         return [
+            'appliedSectorEffects' => array_keys($this->appliedEffects),
             'coordinates' => $this->coordinates->toArray(),
             'objects' => array_map(static fn(UniverseObject $object): array => $object->toArray(), $this->objects),
             'detachedContainers' => array_map(static fn(SectorDetachedContainer $container): array => $container->toArray(), $this->detachedContainers),
@@ -548,7 +563,7 @@ final class SectorContent
     {
         $coord = $data['coordinates'];
 
-        return new self(
+        $sector = new self(
             new SectorCoordinates((int) $coord['x'], (int) $coord['y'], (int) $coord['z']),
             array_map(static fn(array $object): UniverseObject => UniverseObject::fromArray($object), $data['objects'] ?? []),
             (string) ($data['createdAt'] ?? ''),
@@ -560,6 +575,8 @@ final class SectorContent
             array_map(static fn(array $object): SectorDetachedContainer => SectorDetachedContainer::fromArray($object), $data['planetDroppedContainers'] ?? []),
             is_array($data['returnToSpaceProgramMaterialDonations'] ?? null) ? $data['returnToSpaceProgramMaterialDonations'] : [],
         );
+        foreach ($data['appliedSectorEffects'] ?? [] as $id) { $sector->markEffectApplied($id); }
+        return $sector;
     }
 
     /**
@@ -787,6 +804,7 @@ final class SectorContent
                 ...$existing->getDiscoveredByPlayerIds(),
                 ...$replacement->getDiscoveredByPlayerIds(),
             ])),
+            $replacement->storageVersion(),
         );
     }
 

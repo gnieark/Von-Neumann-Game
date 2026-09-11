@@ -64,6 +64,7 @@ final class ProbeMovementService
         ?SectorGrid $grid = null,
         array $gameplayConfig = [],
         private readonly ?OthersRepository $others = null,
+        private readonly ?MannyStorageTransferService $sectorStorageTransfers = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->gameplayConfig = $gameplayConfig;
@@ -211,6 +212,17 @@ final class ProbeMovementService
             $probe->enteredCurrentSectorAt = $now->format('c');
             $this->applyIntersectorIntegrityLoss($probe, $movement);
             $this->probes->save($probe);
+            if ($probe->status === ProbeStatus::Dead) {
+                $movement->status = 'destroyed';
+                $movement->destroyedAt = $now->format('c');
+                $movement->destructionReason = 'Hull integrity exhausted by intersector dust';
+                $this->movements->save($movement);
+
+                return $this->reinstantiation?->handleTerminalProbeLoss(
+                    $probe,
+                    ProbeReinstantiationService::TERMINAL_REASON_DUST,
+                ) ?? $probe;
+            }
             $alreadyVisited = $this->visitedSectors->getVisitedSectorByPlayerId($probe->playerId, $movement->target) !== null;
             $this->visitedSectors->markVisitedByProbe($probe->playerId, $probe->id, $movement->target);
             $this->missions?->completeReadyOracleMissions($probe);
@@ -453,6 +465,7 @@ final class ProbeMovementService
 
     private function registerForgottenMannies(NeumannProbe $probe): void
     {
+        $this->sectorStorageTransfers?->interruptProbe($probe->id, gmdate('c'));
         if ($this->mannies === null || $this->sectors === null) {
             return;
         }
