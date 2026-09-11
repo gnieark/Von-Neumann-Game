@@ -2483,14 +2483,26 @@ $apiKeys = new ApiKeyRepository($pdo);
 $visitedSectors = new VisitedSectorRepository($pdo);
 $detachedStorageContainers = new DetachedStorageContainerRepository($pdo);
 $sectorRepository = new SectorFileRepository($universePath);
-$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers);
+// Fixtures deliberately replace sector contents; production writes retain the CAS check.
+$saveSectorFixture = static function (SectorContent $content) use ($sectorRepository): void {
+    if ($sectorRepository->exists($content->getCoordinates())) {
+        $content->markPersisted($sectorRepository->load($content->getCoordinates())->persistedRevision());
+    }
+    $sectorRepository->save($content);
+};
+$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers, germinationDepots: new \VonNeumannGame\Repository\GerminationDepotRepository($pdo));
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
+$mannyStorageTransfers = new \VonNeumannGame\Service\MannyStorageTransferService($pdo, $mannies, $probes, $storage);
+$sectorEffects = new \VonNeumannGame\Service\SectorEffectService($pdo, $scheduledEvents, $sectorService);
+$anomalyBroadcasts = new \VonNeumannGame\Service\AnomalyBroadcastService($pdo, $scheduledEvents);
+$germinationDepots = new \VonNeumannGame\Service\GerminationDepotService($others, $scheduledEvents, $sectorService, $sectorEffects, $anomalyBroadcasts, mannyStorageTransfers: $mannyStorageTransfers);
+$storageTransfers = new \VonNeumannGame\Service\SectorStorageTransferService($pdo, $germinationDepots);
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, 7, $mannies, $apiKeys, $sectorService);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings);
-$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world');
+$movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world', sectorStorageTransfers: $mannyStorageTransfers);
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
-$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories);
+$mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories, germinationDepots: $germinationDepots, sectorStorageTransfers: $mannyStorageTransfers);
 $asteroidTrajectoryService = new AsteroidTrajectoryService(
     $asteroidTrajectories,
     $probes,
@@ -2501,6 +2513,8 @@ $asteroidTrajectoryService = new AsteroidTrajectoryService(
     $damageWarnings,
     $others,
     mannyService: $mannyService,
+    germinationDepots: $germinationDepots,
+    storageTransfers: $mannyStorageTransfers,
 );
 $othersService = new OthersService(
     $others,
@@ -2513,6 +2527,9 @@ $othersService = new OthersService(
     items: $items,
     scut: $scut,
     players: $players,
+    germinationDepots: $germinationDepots,
+    storageTransfers: $storageTransfers,
+    mannyStorageTransfers: $mannyStorageTransfers,
 );
 $testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTrajectories, new PhaseHandlerRegistry([
     new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, 600),
@@ -2520,7 +2537,7 @@ $testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTraject
     new SectorTransferPhaseHandler($asteroidTrajectories, $scheduledEvents, $sectorService, new CaptureCalculator()),
     new BlackHoleOrbitPhaseHandler($asteroidTrajectories, $sectorService),
 ]));
-$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $testTrajectoryProcessor, $othersService);
+$scheduler = new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $testTrajectoryProcessor, $othersService, $sectorEffects, $anomalyBroadcasts);
 $processScheduledMannyNow = static function (int|string $mannyId) use ($pdo, $scheduler, $mannies): array {
     if (is_string($mannyId)) {
         $mannyId = $mannies->findByUid($mannyId)?->id ?? 0;
@@ -2593,10 +2610,10 @@ $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
     mannies: $mannies,
     asteroidTrajectories: $asteroidTrajectories,
     asteroidTrajectoryService: $asteroidTrajectoryService,
-), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService);
+), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService, sectorStorageTransfers: $mannyStorageTransfers, probeCommands: new \VonNeumannGame\Repository\ProbeCommandRepository($pdo), othersIdempotency: new \VonNeumannGame\Repository\OthersIdempotencyRepository($pdo));
 
 $portableReservationSector = new SectorCoordinates(210, 10, 0);
-$sectorRepository->save(new SectorContent($portableReservationSector, [
+$saveSectorFixture(new SectorContent($portableReservationSector, [
     new Planet(
         'portable-reservation-planet',
         'Portable Reservation Planet',
@@ -3235,7 +3252,7 @@ $harvestabilitySector = $othersHome->add(60, 0, 0);
 $harvestabilityRemoteSector = $othersHome->add(62, 0, 0);
 $harvestableAmounts = ['deuterium' => 0.0001, 'metals' => 5.0, 'ice' => 0.0, 'carbon_compounds' => 0.0];
 $thresholdAmounts = ['deuterium' => 0.0, 'metals' => 5.0, 'ice' => 0.0, 'carbon_compounds' => 0.0];
-$sectorRepository->save(new SectorContent($harvestabilitySector, [
+$saveSectorFixture(new SectorContent($harvestabilitySector, [
     new Planet('others-harvestable-top', 'Rich top-level planet', 'rocky', 1.0, 1.0, true, 0.2, ['metals'], resourceAmounts: $harvestableAmounts),
     new Planet('others-harvest-threshold-top', 'Threshold top-level planet', 'rocky', 1.0, 1.0, true, 0.2, ['metals'], resourceAmounts: $thresholdAmounts),
     new SolarSystem(
@@ -3257,7 +3274,7 @@ $sectorRepository->save(new SectorContent($harvestabilitySector, [
         1.5,
     ),
 ]));
-$sectorRepository->save(new SectorContent($harvestabilityRemoteSector, [
+$saveSectorFixture(new SectorContent($harvestabilityRemoteSector, [
     new Planet('others-harvestable-remote', 'Known remote planet', 'rocky', 1.0, 1.0, true, 0.2, ['metals'], resourceAmounts: $harvestableAmounts),
 ]));
 $harvestabilityFleet = $others->createFleet(
@@ -3437,7 +3454,7 @@ $test->assertEquals(
 
 $knownOthersBlackHoleSector = $othersHome->add(1000, 1000, 0);
 $originalKnownOthersBlackHoleContent = $sectorService->getOrCreateSector($knownOthersBlackHoleSector);
-$sectorRepository->save(new SectorContent($knownOthersBlackHoleSector, [
+$saveSectorFixture(new SectorContent($knownOthersBlackHoleSector, [
     new BlackHole('others-known-black-hole', 'Known Others black hole', 10.0, 0.01, true, 0.5),
 ]));
 $firstKnownVisitAt = gmdate('c', time() + 10);
@@ -3500,7 +3517,7 @@ $pdo->prepare("UPDATE others_ships SET status='removed',destroyed_at=:now,update
     ->execute(['now' => $cleanupNow, 'fleet_id' => (int) $isolatedOthersFleet['id']]);
 $pdo->prepare("UPDATE others_fleets SET status='dissolved',dissolved_at=:now,updated_at=:now WHERE id=:id")
     ->execute(['now' => $cleanupNow, 'id' => (int) $isolatedOthersFleet['id']]);
-$sectorRepository->save($originalKnownOthersBlackHoleContent);
+$saveSectorFixture($originalKnownOthersBlackHoleContent);
 $test->assertEquals(0, $visitedSectors->countVisited($othersAlertPlayer), 'Others visits remain absent from probe visit statistics after scans');
 $fleetMoveStatement = $pdo->prepare('SELECT m.target_x,m.target_y,m.target_z,a.payload_json FROM others_movements m JOIN others_actions a ON a.id=m.action_id WHERE a.public_id=:public_id');
 foreach (($othersFleetMove->body['actions'] ?? []) as $fleetMoveEntry) {
@@ -4205,7 +4222,7 @@ $privacyHome = new SectorCoordinates(1000, 1000, 0);
 $privacySector = new SectorCoordinates(1002, 1000, 0);
 $privacyRelativeLabel = '2:0:0';
 $leakyPlanetName = 'Signal-' . str_replace(':', '-', $privacySector->toKey());
-$sectorRepository->save(new SectorContent($privacySector, [
+$saveSectorFixture(new SectorContent($privacySector, [
     new Planet('privacy-life-planet', $leakyPlanetName, 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
     new SolarSystem(
         'privacy-system',
@@ -4739,7 +4756,7 @@ if ($createdProbe !== null) {
         ResourceComposition::ICE => 0.0,
         ResourceComposition::CARBON_COMPOUNDS => 0.0,
     ]));
-    $sectorRepository->save($deuteriumSector);
+    $saveSectorFixture($deuteriumSector);
     $legacyDamageWarnings = $kernel->handle('GET', '/api/probe/damage-warnings', $missionHeaders);
     $test->assertEquals([], $legacyDamageWarnings->body['damageWarnings'] ?? null, 'legacy damage warnings route excludes object-detection alerts');
     $alertsScript = file_get_contents($root . '/public/assets/alerts.js');
@@ -5009,7 +5026,7 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
 $orphanObserver = $auth->registerPlayerWithPassword('orphan-observer', 'secret', 'Orphan Observer', 'Orphan observer probe');
 $orphanProbe = $probes->findByPlayerId($orphanObserver->id);
 if ($orphanProbe !== null) {
-    $sectorRepository->save(new SectorContent($orphanProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($orphanProbe->currentSector, [
         new SectorManny(
             SectorManny::objectIdForUid('mny_deleted_owner'),
             'orphaned-manny',
@@ -5045,7 +5062,7 @@ if ($englishProbe !== null) {
         0.01,
         0.1,
     ))->withGeneratedName('api-sector:english-asteroid');
-    $sectorRepository->save(new SectorContent($englishProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($englishProbe->currentSector, [
         $englishAsteroid,
     ]));
     $englishObservation = (new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies))
@@ -5151,7 +5168,7 @@ $scutPlayer = $auth->registerPlayerWithPassword('scut-sender', 'secret', 'SCUT S
 $scutSession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'scut-sender', 'password' => 'secret'], JSON_THROW_ON_ERROR));
 $scutHeaders = ['Authorization' => 'Bearer ' . (string) ($scutSession->body['token'] ?? '')];
 $scutProbe = $probes->findByPlayerId($scutPlayer->id) ?? throw new RuntimeException('SCUT test probe missing.');
-$sectorRepository->save(new SectorContent($scutProbe->currentSector, [
+$saveSectorFixture(new SectorContent($scutProbe->currentSector, [
     new Asteroid('scut-dark-rock', null, 'iron', ['iron'], 'small', 0.000001, 0.001),
 ]));
 $scutRelay = $scut->createOffRelay($scutProbe->currentSector, $scutProbe->id);
@@ -5162,7 +5179,7 @@ $scutTurnOnWithoutStar = $kernel->handle('POST', '/api/probe/mannies/' . rawurle
 ], JSON_THROW_ON_ERROR));
 $test->assertEquals(422, $scutTurnOnWithoutStar->status, 'Manny cannot turn on a SCUT relay in a sector without a star');
 $test->assertEquals('scut_relay_requires_star', $scutTurnOnWithoutStar->body['error']['code'] ?? null, 'SCUT relay solar-energy requirement returns an explicit error');
-$sectorRepository->save(new SectorContent($scutProbe->currentSector, [
+$saveSectorFixture(new SectorContent($scutProbe->currentSector, [
     new Star('scut-unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
 ]));
 $scutTurnOn = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($scutMannyId) . '/turn-on-relay', $scutHeaders, json_encode([
@@ -6237,7 +6254,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
 
         $driftingMineSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $driftingMineSector->addObject(new Asteroid('drifting-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001));
-        $sectorRepository->save($driftingMineSector);
+        $saveSectorFixture($driftingMineSector);
         $mineDriftingContainer = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachSecondMannyId) . '/mine', $detachHeaders, json_encode([
             'objectId' => 'drifting-mine-rock',
             'resource' => 'metals',
@@ -6395,7 +6412,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $hiddenSector = new SectorContent($detachProbe->currentSector, [
             new Asteroid('cache-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
         ]);
-        $sectorRepository->save($hiddenSector);
+        $saveSectorFixture($hiddenSector);
         $detachHidden = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/detach-storage-container', $detachHeaders, json_encode([
             'containerId' => $detachContainerId,
             'mode' => 'hidden_on_asteroid',
@@ -6426,7 +6443,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assert($hiddenStoredContainer !== null && in_array($detachPlayer->id, $hiddenStoredContainer->getDiscoveredByPlayerIds(), true), 'completed hidden detach marks the owner player as a discoverer');
         if ($hiddenStoredContainer !== null) {
             $hiddenStoredSector->addHiddenDetachedContainer($hiddenStoredContainer);
-            $sectorRepository->save($hiddenStoredSector);
+            $saveSectorFixture($hiddenStoredSector);
             $hiddenStoredSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
             $test->assertEquals(1, count($hiddenStoredSector->hiddenDetachedContainersForObject('cache-rock')), 're-adding the same hidden detached container id does not duplicate it');
         }
@@ -6852,7 +6869,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $multiHiddenSector = new SectorContent($multiHiddenProbe->currentSector, [
                 new Asteroid('multi-cache-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
             ]);
-            $sectorRepository->save($multiHiddenSector);
+            $saveSectorFixture($multiHiddenSector);
 
             $multiHiddenItemA = $storage->addItem($multiHiddenProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
             $multiHiddenItemB = $storage->addItem($multiHiddenProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
@@ -6957,7 +6974,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $dropSector = new SectorContent($detachProbe->currentSector, [
             new Planet('drop-target-planet', 'Drop target', 'rocky', 1.0, 1.0, true, 0.42, ['metals']),
         ]);
-        $sectorRepository->save($dropSector);
+        $saveSectorFixture($dropSector);
         $dropWithoutKit = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($detachMannyId) . '/drop-storage-container', $detachHeaders, json_encode([
             'containerId' => $detachContainerId,
             'planetId' => 'drop-target-planet',
@@ -7131,7 +7148,7 @@ if ($oracleProbe !== null) {
         $damageWarnings,
     );
 
-    $sectorRepository->save(new SectorContent($oracleSector, [$oraclePlanet]));
+    $saveSectorFixture(new SectorContent($oracleSector, [$oraclePlanet]));
     $oracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet);
     $test->assertEquals('first_contact.oracle', $oracleMission?->type, 'Oracle intelligent-life contact creates the Oracle mission');
     $test->assertEquals('oracle', $oracleMission?->metadata['scenario'] ?? null, 'Oracle mission stores its scenario key');
@@ -7296,7 +7313,7 @@ if ($failedOracleProbe !== null) {
         $players,
         $damageWarnings,
     );
-    $sectorRepository->save(new SectorContent($failedOracleSector, [$failedOraclePlanet]));
+    $saveSectorFixture(new SectorContent($failedOracleSector, [$failedOraclePlanet]));
     $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
     $thresholdPlanet = new Planet('oracle-threshold-planet', 'Barely unsuitable', 'terrestrial', 1.0, 1.0, true, 0.5, ['water']);
     $failedOracleMissionService->handleOracleBiologicalArchiveDrop(
@@ -7332,7 +7349,7 @@ $teleportLifeSession = $kernel->handle('POST', '/api/session', [], json_encode([
 $teleportLifeHeaders = ['Authorization' => 'Bearer ' . (string) ($teleportLifeSession->body['token'] ?? '')];
 if ($teleportLifeProbe !== null) {
     $teleportLifeTarget = $teleportLifeProbe->currentSector->add(4, 0, 0);
-    $sectorRepository->save(new SectorContent($teleportLifeTarget, [
+    $saveSectorFixture(new SectorContent($teleportLifeTarget, [
         new Planet('teleport-life-planet', null, 'ocean', 1.0, 1.0, true, 0.91, ['water_ice'], intelligentLife: true),
     ]));
     $pdo->prepare(
@@ -7362,7 +7379,7 @@ $dormantAlertSession = $kernel->handle('POST', '/api/session', [], json_encode([
 $dormantAlertHeaders = ['Authorization' => 'Bearer ' . (string) ($dormantAlertSession->body['token'] ?? '')];
 if ($dormantAlertProbe !== null) {
     $dormantAlertTarget = $dormantAlertProbe->currentSector->add(2, 0, 0);
-    $sectorRepository->save(new SectorContent($dormantAlertTarget, [
+    $saveSectorFixture(new SectorContent($dormantAlertTarget, [
         new DormantConstruct('dormant-arrival-alert'),
     ]));
 
@@ -7410,7 +7427,7 @@ if ($dormantAlertProbe !== null) {
 if ($intelligentLifeProbe !== null) {
     $intelligentLifeTarget = $intelligentLifeProbe->currentSector->add(2, 0, 0);
     $intelligentLifeLeakyPlanetName = 'Signal-' . str_replace(':', '-', $intelligentLifeTarget->toKey());
-    $sectorRepository->save(new SectorContent($intelligentLifeTarget, [
+    $saveSectorFixture(new SectorContent($intelligentLifeTarget, [
         new Planet('life-alert-planet', $intelligentLifeLeakyPlanetName, 'ocean', 1.0, 1.0, true, 0.82, ['water_ice'], intelligentLife: true),
     ]));
 
@@ -7566,7 +7583,7 @@ if ($intelligentLifeProbe !== null) {
                             ResourceComposition::CARBON_COMPOUNDS => 0.5,
                         ],
                     );
-                    $sectorRepository->save($sectorWithFellowDonation);
+                    $saveSectorFixture($sectorWithFellowDonation);
                 }
 
                 $nonSolverContributor = $auth->registerPlayerWithPassword('mission-non-solver', 'secret', 'Non Solver', 'Non solver probe');
@@ -7655,7 +7672,7 @@ if ($intelligentLifeProbe !== null) {
 
                         $stationReadySector = $sectorRepository->load($intelligentLifeTarget);
                         $stationReadySector->markReturnToSpaceProgramCompletionMessageSent('life-alert-planet', gmdate('c', time() - 1));
-                        $sectorRepository->save($stationReadySector);
+                        $saveSectorFixture($stationReadySector);
 
                         $stationReadyTrigger = $kernel->handle('POST', '/api/probe/messages', $intelligentLifeHeaders, json_encode([
                             'recipient' => [
@@ -7818,7 +7835,7 @@ $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock
 if ($createdProbe !== null) {
     $sectorWithConstruct = $sectorRepository->load($createdProbe->currentSector);
     $sectorWithConstruct->addObject(new DormantConstruct('api-current-dormant-construct'));
-    $sectorRepository->save($sectorWithConstruct);
+    $saveSectorFixture($sectorWithConstruct);
     $currentConstructScan = $kernel->handle('GET', '/api/probe/sector', $headers);
     $currentConstructObjects = array_values(array_filter(
         $currentConstructScan->body['sector']['objects'] ?? [],
@@ -7863,7 +7880,7 @@ if ($dormantInspectionProbe !== null) {
     $dormantInspectionWreck = DormantConstruct::fromOthersMothership('mother_inspection_fixture');
     $dormantInspectionSector->addObject($dormantInspectionWreck);
     $dormantInspectionSector->addObject(new DormantConstruct('dormant-report-random'));
-    $sectorRepository->save($dormantInspectionSector);
+    $saveSectorFixture($dormantInspectionSector);
 
     $dormantInspectionScan = $kernel->handle('GET', '/api/probe/sector', $dormantInspectionHeaders);
     $dormantInspectionObjects = array_values(array_filter(
@@ -8021,7 +8038,7 @@ if ($duckSculptingProbe !== null) {
         'completed-duck-rock', 'Completed duck rock', 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001,
         resourceAmounts: ['metals' => 1.0],
     ));
-    $sectorRepository->save($duckSculptingSector);
+    $saveSectorFixture($duckSculptingSector);
 
     $duckSculptingMannies = $kernel->handle('GET', '/api/probe/mannies', $duckSculptingHeaders);
     $cancelledSculptMannyId = (string) ($duckSculptingMannies->body['mannies'][0]['id'] ?? '');
@@ -8117,7 +8134,7 @@ if ($motorizeProbe !== null) {
         0.001,
         resourceAmounts: ['metals' => 1.0],
     ));
-    $sectorRepository->save($motorizeSector);
+    $saveSectorFixture($motorizeSector);
     $motorizeMannies = $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
     $motorizeMannyId = (string) ($motorizeMannies->body['mannies'][0]['id'] ?? '');
     $motorizeRefuelMannyId = (string) ($motorizeMannies->body['mannies'][1]['id'] ?? '');
@@ -8207,7 +8224,7 @@ if ($motorizeProbe !== null) {
     if ($storedMotorizedAsteroid instanceof Asteroid) {
         $emptyMotorizedSector = $sectorRepository->load($motorizeProbe->currentSector);
         $emptyMotorizedSector->replaceObject($storedMotorizedAsteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY));
-        $sectorRepository->save($emptyMotorizedSector);
+        $saveSectorFixture($emptyMotorizedSector);
     }
     $refuelFuelBefore = $probes->findById($motorizeProbe->id)?->deuteriumStock;
     $acceptedRefuel = $kernel->handle('POST', '/api/probe/' . $motorizeProbe->id . '/mannies/' . rawurlencode($motorizeRefuelMannyId) . '/refuel-motorized-asteroid', $motorizeHeaders, json_encode([
@@ -8297,7 +8314,7 @@ if ($motorizeProbe !== null) {
             $transfer->direction['y'],
             $transfer->direction['z'],
         );
-        $sectorRepository->save(new SectorContent($firstTransferSector, []));
+        $saveSectorFixture(new SectorContent($firstTransferSector, []));
         $testTrajectoryProcessor->process(
             $transfer->id,
             AsteroidTrajectory::STATUS_CROSSING_SECTOR,
@@ -8329,7 +8346,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
         'system-impact-rock', 'System impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
         resourceAmounts: ['metals' => 1.0],
     ))->withDeuteriumEngine();
-    $sectorRepository->save(new SectorContent($impactProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($impactProbe->currentSector, [
         new Star('system-impact-star', 'Impact Star', 'G', 1.0, 5778, 1.0, 1.0),
         $impactAsteroid,
     ]));
@@ -8401,7 +8418,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
     ))->withDeuteriumEngine();
     $probeImpactSector = $sectorRepository->load($impactProbe->currentSector);
     $probeImpactSector->addObject($probeImpactAsteroid);
-    $sectorRepository->save($probeImpactSector);
+    $saveSectorFixture($probeImpactSector);
     $probeImpactLaunch = $kernel->handle(
         'POST',
         '/api/probe/' . $impactProbe->id . '/asteroids/probe-impact-rock/trajectories',
@@ -8443,7 +8460,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
     ))->withDeuteriumEngine();
     $othersImpactSector = $sectorRepository->load($impactProbe->currentSector);
     $othersImpactSector->addObject($othersImpactAsteroid);
-    $sectorRepository->save($othersImpactSector);
+    $saveSectorFixture($othersImpactSector);
     $othersImpactLaunch = $kernel->handle(
         'POST',
         '/api/probe/' . $impactProbe->id . '/asteroids/others-impact-rock/trajectories',
@@ -8486,7 +8503,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
     ))->withDeuteriumEngine();
     $departedLauncherSector = $sectorRepository->load($impactProbe->currentSector);
     $departedLauncherSector->addObject($departedLauncherAsteroid);
-    $sectorRepository->save($departedLauncherSector);
+    $saveSectorFixture($departedLauncherSector);
     $departedLauncherImpact = $kernel->handle(
         'POST',
         '/api/probe/' . $impactProbe->id . '/asteroids/departed-launcher-impact-rock/trajectories',
@@ -8534,7 +8551,7 @@ if ($createdProbe !== null && $stationaryNeighborProbe !== null && $movingNeighb
     $neighborTarget = (new SectorGrid())->getNeighbors($createdProbe->currentSector)[0];
     $deceleratingNeighborProbe->currentSector = $neighborTarget;
     $probes->save($deceleratingNeighborProbe);
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Planet('message-life-planet', 'Warm Chorus', 'ocean', 1.0, 1.0, true, 0.79, ['water_ice'], intelligentLife: true),
         new Planet('message-empty-planet', 'Quiet Rock', 'rocky', 0.8, 0.9, true, 0.33, ['silicates']),
     ]));
@@ -8799,7 +8816,7 @@ $batchHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($b
 $batchProbe = $probes->findByPlayerId($batchPlayer->id) ?? throw new RuntimeException('Expected Manny batch probe.');
 $batchProbe->currentSector = new SectorCoordinates(4550, 0, 0);
 $probes->save($batchProbe);
-$sectorRepository->save(new SectorContent($batchProbe->currentSector, [
+$saveSectorFixture(new SectorContent($batchProbe->currentSector, [
     new Asteroid('batch-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 1.0]),
 ]));
 $batchMannyList = $kernel->handle('GET', '/api/probe/' . $batchProbe->id . '/mannies', $batchHeaders);
@@ -9113,7 +9130,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('done', $cronRepairEventStatus->fetchColumn(), 'scheduler marks completed Manny task event done');
     $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.03]);
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
         new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
         new Star('unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
@@ -9140,7 +9157,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(422, $refillWithoutStation->status, 'Manny deuterium refill requires a refuel station in the current sector');
     $test->assertEquals('deuterium_refuel_station_not_found', $refillWithoutStation->body['error']['code'] ?? null, 'missing deuterium station returns an explicit error');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
         new Asteroid('large-asteroid', null, 'iron', ['iron', 'nickel'], 'large', 0.019, 0.12),
         new Star('unit-star', null, 'G', 1.0, 5778, 1.0, 1.0),
@@ -9465,7 +9482,7 @@ if ($createdProbe !== null) {
     $pathClearingLossMethod->invoke($movementService, $uninstalledPathProbe, $pathClearingMovement);
     $test->assert($uninstalledPathProbe->integrityPercent < $uninstalledIntegrityBefore, 'a sibling probe without relativistic path clearing keeps the deterministic integrity loss');
 
-    $sectorRepository->save(new SectorContent($improvementProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($improvementProbe->currentSector, [
         new DeuteriumRefuelStation('improvement-deuterium-station', 'Deuterium refuel station', 'improvement-planet', null, gmdate('c')),
     ]));
     $refillImprovedTank = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($improvementMannyId) . '/refill-deuterium-tank', $improvementHeaders, json_encode([], JSON_THROW_ON_ERROR));
@@ -9626,7 +9643,7 @@ if ($createdProbe !== null) {
     $assemblyRecallProbe = $probes->findByPlayerId($assemblyRecallPlayer->id) ?? throw new RuntimeException('Expected assembly recall probe.');
     $assemblyRecallProbe->currentSector = new SectorCoordinates(4700, 0, 0);
     $probes->save($assemblyRecallProbe);
-    $sectorRepository->save(new SectorContent($assemblyRecallProbe->currentSector, []));
+    $saveSectorFixture(new SectorContent($assemblyRecallProbe->currentSector, []));
     $assemblyRecallMannyList = $kernel->handle('GET', '/api/probe/mannies', $assemblyRecallHeaders);
     $assemblyRecallMannyId = (string) ($assemblyRecallMannyList->body['mannies'][0]['id'] ?? '');
     $assemblyRecallContainerItemA = $storage->addItem($assemblyRecallProbe, ProbeItem::TYPE_ADDITIONAL_CONTAINER, ProbeItem::ADDITIONAL_CONTAINER_NAME, 0.0, ['capacityBonus' => 1.0]);
@@ -9664,7 +9681,7 @@ if ($createdProbe !== null) {
 
     $visitedPlanetSector = new SectorCoordinates($createdProbe->currentSector->getX() + 8, $createdProbe->currentSector->getY(), $createdProbe->currentSector->getZ());
     $visitedSectors->markVisited($player, $createdProbe, $visitedPlanetSector);
-    $sectorRepository->save(new SectorContent($visitedPlanetSector, [
+    $saveSectorFixture(new SectorContent($visitedPlanetSector, [
         new Planet('visited-habitable-planet', null, 'ocean', 1.1, 1.2, true, 0.81, ['water_ice']),
     ]));
     $visitedPlanetObservation = $kernel->handle('GET', '/api/sector?x=8&y=0&z=0', $headers);
@@ -9713,7 +9730,7 @@ if ($createdProbe !== null) {
     $depletedAsteroid = $depletedSector->getObjects()[0] ?? null;
     $test->assertEquals(0.99, $depletedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'completed Manny mining subtracts the mined metals from the asteroid');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('stale-mine-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
     ]));
     $staleMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -9733,7 +9750,7 @@ if ($createdProbe !== null) {
     $staleMinedAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('stale-mine-rock');
     $test->assertEquals(0.96, $staleMinedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'duplicate stale mining refreshes do not deplete regular mining twice');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('parallel-metal-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.2]),
     ]));
     $parallelMetalMineA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -9766,7 +9783,7 @@ if ($createdProbe !== null) {
     $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.08]);
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 0 WHERE id = :id')->execute(['id' => $createdProbe->id]);
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('parallel-deuterium-rock', null, 'deuterium', ['deuterium'], 'small', 0.000001, 0.001, null, ['deuterium' => 0.2]),
     ]));
     $parallelDeuteriumMineA = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -9795,7 +9812,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.0, $parallelDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'parallel Manny mining depletes both deuterium deliveries');
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 25 WHERE id = :id')->execute(['id' => $createdProbe->id]);
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('trip-deuterium-rock', null, 'deuterium', ['deuterium'], 'small', 0.000001, 0.001, null, ['deuterium' => 0.2]),
     ]));
     $tripDeuteriumMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -9838,7 +9855,7 @@ if ($createdProbe !== null) {
     $tripDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('trip-deuterium-rock');
     $test->assertEquals(0.1, $tripDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'two-trip deuterium mining depletes exactly 0.10 ECE from the asteroid');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('thin-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001, null, ['metals' => 0.005]),
     ]));
     $oversizedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -9848,7 +9865,7 @@ if ($createdProbe !== null) {
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(422, $oversizedMine->status, 'Manny mining refuses an order larger than the asteroid material reserve');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('mixed-rock', null, 'mixed', ['iron', 'water_ice', 'carbon'], 'small', 0.000001, 0.001),
     ]));
     $mixedMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($thirdMannyId) . '/mine', $headers, json_encode([
@@ -9938,7 +9955,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['ice'] ?? null, 'multi-resource mining subtracts the ice share from the asteroid');
     $test->assertEquals(0.3234, $mixedAsteroid?->toArray()['resourceAmounts']['carbon_compounds'] ?? null, 'multi-resource mining subtracts the carbon-compound share from the asteroid');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('haul-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
     ]));
     $multiTripMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -9969,7 +9986,7 @@ if ($createdProbe !== null) {
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'Manny returns to the probe after completing all mining trips');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('recall-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
     ]));
     $quickRecallMine = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($secondMannyId) . '/mine', $headers, json_encode([
@@ -10035,7 +10052,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(1, count($craftedItems), 'completed crafting adds a waypoint bookmark to inventory');
     $test->assertEquals(0.01, $craftedItems[0]['containerSpace'] ?? null, 'waypoint bookmark occupies 0.01 containers');
 
-    $sectorRepository->save(new SectorContent($createdProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
         new Asteroid('bookmark-rock', null, 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001),
     ]));
     $installBookmark = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/install-bookmark', $headers, json_encode([
@@ -10335,7 +10352,7 @@ if ($createdProbe !== null) {
         1,
         CraftingRecipeCatalog::SCUT_RELAY_CONTAINER_SPACE,
     ));
-    $sectorRepository->save($sectorWithLegacyDriftingRelay);
+    $saveSectorFixture($sectorWithLegacyDriftingRelay);
     $scanWithLegacyDriftingRelay = $kernel->handle('GET', '/api/probe/sector', $headers);
     $legacyDriftingRelays = array_values(array_filter(
         $scanWithLegacyDriftingRelay->body['sector']['objects'] ?? [],
@@ -10353,7 +10370,7 @@ if ($createdProbe !== null) {
         1,
         CraftingRecipeCatalog::DEUTERIUM_ENGINE_CONTAINER_SPACE,
     ));
-    $sectorRepository->save($sectorWithDriftingEngine);
+    $saveSectorFixture($sectorWithDriftingEngine);
     $scanWithDriftingEngine = $kernel->handle('GET', '/api/probe/sector', $headers);
     $driftingEngines = array_values(array_filter(
         $scanWithDriftingEngine->body['sector']['objects'] ?? [],
@@ -10501,7 +10518,7 @@ if ($createdProbe !== null) {
     if (!$raceSector->replaceObject($raceObject)) {
         $raceSector->addObject($raceObject);
     }
-    $sectorRepository->save($raceSector);
+    $saveSectorFixture($raceSector);
 
     $firstRaceSalvage = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($firstMannyId) . '/salvage', $headers, json_encode([
         'objectId' => SectorManny::objectIdForUid($raceManny->uid),
@@ -10539,7 +10556,7 @@ if ($currentProbe !== null) {
     $neighbors = $grid->getNeighbors($currentProbe->currentSector);
     $visitedNeighbor = $neighbors[0];
     $visitedSectors->markVisited($player, $currentProbe, $visitedNeighbor);
-    $sectorRepository->save(new SectorContent($visitedNeighbor, [
+    $saveSectorFixture(new SectorContent($visitedNeighbor, [
         new DormantConstruct('api-visited-dormant-construct'),
     ]));
     $visitedRelative = $visitedNeighbor->subtract($player->homeSector);
@@ -11202,7 +11219,7 @@ $blackHoleSession = $kernel->handle('POST', '/api/session', [], json_encode(['us
 $blackHoleHeaders = ['Authorization' => 'Bearer ' . (string) ($blackHoleSession->body['token'] ?? '')];
 $blackHoleProbe = $probes->findByPlayerId($blackHolePlayer->id);
 if ($blackHoleProbe !== null) {
-    $sectorRepository->save(new SectorContent($blackHoleProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($blackHoleProbe->currentSector, [
         new BlackHole('test-black-hole', null, 7.5, 22.0, true, 160.0),
     ]));
 
@@ -11244,7 +11261,7 @@ if ($blackHoleSwitchProbe !== null) {
     $blackHoleSwitchDrone = $probes->createForPlayer($blackHoleSwitchPlayer->id, 'Black hole fallback drone', new SectorCoordinates(82, 0, 0));
     $storage->initializeProbeStorage($blackHoleSwitchDrone);
     $blackHoleSwitchMission = $missionService->startMission($blackHoleSwitchProbe, 'instance_switch_black_hole', 'Instance switch black hole', steps: [['title' => 'Keep black-hole mission']]);
-    $sectorRepository->save(new SectorContent($blackHoleSwitchProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($blackHoleSwitchProbe->currentSector, [
         new BlackHole('switch-black-hole', null, 9.0, 24.0, true, 180.0),
     ]));
 
@@ -11279,7 +11296,7 @@ $escapeSession = $kernel->handle('POST', '/api/session', [], json_encode(['usern
 $escapeHeaders = ['Authorization' => 'Bearer ' . (string) ($escapeSession->body['token'] ?? '')];
 $escapeProbe = $probes->findByPlayerId($escapePlayer->id);
 if ($escapeProbe !== null) {
-    $sectorRepository->save(new SectorContent($escapeProbe->currentSector, [
+    $saveSectorFixture(new SectorContent($escapeProbe->currentSector, [
         new BlackHole('escape-black-hole', null, 5.0, 18.0, false, 120.0),
     ]));
     $kernel->handle('GET', '/api/probe/sector', $escapeHeaders);
@@ -11391,5 +11408,9 @@ $test->assertEquals(0, (int) ($requeuedReservationEvent['attempts'] ?? -1), 'fai
 $test->assertEquals(null, $requeuedReservationEvent['last_error'] ?? null, 'failed Others reservation-event repair clears its obsolete SQL error');
 $reservationRepairCheckPdo = null;
 
+require __DIR__ . '/Support/TransferLoadPlannerTests.php';
+require __DIR__ . '/Support/StorageBudgetTests.php';
+require __DIR__ . '/Support/GerminationDepotTests.php';
+require __DIR__ . '/Support/SectorStorageHttpTests.php';
 removeDirectory($tmp);
 exit($test->finish());

@@ -77,7 +77,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
                 (string)$targetOthers['public_id'],
                 $relativistic ? (int)$targetOthers['integrity'] : 10,
                 'asteroid-impact:'.$trajectory->uid,
-                ['type' => 'motorized_asteroid', 'asteroidId' => $trajectory->asteroidId, 'trajectoryUid' => $trajectory->uid],
+                ['type' => 'motorized_asteroid', 'asteroidId' => $trajectory->asteroidId, 'trajectoryUid' => $trajectory->uid, 'occurredAt' => $now->format('c')],
                 $relativistic,
                 $responsiblePlayerId,
             );
@@ -96,6 +96,12 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
                 $details,
                 $now,
             );
+        }
+        if ($target instanceof \VonNeumannGame\Sector\SectorGerminationDepot) {
+            ($this->othersService ?? throw new \RuntimeException('Depot impact service required.'))->depotService()->impactWithSourceEffect(
+                $target->getId(), 'depot-impact-' . $trajectory->uid, $trajectory->currentSector, $source->getId(), $now->format('c'),
+            );
+            return $this->finish($trajectory, AsteroidTrajectory::STATUS_COMPLETED, 'structure_unchanged', null, 'dormant_construct', $target, ['targetDestroyed'=>false,'message'=>'La structure a résisté. Vous pouvez envoyer une Manny pour une nouvelle inspection.'], $now);
         }
         $targetMovement = $targetProbe !== null ? $this->movements->findActiveByProbeId($targetProbe->id) : null;
         if (
@@ -119,6 +125,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
             $damage = (float) ($resolution['integrityDamagePercent'] ?? 0.0);
             $appliedDamage = $targetProbe->subtractIntegrityPercent($damage);
             if ($targetProbe->status === ProbeStatus::Dead) {
+                $this->othersService?->interruptProbeStorageTransfers($targetProbe->id,$now->format('c'));
                 $this->destroyObject($sector, $source->getId());
             }
             $this->probes->save($targetProbe);

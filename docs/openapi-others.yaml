@@ -9,6 +9,326 @@ servers:
 - url: /
   description: Current host
 paths:
+  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/build-germination-depot:
+    post:
+      tags: [Others]
+      summary: Build a germination depot
+      parameters:
+      - name: shipId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: auxiliaryId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[!-~]+$
+      responses:
+        '202':
+          description: Construction action
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  action:
+                    type: object
+                    description: Existing durable Others action, with id, status, dates, result and optional transfer
+                      projection.
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      description: An idle embarked auxiliary of an idle mothership reserves 2 ECE of metals and builds for 1800 seconds.
+        Black-hole sectors are forbidden. Materials are lost on interruption. Each successful action creates one shared,
+        indestructible, unlimited-capacity SQL depot. No client-supplied cost, duration or capacity is accepted.
+  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/depot-deposits:
+    post:
+      tags: [Others]
+      summary: Start depot deposits
+      parameters:
+      - name: shipId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: auxiliaryId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[!-~]+$
+      responses:
+        '202':
+          description: Auxiliary transfer action; inspect through the existing action route
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  action:
+                    type: object
+                    description: Existing durable Others action, with id, status, dates, result and optional transfer
+                      projection.
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - depotId
+              - resources
+              - itemIds
+              properties:
+                depotId:
+                  type: string
+                  minLength: 1
+                resources:
+                  type: object
+                  additionalProperties: false
+                  minProperties: 0
+                  properties:
+                    deuterium:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    metals:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    ice:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    carbon_compounds:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                itemIds:
+                  type: array
+                  maxItems: 500
+                  uniqueItems: true
+                  items:
+                    type: string
+                    minLength: 1
+      description: Requires an available embarked auxiliary and its stationary carrier in the depot sector. At least
+        one resource or item is required. Each indivisible load is at most 2 ECE and takes 600 seconds round trip.
+        Oversized objects are rejected. All stocks are shared between fleets and operators. Requests reserve source
+        content and destination capacity; accounting occurs once at the terminal event. On carrier departure or destruction
+        an intact auxiliary deposits all outgoing content, or releases an incoming withdrawal, then becomes dormant.
+        Its destruction loses only the virtual load currently carried. Completion due at or before interruption wins.
+        Deuterium is cargo, never an implicit tank refill.
+  /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/depot-withdrawals:
+    post:
+      tags: [Others]
+      summary: Start depot withdrawals
+      parameters:
+      - name: shipId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: auxiliaryId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[!-~]+$
+      responses:
+        '202':
+          description: Auxiliary transfer action; inspect through the existing action route
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  action:
+                    type: object
+                    description: Existing durable Others action, with id, status, dates, result and optional transfer
+                      projection.
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - depotId
+              - resources
+              - itemIds
+              properties:
+                depotId:
+                  type: string
+                  minLength: 1
+                resources:
+                  type: object
+                  additionalProperties: false
+                  minProperties: 0
+                  properties:
+                    deuterium:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    metals:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    ice:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    carbon_compounds:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                itemIds:
+                  type: array
+                  maxItems: 500
+                  uniqueItems: true
+                  items:
+                    type: string
+                    minLength: 1
+      description: Requires an available embarked auxiliary and its stationary carrier in the depot sector. At least
+        one resource or item is required. Each indivisible load is at most 2 ECE and takes 600 seconds round trip.
+        Oversized objects are rejected. All stocks are shared between fleets and operators. Requests reserve source
+        content and destination capacity; accounting occurs once at the terminal event. On carrier departure or destruction
+        an intact auxiliary deposits all outgoing content, or releases an incoming withdrawal, then becomes dormant.
+        Its destruction loses only the virtual load currently carried. Completion due at or before interruption wins.
+        Deuterium is cargo, never an implicit tank refill.
+  /api/others/germination-depots/{depotId}/inventory:
+    get:
+      tags: [Others]
+      summary: Read shared depot contents
+      parameters:
+      - name: depotId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: One bounded inventory page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectorStorageInventory'
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
+      description: Requires Others permission and at least one owned ship physically in the depot sector. Includes
+        reserved and available quantities and item availability. No player ownership restricts the depot itself. A
+        versioned cursor becomes invalid with inventory_changed when contents or reservations change.
   "/api/others/alerts":
     get:
       tags:
@@ -805,6 +1125,103 @@ components:
               targetId:
                 type: string
   schemas:
+    SectorStorageResources:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        deuterium:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+        metals:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+        ice:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+        carbon_compounds:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+    SectorStorageInventory:
+      type: object
+      required:
+      - resources
+      - items
+      - nextCursor
+      properties:
+        objectId:
+          type: string
+          minLength: 1
+        depotId:
+          type: string
+          minLength: 1
+        resources:
+          type: array
+          items:
+            type: object
+            required:
+            - type
+            - amount
+            - reservedAmount
+            - availableAmount
+            properties:
+              type:
+                type: string
+                enum:
+                - deuterium
+                - metals
+                - ice
+                - carbon_compounds
+              amount:
+                type: number
+                minimum: 0
+              reservedAmount:
+                type: number
+                minimum: 0
+              availableAmount:
+                type: number
+                minimum: 0
+        items:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required:
+            - id
+            - type
+            - name
+            - containerSpace
+            - available
+            - metadata
+            properties:
+              id:
+                type: string
+                minLength: 1
+              type:
+                type: string
+                minLength: 1
+              name:
+                type: string
+                minLength: 1
+              containerSpace:
+                type: number
+                minimum: 0
+              available:
+                type: boolean
+              metadata:
+                type: object
+                additionalProperties: true
+        nextCursor:
+          type: string
+          nullable: true
     OthersDeuteriumTransferRequest:
       type: object
       required: [targetShipId, amount]

@@ -138,6 +138,7 @@ final class SchemaInitializer
                 type $text NOT NULL,
                 name $text NOT NULL,
                 container_space $decimal NOT NULL,
+                reserved_transfer_id INTEGER NULL,
                 recipe $nullableText,
                 crafting_run_id $nullableText,
                 crafted_by_manny_id $nullableText,
@@ -183,6 +184,7 @@ final class SchemaInitializer
                 label $text NOT NULL,
                 sort_order INTEGER NOT NULL,
                 capacity $decimal NOT NULL DEFAULT 1,
+                storage_version INTEGER NOT NULL DEFAULT 1,
                 priority_filter_json TEXT NOT NULL,
                 exclusion_filter_json TEXT NOT NULL,
                 strict_exclusion_filter_json TEXT NOT NULL,
@@ -197,6 +199,7 @@ final class SchemaInitializer
                 container_id INTEGER NOT NULL,
                 resource_type $text NOT NULL,
                 amount $decimal NOT NULL DEFAULT 0,
+                reserved_amount $decimal NOT NULL DEFAULT 0,
                 updated_at $text NOT NULL,
                 UNIQUE(container_id, resource_type),
                 FOREIGN KEY(container_id) REFERENCES storage_containers(id)
@@ -221,6 +224,7 @@ final class SchemaInitializer
                 container_label $text NOT NULL,
                 container_sort_order INTEGER NOT NULL,
                 capacity $decimal NOT NULL,
+                storage_version INTEGER NOT NULL DEFAULT 1,
                 capacity_unit $text NOT NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL
@@ -233,6 +237,7 @@ final class SchemaInitializer
                 container_object_id $text NOT NULL,
                 resource_type $text NOT NULL,
                 amount $decimal NOT NULL,
+                reserved_amount $decimal NOT NULL DEFAULT 0,
                 PRIMARY KEY(container_object_id, resource_type),
                 FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE CASCADE
             )",
@@ -243,6 +248,9 @@ final class SchemaInitializer
                 type $text NOT NULL,
                 name $text NOT NULL,
                 container_space $decimal NOT NULL,
+                reserved_transfer_id INTEGER NULL,
+                created_at $text NOT NULL DEFAULT '',
+                updated_at $text NOT NULL DEFAULT '',
                 recipe $nullableText,
                 crafting_run_id $nullableText,
                 crafted_by_manny_id $nullableText,
@@ -737,6 +745,8 @@ final class SchemaInitializer
                 ship_id INTEGER NOT NULL,
                 type $text NOT NULL,
                 container_space $decimal NOT NULL,
+                name $text NOT NULL DEFAULT 'Objet',
+                metadata_json TEXT NOT NULL DEFAULT '{\"technology\":\"others\",\"fabricator\":\"others\"}',
                 reserved_action_id INTEGER NULL,
                 created_at $text NOT NULL,
                 updated_at $text NOT NULL,
@@ -991,6 +1001,8 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_forum_messages_post_recent ON forum_messages(post_id, created_at, id)",
         ];
 
+        $statements = [...$statements, ...$this->sectorStorageStatements()];
+
         $statements = array_values(array_filter($statements, static fn(string $statement): bool => $statement !== ''));
 
         if ($this->driver !== 'mysql') {
@@ -998,6 +1010,141 @@ final class SchemaInitializer
         }
 
         return array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements);
+    }
+
+    /** Additive canonical columns for the explicit upgrade of existing inventories. */
+    public function sectorStorageColumnDefinitions(): array
+    {
+        $text=$this->driver==='mysql'?'VARCHAR(255)':'TEXT';
+        $number=$this->driver==='mysql'?'DOUBLE':'REAL';
+        return [
+            'others_inventory_items'=>['name'=>"$text NOT NULL DEFAULT 'Objet'",'metadata_json'=>"TEXT NOT NULL DEFAULT '{\"technology\":\"others\",\"fabricator\":\"others\"}'"],
+            'probe_items'=>['reserved_transfer_id'=>'INTEGER NULL'],
+            'storage_containers'=>['storage_version'=>'INTEGER NOT NULL DEFAULT 1'],
+            'storage_container_resources'=>['reserved_amount'=>"$number NOT NULL DEFAULT 0"],
+            'detached_storage_containers'=>['storage_version'=>'INTEGER NOT NULL DEFAULT 1'],
+            'detached_storage_container_resources'=>['reserved_amount'=>"$number NOT NULL DEFAULT 0"],
+            'detached_storage_container_items'=>['reserved_transfer_id'=>'INTEGER NULL','created_at'=>"$text NOT NULL DEFAULT ''",'updated_at'=>"$text NOT NULL DEFAULT ''"],
+        ];
+    }
+
+    /** Canonical storage schema, also used by the explicit migration. */
+    public function sectorStorageStatements(): array
+    {
+        $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255) COLLATE utf8mb4_bin' : 'TEXT';
+        $number = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
+        $statements = [
+            "CREATE TABLE IF NOT EXISTS germination_depots (
+                id $id, public_id $text NOT NULL UNIQUE,
+                sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL,
+                state $text NOT NULL DEFAULT 'sealed' CHECK(state IN ('sealed','impacted','open')),
+                version INTEGER NOT NULL DEFAULT 1, construction_action_id INTEGER NOT NULL UNIQUE,
+                created_at $text NOT NULL, opened_at $text NULL
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_germination_depots_sector ON germination_depots(sector_x,sector_y,sector_z,id)",
+            "CREATE TABLE IF NOT EXISTS germination_depot_resources (
+                depot_id INTEGER NOT NULL, resource_type $text NOT NULL,
+                amount $number NOT NULL DEFAULT 0, reserved_amount $number NOT NULL DEFAULT 0,
+                PRIMARY KEY(depot_id,resource_type),
+                CHECK(amount >= 0 AND reserved_amount >= 0 AND reserved_amount <= amount),
+                FOREIGN KEY(depot_id) REFERENCES germination_depots(id)
+            )",
+            "CREATE TABLE IF NOT EXISTS germination_depot_items (
+                id $id, depot_id INTEGER NOT NULL, public_id $text NOT NULL UNIQUE,
+                type $text NOT NULL, name $text NOT NULL, container_space $number NOT NULL,
+                metadata_json TEXT NOT NULL, reserved_transfer_id INTEGER NULL,
+                created_at $text NOT NULL, updated_at $text NOT NULL,
+                CHECK(container_space > 0), FOREIGN KEY(depot_id) REFERENCES germination_depots(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_germination_depot_items_page ON germination_depot_items(depot_id,id)",
+            "CREATE TABLE IF NOT EXISTS germination_depot_probe_knowledge (
+                depot_id INTEGER NOT NULL, probe_id INTEGER NOT NULL,
+                inspected_at $text NOT NULL, access_discovered_at $text NULL,
+                PRIMARY KEY(depot_id,probe_id), FOREIGN KEY(depot_id) REFERENCES germination_depots(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_germination_knowledge_probe ON germination_depot_probe_knowledge(probe_id,depot_id)",
+            "CREATE TABLE IF NOT EXISTS probe_command_keys (
+                player_id INTEGER NOT NULL, idempotency_key $text NOT NULL,
+                request_method $text NOT NULL, request_path $text NOT NULL, request_body_hash $text NOT NULL,
+                response_status INTEGER NOT NULL, response_body_json TEXT NOT NULL, created_at $text NOT NULL,
+                PRIMARY KEY(player_id,idempotency_key)
+            )",
+            "CREATE TABLE IF NOT EXISTS sector_storage_transfers (
+                id $id, public_id $text NOT NULL UNIQUE, player_id INTEGER NOT NULL,
+                actor_kind $text NOT NULL CHECK(actor_kind IN ('others_auxiliary','manny')),
+                actor_public_id $text NOT NULL, others_ship_id INTEGER NULL, probe_id INTEGER NULL,
+                others_action_id INTEGER NULL UNIQUE, manny_id INTEGER NULL,
+                external_storage_kind $text NOT NULL CHECK(external_storage_kind IN ('depot','detached')),
+                external_storage_id $text NOT NULL, object_public_id $text NULL, container_id INTEGER NULL, container_public_id $text NULL,
+                direction $text NOT NULL CHECK(direction IN ('to_storage','from_storage')),
+                status $text NOT NULL CHECK(status IN ('queued','succeeded','failed','canceled')),
+                version INTEGER NOT NULL DEFAULT 1, manifest_json TEXT NOT NULL,
+                resources_json TEXT NOT NULL, items_json TEXT NOT NULL,
+                started_at $text NOT NULL, ends_at $text NOT NULL,
+                result_json TEXT NULL, error_json TEXT NULL, updated_at $text NOT NULL
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_actor ON sector_storage_transfers(actor_kind,actor_public_id,status)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_ship ON sector_storage_transfers(others_ship_id,status)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_probe ON sector_storage_transfers(probe_id,status)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_manny ON sector_storage_transfers(manny_id,status,id)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_object ON sector_storage_transfers(object_public_id,status,id)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_container ON sector_storage_transfers(container_id,status)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_external ON sector_storage_transfers(external_storage_kind,external_storage_id,status)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_transfers_due ON sector_storage_transfers(status,ends_at,id)",
+            "CREATE TABLE IF NOT EXISTS sector_storage_resource_reservations (
+                transfer_id INTEGER NOT NULL, inventory_kind $text NOT NULL, inventory_id $text NOT NULL,
+                resource_type $text NOT NULL, amount $number NOT NULL CHECK(amount > 0),
+                PRIMARY KEY(transfer_id,inventory_kind,inventory_id,resource_type),
+                FOREIGN KEY(transfer_id) REFERENCES sector_storage_transfers(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_sector_resource_reservations_source ON sector_storage_resource_reservations(inventory_kind,inventory_id,resource_type)",
+            "CREATE TABLE IF NOT EXISTS sector_storage_capacity_reservations (
+                transfer_id INTEGER NOT NULL, inventory_kind $text NOT NULL, inventory_id $text NOT NULL,
+                amount $number NOT NULL CHECK(amount > 0),
+                PRIMARY KEY(transfer_id,inventory_kind,inventory_id), FOREIGN KEY(transfer_id) REFERENCES sector_storage_transfers(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_sector_capacity_reservations_destination ON sector_storage_capacity_reservations(inventory_kind,inventory_id)",
+            "CREATE TABLE IF NOT EXISTS sector_storage_item_claims (
+                inventory_kind $text NOT NULL, inventory_id $text NOT NULL, item_public_id $text NOT NULL,
+                transfer_id INTEGER NOT NULL, PRIMARY KEY(inventory_kind,inventory_id,item_public_id),
+                FOREIGN KEY(transfer_id) REFERENCES sector_storage_transfers(id)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_sector_item_claims_transfer ON sector_storage_item_claims(transfer_id)",
+            "CREATE TABLE IF NOT EXISTS sector_effects (
+                id $id, operation_id $text NOT NULL UNIQUE,
+                sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL,
+                effect_type $text NOT NULL CHECK(effect_type IN ('add_object','consume_object')),
+                object_id $text NOT NULL, payload_json TEXT NOT NULL,
+                status $text NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT NULL, created_at $text NOT NULL, updated_at $text NOT NULL
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_sector_effects_pending ON sector_effects(status,id)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_effects_object ON sector_effects(object_id,status)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_effects_sector ON sector_effects(sector_x,sector_y,sector_z,status,effect_type)",
+            "CREATE TABLE IF NOT EXISTS anomaly_broadcasts (
+                id $id, public_id $text NOT NULL UNIQUE, depot_id INTEGER NOT NULL UNIQUE,
+                sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL,
+                opened_at $text NOT NULL, status $text NOT NULL DEFAULT 'pending',
+                probe_high_watermark INTEGER NOT NULL, ship_high_watermark INTEGER NOT NULL,
+                probe_cursor INTEGER NOT NULL DEFAULT 0, ship_cursor INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(depot_id) REFERENCES germination_depots(id)
+            )",
+            "CREATE TABLE IF NOT EXISTS anomaly_broadcast_recipient_counts (
+                broadcast_id INTEGER NOT NULL, recipient_kind $text NOT NULL,
+                expected_count INTEGER NOT NULL CHECK(expected_count >= 0),
+                PRIMARY KEY(broadcast_id,recipient_kind), FOREIGN KEY(broadcast_id) REFERENCES anomaly_broadcasts(id)
+            )",
+            "CREATE TABLE IF NOT EXISTS anomaly_broadcast_deliveries (
+                broadcast_id INTEGER NOT NULL, recipient_kind $text NOT NULL, recipient_id INTEGER NOT NULL,
+                player_id INTEGER NOT NULL, sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL,
+                message TEXT NOT NULL, PRIMARY KEY(broadcast_id,recipient_kind,recipient_id),
+                FOREIGN KEY(broadcast_id) REFERENCES anomaly_broadcasts(id)
+            )",
+        ];
+        return $this->driver === 'mysql'
+            ? array_map(fn(string $sql): string => $this->withMysqlEngine($sql), $statements)
+            : $statements;
     }
 
     private function withMysqlEngine(string $statement): string

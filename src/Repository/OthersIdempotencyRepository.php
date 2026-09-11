@@ -43,6 +43,10 @@ final class OthersIdempotencyRepository
 
     public function responseFrom(array $row): ApiResponse
     {
-        return new ApiResponse((int) $row['response_status'], json_decode((string) $row['response_body_json'], true, 512, JSON_THROW_ON_ERROR));
+        $body=json_decode((string) $row['response_body_json'], true, 512, JSON_THROW_ON_ERROR);
+        if(in_array($body['action']['type']??null,['build_germination_depot','depot_deposit','depot_withdrawal'],true)){
+            $body=\VonNeumannGame\Service\Storage\StoragePublicData::normalize($body);
+        }
+        return new ApiResponse((int) $row['response_status'],$body);
     }
 }

@@ -57,8 +57,14 @@ final class DetachedStorageContainerRepository
             $this->pdo->beginTransaction();
         }
         try {
+            $this->assertNoContentTransfer($container->getId());
+            $check=$this->pdo->prepare('SELECT storage_version FROM detached_storage_containers WHERE object_id=?');
+            $check->execute([$container->getId()]);$version=$check->fetchColumn();
+            if($version!==false && (int)$version!==$container->storageVersion()){throw new \VonNeumannGame\Service\MannyActionException(409,'inventory_changed','Container changed; reload before updating.');}
             $this->upsertContainer($sector, $container);
             $this->replaceChildren($container);
+            $this->pdo->prepare('UPDATE detached_storage_containers SET storage_version=storage_version+1 WHERE object_id=?')->execute([$container->getId()]);
+            $container->markStorageVersion(($version === false ? 1 : (int)$version) + 1);
             if ($ownsTransaction) {
                 $this->pdo->commit();
             }
@@ -75,7 +81,7 @@ final class DetachedStorageContainerRepository
         $stmt = $this->pdo->prepare(
             "UPDATE detached_storage_containers
              SET status = 'reserved', reserved_by_manny_id = :manny_id, updated_at = :updated_at
-             WHERE object_id = :object_id AND status = 'available'"
+             WHERE object_id = :object_id AND status = 'available' AND NOT EXISTS (SELECT 1 FROM sector_storage_transfers t WHERE t.external_storage_kind='detached' AND t.external_storage_id=:object_id AND t.status='queued')"
         );
         $stmt->execute([
             'object_id' => $objectId,
@@ -116,10 +122,19 @@ final class DetachedStorageContainerRepository
 
     public function delete(string $objectId): bool
     {
+        $this->assertNoContentTransfer($objectId);
         $stmt = $this->pdo->prepare('DELETE FROM detached_storage_containers WHERE object_id = :object_id');
         $stmt->execute(['object_id' => $objectId]);
 
         return $stmt->rowCount() > 0;
+    }
+
+    private function assertNoContentTransfer(string $objectId): void
+    {
+        $this->pdo->prepare('UPDATE detached_storage_containers SET updated_at=updated_at WHERE object_id=?')->execute([$objectId]);
+        $query=$this->pdo->prepare("SELECT 1 FROM sector_storage_transfers WHERE external_storage_kind='detached' AND external_storage_id=? AND status='queued' LIMIT 1");
+        $query->execute([$objectId]);
+        if($query->fetchColumn()!==false){throw new \VonNeumannGame\Service\MannyActionException(409,'storage_reserved','The container has reserved content.');}
     }
 
     public function countByMode(string $mode): int
@@ -167,7 +182,7 @@ final class DetachedStorageContainerRepository
         $items = $this->childrenByContainer(
             'SELECT container_object_id, uid, type, name, container_space, recipe, crafting_run_id,
                     crafted_by_manny_id, crafted_by_manny_name, crafted_at, fabricator, capacity_bonus,
-                    restored_detached_container_source_uid, audit_metadata_json, is_backing_item
+                    restored_detached_container_source_uid, audit_metadata_json, is_backing_item, created_at, updated_at
              FROM detached_storage_container_items
              WHERE container_object_id IN (' . $this->placeholders($ids) . ')
              ORDER BY is_backing_item DESC, id ASC',
@@ -211,6 +226,8 @@ final class DetachedStorageContainerRepository
                     'name' => (string) $item['name'],
                     'containerSpace' => round(max(0.0, (float) $item['container_space']), 4),
                     'metadata' => ItemMetadataColumns::metadata($item),
+                    'createdAt' => $item['created_at'],
+                    'updatedAt' => $item['updated_at'],
                 ];
                 if ((int) $item['is_backing_item'] === 1) {
                     $backingItem = $itemPayload;
@@ -276,6 +293,7 @@ final class DetachedStorageContainerRepository
                 $row['description'] !== null ? (string) $row['description'] : null,
                 $bookmarkPayload,
                 $discoveredBy,
+                (int) $row['storage_version'],
             );
         }
 
@@ -379,18 +397,18 @@ final class DetachedStorageContainerRepository
             'INSERT INTO detached_storage_container_items
              (container_object_id, uid, type, name, container_space, recipe, crafting_run_id,
               crafted_by_manny_id, crafted_by_manny_name, crafted_at, fabricator, capacity_bonus,
-              restored_detached_container_source_uid, audit_metadata_json, is_backing_item)
+              restored_detached_container_source_uid, audit_metadata_json, is_backing_item, created_at, updated_at)
              VALUES (:container_object_id, :uid, :type, :name, :container_space, :recipe, :crafting_run_id,
               :crafted_by_manny_id, :crafted_by_manny_name, :crafted_at, :fabricator, :capacity_bonus,
-              :restored_detached_container_source_uid, :audit_metadata_json, :is_backing_item)'
+              :restored_detached_container_source_uid, :audit_metadata_json, :is_backing_item, :created_at, :updated_at)'
         );
         $backing = is_array($payload['containerItem'] ?? null) ? $payload['containerItem'] : null;
         if ($backing !== null) {
-            $this->insertItem($itemInsert, $id, $backing, true);
+            $this->insertItem($itemInsert, $id, $backing, true, $container->getCreatedAt());
         }
         foreach (is_array($payload['items'] ?? null) ? $payload['items'] : [] as $item) {
             if (is_array($item)) {
-                $this->insertItem($itemInsert, $id, $item, false);
+                $this->insertItem($itemInsert, $id, $item, false, $container->getCreatedAt());
             }
         }
 
@@ -447,7 +465,7 @@ final class DetachedStorageContainerRepository
     /**
      * @param array<string, mixed> $item
      */
-    private function insertItem(\PDOStatement $stmt, string $containerId, array $item, bool $backing): void
+    private function insertItem(\PDOStatement $stmt, string $containerId, array $item, bool $backing, string $createdAt): void
     {
         $uid = trim((string) ($item['uid'] ?? ''));
         if ($uid === '') {
@@ -461,6 +479,8 @@ final class DetachedStorageContainerRepository
             'name' => (string) ($item['name'] ?? $item['type'] ?? ''),
             'container_space' => round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4),
             'is_backing_item' => $backing ? 1 : 0,
+            'created_at' => $item['createdAt'] ?? $createdAt,
+            'updated_at' => $item['updatedAt'] ?? $createdAt,
         ] + ItemMetadataColumns::parameters($metadata));
     }
 

@@ -503,7 +503,7 @@ final class MannyCraftingService
     private function probeItemsByType(NeumannProbe $probe): array
     {
         $itemsByType = [];
-        foreach ($this->items->findByProbeId($probe->id) as $item) {
+        foreach ($this->items->findConsumableByProbeId($probe->id) as $item) {
             $itemsByType[$item->type] ??= [];
             $itemsByType[$item->type][] = $item;
         }

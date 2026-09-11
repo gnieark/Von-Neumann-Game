@@ -29,9 +29,10 @@ final class TaskHandlerRegistry
         ScutTransitBeaconInstallationTaskHandler $scutTransitBeaconInstallation,
         StorageMoveTaskHandler $storageMove,
         WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallation,
+        ?SectorStorageTransferTaskHandler $sectorStorageTransfer = null,
     ): array
     {
-        return [
+        $handlers = [
             $repair,
             $mining,
             $motorizeAsteroid,
@@ -54,5 +55,7 @@ final class TaskHandlerRegistry
             $deuteriumTransfer,
             $probeTransfer,
         ];
+        if ($sectorStorageTransfer !== null) { $handlers[] = $sectorStorageTransfer; }
+        return $handlers;
     }
 }

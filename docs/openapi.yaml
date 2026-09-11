@@ -37,6 +37,222 @@ tags:
       multiple probes was introduced. When one of these routes is used, the
       player's default probe is selected automatically.
 paths:
+  /api/probe/{probeId}/sector-objects/{objectId}/inventory:
+    get:
+      tags: [mannies]
+      summary: Read accessible sector storage contents
+      parameters:
+      - name: probeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - name: objectId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: One bounded page; restart at the first page after inventory_changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectorStorageInventory'
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
+      description: Available for drifting containers, personally known containers hidden on asteroids, and other storage
+        objects whose access this probe has discovered. Items are individually selectable; the container shell is
+        excluded. Access is revalidated on every page. No absolute coordinates are returned.
+  /api/probe/{probeId}/mannies/{mannyId}/storage-transfers:
+    post:
+      tags: [mannies]
+      summary: Transfer contents between an onboard container and sector storage
+      parameters:
+      - name: probeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - name: mannyId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[!-~]+$
+      responses:
+        '202':
+          description: Accepted durable transfer and updated Manny
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer:
+                    $ref: '#/components/schemas/SectorStorageTransfer'
+                  manny:
+                    type: object
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+                additionalProperties: false
+                required:
+                - objectId
+                - direction
+                - containerId
+                - kind
+                - resources
+                properties:
+                  objectId:
+                    type: string
+                    minLength: 1
+                  direction:
+                    type: string
+                    enum:
+                    - to_storage
+                    - from_storage
+                  containerId:
+                    type: string
+                    minLength: 1
+                  kind:
+                    type: string
+                    enum:
+                    - resources
+                  resources:
+                    $ref: '#/components/schemas/SectorStorageResources'
+              - type: object
+                additionalProperties: false
+                required:
+                - objectId
+                - direction
+                - containerId
+                - kind
+                - itemIds
+                properties:
+                  objectId:
+                    type: string
+                    minLength: 1
+                  direction:
+                    type: string
+                    enum:
+                    - to_storage
+                    - from_storage
+                  containerId:
+                    type: string
+                    minLength: 1
+                  kind:
+                    type: string
+                    enum:
+                    - items
+                  itemIds:
+                    type: array
+                    maxItems: 500
+                    uniqueItems: true
+                    items:
+                      type: string
+                      minLength: 1
+                    minItems: 1
+      description: Requires an idle embarked Manny and a stationary probe. containerId fixes the onboard source or
+        destination. Resources use the configured Manny cargo and round-trip duration; items use whole-object salvage
+        transport. Source contents and destination capacity are reserved until terminal settlement. Deuterium remains
+        cargo in ECE, with no automatic tank conversion. Idempotency keys are account-wide and bind method, path and
+        canonical JSON. Replaying a matching key returns the original response even after completion.
+  /api/probe/{probeId}/storage-transfers/{transferId}:
+    get:
+      tags: [mannies]
+      summary: Read a durable Manny transfer result
+      parameters:
+      - name: probeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - name: transferId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Requested contents, terminal accounting and stable actor identity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer:
+                    $ref: '#/components/schemas/SectorStorageTransfer'
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
   /api/version:
     get:
       tags: [system]
@@ -5842,6 +6058,235 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    SectorStorageResources:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        deuterium:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+        metals:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+        ice:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+        carbon_compounds:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.0001
+    SectorStorageInventory:
+      type: object
+      required:
+      - resources
+      - items
+      - nextCursor
+      properties:
+        objectId:
+          type: string
+          minLength: 1
+        depotId:
+          type: string
+          minLength: 1
+        resources:
+          type: array
+          items:
+            type: object
+            required:
+            - type
+            - amount
+            - reservedAmount
+            - availableAmount
+            properties:
+              type:
+                type: string
+                enum:
+                - deuterium
+                - metals
+                - ice
+                - carbon_compounds
+              amount:
+                type: number
+                minimum: 0
+              reservedAmount:
+                type: number
+                minimum: 0
+              availableAmount:
+                type: number
+                minimum: 0
+        items:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required:
+            - id
+            - type
+            - name
+            - containerSpace
+            - available
+            - metadata
+            properties:
+              id:
+                type: string
+                minLength: 1
+              type:
+                type: string
+                minLength: 1
+              name:
+                type: string
+                minLength: 1
+              containerSpace:
+                type: number
+                minimum: 0
+              available:
+                type: boolean
+              metadata:
+                type: object
+                additionalProperties: true
+        nextCursor:
+          type: string
+          nullable: true
+    SectorStorageTransferResult:
+      type: object
+      required:
+      - outcome
+      - delivered
+      - lost
+      - released
+      properties:
+        outcome:
+          type: string
+          minLength: 1
+        delivered:
+          type: object
+          properties:
+            resources:
+              type: object
+              additionalProperties:
+                type: number
+            itemIds:
+              type: array
+              maxItems: 500
+              uniqueItems: true
+              items:
+                type: string
+                minLength: 1
+        lost:
+          type: object
+          properties:
+            resources:
+              type: object
+              additionalProperties:
+                type: number
+            itemIds:
+              type: array
+              maxItems: 500
+              uniqueItems: true
+              items:
+                type: string
+                minLength: 1
+        released:
+          type: object
+          properties:
+            resources:
+              type: object
+              additionalProperties:
+                type: number
+            itemIds:
+              type: array
+              maxItems: 500
+              uniqueItems: true
+              items:
+                type: string
+                minLength: 1
+    SectorStorageTransfer:
+      type: object
+      required:
+      - id
+      - actor
+      - objectId
+      - containerId
+      - direction
+      - resources
+      - itemIds
+      - status
+      - startedAt
+      - endsAt
+      - durationSeconds
+      - tripCount
+      - result
+      - error
+      properties:
+        id:
+          type: string
+          minLength: 1
+        actor:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+              - manny
+            id:
+              type: string
+              minLength: 1
+        objectId:
+          type: string
+          minLength: 1
+        containerId:
+          type: string
+          minLength: 1
+        direction:
+          type: string
+          enum:
+          - to_storage
+          - from_storage
+        resources:
+          type: object
+          additionalProperties:
+            type: number
+        itemIds:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        status:
+          type: string
+          enum:
+          - queued
+          - succeeded
+          - failed
+          - canceled
+        startedAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        durationSeconds:
+          type: integer
+          minimum: 1
+        tripCount:
+          type: integer
+          minimum: 1
+        result:
+          allOf:
+          - $ref: '#/components/schemas/SectorStorageTransferResult'
+          nullable: true
+        error:
+          type: object
+          nullable: true
     ErrorResponse:
       type: object
       required: [error]
@@ -8452,6 +8897,15 @@ components:
       type: object
       required: [type, name, summary]
       properties:
+        inspectable:
+          type: boolean
+          description: Whether a Manny can inspect this object.
+        targetable:
+          type: boolean
+          description: Whether this observer currently has enough knowledge to select the structure as a target.
+        inventoryAccessible:
+          type: boolean
+          description: Whether this probe has discovered access to this object's storage. Does not grant access to other probes.
         id:
           type: string
           description: Opaque object id. Clients must not parse coordinates from it. For scut_relay objects this is the relay integer id serialized as a string; pass it as an integer relayId to turn-on-relay or install-scut-transit-beacon.

@@ -66,10 +66,44 @@ final class SectorFileRepository
             throw SectorStorageException::legacyDetachedContainerData($path, $legacyReferences);
         }
 
-        return SectorContent::fromArray($data, 'loaded');
+        $sector = SectorContent::fromArray($data, 'loaded');
+        $sector->markPersisted(hash('sha256', $json));
+        return $sector;
     }
 
     public function save(SectorContent $sector): void
+    {
+        $this->withLock($sector->getCoordinates(), fn() => $this->saveLocked($sector));
+    }
+
+    public function mutate(SectorCoordinates $coordinates, callable $delta): void
+    {
+        $this->withLock($coordinates, function () use ($coordinates, $delta): void {
+            $sector = $this->load($coordinates);
+            $delta($sector);
+            $this->saveLocked($sector);
+        });
+    }
+
+    private function withLock(SectorCoordinates $coordinates, callable $operation): void
+    {
+        $path = $this->getPath($coordinates);
+        $directory = dirname($path);
+        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw SectorStorageException::writeFailed($path);
+        }
+        $handle = fopen($path . '.lock', 'c');
+        if ($handle === false) { throw SectorStorageException::writeFailed($path); }
+        try {
+            if (!flock($handle, LOCK_EX)) { throw SectorStorageException::writeFailed($path); }
+            $operation();
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
+    private function saveLocked(SectorContent $sector): void
     {
         $path = $this->getPath($sector->getCoordinates());
         $directory = dirname($path);
@@ -77,6 +111,11 @@ final class SectorFileRepository
             throw SectorStorageException::writeFailed($path);
         }
 
+        $existing = is_file($path) ? file_get_contents($path) : false;
+        $revision = $existing === false ? null : hash('sha256', $existing);
+        if ($revision !== $sector->persistedRevision()) {
+            throw new SectorStorageException('Sector changed concurrently; reload before applying the operation.');
+        }
         $data = $sector->toArray();
         unset(
             $data['detachedContainers'],
@@ -94,6 +133,7 @@ final class SectorFileRepository
             @unlink($temporaryPath);
             throw SectorStorageException::writeFailed($path);
         }
+        $sector->markPersisted(hash('sha256', $json));
     }
 
     private function bucket(int $coordinate): int

@@ -53,6 +53,9 @@ final class OthersService
         private readonly ?ProbeItemRepository $items = null,
         private readonly ?ScutNetworkService $scut = null,
         private readonly ?PlayerRepository $players = null,
+        private readonly ?GerminationDepotService $germinationDepots = null,
+        private readonly ?SectorStorageTransferService $storageTransfers = null,
+        private readonly ?MannyStorageTransferService $mannyStorageTransfers = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->gameplayConfig = $gameplayConfig;
@@ -63,6 +66,16 @@ final class OthersService
     /** @return array{missile:array<string,mixed>,action:array<string,mixed>} */
     public function launchOthersMissile(array $ship, array $payload): array
     {
+        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
+        return $transaction->run(function () use ($transaction, $ship, $payload): array {
+            $transaction->lock('ship', (int) $ship['id']);
+            $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
+            return $this->launchOthersMissileLocked($current, $payload);
+        });
+    }
+
+    private function launchOthersMissileLocked(array $ship, array $payload): array
+    {
         $itemId = $payload['missileItemId'] ?? null;
         $targetId = $payload['targetId'] ?? null;
         if (!is_string($itemId) || $itemId === '' || !is_string($targetId) || $targetId === '') {
@@ -72,7 +85,7 @@ final class OthersService
             throw new OthersActionException(409, 'others_ship_busy', 'The firing ship is unavailable.');
         }
         $target = $this->resolveMissileTarget((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z'], $targetId);
-        if ($target === null) {
+        if ($target === null || $target['kind'] === 'dormant_construct') {
             throw new OthersActionException(404, 'target_not_found', 'An admissible missile target was not found in this sector.');
         }
 
@@ -84,6 +97,8 @@ final class OthersService
             if (!$item) {
                 throw new OthersActionException(404, 'missile_item_not_found', 'An available missile item was not found in this ship inventory.');
             }
+            $metadata=json_decode($item['metadata_json'],true,512,JSON_THROW_ON_ERROR);
+            if (($metadata['technology'] ?? null) !== 'others') { throw new OthersActionException(422,'item_not_usable','This technology is not supported by the launcher.'); }
             $now = gmdate('c');
             $action = $this->others->createAction($ship, 'missile_launch', 'others_ship', (string) $ship['public_id'], ['targetId' => $target['id'], 'targetKind' => $target['kind']]);
             $missileId = OthersRepository::publicId('missile');
@@ -117,6 +132,18 @@ final class OthersService
     /** @return array<string,mixed> */
     public function igniteProbeMissile(NeumannProbe $probe, int $playerId, string $mannyId, array $payload): array
     {
+        if ($this->probes === null || $this->mannies === null) { throw new OthersActionException(503, 'missile_service_unavailable', 'Missile service unavailable.'); }
+        return $this->probes->withProbeLock($probe->id, function () use ($probe, $playerId, $mannyId, $payload): array {
+            $actor = $this->mannies->findByUidForProbe($probe->id, $mannyId);
+            if ($actor === null) { throw new OthersActionException(404, 'manny_not_found', 'Manny not found.'); }
+            return $this->mannies->withMannyLock($actor->id, fn(): array => $this->igniteProbeMissileLocked(
+                $this->probes->findById($probe->id) ?? throw new \RuntimeException('Probe disappeared under lock.'), $playerId, $mannyId, $payload,
+            ));
+        });
+    }
+
+    private function igniteProbeMissileLocked(NeumannProbe $probe, int $playerId, string $mannyId, array $payload): array
+    {
         $itemIdProvided = array_key_exists('missileItemId', $payload);
         $itemId = $itemIdProvided ? $payload['missileItemId'] : null; $targetId = $payload['targetId'] ?? null;
         if (($itemIdProvided && (!is_string($itemId) || $itemId === '')) || !is_string($targetId) || $targetId === '') {
@@ -129,8 +156,11 @@ final class OthersService
         $target = $this->resolveMissileTarget($probe->currentSector->getX(), $probe->currentSector->getY(), $probe->currentSector->getZ(), $targetId);
         if ($target === null) { throw new OthersActionException(404, 'target_not_found', 'An admissible missile target was not found in this sector.'); }
         return $this->others->transaction(function () use ($probe, $playerId, $manny, $itemId, $target): array {
+            if ($target['kind'] === 'dormant_construct' && !$this->depotService()->canTarget($probe->id, $target['id'], $probe->currentSector)) {
+                throw new OthersActionException(422, 'invalid_missile_target', 'This target cannot be engaged.');
+            }
             $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $launchAt = $now->modify('+1 minute');
-            $lockSql = "SELECT pi.* FROM probe_items pi WHERE pi.probe_id=:probe_id AND pi.type='missile'";
+            $lockSql = "SELECT pi.* FROM probe_items pi WHERE pi.probe_id=:probe_id AND pi.type='missile' AND pi.reserved_transfer_id IS NULL AND (pi.fabricator IS NULL OR pi.fabricator<>'others')";
             $parameters = ['probe_id' => $probe->id];
             if ($itemId !== null) {
                 $lockSql .= ' AND pi.uid=:item_uid';
@@ -198,6 +228,7 @@ final class OthersService
                 throw new OthersActionException(409, 'action_conflict', 'The ship state changed while accepting the command.');
             }
             $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            $this->interruptDepotConstructions((int) $locked['id'], $now->format('c'), 'carrier_departure');
             $cancelableUntil = $now->modify('+15 minutes');
             $timeline = $this->durations->timeline($cancelableUntil, $distance);
             $action = $this->others->createAction(
@@ -281,6 +312,19 @@ final class OthersService
 
     public function createInventoryTransfer(array $source, array $payload): array
     {
+        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
+        return $transaction->run(function () use ($transaction, $source, $payload): array {
+            $target = is_string($payload['targetShipId'] ?? null) ? $this->others->findShipByPublicId($payload['targetShipId']) : null;
+            $ids = array_unique([(int) $source['id'], (int) ($target['id'] ?? $source['id'])]);
+            sort($ids, SORT_NUMERIC);
+            foreach ($ids as $id) { $transaction->lock('ship', $id); }
+            $source = $this->others->findShipByPublicId($source['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
+            return $this->createInventoryTransferLocked($source, $payload);
+        });
+    }
+
+    private function createInventoryTransferLocked(array $source, array $payload): array
+    {
         foreach (['actorAuxiliaryId', 'targetShipId', 'kind'] as $field) {
             if (!is_string($payload[$field] ?? null) || $payload[$field] === '') { throw new OthersActionException(400, 'bad_request', $field . ' is required.'); }
         }
@@ -349,6 +393,9 @@ final class OthersService
     public function startAuxiliaryTask(array $ship, array $auxiliary, string $task, array $payload): array
     {
         return match ($task) {
+            'depot-deposits' => $this->storageTransferService()->startOthers($ship, $auxiliary, 'to_storage', $payload),
+            'depot-withdrawals' => $this->storageTransferService()->startOthers($ship, $auxiliary, 'from_storage', $payload),
+            'build-germination-depot' => $this->depotService()->build($ship, $auxiliary, $payload),
             'transfer-deuterium' => $this->transferDeuterium($ship, $auxiliary, $payload),
             'mine' => $this->startAuxiliaryMining($ship, $auxiliary, $payload),
             'recall' => $this->startAuxiliaryRecall($ship, $auxiliary, $payload),
@@ -358,6 +405,16 @@ final class OthersService
     }
 
     public function startHarvest(array $ship, array $payload): array
+    {
+        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
+        return $transaction->run(function () use ($transaction, $ship, $payload): array {
+            $transaction->lock('ship', (int) $ship['id']);
+            $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
+            return $this->startHarvestLocked($current, $payload);
+        });
+    }
+
+    private function startHarvestLocked(array $ship, array $payload): array
     {
         if ($this->sectors === null) { throw new OthersActionException(503, 'others_sector_unavailable', 'Sector storage is unavailable.'); }
         $targetId = $payload['targetObjectId'] ?? null; $count = $payload['auxiliaryCount'] ?? null;
@@ -411,6 +468,16 @@ final class OthersService
     }
 
     public function startCraft(array $ship, array $payload): array
+    {
+        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
+        return $transaction->run(function () use ($transaction, $ship, $payload): array {
+            $transaction->lock('ship', (int) $ship['id']);
+            $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
+            return $this->startCraftLocked($current, $payload);
+        });
+    }
+
+    private function startCraftLocked(array $ship, array $payload): array
     {
         if ($ship['type'] !== 'mothership') { throw new OthersActionException(422, 'others_mothership_required', 'Only an Others mothership has workshops.'); }
         $recipeId = $payload['recipeId'] ?? null; $assistantId = $payload['assistantAuxiliaryId'] ?? null;
@@ -518,6 +585,17 @@ final class OthersService
 
     public function processScheduledAction(ScheduledEvent $event): void
     {
+        $check = $this->others->pdo()->prepare('SELECT type FROM others_actions WHERE id=?');
+        $check->execute([$event->entityId]);
+        $storageActionType = $check->fetchColumn();
+        if (in_array($storageActionType, ['depot_deposit', 'depot_withdrawal'], true)) {
+            $this->storageTransferService()->completeOthers($event->entityId, $event->runAt);
+            return;
+        }
+        if ($storageActionType === 'build_germination_depot') {
+            $this->depotService()->completeConstruction($event->entityId, $event->runAt);
+            return;
+        }
         $this->others->transaction(function () use ($event): void {
             $pdo = $this->others->pdo();
             $stmt = $pdo->prepare('SELECT a.*, m.id AS movement_id, m.ship_id AS movement_ship_id, m.target_x, m.target_y, m.target_z, m.fuel_cost, m.phase, m.arrive_at, m.leave_auxiliaries_behind FROM others_actions a LEFT JOIN others_movements m ON m.action_id = a.id WHERE a.id = :id');
@@ -882,7 +960,7 @@ final class OthersService
     private function createCraftedMissileItem(int $shipId, string $now): array
     {
         $publicId = OthersRepository::publicId('item');
-        $this->others->pdo()->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,NULL,:now,:now)")->execute(['public_id' => $publicId, 'ship_id' => $shipId, 'now' => $now]);
+        $this->others->pdo()->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,name,metadata_json,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,'Missile Others',:metadata,NULL,:now,:now)")->execute(['public_id' => $publicId, 'ship_id' => $shipId, 'metadata' => json_encode(['technology' => 'others', 'recipe' => 'missile', 'fabricator' => 'others', 'craftedAt' => $now], JSON_THROW_ON_ERROR), 'now' => $now]);
         return ['kind' => 'missile', 'id' => $publicId, 'containerSpaceEce' => 2.0];
     }
 
@@ -918,8 +996,8 @@ final class OthersService
             $damageKey = 'laser:' . $action['public_id'] . ':' . $lock['next_damage_at'];
             try {
                 $pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key' => $damageKey, 'kind' => $target['kind'], 'target' => $target['id'], 'damage' => $target['kind'] === 'probe' ? 5 : ($target['kind'] === 'manny' ? 1 : 0), 'now' => $now]);
-                if ($target['kind'] === 'probe' && $this->probes !== null) { $probe = $this->probes->findById((int) $target['id']); if ($probe !== null) { $probe->subtractIntegrityPercent(5.0); $this->probes->save($probe); } }
-                elseif ($target['kind'] === 'manny') { $pdo->prepare('DELETE FROM mannies WHERE uid=:uid AND location_type=\'sector\'')->execute(['uid' => $target['id']]); if ($this->sectors !== null) { $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z'])); if ($sector->removeObjectById('manny-' . $target['id'])) { $this->sectors->saveSector($sector); } } $this->stopLaser($action, $lock, $now, 'target_destroyed'); return; }
+                if ($target['kind'] === 'probe' && $this->probes !== null) { $probe = $this->probes->findById((int) $target['id']); if ($probe !== null) { $probe->subtractIntegrityPercent(5.0); if($probe->status===ProbeStatus::Dead){$this->interruptProbeStorageTransfers($probe->id,(string)$lock['next_damage_at']);} $this->probes->save($probe); } }
+                elseif ($target['kind'] === 'manny') { $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,(string)$lock['next_damage_at']);} $pdo->prepare('DELETE FROM mannies WHERE uid=:uid AND location_type=\'sector\'')->execute(['uid' => $target['id']]); if ($this->sectors !== null) { $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z'])); if ($sector->removeObjectById('manny-' . $target['id'])) { $this->sectors->saveSector($sector); } } $this->stopLaser($action, $lock, $now, 'target_destroyed'); return; }
             } catch (\PDOException $error) { if (!str_contains(strtolower($error->getMessage()), 'unique')) { throw $error; } }
             $nextDamage = (new \DateTimeImmutable((string) $lock['next_damage_at']))->modify('+10 minutes');
             $pdo->prepare('UPDATE others_laser_locks SET next_damage_at=:next,updated_at=:now WHERE id=:id')->execute(['next' => $nextDamage->format('c'), 'now' => $now, 'id' => (int) $lock['id']]);
@@ -1044,12 +1122,17 @@ final class OthersService
     /** @return array<string,mixed> */
     private function applyMissileImpact(array $projectile,array $target): array
     {
+        if ($target['kind'] === 'dormant_construct') {
+            $this->depotService()->impact($target['id']);
+            return ['damage'=>0,'destroyed'=>false,'message'=>'La structure a résisté. Vous pouvez envoyer une Manny pour une nouvelle inspection.'];
+        }
+
         $pdo=$this->others->pdo(); $key='missile:'.$projectile['public_id'].':'.$target['kind'].':'.$target['id']; $damage=match($target['kind']){'probe'=>(12+(int)floor($this->stableFraction($key.'|damage')*7)),'others_ship'=>10,default=>1};
-        if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$responsiblePlayerId=($projectile['launcher_kind']??null)==='probe'?(int)$projectile['player_id']:null;$ship=$this->damageShip((string)$target['id'],$damage,$key,['type'=>'missile','missileId'=>(string)$projectile['public_id']],responsiblePlayerId:$responsiblePlayerId);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
+        if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$responsiblePlayerId=($projectile['launcher_kind']??null)==='probe'?(int)$projectile['player_id']:null;$ship=$this->damageShip((string)$target['id'],$damage,$key,['type'=>'missile','missileId'=>(string)$projectile['public_id'],'occurredAt'=>$projectile['impact_at']],responsiblePlayerId:$responsiblePlayerId);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
         try{$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')]);}catch(\PDOException $e){if(str_contains(strtolower($e->getMessage()),'unique')){return ['damage'=>0,'replayed'=>true];}throw $e;}
-        if($target['kind']==='manny'){$pdo->prepare("DELETE FROM mannies WHERE uid=:uid AND location_type='sector'")->execute(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
-        if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target);return ['damage'=>1,'destroyed'=>true];}
-        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$applied=$probe->subtractIntegrityPercent($damage);$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->status===ProbeStatus::Dead];}
+        if($target['kind']==='manny'){ $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,$projectile['impact_at']);} $pdo->prepare("DELETE FROM mannies WHERE uid=:uid AND location_type='sector'")->execute(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
+        if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target,$projectile['impact_at']);return ['damage'=>1,'destroyed'=>true];}
+        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$applied=$probe->subtractIntegrityPercent($damage);if($probe->status===ProbeStatus::Dead){$this->interruptProbeStorageTransfers($probe->id,$projectile['impact_at']);}$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->status===ProbeStatus::Dead];}
         if ($target['kind'] === 'motorized_asteroid') {
             $trajectoryId = (int) $target['trajectory_id'];
             $now = gmdate('c');
@@ -1078,14 +1161,22 @@ final class OthersService
         return ['damage'=>$damage];
     }
 
-    private function destroyAuxiliary(array $target): void
+    private function destroyAuxiliary(array $target,string $causalTime): void
     {
+        $query = $this->others->pdo()->prepare("SELECT id,type FROM others_actions WHERE auxiliary_id=? AND type IN ('build_germination_depot','depot_deposit','depot_withdrawal') AND status IN ('queued','running')");
+        $query->execute([(int) $target['sql_id']]);
+        foreach ($query->fetchAll(\PDO::FETCH_ASSOC) as $action) { $this->settleStorageAction($action, $causalTime, 'auxiliary_destroyed'); }
         $pdo=$this->others->pdo();$now=gmdate('c');$pdo->prepare("UPDATE others_actions SET auxiliary_id=NULL,status=CASE WHEN status IN ('queued','running') THEN 'failed' ELSE status END,completed_at=CASE WHEN status IN ('queued','running') THEN :now ELSE completed_at END,updated_at=:now WHERE auxiliary_id=:id")->execute(['now'=>$now,'id'=>(int)$target['sql_id']]);
         $pdo->prepare("UPDATE others_auxiliaries SET status='destroyed',current_action_id=NULL,destroyed_at=:now,updated_at=:now WHERE id=:id AND destroyed_at IS NULL")->execute(['now'=>$now,'id'=>(int)$target['sql_id']]);
         if($this->sectors!==null){$sector=$this->sectors->getOrCreateSector(new SectorCoordinates((int)$target['sector_x'],(int)$target['sector_y'],(int)$target['sector_z']));$wreck=DormantConstruct::fromOthersAuxiliary((string)$target['id'],true);if($sector->findObjectById($wreck->getId())===null){$sector->addObject($wreck);$this->sectors->saveSector($sector);}}
     }
 
     /** Applies one idempotent damage event and returns the remaining ship row when it still exists. */
+    public function interruptProbeStorageTransfers(int $probeId, string $now): void
+    {
+        $this->mannyStorageTransfers?->interruptProbe($probeId,$now,'carrier_destroyed');
+    }
+
     public function damageShip(string $shipPublicId,int $damage,string $eventKey,array $cause,bool $relativistic=false,?int $responsiblePlayerId=null): ?array
     {
         return $this->others->transaction(function()use($shipPublicId,$damage,$eventKey,$cause,$relativistic,$responsiblePlayerId):?array{$pdo=$this->others->pdo();$ship=$this->others->findShipByPublicId($shipPublicId);if($ship===null||$ship['destroyed_at']!==null){return $ship;}
@@ -1097,7 +1188,9 @@ final class OthersService
     private function destroyShip(array $ship, ?int $responsiblePlayerId, array $cause): void
     {
         $pdo = $this->others->pdo();
-        $now = gmdate('c');
+        $now = $cause['occurredAt'] ?? gmdate('c');
+        $constructionCarriers = $ship['type'] === 'mothership' ? $this->others->findActiveShipsByFleetId((int) $ship['fleet_id']) : [$ship];
+        foreach ($constructionCarriers as $carrier) { $this->interruptDepotConstructions((int) $carrier['id'], $now, 'carrier_destroyed'); }
         $wreckOperationId = $ship['type'] === 'mothership'
             ? $this->createMothershipWreck($ship, $cause, $now)
             : null;
@@ -1301,6 +1394,11 @@ final class OthersService
     /** @return array<string,mixed>|null */
     private function resolveMissileTarget(int $x,int $y,int $z,string $targetId): ?array
     {
+        $depot = (new \VonNeumannGame\Repository\GerminationDepotRepository($this->others->pdo()))->find($targetId);
+        if ($depot !== null && [(int)$depot['sector_x'],(int)$depot['sector_y'],(int)$depot['sector_z']] === [$x,$y,$z]) {
+            return ['kind'=>'dormant_construct','id'=>$targetId];
+        }
+
         $pdo=$this->others->pdo();$key="$x:$y:$z";
         $stmt=$pdo->prepare("SELECT id,public_id,departure_engaged FROM others_ships WHERE public_id=:id AND sector_x=:x AND sector_y=:y AND sector_z=:z AND destroyed_at IS NULL AND status<>'transit' AND status<>'removed'");$stmt->execute(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt->fetch()){return ['kind'=>'others_ship','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'departure_engaged'=>(bool)$row['departure_engaged']];}
         $stmt=$pdo->prepare("SELECT id,public_id,sector_x,sector_y,sector_z FROM others_auxiliaries WHERE public_id=:id AND sector_x=:x AND sector_y=:y AND sector_z=:z AND location_type='deployed' AND destroyed_at IS NULL AND status<>'dormant'");$stmt->execute(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt->fetch()){return ['kind'=>'others_auxiliary','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'sector_x'=>$x,'sector_y'=>$y,'sector_z'=>$z];}
@@ -1483,6 +1581,34 @@ final class OthersService
     {
         return [(int) $a['sector_x'], (int) $a['sector_y'], (int) $a['sector_z']] === [(int) $b['sector_x'], (int) $b['sector_y'], (int) $b['sector_z']]
             && $a['status'] !== 'transit' && $b['status'] !== 'transit';
+    }
+
+    public function depotService(): GerminationDepotService
+    {
+        return $this->germinationDepots ?? throw new \RuntimeException('Germination depot service is required.');
+    }
+
+    public function mannyStorageTransferService(): MannyStorageTransferService
+    {
+        return $this->mannyStorageTransfers ?? throw new \RuntimeException('Manny storage service required.');
+    }
+
+    public function storageTransferService(): SectorStorageTransferService
+    {
+        return $this->storageTransfers ?? throw new \RuntimeException('Sector storage transfer service is required.');
+    }
+
+    private function settleStorageAction(array $action, string $now, string $reason): void
+    {
+        if ($action['type'] === 'build_germination_depot') { $this->depotService()->completeConstruction((int) $action['id'], $now, $reason); }
+        else { $this->storageTransferService()->completeOthers((int) $action['id'], $now, $reason); }
+    }
+
+    private function interruptDepotConstructions(int $shipId, string $now, string $reason): void
+    {
+        $query = $this->others->pdo()->prepare("SELECT id,type FROM others_actions WHERE ship_id=? AND type IN ('build_germination_depot','depot_deposit','depot_withdrawal') AND status IN ('queued','running') ORDER BY id");
+        $query->execute([$shipId]);
+        foreach ($query->fetchAll(\PDO::FETCH_ASSOC) as $action) { $this->settleStorageAction($action, $now, $reason); }
     }
 
     private function turnDeployedAuxiliariesDormant(int $shipId, string $now): void

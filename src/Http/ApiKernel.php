@@ -93,6 +93,8 @@ final class ApiKernel
         private readonly ?OthersAuditRepository $othersAudit = null,
         private readonly ?OthersService $othersService = null,
         private readonly ?AutonomousUnitObservationService $autonomousUnits = null,
+        private readonly ?\VonNeumannGame\Service\MannyStorageTransferService $sectorStorageTransfers = null,
+        private readonly ?\VonNeumannGame\Repository\ProbeCommandRepository $probeCommands = null,
     ) {}
 
     public function handle(string $method, string $path, array $headers = [], ?string $body = null): ApiResponse
@@ -120,6 +122,8 @@ final class ApiKernel
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (InvalidSectorCoordinatesException|\InvalidArgumentException $e) {
             return ApiResponse::error(400, 'bad_request', $e->getMessage());
+        } catch (\VonNeumannGame\Database\StorageBusyException) {
+            return ApiResponse::error(503, 'storage_busy', 'Storage is temporarily busy; retry the same command.');
         } catch (\Throwable) {
             return ApiResponse::error(500, 'internal_error', 'Internal server error');
         }
@@ -142,6 +146,9 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/ships/([^/]+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersMissileCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->missileResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->probeMissileCreateResponse($player, $probe, $ctx->body)), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/sector-objects/([^/]+)/inventory$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->sectorStorageInventoryResponse($probe, $ctx), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/storage-transfers$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->sectorStorageTransferResponse($player, $probe, $ctx), $ctx->intParam(0), ['POST'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/storage-transfers/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => new ApiResponse(200, ['transfer' => ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->get($probe, $ctx->stringParam(1))]), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/ignite_missile$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMannyMissileCreateResponse($player, $probe, $ctx->stringParam(1), $ctx->body), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $_probe): ApiResponse => $this->missileResponse($player, $ctx->stringParam(1)), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/weapons/laser$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersLaserResponse($player, $ctx->stringParam(0), $ctx->body)))),
@@ -149,7 +156,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/crafts/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCraftResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/harvest$#', ['POST', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $ctx->method === 'POST' ? $this->othersHarvestCreateResponse($player, $ctx->stringParam(0), $ctx->body) : $this->othersHarvestCancelResponse($player, $ctx->stringParam(0))))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/tasks$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryBatchResponse($player, $ctx->stringParam(0), $ctx->body)))),
-            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/(mine|recall|recover-dormant-auxiliary)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryTaskResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->stringParam(2), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/(mine|recall|recover-dormant-auxiliary|build-germination-depot|depot-deposits|depot-withdrawals)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryTaskResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->stringParam(2), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory-transfers$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersInventoryTransferCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/inventory-transfers/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersInventoryTransferResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/transfer-deuterium$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersDeuteriumTransferResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->body)))),
@@ -163,6 +170,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersInventoryResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersShipResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/fleets/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersFleetResponse($player, $ctx->stringParam(0)))),
+            ApiRoute::regex('#^/api/others/germination-depots/([^/]+)/inventory$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersDepotInventoryResponse($player, $ctx))),
             ApiRoute::regex('#^/api/others/actions/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersActionResponse($player, $ctx->stringParam(0)))),
             ApiRoute::path('/api/others/crafting/recipes', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersRecipesResponse())),
             ApiRoute::path('/api/others/fleets', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersFleetsResponse($player))),
@@ -608,6 +616,11 @@ final class ApiKernel
 
     private function othersAuxiliaryTaskResponse(Player $player, string $shipId, string $auxiliaryId, string $task, ?string $body): ApiResponse
     {
+        if (in_array($task,['build-germination-depot','depot-deposits','depot-withdrawals'],true)) {
+            $decoded=json_decode($body ?? '');
+            if (!$decoded instanceof \stdClass || (isset($decoded->resources) && !$decoded->resources instanceof \stdClass)) { return ApiResponse::error(400,'bad_request','A JSON object is required.'); }
+        }
+
         $ship = $this->others?->findShipForPlayer($shipId, $player->id);
         if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
         $auxiliary = $this->others?->findAuxiliaryForShip($auxiliaryId, (int) $ship['id']);
@@ -699,6 +712,39 @@ final class ApiKernel
         if (($transfer['result_json'] ?? null) !== null) { $result['result'] = json_decode((string) $transfer['result_json'], true); }
         if (($transfer['error_json'] ?? null) !== null) { $result['error'] = json_decode((string) $transfer['error_json'], true); }
         return $result;
+    }
+
+    private function sectorStorageInventoryResponse(NeumannProbe $probe, ApiRouteContext $ctx): ApiResponse
+    {
+        $limit = $ctx->query['limit'] ?? '100';
+        $cursor = $ctx->query['cursor'] ?? null;
+        if (!is_string($limit) || !ctype_digit($limit) || (int)$limit<1 || (int)$limit>500 || ($cursor !== null && !is_string($cursor))) { return ApiResponse::error(400,'bad_request','Invalid inventory pagination.'); }
+        return new ApiResponse(200, ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->inventory($probe,$ctx->stringParam(1),(int)$limit,$cursor));
+    }
+
+    private function sectorStorageTransferResponse(Player $player, NeumannProbe $probe, ApiRouteContext $ctx): ApiResponse
+    {
+        $decoded = json_decode($ctx->body ?? '');
+        if (!$decoded instanceof \stdClass || (isset($decoded->resources) && !$decoded->resources instanceof \stdClass)) { return ApiResponse::error(400,'bad_request','A JSON object is required.'); }
+        $payload = $this->decodeJsonBody($ctx->body);
+        if (!is_array($payload)) { return ApiResponse::error(400,'bad_request','Invalid JSON.'); }
+        return ($this->probeCommands ?? throw new \RuntimeException('Probe command repository required.'))->execute(
+            $player->id,$this->headerValue($ctx->headers,'Idempotency-Key'),$ctx->method,$ctx->path,hash('sha256',$this->canonicalJsonBody($ctx->body)),
+            function () use ($probe,$ctx,$payload): ApiResponse {
+                $created=($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->start($probe,$ctx->stringParam(1),$payload);
+                return new ApiResponse(202,['transfer'=>$created['transfer'],'manny'=>$this->mannies->publicArray($probe,$created['manny'])]);
+            },
+        );
+    }
+
+    private function othersDepotInventoryResponse(Player $player, ApiRouteContext $ctx): ApiResponse
+    {
+        $limit = $ctx->query['limit'] ?? '100';
+        $cursor = $ctx->query['cursor'] ?? null;
+        if ((!is_string($limit) && !is_int($limit)) || !ctype_digit((string) $limit) || (int) $limit < 1 || (int) $limit > 500 || ($cursor !== null && !is_string($cursor))) {
+            return ApiResponse::error(400, 'bad_request', 'Invalid inventory pagination.');
+        }
+        return new ApiResponse(200, ($this->othersService ?? throw new \RuntimeException('Others service required.'))->depotService()->inventoryForOthers($player->id, $ctx->stringParam(0), (int) $limit, $cursor));
     }
 
     private function othersActionResponse(Player $player, string $actionId): ApiResponse
@@ -867,9 +913,12 @@ final class ApiKernel
     {
         $key = $this->headerValue($ctx->headers, 'Idempotency-Key');
         if ($key === null) {
-            $response = $command();
-            $this->othersAudit?->record($player->id, 'http', $ctx->method . ' ' . $ctx->path, $response->status < 400 ? 'accepted' : 'refused');
-            return $response;
+            if ($this->others === null) { return $command(); }
+            return (new \VonNeumannGame\Database\StorageTransaction($this->others->pdo()))->run(function () use ($command, $player, $ctx): ApiResponse {
+                $response = $command();
+                $this->othersAudit?->record($player->id, 'http', $ctx->method . ' ' . $ctx->path, $response->status < 400 ? 'accepted' : 'refused');
+                return $response;
+            });
         }
         if (!preg_match('/^[\x21-\x7E]{1,128}$/', $key)) {
             return ApiResponse::error(400, 'bad_request', 'Idempotency-Key must contain 1 to 128 visible ASCII characters.');
@@ -878,10 +927,11 @@ final class ApiKernel
             return ApiResponse::error(503, 'others_unavailable', 'Others idempotency storage is unavailable.');
         }
         $hash = hash('sha256', $this->canonicalJsonBody($ctx->body));
-        return $this->others->transaction(function () use ($ctx, $player, $command, $key, $hash): ApiResponse {
+        return (new \VonNeumannGame\Database\StorageTransaction($this->others->pdo()))->run(function () use ($ctx, $player, $command, $key, $hash): ApiResponse {
             // Commands sharing an account also share the idempotency namespace.
             // Lock that account so the first lookup and insert are serialized.
             $pdo = $this->others?->pdo() ?? throw new \RuntimeException('Others storage is unavailable.');
+            if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { $pdo->prepare('UPDATE players SET updated_at=updated_at WHERE id=?')->execute([$player->id]); }
             $lockSql = 'SELECT id FROM players WHERE id = :player_id';
             if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
                 $lockSql .= ' FOR UPDATE';
@@ -918,13 +968,16 @@ final class ApiKernel
     private function canonicalJsonBody(?string $body): string
     {
         if ($body === null || trim($body) === '') { return '{}'; }
-        $decoded = json_decode($body, true);
-        if (!is_array($decoded)) { return $body; }
+        $decoded = json_decode($body);
+        if (json_last_error() !== JSON_ERROR_NONE) { return $body; }
         $sort = function (mixed $value) use (&$sort): mixed {
-            if (!is_array($value)) { return $value; }
-            if (!array_is_list($value)) { ksort($value); }
-            foreach ($value as $key => $child) { $value[$key] = $sort($child); }
-            return $value;
+            if ($value instanceof \stdClass) {
+                $properties = get_object_vars($value);
+                ksort($properties);
+                foreach ($properties as $key => $child) { $properties[$key] = $sort($child); }
+                return (object) $properties;
+            }
+            return is_array($value) ? array_map($sort, $value) : $value;
         };
         return json_encode($sort($decoded), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
@@ -1043,13 +1096,19 @@ final class ApiKernel
             'createdAt' => (string) $action['created_at'], 'updatedAt' => (string) $action['updated_at'],
             'actor' => ['kind' => (string) $action['actor_kind'], 'id' => (string) $action['actor_public_id']],
         ];
+        if (in_array($action['type'], ['depot_deposit', 'depot_withdrawal'], true)) {
+            $payload = json_decode($action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+            $result['transfer'] = array_intersect_key($payload, array_flip(['depotId', 'resources', 'itemIds', 'capacityEce', 'roundTrips', 'durationSeconds']));
+        }
         foreach (['ends_at' => 'endsAt', 'cancelable_until' => 'cancelableUntil', 'completed_at' => 'completedAt'] as $column => $field) {
             if (($action[$column] ?? null) !== null) { $result[$field] = (string) $action[$column]; }
         }
         foreach (['result_json' => 'result', 'error_json' => 'error'] as $column => $field) {
             if (($action[$column] ?? null) !== null) { $result[$field] = json_decode((string) $action[$column], true); }
         }
-        return $result;
+        return in_array($action['type'], ['build_germination_depot','depot_deposit','depot_withdrawal'], true)
+            ? \VonNeumannGame\Service\Storage\StoragePublicData::normalize($result)
+            : $result;
     }
 
     private function protectedProbeRoute(ApiRouteContext $ctx, callable $handler, int $probeId, array $allowedMethods): ApiResponse

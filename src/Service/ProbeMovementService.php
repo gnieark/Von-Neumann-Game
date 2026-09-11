@@ -64,6 +64,7 @@ final class ProbeMovementService
         ?SectorGrid $grid = null,
         array $gameplayConfig = [],
         private readonly ?OthersRepository $others = null,
+        private readonly ?MannyStorageTransferService $sectorStorageTransfers = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
         $this->gameplayConfig = $gameplayConfig;
@@ -453,6 +454,7 @@ final class ProbeMovementService
 
     private function registerForgottenMannies(NeumannProbe $probe): void
     {
+        $this->sectorStorageTransfers?->interruptProbe($probe->id, gmdate('c'));
         if ($this->mannies === null || $this->sectors === null) {
             return;
         }

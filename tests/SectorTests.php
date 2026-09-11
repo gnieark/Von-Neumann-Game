@@ -942,5 +942,6 @@ removeDirectory($migrationBase);
 removeDirectory($engineMigrationBase);
 
 // Print summary
+require __DIR__ . '/Support/TransferLoadPlannerTests.php';
 $test->printSummary();
 exit($test->getStatus());

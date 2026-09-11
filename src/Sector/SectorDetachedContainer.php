@@ -31,9 +31,13 @@ final class SectorDetachedContainer extends UniverseObject
         ?string $description = null,
         array $waypointBookmarks = [],
         private readonly array $discoveredByPlayerIds = [],
+        private int $storageVersion = 1,
     ) {
         parent::__construct($id, $name, UniverseObjectType::DetachedContainer, 0.0, 0.0, $description, $waypointBookmarks);
     }
+
+    public function storageVersion(): int { return $this->storageVersion; }
+    public function markStorageVersion(int $version): void { $this->storageVersion = $version; }
 
     public static function objectIdForContainer(string $containerUid): string
     {
@@ -130,6 +134,7 @@ final class SectorDetachedContainer extends UniverseObject
             $this->getDescription(),
             $this->getWaypointBookmarks(),
             [...$this->getDiscoveredByPlayerIds(), $playerId],
+            $this->storageVersion,
         );
     }
 
@@ -153,6 +158,7 @@ final class SectorDetachedContainer extends UniverseObject
             $this->getDescription(),
             $this->getWaypointBookmarks(),
             $this->getDiscoveredByPlayerIds(),
+            $this->storageVersion,
         );
     }
 
@@ -173,12 +179,14 @@ final class SectorDetachedContainer extends UniverseObject
             $this->getDescription(),
             $this->getWaypointBookmarks(),
             $this->getDiscoveredByPlayerIds(),
+            $this->storageVersion,
         );
     }
 
     public function toArray(): array
     {
         return parent::toArray() + [
+            'storageVersion' => $this->storageVersion,
             'mode' => $this->mode,
             'ownerProbeId' => $this->ownerProbeId,
             'ownerPlayerId' => $this->ownerPlayerId,
@@ -209,6 +217,7 @@ final class SectorDetachedContainer extends UniverseObject
             $data['description'] ?? null,
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
             self::discoveredByPlayerIdsFromArray($data),
+            (int) ($data['storageVersion'] ?? 1),
         );
     }
 

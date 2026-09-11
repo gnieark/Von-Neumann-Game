@@ -41,6 +41,8 @@ final class AsteroidTrajectoryService
         private readonly ?ProbeDamageWarningRepository $alerts = null,
         private readonly ?OthersRepository $others = null,
         private readonly ?MannyService $mannyService = null,
+        private readonly ?\VonNeumannGame\Service\GerminationDepotService $germinationDepots = null,
+        private readonly ?\VonNeumannGame\Service\MannyStorageTransferService $storageTransfers = null,
     ) {
         $this->trajectoryConfig = Config::getArray($gameplayConfig, 'asteroidTrajectories');
         $massRange = Config::getArray($universeConfig, 'asteroids.massRange', [0.000001, 0.02]);
@@ -92,6 +94,7 @@ final class AsteroidTrajectoryService
             $values = $mode === AsteroidTrajectory::MODE_SYSTEM_IMPACT
                 ? $this->systemImpactValues($probe, $sector, $asteroid, $request, $now)
                 : $this->sectorTransferValues($player, $probe, $asteroid, $request, $now);
+            foreach ($sector->containersForObject($asteroidId) as $container) { $this->storageTransfers?->interruptExternal($container->getId(),$now->format('c')); }
             $values['launcherProbeId'] = $probe->id;
             $values['asteroidSnapshot'] = $asteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY)->toArray();
             $values['attachmentsSnapshot'] = array_map(
@@ -284,7 +287,11 @@ final class AsteroidTrajectoryService
         }
         $target = $sector->findObjectById($targetId);
         $targetProbeId = null;
-        if (!$target instanceof Asteroid && !$target instanceof Planet && !$target instanceof Star) {
+        if ($target instanceof \VonNeumannGame\Sector\SectorGerminationDepot) {
+            if (!($this->germinationDepots ?? throw new \RuntimeException('Depot targeting service required.'))->canTarget($probe->id, $targetId, $probe->currentSector)) {
+                throw new AsteroidTrajectoryException(422, 'invalid_asteroid_impact_target', 'This target cannot be engaged.');
+            }
+        } elseif (!$target instanceof Asteroid && !$target instanceof Planet && !$target instanceof Star) {
             $numericTargetId = filter_var($targetId, FILTER_VALIDATE_INT);
             $targetProbe = $numericTargetId !== false ? $this->probes->findById((int) $numericTargetId) : null;
             if ($targetProbe === null || !$targetProbe->currentSector->equals($probe->currentSector)) {

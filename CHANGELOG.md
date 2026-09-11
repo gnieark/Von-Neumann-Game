@@ -2,6 +2,15 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-11
+
+### Added
+
+- Dépôts de germination construits par les auxiliaires Others : stockage partagé persistant, transferts par charges de 2 ECE, progression d’inspection propre à chaque sonde et diffusion mondiale durable lors de l’ouverture.
+- Logistique Manny : consultation paginée et transferts de ressources ou d’objets entiers entre un container embarqué et un stockage du secteur accessible, avec suivi durable et interface dédiée dans les actions existantes.
+- Réservations communes, conservation des identités et métadonnées, règlement unique des interruptions, journal des effets secteur et protection des fichiers contre les écritures périmées.
+- Migration explicite `migrate-sector-storage.php`, audit en lecture seule `audit-sector-storage.php` et tests de concurrence SQLite/MariaDB. Procédure de bascule et de reprise dans `docs/sector-storage-operations.md`.
+
 ## 2026-09-10
 
 ### Added

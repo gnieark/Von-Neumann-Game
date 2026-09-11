@@ -116,17 +116,22 @@ final class AppFactory
         $visitedSectors = new VisitedSectorRepository($pdo);
         $others = new OthersRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo), germinationDepots: new \VonNeumannGame\Repository\GerminationDepotRepository($pdo));
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players, $damageWarnings);
+        $sectorEffects = new \VonNeumannGame\Service\SectorEffectService($pdo, $scheduledEvents, $sectorService);
+        $anomalyBroadcasts = new \VonNeumannGame\Service\AnomalyBroadcastService($pdo, $scheduledEvents);
+        $mannyStorageTransfers = new \VonNeumannGame\Service\MannyStorageTransferService($pdo, $mannies, $probes, $storage, $gameplayConfig);
+        $germinationDepots = new \VonNeumannGame\Service\GerminationDepotService($others, $scheduledEvents, $sectorService, $sectorEffects, $anomalyBroadcasts, mannyStorageTransfers: $mannyStorageTransfers);
+        $storageTransfers = new \VonNeumannGame\Service\SectorStorageTransferService($pdo, $germinationDepots);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectoryRepository);
-        $asteroidTrajectoryService = new AsteroidTrajectoryService($asteroidTrajectoryRepository, $probes, $scheduledEvents, $sectorService, $gameplayConfig, $universeConfig, $damageWarnings, $others, $mannyService);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectoryRepository, germinationDepots: $germinationDepots, sectorStorageTransfers: $mannyStorageTransfers);
+        $asteroidTrajectoryService = new AsteroidTrajectoryService($asteroidTrajectoryRepository, $probes, $scheduledEvents, $sectorService, $gameplayConfig, $universeConfig, $damageWarnings, $others, $mannyService, $germinationDepots, $mannyStorageTransfers);
         $observations = new SectorObservationService($sectorService, $visitedSectors, config: $gameplayConfig, mannies: $mannies, asteroidTrajectories: $asteroidTrajectoryRepository, asteroidTrajectoryService: $asteroidTrajectoryService);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig, others: $others);
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig, others: $others, sectorStorageTransfers: $mannyStorageTransfers);
         $redisConfig = $this->redisConfig();
         $rateLimitConfig = Config::getArray($redisConfig, 'rateLimit');
         $rateLimiter = Config::bool($redisConfig, 'rateLimit.enabled', true)
@@ -138,8 +143,8 @@ final class AppFactory
             )
             : null;
 
-        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players);
-        return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements, $rateLimiter, $asteroidTrajectoryService, $others, new OthersIdempotencyRepository($pdo), new OthersAuditRepository($pdo), $othersService, new AutonomousUnitObservationService($mannies, $others));
+        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players, germinationDepots: $germinationDepots, storageTransfers: $storageTransfers, mannyStorageTransfers: $mannyStorageTransfers);
+        return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements, $rateLimiter, $asteroidTrajectoryService, $others, new OthersIdempotencyRepository($pdo), new OthersAuditRepository($pdo), $othersService, new AutonomousUnitObservationService($mannies, $others), sectorStorageTransfers: $mannyStorageTransfers, probeCommands: new \VonNeumannGame\Repository\ProbeCommandRepository($pdo));
     }
 
     public function schedulerService(?PDO $pdo = null): SchedulerService
@@ -161,7 +166,7 @@ final class AppFactory
         $visitedSectors = new VisitedSectorRepository($pdo);
         $damageWarnings = new ProbeDamageWarningRepository($pdo);
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo), germinationDepots: new \VonNeumannGame\Repository\GerminationDepotRepository($pdo));
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
         $improvements = new ProbeImprovementRepository($pdo);
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
@@ -170,10 +175,15 @@ final class AppFactory
         $scutNetworks = new ScutNetworkRepository($pdo);
         $scut = new ScutNetworkService($scutRelays, $scutNetworks, $probes);
         $missionService = new MissionService($missions, $messages, $gameplayConfig, (string) ($appConfig['worldSeed'] ?? 'default-world'), $sectorService, $probes, $players, $damageWarnings);
+        $sectorEffects = new \VonNeumannGame\Service\SectorEffectService($pdo, $scheduledEvents, $sectorService);
+        $anomalyBroadcasts = new \VonNeumannGame\Service\AnomalyBroadcastService($pdo, $scheduledEvents);
+        $mannyStorageTransfers = new \VonNeumannGame\Service\MannyStorageTransferService($pdo, $mannies, $probes, $storage, $gameplayConfig);
+        $germinationDepots = new \VonNeumannGame\Service\GerminationDepotService($others, $scheduledEvents, $sectorService, $sectorEffects, $anomalyBroadcasts, mannyStorageTransfers: $mannyStorageTransfers);
+        $storageTransfers = new \VonNeumannGame\Service\SectorStorageTransferService($pdo, $germinationDepots);
         $bookmarks = new WaypointBookmarkService($items, $sectorService);
-        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories);
+        $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, $gameplayConfig, $bookmarks, $missionService, $scut, $damageWarnings, $improvements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories, germinationDepots: $germinationDepots, sectorStorageTransfers: $mannyStorageTransfers);
         $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
-        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig, others: $others);
+        $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $improvements, reinstantiation: $reinstantiation, scut: $scut, durations: $durations, worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'), gameplayConfig: $gameplayConfig, others: $others, sectorStorageTransfers: $mannyStorageTransfers);
         $trajectoryConfig = Config::getArray($gameplayConfig, 'asteroidTrajectories');
         $impactConfig = Config::getArray($trajectoryConfig, 'impact');
         $impactDamage = new ImpactDamageResolver(
@@ -186,7 +196,7 @@ final class AppFactory
             planetaryLossMinimum: Config::float($impactConfig, 'planetaryMassLossMinimumFraction', 0.01),
             planetaryLossMaximum: Config::float($impactConfig, 'planetaryMassLossMaximumFraction', 0.3),
         );
-        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players);
+        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players, germinationDepots: $germinationDepots, storageTransfers: $storageTransfers, mannyStorageTransfers: $mannyStorageTransfers);
         $trajectoryProcessor = new AsteroidTrajectoryPhaseProcessor(
             $asteroidTrajectories,
             new PhaseHandlerRegistry([
@@ -210,7 +220,7 @@ final class AppFactory
             ]),
         );
 
-        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $trajectoryProcessor, $othersService);
+        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $trajectoryProcessor, $othersService, $sectorEffects, $anomalyBroadcasts);
     }
 
     public function authService(PDO $pdo): AuthService
@@ -219,7 +229,7 @@ final class AppFactory
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo), germinationDepots: new \VonNeumannGame\Repository\GerminationDepotRepository($pdo));
         $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
         $mannies = new MannyRepository($pdo, $gameplayConfig);
         $storage = new ProbeStorageService(

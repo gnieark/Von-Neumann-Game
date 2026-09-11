@@ -132,6 +132,8 @@ final class MannyService implements MannyTaskRuntime
         ?MannyCargoService $cargo = null,
         private readonly ?ProbeMovementRepository $movements = null,
         private readonly ?AsteroidTrajectoryRepository $asteroidTrajectories = null,
+        private readonly ?GerminationDepotService $germinationDepots = null,
+        private readonly ?MannyStorageTransferService $sectorStorageTransfers = null,
     ) {
         $this->bookmarks = $bookmarks ?? new WaypointBookmarkService($items, $sectors);
         $this->crafting = $crafting ?? new MannyCraftingService($mannies, $probes, $items, $storage, $config);
@@ -320,7 +322,9 @@ final class MannyService implements MannyTaskRuntime
                 $this->mannies->save($manny);
             },
             fn(SectorDetachedContainer $container): array => $this->detachedContainerInspectionReport($container),
-            fn(NeumannProbe $probe, SectorContent $sector, DormantConstruct $construct): array => $this->dormantConstructInspectionReport($probe, $sector, $construct),
+            fn(NeumannProbe $probe, SectorContent $sector, DormantConstruct|\VonNeumannGame\Sector\SectorGerminationDepot $construct): array => $construct instanceof \VonNeumannGame\Sector\SectorGerminationDepot
+                ? ($this->germinationDepots ?? throw new \RuntimeException('Depot inspection service required.'))->inspect($probe, $construct->getId(), gmdate('c'))
+                : $this->dormantConstructInspectionReport($probe, $sector, $construct),
             function (int $probeId, SectorCoordinates $sectorCoordinates, string $objectId, string $objectLabel, string $message, string $objectType, ?string $scheduledAt, ?string $illustrationImageUrl = null): void {
                 $this->alerts?->createMannyReportAlert($probeId, $sectorCoordinates, $objectId, $objectLabel, $message, $objectType, $scheduledAt, $illustrationImageUrl);
             },
@@ -793,6 +797,13 @@ final class MannyService implements MannyTaskRuntime
                 $this->scutTransitBeaconInstallationTaskHandler,
                 $this->storageMoveTaskHandler,
                 $this->waypointBookmarkInstallationTaskHandler,
+                new \VonNeumannGame\Service\Manny\SectorStorageTransferTaskHandler(
+                    $this->sectorStorageTransfers,
+                    fn(NeumannProbe $probe, Manny $manny): bool => $this->storage->placeMannyOnProbe($probe, $manny),
+                    fn(Manny $manny, array $payload) => $this->cargo->waitForStorageSpace($manny, $payload),
+                    fn(Manny $manny, array $payload) => $this->clearTask($manny, $payload),
+                    fn(Manny $manny) => $this->mannies->save($manny),
+                ),
             ),
             $this,
             fn(Manny $manny, NeumannProbe $probe, callable $callback): mixed => $this->withTaskLock($manny, $probe, $callback),
@@ -1480,6 +1491,11 @@ final class MannyService implements MannyTaskRuntime
         }
         $this->ensureMannyInRange($manny, $probe);
 
+        if ($manny->currentTask === MannyStorageTransferService::TASK) {
+            ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->complete($manny->taskPayload['transferId'],gmdate('c'),'recalled');
+            $manny=$this->requiredManny($probe,$uid);
+        }
+
         if ($manny->currentTask === Manny::TASK_REPAIR) {
             $metalsCost = round(max(0.0, (float) ($manny->taskPayload['metalsCost'] ?? 0.0)), 4);
             if ($metalsCost > 0.0) {
@@ -1580,6 +1596,10 @@ final class MannyService implements MannyTaskRuntime
             return [];
         }
 
+        if ($lastTask === MannyStorageTransferService::TASK) {
+            ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->complete($manny->taskPayload['transferId'],gmdate('c'),'actor_reassigned');
+        }
+
         if ($lastTask === Manny::TASK_REPAIR) {
             $metalsCost = round(max(0.0, (float) ($manny->taskPayload['metalsCost'] ?? 0.0)), 4);
             if ($metalsCost > 0.0) {
@@ -1673,6 +1693,9 @@ final class MannyService implements MannyTaskRuntime
     private function abandonRemoteMannyTask(Manny $manny): Manny
     {
         $lastTask = $manny->currentTask;
+        if ($lastTask === MannyStorageTransferService::TASK) {
+            ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->complete($manny->taskPayload['transferId'],gmdate('c'),'recalled');
+        }
         if ($manny->currentTask === Manny::TASK_SALVAGE) {
             $this->cargo->restoreReservedSalvageItem($manny);
             $this->cargo->restoreReservedDetachedContainer($manny);
@@ -2206,7 +2229,7 @@ final class MannyService implements MannyTaskRuntime
     private function findInspectableSectorObject(SectorContent $sector, string $objectId, int $playerId): ?UniverseObject
     {
         $target = $sector->findObjectById($objectId);
-        if ($target instanceof Asteroid || $target instanceof DormantConstruct) {
+        if ($target instanceof Asteroid || $target instanceof DormantConstruct || $target instanceof \VonNeumannGame\Sector\SectorGerminationDepot) {
             return $target;
         }
         if ($target instanceof SectorDetachedContainer && $target->getMode() === SectorDetachedContainer::MODE_DRIFTING) {

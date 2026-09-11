@@ -17,6 +17,7 @@ final class SectorService
         private readonly string $worldSeed,
         ?SectorGrid $grid = null,
         private readonly ?DetachedStorageContainerRepository $detachedContainers = null,
+        private readonly ?\VonNeumannGame\Repository\GerminationDepotRepository $germinationDepots = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
     }
@@ -48,6 +49,25 @@ final class SectorService
         }
         $this->repository->save($sector);
         $sector->markDetachedContainerChangesPersisted();
+    }
+
+    public function germinationKnowledge(int $probeId, SectorCoordinates $sector): array
+    {
+        return $this->germinationDepots === null ? [] : $this->germinationDepots->knowledgeInSector($probeId, $sector);
+    }
+
+    public function applySectorEffect(SectorCoordinates $coordinates, string $operationId, string $type, string $objectId, array $payload): void
+    {
+        $this->getOrCreateSector($coordinates);
+        $this->repository->mutate($coordinates, static function (SectorContent $sector) use ($operationId, $type, $objectId, $payload): void {
+            if ($sector->hasAppliedEffect($operationId)) { return; }
+            if ($type === 'add_object') {
+                if ($sector->findObjectById($objectId) === null) { $sector->addObject(UniverseObject::fromArray($payload)); }
+            } elseif ($type === 'consume_object') {
+                $sector->removeObjectById($objectId);
+            } else { throw new \LogicException('Unsupported sector effect.'); }
+            $sector->markEffectApplied($operationId);
+        });
     }
 
     public function reserveDetachedContainer(string $objectId, int $mannyId): bool
@@ -97,11 +117,15 @@ final class SectorService
             }
         }
 
-        return $sector;
+        return $this->withSqlDetachedContainers($sector);
     }
 
     private function withSqlDetachedContainers(SectorContent $sector): SectorContent
     {
+        if ($this->germinationDepots !== null) {
+            $sector->hydrateGerminationDepots($this->germinationDepots->projections($sector->getCoordinates()));
+            foreach ($this->germinationDepots->pendingConsumedObjects($sector->getCoordinates()) as $id) { $sector->removeObjectById($id); }
+        }
         $sector->hydrateDetachedContainers(
             $this->detachedContainers?->findBySector($sector->getCoordinates()) ?? [],
         );
