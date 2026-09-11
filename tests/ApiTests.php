@@ -1687,7 +1687,28 @@ foreach ([
         ]);
     }
 }
-$rankingStats = (new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe'))->collect();
+$statsRankingService = new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe');
+$test->assertEquals(0, $statsRankingService->collect()['metrics']['othersOccupiedSectors'], 'public stats report zero occupied sectors without Others ships');
+$statsRankingOthers = new OthersRepository($statsRankingPdo);
+foreach ([
+    [0, 0, 0, 'inactive', null],
+    [0, 0, 0, 'low_orbit', null],
+    [2, 0, 0, 'inactive', null],
+    [0, 2, 0, 'inactive', null],
+    [0, 0, 2, 'inactive', null],
+    [4, 0, 0, 'transit', null],
+    [6, 0, 0, 'removed', null],
+    [8, 0, 0, 'inactive', '2026-09-11T00:00:00+00:00'],
+] as [$x, $y, $z, $status, $destroyedAt]) {
+    $statsOthersFleet = $statsRankingOthers->createFleet($statsRankingPlayerRows[1]->id, $x, $y, $z);
+    $statsRankingPdo->prepare('UPDATE others_ships SET status=:status, destroyed_at=:destroyed_at WHERE id=:id')->execute([
+        'status' => $status,
+        'destroyed_at' => $destroyedAt,
+        'id' => $statsOthersFleet['ship']['id'],
+    ]);
+}
+$rankingStats = $statsRankingService->collect();
+$test->assertEquals(4, $rankingStats['metrics']['othersOccupiedSectors'], 'public stats count distinct occupied sectors across fleets and all three axes, excluding transit, removed and destroyed ships');
 $topRankingPlayers = $rankingStats['metrics']['topVisitedPlayers'] ?? [];
 $test->assertEquals(9, count($topRankingPlayers), 'public stats visited-sector ranking exposes the first nine rows');
 $test->assert(!array_key_exists('topVisitedProbes', $rankingStats['metrics']), 'public stats no longer emits the legacy visited-probe podium alias');

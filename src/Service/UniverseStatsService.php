@@ -50,6 +50,7 @@ final class UniverseStatsService
                 'probesInUniverse' => count($probeRows),
                 'generatedSectors' => $sectorStats['generatedSectors'],
                 'visitedSectors' => count($visitedSectorKeys),
+                'othersOccupiedSectors' => $this->othersOccupiedSectors(),
                 'habitablePlanetsInGeneratedSectors' => $sectorStats['habitablePlanetsInGeneratedSectors'],
                 'habitablePlanetsInVisitedSectors' => $sectorStats['habitablePlanetsInVisitedSectors'],
                 'blackHoles' => $sectorStats['blackHoles'],
@@ -242,6 +243,19 @@ final class UniverseStatsService
         }
 
         return $keys;
+    }
+
+    private function othersOccupiedSectors(): int
+    {
+        $stmt = $this->pdo->query(
+            "SELECT COUNT(*) FROM (
+                SELECT DISTINCT sector_x, sector_y, sector_z
+                FROM others_ships
+                WHERE destroyed_at IS NULL AND status NOT IN ('removed', 'transit')
+            ) occupied_sectors"
+        );
+
+        return (int) $stmt->fetchColumn();
     }
 
     /**

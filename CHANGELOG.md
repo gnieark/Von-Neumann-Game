@@ -17,6 +17,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- Statistiques publiques : ajout de « Secteurs occupés par les Others » juste après les secteurs visités. Le compteur généré par `scripts/generate-stats.php` compte les secteurs distincts contenant au moins un vaisseau Others non détruit, hors vaisseaux retirés ou en transit.
+
 - WebUI `/sector-storage` : chaque ressource et objet disponible propose désormais une action de récupération, avec sélection d’une Manny libre, du container embarqué de destination et de la quantité pour les ressources. Le deutérium utilise directement le ravitaillement du réservoir et conserve le plafonnement à sa capacité restante.
 - Endpoint `POST /api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-from-external-storage` : transfert de deutérium brut d’un stockage extérieur vers le réservoir, à raison de 100 points par ECE. Un aller-retour dure toujours 10 minutes (5 + 5), avec plafonnement explicite à la capacité restante, réservations, idempotence et règlement des interruptions sans duplication.
 - WebUI Manny : formulaire de ravitaillement depuis un stockage extérieur avec lecture du deutérium disponible, état du réservoir, aperçu de la conversion et du plafonnement, durée annoncée et envoi idempotent vers l’endpoint dédié.
