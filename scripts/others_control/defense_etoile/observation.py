@@ -50,6 +50,7 @@ class ScoutObserver:
 
         ejected_mannies: dict[str, str] = {}
         missiles: dict[str, str] = {}
+        missiles_targeting_probes: dict[str, list[str]] = {}
         trajectories: dict[str, str] = {}
         floating_objects: dict[str, str] = {}
         waypoints: dict[str, str] = {}
@@ -73,6 +74,15 @@ class ScoutObserver:
                         "impactAt": sector_object.get("impactAt"),
                     }
                 )
+            if (
+                object_type == "missile"
+                and sector_object.get("launcherKind") == "others_ship"
+                and sector_object.get("targetKind") == "probe"
+            ):
+                target_id = identifier_string(
+                    sector_object.get("targetId"), f"sector object {object_id}.targetId"
+                )
+                missiles_targeting_probes.setdefault(target_id, []).append(object_id)
             trajectory = sector_object.get("trajectory")
             if object_type == "asteroid" and isinstance(trajectory, dict):
                 trajectories[object_id] = stable_signature(
@@ -100,6 +110,10 @@ class ScoutObserver:
             floating_objects=floating_objects,
             waypoints=waypoints,
             probe_ids=probe_ids,
+            missiles_targeting_probes={
+                target_id: tuple(sorted(missile_ids))
+                for target_id, missile_ids in missiles_targeting_probes.items()
+            },
         )
 
 

@@ -21,6 +21,7 @@ def observation(
         floating_objects={},
         waypoints={},
         probe_ids=probe_ids,
+        missiles_targeting_probes={},
     )
 
 

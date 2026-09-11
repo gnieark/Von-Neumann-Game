@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from .armament import FleetArmamentCoordinator
 from .commands import CommandExecutor
+from .central_defense import CentralDefenseCoordinator
 from .contracts import optional_mapping, require_mapping, require_string
 from .engagement import EngagementCoordinator
 from .errors import ApiContractError, ConfigurationError
@@ -49,8 +50,9 @@ class DefenseEtoileAttente:
         self.policy = policy or DefensePolicy()
 
         commands = CommandExecutor(api, logger)
+        observer = ScoutObserver(api)
         engagement = EngagementCoordinator(
-            ScoutObserver(api),
+            observer,
             commands,
             policy=self.policy,
             logger=logger,
@@ -62,6 +64,14 @@ class DefenseEtoileAttente:
             SectorKnowledge(api, logger),
             policy=self.policy,
             logger=logger,
+        )
+        self.central_defense = CentralDefenseCoordinator(
+            api,
+            observer,
+            commands,
+            policy=self.policy,
+            logger=logger,
+            now=self.now,
         )
         self.armament = FleetArmamentCoordinator(api, logger=logger)
         self.refueling = FleetRefuelingCoordinator(api, logger=logger)
@@ -135,6 +145,7 @@ class DefenseEtoileAttente:
             self._validate_mothership(mothership, self.mothership_id)
             mothership_movement = optional_mapping(mothership.get("movement"), "ship.movement")
             if mothership_movement is not None:
+                self.central_defense.clear_context()
                 result.add_event_date(
                     mothership_movement.get("arrivalAt"),
                     "ship.movement.arrivalAt",
@@ -155,8 +166,15 @@ class DefenseEtoileAttente:
         self._validate_mothership(fleet_mothership, mothership_id)
         movement = optional_mapping(fleet_mothership.get("movement"), "mothership.movement")
         if movement is not None:
+            self.central_defense.clear_context()
             result.add_event_date(movement.get("arrivalAt"), "mothership.movement.arrivalAt")
             self.log("Le vaisseau mère vient d'engager un mouvement : cycle reporté.")
+            return result
+
+        sector = require_mapping(fleet_mothership.get("sector"), "mothership.sector")
+        center = parse_coordinates(sector.get("relative"), "mothership.sector.relative")
+        self.central_defense.configure(fleet_mothership, center)
+        if self.central_defense.reconcile(result, ships=ships):
             return result
 
         armament = self.armament.reconcile(fleet_mothership, ships, result)
@@ -176,7 +194,10 @@ class DefenseEtoileAttente:
 
     def run_activity_cycle(self) -> CycleResult:
         """Observe les sentinelles en poste sans relancer la maintenance de flotte."""
-        return self.formation.reconcile_activity(CycleResult())
+        result = CycleResult()
+        if self.central_defense.reconcile(result):
+            return result
+        return self.formation.reconcile_activity(result)
 
     def _load_fleet_state(
         self, fleet_id: str,

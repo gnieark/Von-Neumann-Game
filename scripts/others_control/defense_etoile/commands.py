@@ -34,7 +34,7 @@ class CommandExecutor:
         target_id: str,
         event_key: str,
         result: CycleResult,
-    ) -> bool:
+    ) -> dict[str, Any] | None:
         try:
             action = self.api.launch_missile(ship_id, missile_id, target_id, event_key)
         except ApiRequestError as error:
@@ -43,12 +43,12 @@ class CommandExecutor:
                     f"Tir de {ship_id} ignoré vers {target_id} : "
                     f"{error.code} ({error.message})."
                 )
-                return False
+                return None
             raise
         result.accepted_commands += 1
         result.add_event_date(action.get("endsAt"), f"missile action for {ship_id}.endsAt")
         self.log(f"Missile {missile_id} de {ship_id} lancé vers {target_id}.")
-        return True
+        return action
 
     def start_laser(
         self,
@@ -56,7 +56,7 @@ class CommandExecutor:
         target_id: str,
         event_key: str,
         result: CycleResult,
-    ) -> bool:
+    ) -> dict[str, Any] | None:
         try:
             action = self.api.start_laser(ship_id, target_id, event_key)
         except ApiRequestError as error:
@@ -65,11 +65,11 @@ class CommandExecutor:
                     f"Laser de {ship_id} ignoré vers {target_id} : "
                     f"{error.code} ({error.message})."
                 )
-                return False
+                return None
             raise
         result.accepted_commands += 1
         result.add_event_date(action.get("endsAt"), f"laser action for {ship_id}.endsAt")
-        return True
+        return action
 
     def move(
         self,

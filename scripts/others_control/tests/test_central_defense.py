@@ -93,6 +93,49 @@ class CentralDefenseTests(unittest.TestCase):
         self.assertEqual(5, len(api.missile_launches))
         self.assertEqual(("mother", "item-4", "42"), api.missile_launches[-1])
 
+    def test_same_visible_missile_does_not_confirm_several_pending_launches(self) -> None:
+        center = (0, 0, 0)
+        scan = detailed_scan(probes=[{"id": 42, "status": "idle"}])
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership")],
+            scans={center: scan},
+            inventories={
+                "mother": [missile_item(f"item-{index}") for index in range(5)]
+            },
+        )
+        controller = DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        )
+        controller.run_cycle()
+        scan["objects"] = [moving_missile("launched-missile-1", "42")]
+
+        controller.run_activity_cycle()
+        controller.run_activity_cycle()
+
+        self.assertEqual(4, len(api.missile_launches))
+
+    def test_end_of_alert_allows_formation_to_resume_on_general_cycle(self) -> None:
+        center = (0, 0, 0)
+        scan = detailed_scan(probes=[{"id": 42, "status": "idle"}])
+        api = FakeApi(
+            [
+                ship("mother", center, ship_type="mothership"),
+                ship("home", center),
+            ],
+            scans={center: scan},
+        )
+        controller = DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        )
+
+        controller.run_cycle()
+        self.assertEqual([], api.moves)
+
+        scan["probes"] = []
+        controller.run_cycle()
+
+        self.assertEqual([("home", NEIGHBOR_OFFSETS[0])], api.moves)
+
     def test_four_missiles_are_maintained_for_each_probe(self) -> None:
         center = (0, 0, 0)
         api = FakeApi(
@@ -147,6 +190,26 @@ class CentralDefenseTests(unittest.TestCase):
             set(api.laser_locks),
         )
         self.assertEqual(2, len(api.laser_locks))
+
+    def test_missing_laser_action_is_recreated_while_manny_remains(self) -> None:
+        center = (0, 0, 0)
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership")],
+            scans={center: detailed_scan()},
+            autonomous_units={"mother": [observed_manny("manny-a", "42")]},
+        )
+        controller = DefenseEtoileAttente(
+            api, mothership_id="mother", logger=lambda _: None
+        )
+        controller.run_cycle()
+        api.actions.clear()
+
+        controller.run_activity_cycle()
+
+        self.assertEqual(
+            [("mother", "manny-a"), ("mother", "manny-a")],
+            api.laser_locks,
+        )
 
 
 if __name__ == "__main__":

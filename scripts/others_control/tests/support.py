@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from scripts.others_control.defense_etoile.errors import ApiRequestError
 from scripts.others_control.defense_etoile.models import Coordinates
 
 
@@ -121,6 +122,11 @@ class FakeApi:
         self.crafts = crafts or {}
         self.move_errors = move_errors or {}
         self.active_actions = list(active_actions or [])
+        self.actions: dict[str, dict[str, Any]] = {
+            str(action["id"]): action
+            for action in self.active_actions
+            if action.get("id") is not None
+        }
         self.deuterium_transfers: list[tuple[str, str, str, float]] = []
         self.missile_launches: list[tuple[str, str, str]] = []
         self.laser_locks: list[tuple[str, str]] = []
@@ -139,6 +145,12 @@ class FakeApi:
     def get_fleet(self, fleet_id: str) -> dict[str, Any]:
         self.fleet_calls += 1
         return {"id": fleet_id, "ships": self.ships, "activeActions": self.active_actions}
+
+    def get_action(self, action_id: str) -> dict[str, Any]:
+        action = self.actions.get(action_id)
+        if action is None:
+            raise ApiRequestError(404, "others_action_not_found", "Action not found")
+        return action
 
     def scan_sector(self, ship_id: str, coordinates: Coordinates) -> dict[str, Any]:
         self.scan_calls.append(coordinates)
@@ -308,7 +320,13 @@ class FakeApi:
             for item in self.inventories.get(ship_id, [])
             if item.get("id") != missile_item_id
         ]
-        return {"endsAt": "2099-01-01T00:00:00+00:00"}
+        action = {
+            "id": f"missile-action-{len(self.missile_launches)}",
+            "status": "queued",
+            "endsAt": "2099-01-01T00:00:00+00:00",
+        }
+        self.actions[action["id"]] = action
+        return action
 
     def start_laser(
         self,
@@ -317,7 +335,13 @@ class FakeApi:
         event_key: str,
     ) -> dict[str, Any]:
         self.laser_locks.append((ship_id, target_id))
-        return {"endsAt": None}
+        action = {
+            "id": f"laser-action-{len(self.laser_locks)}",
+            "status": "queued",
+            "endsAt": None,
+        }
+        self.actions[action["id"]] = action
+        return action
 
     def move_ship(self, item: dict[str, Any], target: Coordinates) -> dict[str, Any]:
         error = self.move_errors.get(item["id"])

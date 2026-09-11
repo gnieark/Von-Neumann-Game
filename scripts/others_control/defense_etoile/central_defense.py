@@ -49,6 +49,7 @@ class CentralDefenseCoordinator:
         self.center: Coordinates | None = None
         self.at_war = False
         self.pending_missiles: dict[str, PendingMissile] = {}
+        self.visible_missile_ids: set[str] = set()
         self.laser_assignments: dict[str, LaserAssignment] = {}
         self.recalled_sentinel_ids: set[str] = set()
 
@@ -58,6 +59,7 @@ class CentralDefenseCoordinator:
         self.center = None
         self.at_war = False
         self.pending_missiles.clear()
+        self.visible_missile_ids.clear()
         self.laser_assignments.clear()
         self.recalled_sentinel_ids.clear()
 
@@ -66,7 +68,11 @@ class CentralDefenseCoordinator:
         fleet_id = require_string(mothership.get("fleetId"), "mothership.fleetId")
         if (
             self.mothership_id is not None
-            and (self.mothership_id != mothership_id or self.fleet_id != fleet_id)
+            and (
+                self.mothership_id != mothership_id
+                or self.fleet_id != fleet_id
+                or self.center != center
+            )
         ):
             self.clear_context()
         self.mothership_id = mothership_id
@@ -89,6 +95,7 @@ class CentralDefenseCoordinator:
                 self.log("Fin d'alerte dans le secteur du vaisseau mère.")
             self.at_war = False
             self.pending_missiles.clear()
+            self.visible_missile_ids.clear()
             self.laser_assignments.clear()
             self.recalled_sentinel_ids.clear()
             return False
@@ -175,12 +182,22 @@ class CentralDefenseCoordinator:
         }
         now = self.now()
         self.pending_missiles = {
-            missile_id: pending
-            for missile_id, pending in self.pending_missiles.items()
+            action_id: pending
+            for action_id, pending in self.pending_missiles.items()
             if pending.target_id in probe_ids
-            and missile_id not in visible_ids
             and pending.expires_at > now
         }
+        newly_visible_ids = visible_ids - self.visible_missile_ids
+        for probe_id, missile_ids in observation.missiles_targeting_probes.items():
+            confirmations = sum(missile_id in newly_visible_ids for missile_id in missile_ids)
+            pending_action_ids = sorted(
+                action_id
+                for action_id, pending in self.pending_missiles.items()
+                if pending.target_id == probe_id
+            )
+            for action_id in pending_action_ids[:confirmations]:
+                self.pending_missiles.pop(action_id, None)
+        self.visible_missile_ids = visible_ids
         if not probe_ids:
             return
 
@@ -217,16 +234,17 @@ class CentralDefenseCoordinator:
                     key=lambda ship_id: (-len(ammunition[ship_id]), ship_id),
                 )
                 missile_item_id = ammunition[launcher_id].pop(0)
-                launched_id = self.commands.launch_missile(
+                action = self.commands.launch_missile(
                     launcher_id,
                     missile_item_id,
                     probe_id,
                     f"central-war:{probe_id}",
                     result,
                 )
-                if launched_id is None:
+                if action is None:
                     continue
-                self.pending_missiles[launched_id] = PendingMissile(
+                action_id = require_string(action.get("id"), "missile action.id")
+                self.pending_missiles[action_id] = PendingMissile(
                     probe_id,
                     now + timedelta(seconds=self.policy.central_pending_missile_seconds),
                 )

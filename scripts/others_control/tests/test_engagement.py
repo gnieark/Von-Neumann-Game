@@ -36,8 +36,8 @@ class EngagementTests(unittest.TestCase):
 
         self.assertEqual(initial_ship_calls, api.ship_calls)
         self.assertEqual(initial_fleet_calls, api.fleet_calls)
-        self.assertEqual(["guard"], api.autonomous_unit_calls)
-        self.assertEqual([guard_sector], api.scan_calls)
+        self.assertEqual(["mother", "guard"], api.autonomous_unit_calls)
+        self.assertEqual([center, guard_sector], api.scan_calls)
         self.assertEqual([], api.inventory_calls)
 
     def test_activity_cycle_can_engage_and_remove_a_returning_guard(self) -> None:
@@ -61,7 +61,7 @@ class EngagementTests(unittest.TestCase):
 
         self.assertEqual([("guard", "missile-a", "42")], api.missile_launches)
         self.assertEqual([("guard", center)], api.moves)
-        self.assertEqual(scans_after_return, len(api.scan_calls))
+        self.assertEqual([center], api.scan_calls[scans_after_return:])
 
     def test_deployed_manny_uses_two_missiles_then_returns(self) -> None:
         center = (0, 0, 0)

@@ -96,6 +96,19 @@ class HttpApiTests(unittest.TestCase):
         self.assertIn("cursor=cursor-a", second_request.full_url)
 
     @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_get_action_encodes_its_identifier(self, urlopen_mock: Mock) -> None:
+        urlopen_mock.return_value = FakeResponse({"action": {"id": "action/a"}})
+        api = HttpOthersApi("http://127.0.0.1:8000", "token", 10)
+
+        action = api.get_action("action/a")
+
+        self.assertEqual({"id": "action/a"}, action)
+        self.assertEqual(
+            "http://127.0.0.1:8000/api/others/actions/action%2Fa",
+            urlopen_mock.call_args.args[0].full_url,
+        )
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
     def test_craft_and_harvest_build_canonical_requests(self, urlopen_mock: Mock) -> None:
         urlopen_mock.side_effect = [
             FakeResponse({"action": {"id": "craft-action"}}),

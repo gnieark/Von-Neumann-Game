@@ -105,7 +105,8 @@ class FormationTests(unittest.TestCase):
         controller.run_cycle()
         controller.run_cycle()
 
-        self.assertEqual(12, len(api.scan_calls))
+        self.assertEqual(14, len(api.scan_calls))
+        self.assertEqual(2, api.scan_calls.count((0, 0, 0)))
 
     def test_mothership_movement_suspends_the_formation(self) -> None:
         api = FakeApi([

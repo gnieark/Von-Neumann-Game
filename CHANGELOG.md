@@ -10,6 +10,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Contrôle Others « défense étoile — attente » : activation effective de la défense centrale lors de la présence d'une sonde ou d'une Manny auprès du vaisseau mère. Les sentinelles sont rappelées, quatre missiles sont maintenus par sonde et les Mannies sont réparties entre des verrouillages laser distincts, avec suivi des actions et des projectiles visibles pour éviter les doublons.
 - WebUI des stockages du secteur : `/sector-storage` et les formulaires Manny résolvent désormais l’identifiant réel de la sonde par défaut avant d’appeler les endpoints canoniques qui exigent `{probeId}`, au lieu d’aboutir sur `Endpoint not found`.
 - Destruction des sondes par missile, laser, astéroïde ou usure intersectorielle : suppression de la sonde perdue et basculement de l’instance par défaut vers la sonde survivante la plus proche, avec alerte identifiant la sonde et la cause. La perte d’un drone conserve la sonde par défaut ; l’exploration est préservée.
 - Nettoyage des sondes détruites : détachement des références de l’historique des missiles, annulation des préparations et suppression du journal de bord pour respecter les clés étrangères ; les missiles déjà en vol poursuivent leur trajectoire.
@@ -17,6 +18,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- Contrôle Others : `build_germination_depot.py` lance ponctuellement la construction d’un dépôt dans le secteur courant d’un vaisseau mère, avec le premier auxiliaire embarqué libre et une URL d’API configurable.
 - Statistiques publiques : ajout de « Secteurs occupés par les Others » juste après les secteurs visités. Le compteur généré par `scripts/generate-stats.php` compte les secteurs distincts contenant au moins un vaisseau Others non détruit, hors vaisseaux retirés ou en transit.
 
 - WebUI `/sector-storage` : chaque ressource et objet disponible propose désormais une action de récupération, avec sélection d’une Manny libre, du container embarqué de destination et de la quantité pour les ressources. Le deutérium utilise directement le ravitaillement du réservoir et conserve le plafonnement à sa capacité restante.

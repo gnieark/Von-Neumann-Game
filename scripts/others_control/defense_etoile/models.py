@@ -37,6 +37,8 @@ class DefensePolicy:
     max_movement_distance: int = 10
     laser_engagement_seconds: int = 600
     laser_deuterium_threshold: float = 12.0
+    central_missiles_per_probe: int = 4
+    central_pending_missile_seconds: int = 120
 
 
 @dataclass
@@ -79,6 +81,7 @@ class ScoutObservation:
     floating_objects: dict[str, str]
     waypoints: dict[str, str]
     probe_ids: tuple[str, ...]
+    missiles_targeting_probes: dict[str, tuple[str, ...]]
 
 
 @dataclass

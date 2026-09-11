@@ -39,6 +39,10 @@ class HttpOthersApi:
         body = self._request("GET", f"/api/others/fleets/{quote(fleet_id, safe='')}")
         return require_mapping(body.get("fleet"), "fleet")
 
+    def get_action(self, action_id: str) -> dict[str, Any]:
+        body = self._request("GET", f"/api/others/actions/{quote(action_id, safe='')}")
+        return require_mapping(body.get("action"), "action")
+
     def scan_sector(self, ship_id: str, coordinates: Coordinates) -> dict[str, Any]:
         query = urlencode(
             {"shipId": ship_id, "x": coordinates[0], "y": coordinates[1], "z": coordinates[2]}
@@ -107,6 +111,26 @@ class HttpOthersApi:
         if not isinstance(crafts, list):
             raise ApiContractError("crafts doit être une liste.")
         return [require_mapping(craft, "crafts[]") for craft in crafts]
+
+    def start_germination_depot(
+        self,
+        mothership_id: str,
+        auxiliary_id: str,
+        operation_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(mothership_id, safe='')}"
+            f"/auxiliaries/{quote(auxiliary_id, safe='')}/build-germination-depot",
+            payload={},
+            idempotency_key=command_idempotency_key(
+                "build-germination-depot",
+                mothership_id,
+                auxiliary_id,
+                operation_key,
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
 
     def start_deuterium_transfer(
         self,

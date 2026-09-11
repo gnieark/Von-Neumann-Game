@@ -9,6 +9,32 @@ le token API. Pour vérifier la connexion et les accès en lecture :
 python3 scripts/others_control/test_connection.py
 ```
 
+## Construction ponctuelle d’un dépôt
+
+Le script suivant choisit le premier auxiliaire embarqué libre du vaisseau mère
+et lance la construction d’un dépôt dans son secteur courant :
+
+```console
+python3 scripts/others_control/build_germination_depot.py \
+  --token TOKEN_OTHERS \
+  --mothership-id ship_0123456789abcdefabcd
+```
+
+L’API locale `http://127.0.0.1:8000` est utilisée par défaut. Pour viser une
+autre instance :
+
+```console
+python3 scripts/others_control/build_germination_depot.py \
+  --base-url https://jeu.example \
+  --token TOKEN_OTHERS \
+  --mothership-id ship_0123456789abcdefabcd
+```
+
+La commande vérifie que l’identifiant désigne un vaisseau mère, parcourt tous
+ses auxiliaires par pagination et retient le premier identifiant disponible.
+Le serveur choisit le secteur courant, réserve les 2 ECE de métaux nécessaires
+et renvoie l’action de construction prévue pour trente minutes.
+
 ## Défense étoile — attente
 
 Le contrôleur maintient le vaisseau mère au centre et jusqu'à une sentinelle dans
@@ -37,7 +63,8 @@ python3 scripts/others_control/defense_etoile_attente.py --once --fleet-id fleet
 ```
 
 Le contrôleur vérifie toutes les vingt secondes les activités attribuables aux
-sondes depuis chaque sentinelle en poste. La réconciliation générale de la flotte
+sondes dans le secteur du vaisseau mère et depuis chaque sentinelle en poste.
+La réconciliation générale de la flotte
 reste espacée d'au plus cinq minutes et se réveille plus tôt lorsque `arrivalAt`
 annonce une arrivée. Les rappels dépassant la portée
 d'un mouvement sont automatiquement découpés en étapes de dix secteurs. Un
@@ -50,6 +77,15 @@ de missiles en inventaire et éventuel mouvement avec sa destination relative et
 son heure d'arrivée prévue. Une ligne d'inventaire détaille également
 l'occupation et les réservations de la soute, les quantités de ressources et les
 objets regroupés par type.
+
+Une sonde ou une Manny détectée dans le secteur du vaisseau mère déclenche la
+défense centrale. Les sentinelles voisines disponibles sont rappelées et le
+redéploiement normal est suspendu pendant l'alerte. La flotte maintient quatre
+missiles en vol vers chaque sonde présente et remplace ceux qui disparaissent du
+scan. Chaque Manny détectée reçoit un verrouillage laser provenant d'un vaisseau
+local distinct disposant de plus de 12 points de deutérium. Les ordres acceptés
+mais pas encore visibles sont suivis temporairement pour éviter les tirs en
+double pendant le traitement de l'ordonnanceur.
 
 Chaque sentinelle compare aussi ses observations locales d'un cycle au suivant
 et applique les procédures d'engagement suivantes :
@@ -155,7 +191,8 @@ Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
 comme désignateur de flotte. La précision du scan et l'historique de visite
 restent propres à cette flotte. Les Mannys déployées sont suivies par la route
 `autonomous-units` de la sentinelle et les stocks par son inventaire.
-Les deux routes d'observation tactique sont interrogées toutes les vingt secondes ;
+Les deux routes d'observation tactique du vaisseau mère et des sentinelles en
+poste sont interrogées toutes les vingt secondes ;
 les lectures d'inventaire et les commandes ne sont ajoutées qu'en cas d'engagement.
 
 Les appels HTTP sont espacés d’au moins une seconde, y compris pendant les
