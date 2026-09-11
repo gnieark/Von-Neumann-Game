@@ -14,7 +14,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 const SESSION_COOKIE = 'vn_session';
 const LANGUAGE_COOKIE = 'vn_lang';
-const ASSET_VERSION = '20260902-sensors-probe-status';
+const ASSET_VERSION = '20260911-sector-storage-explicit-probe';
 
 $projectRoot = dirname(__DIR__);
 $factory = new AppFactory($projectRoot);
@@ -232,6 +232,16 @@ $availableroutes = [
         'routeClass' => 'FrontRouteInventories',
         'displayOnMainMenu' => true,
         'displayOnFooter' => false,   
+    ],
+    "SectorStorage" => [
+        'name'  => translatedRouteName($translator, 'sectorStoragePageTitle'),
+        'methods' => ['GET','HEAD'],
+        'needAuth' => true,
+        'uriPattern' => '#^/sector-storage(?:/\d+)?$#',
+        'linkUri' => '/sector-storage',
+        'routeClass' => 'FrontRouteSectorStorage',
+        'displayOnMainMenu' => false,
+        'displayOnFooter' => false,
     ],
     "Mannys" => [
         'name'  => translatedRouteName($translator, 'tabMannies'),

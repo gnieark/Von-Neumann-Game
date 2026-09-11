@@ -2701,7 +2701,7 @@
         const objectId = form.elements.objectId.value;
         const signature = String(objectId || "");
         form.dataset.externalDeuteriumSignature = signature;
-        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/sector-objects/" + encodeURIComponent(objectId) + "/inventory"));
+        const data = await window.VNG.apiJson(explicitCurrentProbeApiPath("/sector-objects/" + encodeURIComponent(objectId) + "/inventory"));
         if (form.dataset.externalDeuteriumSignature !== signature || !form.isConnected) return;
         const resources = data.resources || data.inventory?.resourceStocks || [];
         const deuterium = resources.find((resource) => resource.type === "deuterium");
@@ -2729,7 +2729,7 @@
         const path = direction === "from_storage"
             ? "/sector-objects/" + encodeURIComponent(objectId) + "/inventory" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : "")
             : "/storage-containers/" + encodeURIComponent(containerId);
-        const data = await window.VNG.apiJson(window.VNG.probeApiPath(path));
+        const data = await window.VNG.apiJson(explicitCurrentProbeApiPath(path));
         if (form.dataset.storageSignature !== signature || !form.isConnected) return;
         const content = form.querySelector(".sector-storage-content");
         if (!nextPage) content.replaceChildren();
@@ -4625,7 +4625,7 @@
             } else payload.itemIds = formData.getAll("itemIds");
             const body = JSON.stringify(payload);
             if (form.dataset.storageRequest !== body) { form.dataset.storageRequest = body; form.dataset.storageKey = crypto.randomUUID(); }
-            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/storage-transfers"), {method: "POST", headers: {"Idempotency-Key": form.dataset.storageKey}, body});
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/storage-transfers"), {method: "POST", headers: {"Idempotency-Key": form.dataset.storageKey}, body});
         }
         if (form.classList.contains("manny-external-deuterium-form")) {
             const payload = {objectId: String(formData.get("objectId") || ""), amount: Number(formData.get("amount"))};
@@ -4639,7 +4639,7 @@
                 form.dataset.externalDeuteriumRequest = body;
                 form.dataset.externalDeuteriumKey = crypto.randomUUID();
             }
-            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/transfer-deuterium-from-external-storage"), {
+            return window.VNG.apiJson(explicitCurrentProbeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/transfer-deuterium-from-external-storage"), {
                 method: "POST", headers: {"Idempotency-Key": form.dataset.externalDeuteriumKey}, body,
             });
         }
@@ -5044,7 +5044,7 @@
             if (reportButton) {
                 reportButton.disabled = true;
                 try {
-                    const data = await window.VNG.apiJson(window.VNG.probeApiPath("/storage-transfers/" + encodeURIComponent(reportButton.dataset.transferId)));
+                    const data = await window.VNG.apiJson(explicitCurrentProbeApiPath("/storage-transfers/" + encodeURIComponent(reportButton.dataset.transferId)));
                     const transfer = data.transfer;
                     const rows = [["delivered", tr("storageDelivered", "Livré")], ["lost", tr("storageLost", "Perdu")], ["released", tr("storageReleased", "Libéré")]].map(([key, label]) => {
                         const content = transfer.result?.[key] || {};

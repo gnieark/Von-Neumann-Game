@@ -3,7 +3,10 @@
         <div>
             <h2>{{t.tabSystems}}</h2>
         </div>
-        <button class="icon-button" data-refresh="inventory" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+        <div class="panel-heading-actions">
+            <a class="button-link secondary-button-link" href="{{sectorStorageHref}}">{{t.sectorStorageLink}}</a>
+            <button class="icon-button" data-refresh="inventory" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+        </div>
     </div>
     <div id="systems-summary" class="metrics" aria-live="polite"></div>
     <div id="storage-rules-panel" class="storage-rules-panel"></div>

@@ -1,0 +1,17 @@
+<article id="sector-storage-panel" class="data-panel active">
+    <div class="panel-heading">
+        <div>
+            <h2>{{t.sectorStoragePageTitle}}</h2>
+            <p class="sector-storage-intro">{{t.sectorStoragePageDescription}}</p>
+        </div>
+        <button class="icon-button" data-refresh="sector-storage" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+    </div>
+    <div class="sector-storage-picker">
+        <label for="sector-storage-select">{{t.sectorStorageSelect}}</label>
+        <select id="sector-storage-select" disabled>
+            <option value="">{{t.sectorStorageLoading}}</option>
+        </select>
+    </div>
+    <div id="sector-storage-inventory" class="sector-storage-inventory" aria-live="polite"></div>
+    <p id="sector-storage-status" class="action-status" aria-live="polite"></p>
+</article>

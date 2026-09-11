@@ -1,10 +1,14 @@
 <?php
+
+declare(strict_types=1);
+
 namespace VonNeumannGame\FrontRoute;
 
 use VonNeumannGame\I18n\Translator;
 use VonNeumannGame\View\TplBlock;
 
-class FrontRouteInventories extends FrontRoute{
+final class FrontRouteSectorStorage extends FrontRoute
+{
     public function handle(string $method, string $routePath, ?string $bearer, string $language): void
     {
         if ($bearer === null) {
@@ -23,29 +27,26 @@ class FrontRouteInventories extends FrontRoute{
         $translator = new Translator(Translator::normalize($language));
         $tpl = new TplBlock();
         $tpl->addPrefixedVars('t', $translator->allEscaped());
-        $tpl->addVars([
-            'sectorStorageHref' => self::e('/sector-storage' . ($this->selectedProbeId !== null ? '/' . $this->selectedProbeId : '')),
-        ]);
 
-        return $tpl->applyTplFile($projectRoot . '/templates/inventories.html');
+        return $tpl->applyTplFile($projectRoot . '/templates/sector-storage.html');
     }
 
     public function getPageTitle(?string $bearer, string $language): string
     {
         $translator = new Translator(Translator::normalize($language));
 
-        return 'Von Neumann Game - ' . $translator->get('tabSystems');
+        return 'Von Neumann Game - ' . $translator->get('sectorStoragePageTitle');
     }
 
     public function getCustomJs(): string
     {
-        return '<script src="/assets/inventories.js?v=' . (defined('ASSET_VERSION') ? ASSET_VERSION : '') .'" defer></script>';
+        return '<script src="/assets/sector-storage.js?v=' . (defined('ASSET_VERSION') ? ASSET_VERSION : '') . '" defer></script>';
     }
 
     public function getMetaDescription(?string $bearer, string $language): string
     {
         $translator = new Translator(Translator::normalize($language));
 
-        return self::e($translator->get('homeMetaDescription'));
+        return self::e($translator->get('sectorStoragePageDescription'));
     }
 }
