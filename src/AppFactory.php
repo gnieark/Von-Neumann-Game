@@ -143,7 +143,7 @@ final class AppFactory
             )
             : null;
 
-        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players, germinationDepots: $germinationDepots, storageTransfers: $storageTransfers, mannyStorageTransfers: $mannyStorageTransfers);
+        $othersService = new OthersService($others, $scheduledEvents, $reinstantiation, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players, germinationDepots: $germinationDepots, storageTransfers: $storageTransfers, mannyStorageTransfers: $mannyStorageTransfers);
         return new ApiKernel($auth, $players, $probes, $observations, $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, $gameplayConfig, $improvements, $rateLimiter, $asteroidTrajectoryService, $others, new OthersIdempotencyRepository($pdo), new OthersAuditRepository($pdo), $othersService, new AutonomousUnitObservationService($mannies, $others), sectorStorageTransfers: $mannyStorageTransfers, probeCommands: new \VonNeumannGame\Repository\ProbeCommandRepository($pdo));
     }
 
@@ -196,12 +196,12 @@ final class AppFactory
             planetaryLossMinimum: Config::float($impactConfig, 'planetaryMassLossMinimumFraction', 0.01),
             planetaryLossMaximum: Config::float($impactConfig, 'planetaryMassLossMaximumFraction', 0.3),
         );
-        $othersService = new OthersService($others, $scheduledEvents, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players, germinationDepots: $germinationDepots, storageTransfers: $storageTransfers, mannyStorageTransfers: $mannyStorageTransfers);
+        $othersService = new OthersService($others, $scheduledEvents, $reinstantiation, $gameplayConfig, sectors: $sectorService, probes: $probes, alerts: $damageWarnings, mannies: $mannies, items: $items, scut: $scut, players: $players, germinationDepots: $germinationDepots, storageTransfers: $storageTransfers, mannyStorageTransfers: $mannyStorageTransfers);
         $trajectoryProcessor = new AsteroidTrajectoryPhaseProcessor(
             $asteroidTrajectories,
             new PhaseHandlerRegistry([
                 new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, Config::int($trajectoryConfig, 'coastingDurationSeconds', 600)),
-                new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, $impactDamage, $others, $othersService, $damageWarnings),
+                new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, $impactDamage, $reinstantiation, $others, $othersService, $damageWarnings),
                 new SectorTransferPhaseHandler(
                     $asteroidTrajectories,
                     $scheduledEvents,

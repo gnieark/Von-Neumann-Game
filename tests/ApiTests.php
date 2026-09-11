@@ -1138,6 +1138,13 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'detecti
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'mannyInCurrentProbeSector'), 'mannies JS ignores hidden-container recovery detections from remote Manny sectors');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'recoverableDetachedContainerTargets'), 'mannies JS limits recovery targets to current-sector detached container objects');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'sectorObjectInspectionTargets'), 'mannies JS builds a generic sector-object inspection target list');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-external-deuterium-form'), 'mannies JS renders the external raw-deuterium refueling form');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'loadExternalDeuteriumStock'), 'mannies JS loads raw deuterium availability from selected external storage');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'externalDeuteriumTankCapacityEce'), 'mannies JS converts remaining tank points to ECE for its preview');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, '/transfer-deuterium-from-external-storage'), 'mannies JS submits external refueling to the dedicated endpoint');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'externalDeuteriumKey = crypto.randomUUID()'), 'external refueling reuses an idempotency key for an unchanged order');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'externalDeuteriumDuration' => 'Durée : 5 minutes aller et 5 minutes retour.'"), 'French WebUI explains the external refueling duration');
+$test->assert(is_string($translatorSource) && str_contains($translatorSource, "'externalDeuteriumDuration' => 'Duration: 5 minutes outbound and 5 minutes returning.'"), 'English WebUI explains the external refueling duration');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '/inspect-sector-object'), 'mannies JS posts generic sector-object inspections');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-refuel-motorized-asteroid-form'), 'mannies JS renders the motorized asteroid refueling form');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'manny-launch-asteroid-form'), 'mannies JS renders the asteroid trajectory launch form');
@@ -2519,6 +2526,7 @@ $asteroidTrajectoryService = new AsteroidTrajectoryService(
 $othersService = new OthersService(
     $others,
     $scheduledEvents,
+    $reinstantiation,
     json_decode((string) file_get_contents($root . '/config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR),
     sectors: $sectorService,
     probes: $probes,
@@ -2533,7 +2541,7 @@ $othersService = new OthersService(
 );
 $testTrajectoryProcessor = new AsteroidTrajectoryPhaseProcessor($asteroidTrajectories, new PhaseHandlerRegistry([
     new AccelerationPhaseHandler($asteroidTrajectories, $scheduledEvents, 600),
-    new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, new ImpactDamageResolver(), $others, $othersService, $damageWarnings),
+    new SystemImpactPhaseHandler($asteroidTrajectories, $sectorService, $probes, $movements, new ImpactDamageResolver(), $reinstantiation, $others, $othersService, $damageWarnings),
     new SectorTransferPhaseHandler($asteroidTrajectories, $scheduledEvents, $sectorService, new CaptureCalculator()),
     new BlackHoleOrbitPhaseHandler($asteroidTrajectories, $sectorService),
 ]));
@@ -3765,7 +3773,126 @@ $test->assertEquals(5.0, (float) ($fatalProbeImpactDetails['damage'] ?? -1), 'mi
 $test->assertEquals(true, $fatalProbeImpactDetails['destroyed'] ?? null, 'missile resolution reports a zero-integrity probe as destroyed');
 $test->assertEquals(ProbeStatus::Dead, $fatalTargetProbeAfterImpact?->status, 'a probe reaching zero integrity becomes dead');
 
-$missileFixtureObjectIds = [];
+// Fatal weapon damage must follow the same fleet-loss flow as movement hazards.
+$fatalWeaponAlertObjectIds = [];
+foreach (['missile', 'laser'] as $fatalWeapon) {
+    foreach ([true, false] as $fatalWasDefault) {
+        $case = $fatalWeapon . ($fatalWasDefault ? '-default' : '-secondary');
+        $owner = $players->createPlayer('fatal-' . $case, 'Fatal ' . $case, null, $secondaryProbe->currentSector);
+        $victim = $probes->createForPlayer($owner->id, 'Destroyed ' . $case, $owner->homeSector);
+        $farDrone = $probes->createForPlayer($owner->id, 'Far drone', $owner->homeSector->add(80, 0, 0));
+        $nearDrone = $probes->createForPlayer($owner->id, 'Nearest drone', $owner->homeSector->add(2, 0, 0));
+        $owner = $players->findById($owner->id);
+        $owner->defaultProbeId = $fatalWasDefault ? $victim->id : $farDrone->id;
+        $players->save($owner);
+        $ownerHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($owner)['token']];
+        foreach ([$victim, $farDrone, $nearDrone] as $fixtureProbe) {
+            $fixtureProbe->excludeFromStats = true;
+            $probes->save($fixtureProbe);
+            $storage->initializeProbeStorage($fixtureProbe);
+        }
+        if ($fatalWeapon === 'missile' && $fatalWasDefault) {
+            $victim->status = ProbeStatus::Dead;
+            $probes->save($victim);
+            $test->assertEquals(409, $kernel->handle('POST', '/api/probe/mind-snapshot/reassign', $ownerHeaders)->status, 'a terminal default with surviving drones cannot create a fresh chassis');
+            $test->assertEquals(3, count($probes->findAllByPlayerId($owner->id)), 'rejected restoration preserves the entire fleet');
+            $victim->status = ProbeStatus::Idle;
+        }
+        $victim->integrityPercent = 5.0;
+        $probes->save($victim);
+        $visitedSectors->markVisited($owner, $nearDrone, $nearDrone->currentSector);
+        $visitedBefore = count($visitedSectors->listVisited($owner));
+        $outboundLaunches = [];
+        if ($fatalWeapon === 'missile' && $fatalWasDefault) {
+            $logbook->create($victim->id, 'Last log entry', 'Missiles incoming.');
+            $mannies->ensureDefaultsForProbe($victim);
+            $outboundManny = $mannies->findByProbeId($victim->id)[0];
+            foreach (['launched', 'preparing'] as $outboundStatus) {
+                $outboundItem = $items->create($victim->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05);
+                $outbound = $othersService->prepareProbeMissile($victim, $owner->id, [
+                    'actorMannyId' => $outboundManny->uid,
+                    'missileItemId' => $outboundItem->uid,
+                    'targetId' => (string) $sameSectorProbe->id,
+                ]);
+                $outboundLaunches[$outboundStatus] = $outbound['public_id'];
+                foreach (['weapon-', 'weapon-result-', 'weapon-damage-'] as $prefix) {
+                    $fatalWeaponAlertObjectIds[] = $prefix . $outbound['public_id'];
+                }
+                if ($outboundStatus === 'launched') {
+                    $processScheduledMannyNow($outboundManny->id);
+                }
+            }
+        }
+        if ($fatalWeapon === 'missile') {
+            $missileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05);
+            $launch = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
+                'actorMannyId' => $missileAlertManny->uid,
+                'missileItemId' => $missileItem->uid,
+                'targetId' => (string) $victim->id,
+            ]);
+            foreach (['weapon-', 'weapon-result-', 'weapon-damage-'] as $prefix) {
+                $fatalWeaponAlertObjectIds[] = $prefix . $launch['public_id'];
+            }
+            $processScheduledMannyNow($missileAlertManny->id);
+            $history = $resolveMissileHitNow((string) $launch['public_id']);
+            $details = json_decode($history['details_json'], true, 512, JSON_THROW_ON_ERROR);
+            $test->assertEquals(true, $details['destroyed'] ?? null, $case . ' records the fatal impact');
+        } else {
+            $laserOwner = $players->createPlayer('emitter-' . $case, 'Emitter ' . $case, null, $owner->homeSector);
+            $laserFleet = $others->createFleet($laserOwner->id, $owner->homeSector->getX(), $owner->homeSector->getY(), $owner->homeSector->getZ());
+            $pdo->prepare('UPDATE others_ships SET deuterium_stock=20 WHERE id=:id')->execute(['id' => $laserFleet['ship']['id']]);
+            $laserShip = $others->findShipByPublicId($laserFleet['ship']['public_id']);
+            $action = $othersService->startLaser($laserShip, ['targetId' => (string) $victim->id]);
+            $fatalWeaponAlertObjectIds[] = 'weapon-' . $action['public_id'];
+            $processOthersActionNow($action);
+            $pdo->prepare('UPDATE others_laser_locks SET next_damage_at=:now WHERE action_id=:id')->execute(['now' => gmdate('c', time() - 1), 'id' => $action['id']]);
+            $action = $others->findActionByPublicId($action['public_id']);
+            $processOthersActionNow($action);
+            $laserResult = json_decode($others->findActionByPublicId($action['public_id'])['result_json'], true, 512, JSON_THROW_ON_ERROR);
+            $test->assertEquals('target_destroyed', $laserResult['reason'] ?? null, $case . ' stops the laser on destruction');
+        }
+        foreach ($outboundLaunches as $outboundStatus => $outboundId) {
+            $outbound = $othersService->findMissileForPlayer($outboundId, $owner->id);
+            $test->assert($outbound !== null, 'destroyed launcher preserves its missile records');
+            $test->assertEquals(null, $outbound['probe_id'] ?? null, 'missile history detaches the deleted launcher');
+            $test->assertEquals(null, $outbound['manny_id'] ?? null, 'missile history detaches the deleted Manny');
+            $test->assertEquals(null, $outbound['probe_item_id'] ?? null, 'missile history detaches the deleted item');
+            $test->assertEquals((string) $victim->id, $outbound['launcher_public_id'] ?? null, 'missile history keeps the historical launcher identity');
+            if ($outboundStatus === 'launched') {
+                $test->assertEquals('launched', $outbound['status'] ?? null, 'a missile already in flight survives its launcher');
+                $history = $resolveMissileHitNow($outboundId);
+                $test->assertEquals('impacted', $history['result'] ?? null, 'a missile resolves after its launcher has been deleted');
+            } else {
+                $test->assertEquals('failed', $outbound['status'] ?? null, 'destruction cancels a missile still preparing');
+                $test->assertEquals('carrier_destroyed', $outbound['result'] ?? null, 'canceled preparation records carrier destruction');
+            }
+        }
+        $expectedDefault = $fatalWasDefault ? $nearDrone : $farDrone;
+        $test->assertEquals(null, $probes->findById($victim->id), $case . ' deletes the destroyed probe');
+        $test->assertEquals($expectedDefault->id, $players->findById($owner->id)?->defaultProbeId, $case . ' selects the correct surviving default');
+        $test->assertEquals($visitedBefore, count($visitedSectors->listVisited($owner)), $case . ' preserves exploration');
+        $test->assertEquals(2, count($probes->findAllByPlayerId($owner->id)), $case . ' keeps both surviving drones');
+        $lossAlerts = array_values(array_filter($damageWarnings->findByProbeId($expectedDefault->id),
+            static fn(ProbeDamageWarning $alert): bool => in_array($alert->type, [ProbeDamageWarning::TYPE_MIND_SNAPSHOT_TRANSFERRED, ProbeDamageWarning::TYPE_PROBE_DESTROYED], true)));
+        $test->assertEquals(1, count($lossAlerts), $case . ' creates one fleet-loss alert');
+        $test->assert(str_contains($lossAlerts[0]->message ?? '', $victim->name) && str_contains($lossAlerts[0]->message ?? '', $fatalWeapon), $case . ' alert identifies the lost probe and cause');
+        $response = $kernel->handle('GET', '/api/probe', $ownerHeaders);
+        $test->assertEquals($expectedDefault->id, $response->body['probe']['id'] ?? null, $case . ' API returns the surviving default');
+        $test->assert(!isset($response->body['probe']['alert']['action']), $case . ' offers no fresh chassis restoration');
+        $test->assertEquals(409, $kernel->handle('POST', '/api/probe/mind-snapshot/reassign', $ownerHeaders)->status, $case . ' refuses fresh chassis restoration');
+    }
+}
+$soleFatalHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($fatalTargetOwner)['token']];
+$soleFatalResponse = $kernel->handle('GET', '/api/probe', $soleFatalHeaders);
+$test->assertEquals('mind_snapshot_reassignment_available', $soleFatalResponse->body['probe']['alert']['type'] ?? null, 'fatal missile keeps restoration available for the only probe');
+$soleFatalRestore = $kernel->handle('POST', '/api/probe/mind-snapshot/reassign', $soleFatalHeaders);
+$test->assertEquals(200, $soleFatalRestore->status, 'the only probe destroyed by a missile can be restored into a fresh chassis');
+
+$restoredFatalProbe = $probes->findByPlayerId($fatalTargetOwner->id);
+$restoredFatalProbe->excludeFromStats = true;
+$probes->save($restoredFatalProbe);
+
+$missileFixtureObjectIds = $fatalWeaponAlertObjectIds;
 foreach ([$probeToOthersMissile['public_id'], $probeKillMissile['public_id'], $othersKillMissile['missile']['public_id'], $othersToProbeMissile['missile']['public_id'], $departedLauncherMissile['missile']['public_id'], $departedProbeMissile['public_id'], $fatalProbeMissile['public_id']] as $fixtureMissileId) {
     $missileFixtureObjectIds[] = 'weapon-' . $fixtureMissileId;
     $missileFixtureObjectIds[] = 'weapon-result-' . $fixtureMissileId;
@@ -8449,6 +8576,35 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
     $test->assertEquals(ProbeDamageWarning::PHASE_WEAPON_DAMAGE, $probeImpactVictimAlert?->phase, 'a probe hit by a motorized asteroid receives its own critical damage alert');
     $test->assert(str_contains($probeImpactVictimAlert?->message ?? '', '% of total integrity'), 'a surviving asteroid victim receives damage expressed as a percentage of total integrity');
 
+    $fatalAsteroidOwner = $players->createPlayer('fatal-asteroid-owner', 'Fatal Asteroid Owner', null, $impactProbe->currentSector);
+    $fatalAsteroidProbe = $probes->createForPlayer($fatalAsteroidOwner->id, 'Fatal asteroid victim', $impactProbe->currentSector);
+    $fatalAsteroidDrone = $probes->createForPlayer($fatalAsteroidOwner->id, 'Asteroid surviving drone', $impactProbe->currentSector->add(2, 0, 0));
+    $fatalAsteroidProbe->integrityPercent = 0.01;
+    $probes->save($fatalAsteroidProbe);
+    $fatalAsteroid = (new Asteroid('fatal-impact-rock', 'Fatal impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001, resourceAmounts: ['metals' => 1.0]))->withDeuteriumEngine();
+    $fatalAsteroidSector = $sectorRepository->load($impactProbe->currentSector);
+    $fatalAsteroidSector->addObject($fatalAsteroid);
+    $saveSectorFixture($fatalAsteroidSector);
+    $fatalAsteroidLaunch = $kernel->handle('POST', '/api/probe/' . $impactProbe->id . '/asteroids/fatal-impact-rock/trajectories', $impactHeaders, json_encode([
+        'mode' => AsteroidTrajectory::MODE_SYSTEM_IMPACT,
+        'targetObjectId' => (string) $fatalAsteroidProbe->id,
+        'targetSpeedC' => 0.05,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $fatalAsteroidLaunch->status, 'fatal asteroid impact launches');
+    $fatalAsteroidTrajectory = $asteroidTrajectories->findByUid((string) ($fatalAsteroidLaunch->body['trajectory']['id'] ?? ''));
+    if ($fatalAsteroidTrajectory !== null) {
+        $impactTime = new DateTimeImmutable($fatalAsteroidTrajectory->accelerationEndsAt);
+        $testTrajectoryProcessor->process($fatalAsteroidTrajectory->id, AsteroidTrajectory::STATUS_ACCELERATING, null, $impactTime);
+        $testTrajectoryProcessor->process($fatalAsteroidTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $impactTime->modify('+600 seconds'));
+        $test->assertEquals(null, $probes->findById($fatalAsteroidProbe->id), 'fatal asteroid deletes the lost default probe');
+        $test->assertEquals($fatalAsteroidDrone->id, $players->findById($fatalAsteroidOwner->id)?->defaultProbeId, 'fatal asteroid activates the surviving drone');
+        $fatalAsteroidAlerts = $damageWarnings->findByProbeId($fatalAsteroidDrone->id);
+        $test->assertEquals(1, count($fatalAsteroidAlerts), 'fatal asteroid creates one survivor alert');
+        $test->assert(str_contains($fatalAsteroidAlerts[0]->message ?? '', 'motorized asteroid impact'), 'fatal asteroid alert explains the cause');
+        $testTrajectoryProcessor->process($fatalAsteroidTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $impactTime->modify('+600 seconds'));
+        $test->assertEquals(1, count($damageWarnings->findByProbeId($fatalAsteroidDrone->id)), 'replayed fatal asteroid creates no duplicate survivor alert');
+    }
+
     $othersImpactOwner = $players->createPlayer('asteroid-others-victim', 'Asteroid Others Victim', null, $impactProbe->currentSector);
     $players->setOthersControl($othersImpactOwner->id, true);
     $othersImpactHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($othersImpactOwner)['token']];
@@ -11037,6 +11193,34 @@ if ($riskProbe !== null) {
         $test->assert($newRiskProbe !== null && $newRiskProbe->id !== $riskProbe->id, 'mind snapshot reassignment creates a fresh probe row');
         $test->assert($newRiskProbe !== null && $updatedRiskPlayer !== null && $newRiskProbe->currentSector->equals($updatedRiskPlayer->homeSector), 'fresh probe starts in the player new home sector');
         $test->assert($updatedRiskPlayer !== null && count($visitedSectors->listVisited($updatedRiskPlayer)) === 1, 'mind snapshot reassignment resets visited sectors to the fresh origin only');
+    }
+}
+
+foreach ([false, true] as $dustHasDrone) {
+    $dustOwner = $auth->registerPlayerWithPassword('fatal-dust-' . (int) $dustHasDrone, 'secret', 'Fatal Dust');
+    $dustHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($dustOwner)['token']];
+    $dustProbe = $probes->findByPlayerId($dustOwner->id);
+    $dustDrone = $dustHasDrone ? $probes->createForPlayer($dustOwner->id, 'Dust surviving drone', $dustProbe->currentSector->add(20, 0, 0)) : null;
+    if ($dustDrone !== null) {
+        $storage->initializeProbeStorage($dustDrone);
+    }
+    $dustMove = $kernel->handle('POST', '/api/probe/move', $dustHeaders, json_encode(['target' => ['x' => 8, 'y' => 0, 'z' => 0]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $dustMove->status, 'fatal dust movement starts');
+    $dustMovement = $movements->findActiveByProbeId($dustProbe->id);
+    if ($dustMovement !== null) {
+        $pdo->prepare('UPDATE neumann_probes SET integrity_percent=0.01 WHERE id=:id')->execute(['id' => $dustProbe->id]);
+        $pdo->prepare('UPDATE probe_movements SET arrival_at=:past,deceleration_ends_at=:past WHERE id=:id')->execute(['past' => gmdate('c', time() - 1), 'id' => $dustMovement->id]);
+        $dustResponse = $kernel->handle('GET', '/api/probe', $dustHeaders);
+        if ($dustHasDrone) {
+            $test->assertEquals(null, $probes->findById($dustProbe->id), 'fatal dust deletes the destroyed default when a drone survives');
+            $test->assertEquals($dustDrone->id, $dustResponse->body['probe']['id'] ?? null, 'fatal dust returns the surviving default');
+            $dustAlerts = $damageWarnings->findByProbeId($dustDrone->id);
+            $test->assert(str_contains($dustAlerts[0]->message ?? '', 'intersector dust'), 'fatal dust alert explains the cause');
+        } else {
+            $test->assertEquals('dead', $dustResponse->body['probe']['status'] ?? null, 'fatal dust leaves the only probe in a terminal state');
+            $test->assertEquals('mind_snapshot_reassignment_available', $dustResponse->body['probe']['alert']['type'] ?? null, 'fatal dust offers restoration for the only probe');
+            $test->assertEquals('destroyed', $movements->findLatestByProbeId($dustProbe->id)?->status, 'fatal dust records a destroyed movement');
+        }
     }
 }
 

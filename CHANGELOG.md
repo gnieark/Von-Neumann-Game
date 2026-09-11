@@ -4,7 +4,20 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-11
 
+### Changed
+
+- Transferts Manny entre container embarqué et stockage du secteur : le deutérium est exclu de `POST /api/probe/{probeId}/mannies/{mannyId}/storage-transfers`, dans les deux sens. Sa présence dans les ressources entraîne un refus `400 bad_request` sans réservation ; le formulaire ne le propose plus. Le ravitaillement du réservoir dispose désormais de son endpoint dédié.
+
+### Fixed
+
+- Destruction des sondes par missile, laser, astéroïde ou usure intersectorielle : suppression de la sonde perdue et basculement de l’instance par défaut vers la sonde survivante la plus proche, avec alerte identifiant la sonde et la cause. La perte d’un drone conserve la sonde par défaut ; l’exploration est préservée.
+- Nettoyage des sondes détruites : détachement des références de l’historique des missiles, annulation des préparations et suppression du journal de bord pour respecter les clés étrangères ; les missiles déjà en vol poursuivent leur trajectoire.
+- Réinstanciation dans une nouvelle sonde réservée à la perte de l’unique sonde du joueur. Le script explicite `scripts/delete-probe.php` accepte les nouvelles causes pour réparer les pertes déjà présentes en base.
+
 ### Added
+
+- Endpoint `POST /api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-from-external-storage` : transfert de deutérium brut d’un stockage extérieur vers le réservoir, à raison de 100 points par ECE. Un aller-retour dure toujours 10 minutes (5 + 5), avec plafonnement explicite à la capacité restante, réservations, idempotence et règlement des interruptions sans duplication.
+- WebUI Manny : formulaire de ravitaillement depuis un stockage extérieur avec lecture du deutérium disponible, état du réservoir, aperçu de la conversion et du plafonnement, durée annoncée et envoi idempotent vers l’endpoint dédié.
 
 - Dépôts de germination construits par les auxiliaires Others : stockage partagé persistant, transferts par charges de 2 ECE, progression d’inspection propre à chaque sonde et diffusion mondiale durable lors de l’ouverture.
 - Logistique Manny : consultation paginée et transferts de ressources ou d’objets entiers entre un container embarqué et un stockage du secteur accessible, avec suivi durable et interface dédiée dans les actions existantes.

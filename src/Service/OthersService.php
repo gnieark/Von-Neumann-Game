@@ -43,6 +43,7 @@ final class OthersService
     public function __construct(
         private readonly OthersRepository $others,
         private readonly ScheduledEventRepository $events,
+        private readonly ProbeReinstantiationService $reinstantiation,
         array $gameplayConfig = [],
         ?SectorGrid $grid = null,
         ?MovementDurationCalculator $durations = null,
@@ -996,7 +997,21 @@ final class OthersService
             $damageKey = 'laser:' . $action['public_id'] . ':' . $lock['next_damage_at'];
             try {
                 $pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key' => $damageKey, 'kind' => $target['kind'], 'target' => $target['id'], 'damage' => $target['kind'] === 'probe' ? 5 : ($target['kind'] === 'manny' ? 1 : 0), 'now' => $now]);
-                if ($target['kind'] === 'probe' && $this->probes !== null) { $probe = $this->probes->findById((int) $target['id']); if ($probe !== null) { $probe->subtractIntegrityPercent(5.0); if($probe->status===ProbeStatus::Dead){$this->interruptProbeStorageTransfers($probe->id,(string)$lock['next_damage_at']);} $this->probes->save($probe); } }
+                if ($target['kind'] === 'probe' && $this->probes !== null) {
+                    $probe = $this->probes->findById((int) $target['id']);
+                    if ($probe !== null) {
+                        $probe->subtractIntegrityPercent(5.0);
+                        if ($probe->status === ProbeStatus::Dead) {
+                            $this->interruptProbeStorageTransfers($probe->id, (string) $lock['next_damage_at']);
+                        }
+                        $this->probes->save($probe);
+                        if ($probe->status === ProbeStatus::Dead) {
+                            $this->reinstantiation->handleTerminalProbeLoss($probe, ProbeReinstantiationService::TERMINAL_REASON_LASER);
+                            $this->stopLaser($action, $lock, $now, 'target_destroyed');
+                            return;
+                        }
+                    }
+                }
                 elseif ($target['kind'] === 'manny') { $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,(string)$lock['next_damage_at']);} $pdo->prepare('DELETE FROM mannies WHERE uid=:uid AND location_type=\'sector\'')->execute(['uid' => $target['id']]); if ($this->sectors !== null) { $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z'])); if ($sector->removeObjectById('manny-' . $target['id'])) { $this->sectors->saveSector($sector); } } $this->stopLaser($action, $lock, $now, 'target_destroyed'); return; }
             } catch (\PDOException $error) { if (!str_contains(strtolower($error->getMessage()), 'unique')) { throw $error; } }
             $nextDamage = (new \DateTimeImmutable((string) $lock['next_damage_at']))->modify('+10 minutes');
@@ -1111,6 +1126,12 @@ final class OthersService
         if($projectile['action_id']!==null){$pdo->prepare("UPDATE others_actions SET status='succeeded',result_json=:details,completed_at=:now,updated_at=:now WHERE id=:id AND status='running'")->execute(['details'=>json_encode(['outcome'=>$result]+$details,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),'now'=>$now,'id'=>(int)$projectile['action_id']]);}
         $this->createProjectileResolutionAlerts($projectile, $target, $result, $details, $now);
         $pdo->prepare('DELETE FROM others_projectiles WHERE id=:id')->execute(['id'=>(int)$projectile['id']]);
+        if ($target['kind'] === 'probe' && ($details['destroyed'] ?? false)) {
+            $probe = $this->probes?->findById((int) $target['id']);
+            if ($probe !== null) {
+                $this->reinstantiation->handleTerminalProbeLoss($probe, ProbeReinstantiationService::TERMINAL_REASON_MISSILE);
+            }
+        }
     }
 
     private function interceptProjectile(array $target,array $interceptor): void

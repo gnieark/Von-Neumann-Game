@@ -9,6 +9,7 @@ use VonNeumannGame\Database\StorageTransaction;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeStatus;
+use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\GerminationDepotRepository;
 use VonNeumannGame\Repository\MannyRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
@@ -46,6 +47,9 @@ final class MannyStorageTransferService
         foreach($ids as $id){if(!is_string($id)||$id===''){throw new MannyActionException(400,'bad_request','Invalid item ID.');}}
         if(count(array_unique($ids,SORT_STRING))!==count($ids)){throw new MannyActionException(400,'bad_request','Duplicate item IDs.');}
         if(array_diff(array_keys($resources),TransferLoadPlanner::RESOURCE_TYPES)!==[]){throw new MannyActionException(400,'bad_request','Unknown resource type.');}
+        if (array_key_exists('deuterium', $resources)) {
+            throw new MannyActionException(400, 'bad_request', 'Deuterium cannot be transferred through this endpoint.');
+        }
         try { foreach($resources as $amount){TransferLoadPlanner::units($amount);} }
         catch(\InvalidArgumentException $error){throw new MannyActionException(400,'bad_request',$error->getMessage());}
         return $this->transaction->run(function()use($selectedProbe,$mannyUid,$payload,$resources,$ids,$kind):array{
@@ -95,6 +99,83 @@ final class MannyStorageTransferService
         });
     }
 
+    public function startDeuteriumFromExternalStorage(NeumannProbe $selectedProbe, string $mannyUid, array $payload): array
+    {
+        if (array_diff(array_keys($payload), ['objectId', 'amount']) !== []
+            || !is_string($payload['objectId'] ?? null) || $payload['objectId'] === '') {
+            throw new MannyActionException(400, 'bad_request', 'objectId and a positive amount in ECE are required.');
+        }
+        try {
+            $requestedUnits = TransferLoadPlanner::units($payload['amount'] ?? null);
+        } catch (\InvalidArgumentException $error) {
+            throw new MannyActionException(400, 'bad_request', $error->getMessage());
+        }
+
+        return $this->transaction->run(function () use ($selectedProbe, $mannyUid, $payload, $requestedUnits): array {
+            $this->transaction->lock('probe', $selectedProbe->id);
+            $probe = $this->probes->findById($selectedProbe->id) ?? throw new MannyActionException(404, 'not_found', 'Probe not found.');
+            if (!in_array($probe->status, [ProbeStatus::Idle, ProbeStatus::Orbiting], true)) {
+                throw new MannyActionException(409, 'probe_busy', 'The probe must be stationary.');
+            }
+            $manny = $this->mannies->findByUidForProbe($probe->id, $mannyUid)
+                ?? throw new MannyActionException(404, 'manny_not_found', 'Manny not found.');
+            $this->transaction->lock('manny', $manny->id);
+            $manny = $this->mannies->findById($manny->id) ?? throw new \RuntimeException('Manny missing.');
+            if (!$manny->isOnProbe() || $manny->currentTask !== null) {
+                throw new MannyActionException(409, 'manny_busy', 'An idle embarked Manny is required.');
+            }
+            $external = $this->external($probe, $payload['objectId'], false);
+            $acceptedUnits = min($requestedUnits, $this->availableTankUnits($probe));
+            if ($acceptedUnits === 0) {
+                throw new MannyActionException(409, 'probe_deuterium_full', 'No unreserved tank capacity is available for deuterium.');
+            }
+            $amount = $acceptedUnits / 10000;
+            $resources = ['deuterium' => $amount];
+            $now = ($this->clock)();
+            // One fixed trip: five minutes outbound, five minutes returning with the fuel.
+            $plan = $this->planner->plan($resources, [], $amount, 600);
+            $plan['tankTransfer'] = [
+                'requestedAmountEce' => $requestedUnits / 10000,
+                'acceptedAmountEce' => $amount,
+                'tankPoints' => round($amount * ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE, 4),
+                'clamped' => $acceptedUnits < $requestedUnits,
+            ];
+            $ends = $this->planner->endsAt($plan, $now);
+            $publicId = 'storage_transfer_' . bin2hex(random_bytes(12));
+            $query = $this->pdo->prepare("INSERT INTO sector_storage_transfers
+                (public_id,player_id,actor_kind,actor_public_id,probe_id,manny_id,external_storage_kind,external_storage_id,object_public_id,direction,status,manifest_json,resources_json,items_json,started_at,ends_at,updated_at)
+                VALUES (?,?,'manny',?,?,?,?,?,?,'from_storage','queued',?,?,'[]',?,?,?)");
+            $query->execute([$publicId, $probe->playerId, $manny->uid, $probe->id, $manny->id,
+                $external['kind'], (string) $external['id'], $payload['objectId'], json_encode($plan, JSON_THROW_ON_ERROR),
+                json_encode($resources, JSON_THROW_ON_ERROR), $now->format('c'), $ends->format('c'), $now->format('c')]);
+            $transferId = (int) $this->pdo->lastInsertId();
+            $external['port']->reserve($transferId, 0, $resources, [], $now->format('c'));
+            $this->pdo->prepare("INSERT INTO sector_storage_capacity_reservations(transfer_id,inventory_kind,inventory_id,amount) VALUES (?,'probe_tank',?,?)")
+                ->execute([$transferId, (string) $probe->id, $amount]);
+            $this->storage->releaseMannyFromStorage($manny);
+            $manny->locationType = Manny::LOCATION_SECTOR;
+            $manny->sector = $probe->currentSector;
+            $manny->currentTask = self::TASK;
+            $manny->taskStartedAt = $now->format('c');
+            $manny->taskEndsAt = $ends->format('c');
+            $manny->taskPayload = ['transferId' => $publicId, 'objectId' => $payload['objectId'],
+                'direction' => 'from_storage', 'durationSeconds' => 600, 'tankTransfer' => $plan['tankTransfer']];
+            $this->mannies->save($manny);
+            return ['transfer' => $this->get($probe, $publicId), 'manny' => $this->mannies->findById($manny->id)];
+        });
+    }
+
+    /** Caller holds the probe lock. Quantities round down to the raw stock precision (0.0001 ECE). */
+    private function availableTankUnits(NeumannProbe $probe, int $ignoredTransferId = 0): int
+    {
+        $query = $this->pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM sector_storage_capacity_reservations
+            WHERE inventory_kind='probe_tank' AND inventory_id=? AND transfer_id<>?");
+        $query->execute([(string) $probe->id, $ignoredTransferId]);
+        $remainingEce = ($this->storage->maxDeuteriumPercent($probe) - $probe->deuteriumStock)
+            / ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE - (float) $query->fetchColumn();
+        return max(0, (int) floor(round($remainingEce * 10000, 6)));
+    }
+
     /** Rechecks discovery before reading any content. Parent row locks serialize partial stock mutations. */
     private function external(NeumannProbe $probe,string $objectId, bool $withCapacity = true):array
     {
@@ -140,7 +221,8 @@ final class MannyStorageTransferService
         return \VonNeumannGame\Service\Storage\StoragePublicData::normalize(['id'=>$row['public_id'],'actor'=>['kind'=>'manny','id'=>$row['actor_public_id']],'objectId'=>$row['object_public_id'],'containerId'=>$row['container_public_id'],
             'direction'=>$row['direction'],'resources'=>json_decode($row['resources_json'],true,512,JSON_THROW_ON_ERROR),'itemIds'=>array_column(json_decode($row['items_json'],true,512,JSON_THROW_ON_ERROR),'id'),
             'status'=>$row['status'],'startedAt'=>$row['started_at'],'endsAt'=>$row['ends_at'],'durationSeconds'=>$plan['durationSeconds'],'tripCount'=>$plan['tripCount'],
-            'result'=>$row['result_json']===null?null:json_decode($row['result_json'],true,512,JSON_THROW_ON_ERROR),'error'=>$row['error_json']===null?null:json_decode($row['error_json'],true,512,JSON_THROW_ON_ERROR)]);
+            'result'=>$row['result_json']===null?null:json_decode($row['result_json'],true,512,JSON_THROW_ON_ERROR),'error'=>$row['error_json']===null?null:json_decode($row['error_json'],true,512,JSON_THROW_ON_ERROR)]
+            + (isset($plan['tankTransfer']) ? ['tankTransfer' => $plan['tankTransfer']] : []));
     }
 
     /** Delivery commits once; returning the actor to storage is handled separately by the Manny handler. */
@@ -153,31 +235,48 @@ final class MannyStorageTransferService
             if($initial['manny_id']!==null){$this->transaction->lock('manny',(int)$initial['manny_id']);}
             $row=$this->transaction->lock('transfer',(int)$initial['id']);
             if($row['status']!=='queued'){return $this->present($row);}
-            $this->transaction->lock('container',(int)$row['container_id']);
+            if ($row['container_id'] !== null) { $this->transaction->lock('container', (int) $row['container_id']); }
             $this->transaction->lock($row['external_storage_kind'],$row['external_storage_kind']==='depot'?(int)$row['external_storage_id']:$row['external_storage_id']);
             $plan=json_decode($row['manifest_json'],true,512,JSON_THROW_ON_ERROR);$elapsed=strtotime($causalTime)-strtotime($row['started_at']);
             if($elapsed >= $plan['durationSeconds']){$reason=null;}elseif($reason===null){return $this->present($row);}
             $probe=$this->probes->findById((int)$row['probe_id']);
-            $onboard=new SqlInventoryTransferPort($this->pdo,'container',(int)$row['container_id'],probeId:(int)$row['probe_id']);
+            $tankTransfer = isset($plan['tankTransfer']);
+            $onboard = $tankTransfer ? null : new SqlInventoryTransferPort($this->pdo,'container',(int)$row['container_id'],probeId:(int)$row['probe_id']);
             $external=new SqlInventoryTransferPort($this->pdo,$row['external_storage_kind'],$row['external_storage_kind']==='depot'?(int)$row['external_storage_id']:$row['external_storage_id']);
             [$source,$destination]=$row['direction']==='to_storage'?[$onboard,$external]:[$external,$onboard];
             $resources=json_decode($row['resources_json'],true,512,JSON_THROW_ON_ERROR);$items=json_decode($row['items_json'],true,512,JSON_THROW_ON_ERROR);
             $lost=['resources'=>[],'itemIds'=>[]];$delivered=['resources'=>[],'itemIds'=>[]];
             if($reason===null){
-                $source->debit((int)$row['id'],0,$resources,array_column($items,'id'),$causalTime);$destination->credit($resources,$items,$causalTime);
-                $delivered=['resources'=>$resources,'itemIds'=>array_column($items,'id')];
+                $deliveredResources = $resources;
+                if ($tankTransfer) {
+                    if ($probe === null) { throw new \RuntimeException('Destination probe missing.'); }
+                    $units = min(TransferLoadPlanner::units($resources['deuterium']), $this->availableTankUnits($probe, (int) $row['id']));
+                    $deliveredResources = $units > 0 ? ['deuterium' => $units / 10000] : [];
+                    if ($units > 0) {
+                        $this->probes->addDeuteriumStock($probe->id, $units / 10000 * ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE, $this->storage->maxDeuteriumPercent($probe));
+                    }
+                }
+                $source->debit((int)$row['id'],0,$deliveredResources,array_column($items,'id'),$causalTime);
+                $destination?->credit($deliveredResources,$items,$causalTime);
+                $delivered=['resources'=>$deliveredResources,'itemIds'=>array_column($items,'id')];
             }elseif($reason==='manny_destroyed'){
                 $cargo=$this->planner->cargoAt($plan,$elapsed,$row['direction']);
                 foreach($cargo['resources'] as $type=>$units){$lost['resources'][$type]=$units/10000;}$lost['itemIds']=$cargo['itemIds'];
                 $source->debit((int)$row['id'],0,$lost['resources'],$lost['itemIds'],$causalTime);
             }
-            $source->release((int)$row['id'],0,$causalTime);$destination->release((int)$row['id'],0,$causalTime);
+            $source->release((int)$row['id'],0,$causalTime);$destination?->release((int)$row['id'],0,$causalTime);
+            if ($tankTransfer) {
+                $this->pdo->prepare("DELETE FROM sector_storage_capacity_reservations WHERE transfer_id=? AND inventory_kind='probe_tank'")->execute([(int) $row['id']]);
+            }
             $released=['resources'=>[],'itemIds'=>array_values(array_diff(array_column($items,'id'),$delivered['itemIds'],$lost['itemIds']))];
             foreach($resources as $type=>$amount){
                 $remaining=round($amount-($delivered['resources'][$type]??0)-($lost['resources'][$type]??0),4);
                 if($remaining>0){$released['resources'][$type]=$remaining;}
             }
             $result=['outcome'=>$reason??'delivered','delivered'=>$delivered,'lost'=>$lost,'released'=>$released];
+            if ($tankTransfer) {
+                $result['deliveredTankPoints'] = round(($delivered['resources']['deuterium'] ?? 0) * ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE, 4);
+            }
             $status=$reason===null?'succeeded':($reason==='manny_destroyed'?'failed':'canceled');
             $this->pdo->prepare('UPDATE sector_storage_transfers SET status=?,version=version+1,result_json=?,updated_at=? WHERE id=?')->execute([$status,json_encode($result,JSON_THROW_ON_ERROR),$causalTime,$row['id']]);
             $row['status']=$status;$row['result_json']=json_encode($result,JSON_THROW_ON_ERROR);

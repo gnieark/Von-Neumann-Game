@@ -26,6 +26,10 @@ final class ProbeReinstantiationService
 {
     public const TERMINAL_REASON_BLACK_HOLE = 'black_hole_trap';
     public const TERMINAL_REASON_COLLISION = 'movement_collision';
+    public const TERMINAL_REASON_DUST = 'intersector_dust';
+    public const TERMINAL_REASON_MISSILE = 'missile_impact';
+    public const TERMINAL_REASON_LASER = 'laser_damage';
+    public const TERMINAL_REASON_ASTEROID = 'asteroid_impact';
 
     private readonly SectorGrid $grid;
 
@@ -56,6 +60,10 @@ final class ProbeReinstantiationService
 
         if (!in_array($terminalProbe->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true)) {
             throw new ProbeReinstantiationException('Mind snapshot reassignment is only available after probe destruction or black-hole entrapment.');
+        }
+
+        if (count($this->probes->findAllByPlayerId($player->id)) !== 1) {
+            throw new ProbeReinstantiationException('Mind snapshot reassignment to a new probe is only available after losing your only probe.');
         }
 
         $newHome = $this->preparedHomeSector();
@@ -137,7 +145,7 @@ final class ProbeReinstantiationService
                     $alertProbe->currentSector,
                     $terminalProbe->id,
                     $reason,
-                    $this->mindSnapshotTransferMessage($reason),
+                    $this->mindSnapshotTransferMessage($reason) . ' ' . $this->probeDestroyedMessage($player, $terminalProbe, $reason),
                 );
             } else {
                 $this->damageWarnings?->createProbeDestroyedAlert(
@@ -232,9 +240,15 @@ final class ProbeReinstantiationService
         $cause = match ($reason) {
             self::TERMINAL_REASON_BLACK_HOLE => 'black-hole entrapment beyond the escape threshold',
             self::TERMINAL_REASON_COLLISION => 'a high-velocity collision during intersector movement',
+            self::TERMINAL_REASON_DUST => 'intersector dust damage exhausting its remaining hull integrity',
+            self::TERMINAL_REASON_MISSILE => 'a missile impact',
+            self::TERMINAL_REASON_LASER => 'an Others laser',
+            self::TERMINAL_REASON_ASTEROID => 'a motorized asteroid impact',
             default => 'an unrecoverable terminal event',
         };
-        $movement = $this->latestMovementAttemptForProbe($terminalProbe->id);
+        $movement = in_array($reason, [self::TERMINAL_REASON_COLLISION, self::TERMINAL_REASON_DUST, self::TERMINAL_REASON_BLACK_HOLE], true)
+            ? $this->latestMovementAttemptForProbe($terminalProbe->id)
+            : null;
         $movementSummary = $movement !== null
             ? ' Attempted movement: from relative sector '
                 . $this->relativeSectorKey($movement['origin'], $player)
@@ -279,6 +293,18 @@ final class ProbeReinstantiationService
 
     private function deleteProbeData(int $probeId): void
     {
+        $this->execute(
+            "UPDATE missile_launches
+             SET status = 'failed', result = 'carrier_destroyed', scheduled_event_id = NULL, updated_at = :now
+             WHERE probe_id = :probe_id AND status IN ('preparing', 'queued')",
+            ['probe_id' => $probeId, 'now' => gmdate('c')],
+        );
+        // Preserve missile history and projectiles already in flight after their carrier is gone.
+        $this->execute(
+            'UPDATE missile_launches SET probe_id = NULL, manny_id = NULL, probe_item_id = NULL WHERE probe_id = :probe_id',
+            ['probe_id' => $probeId],
+        );
+        $this->execute('DELETE FROM probe_logbook_pages WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute('DELETE FROM visited_sectors WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
         $this->execute(
             'DELETE FROM scheduled_events

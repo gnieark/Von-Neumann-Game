@@ -147,6 +147,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/missiles/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->missileResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/probe/(\d+)/missiles$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->probeMissileCreateResponse($player, $probe, $ctx->body)), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/sector-objects/([^/]+)/inventory$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->sectorStorageInventoryResponse($probe, $ctx), $ctx->intParam(0), ['GET'])),
+            ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/transfer-deuterium-from-external-storage$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->sectorStorageTransferResponse($player, $probe, $ctx, true), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/storage-transfers$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->sectorStorageTransferResponse($player, $probe, $ctx), $ctx->intParam(0), ['POST'])),
             ApiRoute::regex('#^/api/probe/(\d+)/storage-transfers/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => new ApiResponse(200, ['transfer' => ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->get($probe, $ctx->stringParam(1))]), $ctx->intParam(0), ['GET'])),
             ApiRoute::regex('#^/api/probe/(\d+)/mannies/([^/]+)/ignite_missile$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedProbeRoute($ctx, fn(Player $player, NeumannProbe $probe): ApiResponse => $this->probeMannyMissileCreateResponse($player, $probe, $ctx->stringParam(1), $ctx->body), $ctx->intParam(0), ['POST'])),
@@ -722,7 +723,7 @@ final class ApiKernel
         return new ApiResponse(200, ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->inventory($probe,$ctx->stringParam(1),(int)$limit,$cursor));
     }
 
-    private function sectorStorageTransferResponse(Player $player, NeumannProbe $probe, ApiRouteContext $ctx): ApiResponse
+    private function sectorStorageTransferResponse(Player $player, NeumannProbe $probe, ApiRouteContext $ctx, bool $deuterium = false): ApiResponse
     {
         $decoded = json_decode($ctx->body ?? '');
         if (!$decoded instanceof \stdClass || (isset($decoded->resources) && !$decoded->resources instanceof \stdClass)) { return ApiResponse::error(400,'bad_request','A JSON object is required.'); }
@@ -730,8 +731,11 @@ final class ApiKernel
         if (!is_array($payload)) { return ApiResponse::error(400,'bad_request','Invalid JSON.'); }
         return ($this->probeCommands ?? throw new \RuntimeException('Probe command repository required.'))->execute(
             $player->id,$this->headerValue($ctx->headers,'Idempotency-Key'),$ctx->method,$ctx->path,hash('sha256',$this->canonicalJsonBody($ctx->body)),
-            function () use ($probe,$ctx,$payload): ApiResponse {
-                $created=($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->start($probe,$ctx->stringParam(1),$payload);
+            function () use ($probe,$ctx,$payload,$deuterium): ApiResponse {
+                $service=($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'));
+                $created = $deuterium
+                    ? $service->startDeuteriumFromExternalStorage($probe, $ctx->stringParam(1), $payload)
+                    : $service->start($probe, $ctx->stringParam(1), $payload);
                 return new ApiResponse(202,['transfer'=>$created['transfer'],'manny'=>$this->mannies->publicArray($probe,$created['manny'])]);
             },
         );

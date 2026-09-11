@@ -2262,7 +2262,10 @@
                 + "</section>";
         }
         if (manny.currentTask === "transferring_sector_storage") {
-            return `<section class="manny-task-panel"><h4>${escaped(tr("sectorStorageInProgress", "Transfert de contenu en cours"))}</h4><p>${escaped(tr("taskProgress", "Progression"))} ${progress}</p>${renderSectorStorageReport(payload.transferId)}</section>`;
+            const title = payload.tankTransfer
+                ? tr("externalDeuteriumInProgress", "Ravitaillement en deutérium en cours")
+                : tr("sectorStorageInProgress", "Transfert de contenu en cours");
+            return `<section class="manny-task-panel"><h4>${escaped(title)}</h4><p>${escaped(tr("taskProgress", "Progression"))} ${progress}</p>${renderSectorStorageReport(payload.transferId)}</section>`;
         }
         if (manny.currentTask === "preparing_missile") {
             return "<section class=\"manny-task-panel\">"
@@ -2650,6 +2653,71 @@
         </form>`;
     }
 
+    function externalDeuteriumTankCapacityEce() {
+        return Math.max(0, state.currentProbeMaxDeuterium - state.currentProbeDeuterium) / 100;
+    }
+
+    function renderExternalDeuteriumRefuelForm() {
+        const targets = sectorStorageTargets();
+        const options = targets.map((target) => `<option value="${escaped(target.id)}">${escaped(target.name || target.id)}</option>`).join("");
+        const capacity = externalDeuteriumTankCapacityEce();
+        const disabled = !targets.length || capacity <= 0;
+        return `<form class="manny-external-deuterium-form manny-form">
+            <label>${escaped(tr("externalStorage", "Stockage du secteur"))}<select name="objectId">${options}</select></label>
+            <p>${escaped(window.VNG.formatText(tr("externalDeuteriumTankState", "Réservoir : {current}/{maximum} points ; capacité restante : {capacity} ECE."), {
+                current: window.VNG.numberValue(state.currentProbeDeuterium),
+                maximum: window.VNG.numberValue(state.currentProbeMaxDeuterium),
+                capacity: window.VNG.numberValue(capacity),
+            }))}</p>
+            <button type="button" class="external-deuterium-load" ${disabled ? "disabled" : ""}>${escaped(tr("loadExternalDeuterium", "Afficher le deutérium disponible"))}</button>
+            <div class="external-deuterium-content" aria-live="polite">${capacity <= 0 ? escaped(tr("probeDeuteriumTankFull", "Le réservoir est plein.")) : ""}</div>
+            <button type="submit" disabled>${escaped(tr("startExternalDeuteriumTransfer", "Ravitailler le réservoir"))}</button>
+            <p>${escaped(tr("externalDeuteriumDuration", "Durée : 5 minutes aller et 5 minutes retour."))}</p>
+        </form>`;
+    }
+
+    function updateExternalDeuteriumPreview(form) {
+        if (!form) return;
+        const input = form.querySelector(".external-deuterium-amount");
+        const submit = form.querySelector('button[type="submit"]');
+        const preview = form.querySelector(".external-deuterium-preview");
+        if (!input || !submit || !preview) return;
+        const requested = Number(input.value);
+        const available = Number(form.dataset.externalDeuteriumAvailable || 0);
+        const capacity = externalDeuteriumTankCapacityEce();
+        const accepted = Number.isFinite(requested) && requested > 0 ? Math.min(requested, capacity) : 0;
+        const valid = accepted > 0 && accepted <= available;
+        submit.disabled = !valid;
+        preview.textContent = valid
+            ? window.VNG.formatText(tr("externalDeuteriumPreview", "Quantité retenue : {amount} ECE, soit {points} points de réservoir{clamped}."), {
+                amount: window.VNG.numberValue(accepted),
+                points: window.VNG.numberValue(accepted * 100),
+                clamped: requested > capacity ? tr("externalDeuteriumClamped", " (plafonnée à la capacité restante)") : "",
+            })
+            : tr("externalDeuteriumEnterAmount", "Indiquez une quantité disponible supérieure à zéro.");
+    }
+
+    async function loadExternalDeuteriumStock(form) {
+        const objectId = form.elements.objectId.value;
+        const signature = String(objectId || "");
+        form.dataset.externalDeuteriumSignature = signature;
+        const data = await window.VNG.apiJson(window.VNG.probeApiPath("/sector-objects/" + encodeURIComponent(objectId) + "/inventory"));
+        if (form.dataset.externalDeuteriumSignature !== signature || !form.isConnected) return;
+        const resources = data.resources || data.inventory?.resourceStocks || [];
+        const deuterium = resources.find((resource) => resource.type === "deuterium");
+        const available = Math.max(0, Number(deuterium && (deuterium.availableAmount ?? deuterium.amount)) || 0);
+        form.dataset.externalDeuteriumAvailable = String(available);
+        const content = form.querySelector(".external-deuterium-content");
+        if (available <= 0) {
+            content.textContent = tr("noExternalDeuterium", "Aucun deutérium brut disponible dans ce stockage.");
+            return;
+        }
+        content.innerHTML = `<label>${escaped(window.VNG.formatText(tr("externalDeuteriumAvailable", "Deutérium disponible : {amount} ECE"), {amount: window.VNG.numberValue(available)}))}
+            <input class="external-deuterium-amount" name="amount" type="number" min="0.0001" step="0.0001" required></label>
+            <p class="external-deuterium-preview"></p>`;
+        updateExternalDeuteriumPreview(form);
+    }
+
     async function loadSectorStorageContent(form, nextPage) {
         const direction = form.elements.direction.value;
         const objectId = form.elements.objectId.value;
@@ -2669,7 +2737,7 @@
         const resources = data.resources || data.inventory?.resourceStocks || [];
         const items = data.items || data.inventory?.items || [];
         if (kind === "resources" && !nextPage) {
-            content.innerHTML = resources.map((resource) => {
+            content.innerHTML = resources.filter((resource) => resource.type !== "deuterium").map((resource) => {
                 const available = Number(resource.availableAmount ?? resource.amount) || 0;
                 return `<label>${escaped(inventoryItemTypeLabel(resource.type, resource.type))} (${escaped(window.VNG.numberValue(available))} ECE)<input type="number" min="0" max="${available}" step="0.0001" value="0" data-storage-resource="${escaped(resource.type)}"></label>`;
             }).join("");
@@ -3333,6 +3401,7 @@
             {"id": "mine", "title": tr("miningActionTitle", "Mine the sector"), "render": renderMineForm},
             {"id": "salvage", "title": tr("salvageActionTitle", "Recover a drifting object"), "render": renderSalvageForm},
             ...(manny.location?.type === "probe" ? [{"id": "sector-storage", "title": tr("sectorStorageTransfer", "Transférer du contenu avec un stockage du secteur"), "render": renderSectorStorageTransferForm}] : []),
+            ...(manny.location?.type === "probe" ? [{"id": "external-deuterium", "title": tr("externalDeuteriumRefuel", "Ravitailler le réservoir depuis un stockage extérieur"), "render": renderExternalDeuteriumRefuelForm}] : []),
             {"id": "inspect-sector-object", "title": tr("inspectSectorObjectActionTitle", "Inspect a sector object"), "render": renderInspectSectorObjectForm},
             {"id": "bookmark", "title": tr("installBookmarkActionTitle", "Install a waypoint bookmark"), "render": renderBookmarkForm},
             {"id": "turn-on-relay", "title": tr("turnOnScutRelayActionTitle", "Activate a SCUT relay"), "render": renderTurnOnRelayForm},
@@ -4558,6 +4627,22 @@
             if (form.dataset.storageRequest !== body) { form.dataset.storageRequest = body; form.dataset.storageKey = crypto.randomUUID(); }
             return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/storage-transfers"), {method: "POST", headers: {"Idempotency-Key": form.dataset.storageKey}, body});
         }
+        if (form.classList.contains("manny-external-deuterium-form")) {
+            const payload = {objectId: String(formData.get("objectId") || ""), amount: Number(formData.get("amount"))};
+            const accepted = Math.min(payload.amount, externalDeuteriumTankCapacityEce());
+            if (!payload.objectId || !Number.isFinite(payload.amount) || payload.amount <= 0 || accepted <= 0 || accepted > Number(form.dataset.externalDeuteriumAvailable || 0)) {
+                setStatus(tr("invalidExternalDeuteriumOrder", "Quantité de deutérium invalide."));
+                return null;
+            }
+            const body = JSON.stringify(payload);
+            if (form.dataset.externalDeuteriumRequest !== body) {
+                form.dataset.externalDeuteriumRequest = body;
+                form.dataset.externalDeuteriumKey = crypto.randomUUID();
+            }
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/transfer-deuterium-from-external-storage"), {
+                method: "POST", headers: {"Idempotency-Key": form.dataset.externalDeuteriumKey}, body,
+            });
+        }
         if (form.classList.contains("manny-inspect-sector-object-form")) {
             const targetSelect = form.querySelector(".manny-inspect-sector-object-target");
             if (!targetSelect || !targetSelect.value) {
@@ -4889,6 +4974,13 @@
                 delete storageForm.dataset.storageCursor;
                 storageForm.querySelector(".sector-storage-content").replaceChildren();
             }
+            const deuteriumForm = event.target.closest(".manny-external-deuterium-form");
+            if (deuteriumForm && event.target.tagName === "SELECT") {
+                delete deuteriumForm.dataset.externalDeuteriumSignature;
+                delete deuteriumForm.dataset.externalDeuteriumAvailable;
+                deuteriumForm.querySelector(".external-deuterium-content").replaceChildren();
+                deuteriumForm.querySelector('button[type="submit"]').disabled = true;
+            }
             if (event.target.classList.contains("manny-mine-target")) {
                 updateMannyResourceOptions(event.target.closest(".manny-mine-form"));
             }
@@ -4936,6 +5028,9 @@
         });
 
         mannyList.addEventListener("input", (event) => {
+            if (event.target.classList.contains("external-deuterium-amount")) {
+                updateExternalDeuteriumPreview(event.target.closest(".manny-external-deuterium-form"));
+            }
             if (event.target.classList.contains("manny-transfer-deuterium-amount")) {
                 updateDeuteriumTransferForms();
             }
@@ -4957,7 +5052,11 @@
                         if (content.itemIds?.length) parts.push(escaped(tr("items", "Objets")) + ": " + escaped(content.itemIds.length));
                         return `<tr><th>${escaped(label)}</th><td>${parts.join(", ") || "—"}</td></tr>`;
                     }).join("");
-                    reportButton.parentElement.querySelector(".sector-storage-report-result").innerHTML = `<p>${escaped(({queued: tr("storageQueued", "Transfert en cours"), succeeded: tr("storageSucceeded", "Transfert terminé"), failed: tr("storageFailed", "Transfert interrompu"), canceled: tr("storageCanceled", "Transfert annulé")})[transfer.status] || transfer.status)}</p><table><tbody>${rows}</tbody></table>`;
+                    const tankPoints = Number(transfer.result?.deliveredTankPoints);
+                    const tankSummary = Number.isFinite(tankPoints)
+                        ? `<p>${escaped(window.VNG.formatText(tr("externalDeuteriumDelivered", "Réservoir crédité de {points} points."), {points: window.VNG.numberValue(tankPoints)}))}</p>`
+                        : "";
+                    reportButton.parentElement.querySelector(".sector-storage-report-result").innerHTML = `<p>${escaped(({queued: tr("storageQueued", "Transfert en cours"), succeeded: tr("storageSucceeded", "Transfert terminé"), failed: tr("storageFailed", "Transfert interrompu"), canceled: tr("storageCanceled", "Transfert annulé")})[transfer.status] || transfer.status)}</p>${tankSummary}<table><tbody>${rows}</tbody></table>`;
                 } catch (error) { setStatus(error.message || tr("storageUnavailable", "Le stockage est indisponible.")); }
                 finally { reportButton.disabled = false; }
                 return;
@@ -4968,6 +5067,14 @@
                 try { await loadSectorStorageContent(storageButton.closest("form"), storageButton.classList.contains("sector-storage-next")); }
                 catch (error) { setStatus(error.message || tr("storageUnavailable", "Le stockage est indisponible.")); }
                 finally { storageButton.disabled = false; }
+                return;
+            }
+            const deuteriumButton = event.target.closest(".external-deuterium-load");
+            if (deuteriumButton) {
+                deuteriumButton.disabled = true;
+                try { await loadExternalDeuteriumStock(deuteriumButton.closest("form")); }
+                catch (error) { setStatus(error.message || tr("storageUnavailable", "Le stockage est indisponible.")); }
+                finally { deuteriumButton.disabled = false; }
                 return;
             }
             const craftingRecipesRetryButton = event.target.closest(".manny-crafting-recipes-retry");

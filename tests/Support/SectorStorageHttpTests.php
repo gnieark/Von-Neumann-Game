@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // This scenario uses the API suite's complete router and isolated database.
-(static function () use ($test,$pdo,$players,$probes,$auth,$others,$kernel,$sectorRepository,$germinationDepots,$storageTransfers,$storage,$mannies,$mannyStorageTransfers): void {
+(static function () use ($test,$pdo,$players,$probes,$auth,$others,$kernel,$sectorRepository,$germinationDepots,$storageTransfers,$storage,$mannies,$mannyStorageTransfers,$mannyService): void {
     $coordinates=new \VonNeumannGame\Sector\SectorCoordinates(315,7,-8);
     $sectorRepository->save(new \VonNeumannGame\Sector\SectorContent($coordinates));
     $player=$players->createPlayer('storage-http-owner','Storage HTTP owner',null,$coordinates);
@@ -45,6 +45,28 @@ declare(strict_types=1);
     $test->assertEquals(200,$kernel->handle('GET',$probeInventoryPath,$headers)->status,'personal discovery enables generic inventory route');
     $manny=$mannies->createForProbe($probe->id,'Storage HTTP Manny');$storage->initializeProbeStorage($probe);
     $path='/api/probe/'.$probe->id.'/mannies/'.$manny->uid.'/storage-transfers';
+    $beforeTransferCount = (int) $pdo->query('SELECT COUNT(*) FROM sector_storage_transfers')->fetchColumn();
+    $beforeReservations = $pdo->query('SELECT * FROM sector_storage_resource_reservations ORDER BY transfer_id, inventory_kind, inventory_id, resource_type')->fetchAll(PDO::FETCH_ASSOC);
+    $beforeInventory = $kernel->handle('GET', $probeInventoryPath, $headers)->body;
+    $beforeCapacityReservations = $pdo->query('SELECT * FROM sector_storage_capacity_reservations ORDER BY transfer_id, inventory_kind, inventory_id')->fetchAll(PDO::FETCH_ASSOC);
+    $beforeTank = $probes->findById($probe->id)->deuteriumStock;
+    foreach (['to_storage', 'from_storage'] as $direction) {
+        foreach ([['deuterium' => 0.01], ['metals' => 0.05, 'deuterium' => 0.01], ['metals' => 0.05, 'deuterium' => 0]] as $resources) {
+            $rejected = $kernel->handle('POST', $path, $headers, json_encode([
+                'objectId' => $depot['public_id'], 'direction' => $direction, 'containerId' => 'probe-core',
+                'kind' => 'resources', 'resources' => $resources,
+            ], JSON_THROW_ON_ERROR));
+            $test->assertEquals(400, $rejected->status, 'Manny storage transfer rejects deuterium in ' . $direction);
+            $test->assertEquals('bad_request', $rejected->body['error']['code'] ?? null, 'deuterium exclusion returns a payload error');
+            $test->assert(str_contains($rejected->body['error']['message'] ?? '', 'Deuterium'), 'deuterium exclusion explains which resource is unsupported');
+        }
+    }
+    $test->assertEquals($beforeTransferCount, (int) $pdo->query('SELECT COUNT(*) FROM sector_storage_transfers')->fetchColumn(), 'rejected deuterium transfers create no durable transfer');
+    $test->assertEquals($beforeReservations, $pdo->query('SELECT * FROM sector_storage_resource_reservations ORDER BY transfer_id, inventory_kind, inventory_id, resource_type')->fetchAll(PDO::FETCH_ASSOC), 'rejected deuterium transfers reserve no resources');
+    $test->assertEquals($beforeCapacityReservations, $pdo->query('SELECT * FROM sector_storage_capacity_reservations ORDER BY transfer_id, inventory_kind, inventory_id')->fetchAll(PDO::FETCH_ASSOC), 'rejected deuterium transfers reserve no container capacity');
+    $test->assertEquals($beforeInventory, $kernel->handle('GET', $probeInventoryPath, $headers)->body, 'rejected mixed transfers leave sector stocks unchanged');
+    $test->assertEquals($beforeTank, $probes->findById($probe->id)->deuteriumStock, 'rejected deuterium transfers do not change the tank');
+    $test->assertEquals(null, $mannies->findById($manny->id)->currentTask, 'rejected deuterium transfers leave the Manny idle');
     $body=json_encode(['objectId'=>$depot['public_id'],'direction'=>'from_storage','containerId'=>'probe-core','kind'=>'resources','resources'=>['metals'=>0.05]]);
     $transferHeaders=$headers+['Idempotency-Key'=>'storage-http-manny'];
     $created=$kernel->handle('POST',$path,$transferHeaders,$body);
@@ -56,6 +78,7 @@ declare(strict_types=1);
     $lookup='/api/probe/'.$probe->id.'/storage-transfers/'.$transfer['id'];
     $test->assertEquals('succeeded',$kernel->handle('GET',$lookup,$headers)->body['transfer']['status']??null,'durable transfer result remains available after settlement');
     $test->assertEquals(0.05,$storage->resourceStock($probe,'metals'),'HTTP scenario conserves the resource quantity');
+    require __DIR__ . '/ExternalDeuteriumTransferTests.php';
     $test->assertEquals(400,$kernel->handle('GET',$probeInventoryPath.'?limit=501',$headers)->status,'inventory bounds its page size');
     $test->assertEquals(400,$kernel->handle('GET',$probeInventoryPath.'?cursor=invalid',$headers)->status,'inventory rejects malformed cursors');
 }) ();

@@ -206,15 +206,17 @@ use VonNeumannGame\Service\Storage\TransferLoadPlanner;
     $test->assert($rejected,'stale sector writer cannot erase a committed effect');
     $db->prepare('INSERT INTO germination_depot_resources(depot_id,resource_type,amount,reserved_amount) VALUES(?,?,?,0)')->execute([$depot['id'],'deuterium',0.1]);
     $initialTank=$probe->deuteriumStock;
-    $fuelCargo=$mannyTransfers->start($probe,$manny->uid,['objectId'=>$depot['public_id'],'direction'=>'from_storage','containerId'=>'probe-core','kind'=>'resources','resources'=>['deuterium'=>0.1]]);
-    $handler->refresh($mannyService,$mannies->findByUid($manny->uid),$probe,new DateTimeImmutable($fuelCargo['transfer']['endsAt']));
-    $test->assertEquals($initialTank,$probes->findById($probe->id)->deuteriumStock,'deuterium withdrawal does not implicitly fill the probe tank');
-    $coreInventory=$storage->containerInventory($probe,'probe-core');
-    $fuelRows=array_values(array_filter($coreInventory['inventory']['resourceStocks'],static fn(array $r):bool=>$r['type']==='deuterium'));
-    $test->assertEquals(0.1,$fuelRows[0]['amount'],'literal deuterium cargo is visible in its fixed container');
-    $fuelDeposit=$mannyTransfers->start($probe,$manny->uid,['objectId'=>$depot['public_id'],'direction'=>'to_storage','containerId'=>'probe-core','kind'=>'resources','resources'=>['deuterium'=>0.1]]);
-    $handler->refresh($mannyService,$mannies->findByUid($manny->uid),$probe,new DateTimeImmutable($fuelDeposit['transfer']['endsAt']));
-    $test->assertEquals($initialTank,$probes->findById($probe->id)->deuteriumStock,'deuterium deposit leaves the probe tank unchanged');
+    $fuelRejected = false;
+    try {
+        $mannyTransfers->start($probe, $manny->uid, ['objectId'=>$depot['public_id'], 'direction'=>'from_storage', 'containerId'=>'probe-core', 'kind'=>'resources', 'resources'=>['deuterium'=>0.1]]);
+    } catch (\VonNeumannGame\Service\MannyActionException $error) {
+        $fuelRejected = $error->httpStatus === 400 && $error->errorCode === 'bad_request';
+    }
+    $test->assert($fuelRejected, 'Manny storage transfer rejects deuterium even when the depot has enough stock');
+    $test->assertEquals($initialTank, $probes->findById($probe->id)->deuteriumStock, 'rejected deuterium withdrawal leaves the probe tank unchanged');
+    $fuelInventory = $mannyTransfers->inventory($probe, $depot['public_id']);
+    $fuelRows = array_values(array_filter($fuelInventory['resources'], static fn(array $r): bool => $r['type'] === 'deuterium'));
+    $test->assertEquals(0.1, $fuelRows[0]['availableAmount'] ?? null, 'deuterium remains visible and unreserved in the depot inventory');
     $now=new DateTimeImmutable('now',new DateTimeZone('UTC'));
     $recallTransfer=$mannyTransfers->start($probe,$manny->uid,['objectId'=>$depot['public_id'],'direction'=>'from_storage','containerId'=>'probe-core','kind'=>'resources','resources'=>['metals'=>0.01]]);
     $mannyService->recallManny($probe,$manny->uid);

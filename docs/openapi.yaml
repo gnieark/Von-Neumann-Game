@@ -92,6 +92,86 @@ paths:
       description: Available for drifting containers, personally known containers hidden on asteroids, and other storage
         objects whose access this probe has discovered. Items are individually selectable; the container shell is
         excluded. Access is revalidated on every page. No absolute coordinates are returned.
+  /api/probe/{probeId}/mannies/{mannyId}/transfer-deuterium-from-external-storage:
+    post:
+      tags: [mannies]
+      summary: Transfer raw deuterium from external storage into the probe tank
+      description: >
+        Retrieves deuterium stored as raw material in accessible external storage in the current sector,
+        and fills the selected probe's deuterium tank directly. Requires an idle embarked Manny and a stationary probe.
+        amount is expressed in ECE: 0.01 ECE adds 1 tank point (100 points per ECE), regardless of tank model or compression.
+        The task always takes 600 seconds: five minutes outbound and five minutes returning, in a single trip
+        regardless of the quantity. The tank is credited only at completion.
+        Requests exceeding the remaining unreserved tank capacity are accepted with 202 and reduced to that capacity,
+        rounded down to 0.0001 ECE. transfer.tankTransfer reports requestedAmountEce, acceptedAmountEce,
+        tankPoints and clamped. Only the accepted amount must be available at the source.
+        A full or fully reserved tank returns 409 probe_deuterium_full; insufficient source stock returns 422.
+        Raw stock and incoming tank capacity are reserved atomically. No onboard cargo capacity is required.
+        Capacity is checked again on return: any amount that no longer fits is released back to source stock,
+        without loss. The final result includes deliveredTankPoints and delivered, released and lost resources in ECE.
+        Cancellation, probe departure or source relocation releases reservations. If the Manny is destroyed,
+        only deuterium carried on the return leg is lost; the outbound leg carries no deuterium.
+        Idempotency-Key is account-wide and binds method, path and canonical JSON. Matching retries return
+        the original response even after completion. The transfer can be followed with
+        GET /api/probe/{probeId}/storage-transfers/{transferId}.
+      parameters:
+      - name: probeId
+        in: path
+        required: true
+        schema: {type: integer, minimum: 1}
+      - name: mannyId
+        in: path
+        required: true
+        schema: {type: string, minLength: 1}
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[!-~]+$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [objectId, amount]
+              properties:
+                objectId:
+                  type: string
+                  minLength: 1
+                  description: Opaque identifier of accessible external storage in the current sector.
+                amount:
+                  type: number
+                  minimum: 0
+                  exclusiveMinimum: true
+                  multipleOf: 0.0001
+                  description: Requested quantity of raw deuterium in ECE, before tank capacity clamping.
+            example: {objectId: external-storage-id, amount: 0.25}
+      responses:
+        '202':
+          description: Ten-minute transfer accepted, possibly clamped to remaining tank capacity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transfer, manny]
+                properties:
+                  transfer:
+                    $ref: '#/components/schemas/SectorStorageTransfer'
+                  manny:
+                    type: object
+        '400':
+          description: Invalid object, quantity, unknown field or malformed payload
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Probe, Manny or accessible external storage not found
+        '409':
+          description: Probe or Manny busy, probe_deuterium_full, reserved storage or idempotency_key_conflict
+        '422':
+          description: Insufficient unreserved raw deuterium or selected probe out of reach
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
   /api/probe/{probeId}/mannies/{mannyId}/storage-transfers:
     post:
       tags: [mannies]
@@ -130,7 +210,7 @@ paths:
                   manny:
                     type: object
         '400':
-          description: Invalid payload, quantity, identifier or cursor
+          description: Invalid payload, quantity or identifier; deuterium is not accepted
         '401':
           description: Authentication required
         '403':
@@ -174,7 +254,7 @@ paths:
                     enum:
                     - resources
                   resources:
-                    $ref: '#/components/schemas/SectorStorageResources'
+                    $ref: '#/components/schemas/MannyStorageTransferResources'
               - type: object
                 additionalProperties: false
                 required:
@@ -209,8 +289,9 @@ paths:
                     minItems: 1
       description: Requires an idle embarked Manny and a stationary probe. containerId fixes the onboard source or
         destination. Resources use the configured Manny cargo and round-trip duration; items use whole-object salvage
-        transport. Source contents and destination capacity are reserved until terminal settlement. Deuterium remains
-        cargo in ECE, with no automatic tank conversion. Idempotency keys are account-wide and bind method, path and
+        transport. Source contents and destination capacity are reserved until terminal settlement. Only metals, ice and carbon_compounds are accepted as resources, in ECE.
+        Any resources object containing deuterium is rejected with 400 bad_request in either direction, including
+        mixed-resource requests and zero quantities, before any stock or capacity reservation. Idempotency keys are account-wide and bind method, path and
         canonical JSON. Replaying a matching key returns the original response even after completion.
   /api/probe/{probeId}/storage-transfers/{transferId}:
     get:
@@ -3510,7 +3591,14 @@ paths:
       tags: [default probe]
       summary: Reassign a terminal probe mind snapshot
       description: >
-        Available only when the current probe is dead or trapped by a black hole.
+        Available only when the player's only probe is dead or trapped by a black hole.
+        When another operational probe survives a terminal loss (collision, dust,
+        missile, laser, asteroid or black hole), the lost probe is deleted.
+        If it was the default, the nearest surviving owned probe becomes the default,
+        regardless of SCUT coverage, and receives a mind_snapshot_transferred alert
+        identifying the lost probe and cause. Otherwise the current default receives
+        a probe_destroyed alert. Exploration and the player reference frame are preserved.
+        Reassignment to a fresh chassis is rejected with 409 while multiple probes remain.
         Deletes the terminal probe state, assigns the player's last stable mind
         snapshot to a fresh probe chassis, resets the player's local reference
         frame, and marks the new origin as 0,0,0.
@@ -6083,6 +6171,18 @@ components:
           exclusiveMinimum: true
           minimum: 0
           multipleOf: 0.0001
+    MannyStorageTransferResources:
+      type: object
+      description: Resources accepted by Manny storage transfers, in ECE. Deuterium is excluded.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        metals:
+          $ref: '#/components/schemas/SectorStorageResources/properties/metals'
+        ice:
+          $ref: '#/components/schemas/SectorStorageResources/properties/ice'
+        carbon_compounds:
+          $ref: '#/components/schemas/SectorStorageResources/properties/carbon_compounds'
     SectorStorageInventory:
       type: object
       required:
@@ -6163,6 +6263,10 @@ components:
       - lost
       - released
       properties:
+        deliveredTankPoints:
+          type: number
+          minimum: 0
+          description: Present for raw deuterium transfers into a probe tank; actual tank points credited.
         outcome:
           type: string
           minLength: 1
@@ -6244,12 +6348,23 @@ components:
           minLength: 1
         containerId:
           type: string
+          nullable: true
+          description: Null when the destination is the probe deuterium tank.
           minLength: 1
         direction:
           type: string
           enum:
           - to_storage
           - from_storage
+        tankTransfer:
+          type: object
+          description: Present when raw deuterium is transferred directly into the probe tank.
+          required: [requestedAmountEce, acceptedAmountEce, tankPoints, clamped]
+          properties:
+            requestedAmountEce: {type: number, minimum: 0, description: Requested raw deuterium in ECE.}
+            acceptedAmountEce: {type: number, minimum: 0, description: Reserved raw deuterium after capacity clamping.}
+            tankPoints: {type: number, minimum: 0, description: Expected credit at 100 tank points per ECE.}
+            clamped: {type: boolean, description: True when the accepted quantity is below the requested quantity.}
         resources:
           type: object
           additionalProperties:
@@ -7853,7 +7968,7 @@ components:
             reason:
               type: string
               nullable: true
-              enum: [black_hole_trap, movement_collision]
+              enum: [black_hole_trap, movement_collision, intersector_dust, missile_impact, laser_damage, asteroid_impact]
         destroyedProbe:
           type: object
           description: Present for `probe_destroyed` alerts.
@@ -7866,7 +7981,7 @@ components:
             reason:
               type: string
               nullable: true
-              enum: [black_hole_trap, movement_collision]
+              enum: [black_hole_trap, movement_collision, intersector_dust, missile_impact, laser_damage, asteroid_impact]
         blueprintShare:
           type: object
           description: Present for `blueprint_shared` alerts.

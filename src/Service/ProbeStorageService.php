@@ -1870,7 +1870,7 @@ final class ProbeStorageService
         return array_replace($manny->cargoArray(), ['capacity' => $this->mannyCargoCapacity()]);
     }
 
-    private function maxDeuteriumPercent(?NeumannProbe $probe = null): float
+    public function maxDeuteriumPercent(?NeumannProbe $probe = null): float
     {
         $max = ProbeModel::baseMaxDeuteriumPercent(
             $probe?->model ?? ProbeModel::GENERIC,
