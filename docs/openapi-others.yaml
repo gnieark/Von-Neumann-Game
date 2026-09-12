@@ -41,11 +41,10 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [action]
                 properties:
                   action:
-                    type: object
-                    description: Existing durable Others action, with id, status, dates, result and optional transfer
-                      projection.
+                    $ref: '#/components/schemas/OthersDepotConstructionAction'
         '400':
           description: Invalid payload, quantity, identifier or cursor
         '401':
@@ -102,11 +101,10 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [action]
                 properties:
                   action:
-                    type: object
-                    description: Existing durable Others action, with id, status, dates, result and optional transfer
-                      projection.
+                    $ref: '#/components/schemas/OthersDepotDepositAction'
         '400':
           description: Invalid payload, quantity, identifier or cursor
         '401':
@@ -207,11 +205,10 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [action]
                 properties:
                   action:
-                    type: object
-                    description: Existing durable Others action, with id, status, dates, result and optional transfer
-                      projection.
+                    $ref: '#/components/schemas/OthersDepotWithdrawalAction'
         '400':
           description: Invalid payload, quantity, identifier or cursor
         '401':
@@ -941,7 +938,11 @@ paths:
         HTTP 200. For type deuterium_transfer, action follows
         OthersDeuteriumTransferAction: endsAt is the scheduled completion,
         result.amount is present on success, and error describes a failure
-        when available. Read this endpoint to track progress; replaying an
+        when available. Depot construction follows OthersDepotConstructionAction;
+        depot_deposit and depot_withdrawal follow OthersDepotTransferAction, including
+        the reserved transfer manifest and terminal delivered/lost/released content.
+        result and completedAt are omitted until settlement; error is optional.
+        Read this endpoint to track progress; replaying an
         idempotent POST returns the originally stored response.
       responses:
         '200':
@@ -953,11 +954,7 @@ paths:
                 required: [action]
                 properties:
                   action:
-                    type: object
-                    description: >-
-                      Action fields depend on type. For deuterium_transfer,
-                      see OthersDeuteriumTransferAction.
-                    additionalProperties: true
+                    $ref: '#/components/schemas/OthersAction'
         '401':
           "$ref": "#/components/responses/Unauthorized"
         '403':
@@ -1125,6 +1122,260 @@ components:
               targetId:
                 type: string
   schemas:
+    OthersAction:
+      description: >-
+        Current action returned by the shared action lookup. Depot and deuterium
+        actions have typed contracts; other action families keep their own fields.
+      oneOf:
+      - $ref: '#/components/schemas/OthersDepotConstructionAction'
+      - $ref: '#/components/schemas/OthersDepotTransferAction'
+      - $ref: '#/components/schemas/OthersDeuteriumTransferAction'
+      - type: object
+        required: [id, type, status, actor, createdAt, updatedAt]
+        properties:
+          type:
+            type: string
+            not:
+              enum: [build_germination_depot, depot_deposit, depot_withdrawal, deuterium_transfer]
+        additionalProperties: true
+    OthersDepotActionBase:
+      type: object
+      required: [id, type, status, actor, createdAt, updatedAt, endsAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: Opaque action id retained after the auxiliary disappears.
+        type:
+          type: string
+          enum: [build_germination_depot, depot_deposit, depot_withdrawal]
+        status:
+          type: string
+          enum: [queued, succeeded, failed, canceled]
+          description: >-
+            queued until terminal settlement; succeeded on completion, canceled
+            on carrier departure/destruction, failed on auxiliary destruction.
+            Completion already due at interruption takes precedence.
+        actor:
+          type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [others_auxiliary]
+            id:
+              type: string
+              minLength: 1
+              description: Original public auxiliary id, also retained after dormancy or destruction.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+          description: Scheduled deadline; retained even when interrupted earlier.
+        completedAt:
+          type: string
+          format: date-time
+          description: Present after terminal settlement; omitted while queued.
+        error:
+          allOf:
+          - $ref: '#/components/schemas/OthersError'
+          description: Present only when an error was recorded. An interruption can have a result without error.
+    OthersDepotConstructionAction:
+      allOf:
+      - $ref: '#/components/schemas/OthersDepotActionBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum: [build_germination_depot]
+          result:
+            $ref: '#/components/schemas/OthersDepotConstructionResult'
+      description: >-
+        Construction takes 1800 seconds and reserves 2 ECE of metals. No transfer
+        projection is returned. result is omitted while queued; success returns
+        result.depotId. An interruption consumes the reserved 2 ECE without creating a depot.
+    OthersDepotConstructionResult:
+      oneOf:
+      - type: object
+        required: [outcome, depotId]
+        additionalProperties: false
+        properties:
+          outcome:
+            type: string
+            enum: [built]
+          depotId:
+            type: string
+            minLength: 1
+            description: Opaque public id of the newly constructed shared depot.
+      - type: object
+        required: [outcome, lost, dormantAuxiliaryId]
+        additionalProperties: false
+        properties:
+          outcome:
+            type: string
+            enum: [carrier_departure, carrier_destroyed]
+          lost:
+            $ref: '#/components/schemas/OthersDepotConstructionLoss'
+          dormantAuxiliaryId:
+            type: string
+            minLength: 1
+            description: Public sector-object id of the intact auxiliary left dormant.
+      - type: object
+        required: [outcome, lost]
+        additionalProperties: false
+        properties:
+          outcome:
+            type: string
+            enum: [auxiliary_destroyed]
+          lost:
+            $ref: '#/components/schemas/OthersDepotConstructionLoss'
+    OthersDepotConstructionLoss:
+      type: object
+      required: [resources, itemIds]
+      additionalProperties: false
+      properties:
+        resources:
+          type: object
+          required: [metals]
+          additionalProperties: false
+          properties:
+            metals:
+              type: number
+              enum: [2]
+              description: ECE of construction materials lost once.
+        itemIds:
+          type: array
+          maxItems: 0
+          items:
+            type: string
+    OthersDepotTransferAction:
+      allOf:
+      - $ref: '#/components/schemas/OthersDepotActionBase'
+      - type: object
+        required: [transfer]
+        properties:
+          type:
+            type: string
+            enum: [depot_deposit, depot_withdrawal]
+          transfer:
+            $ref: '#/components/schemas/OthersDepotTransfer'
+          result:
+            $ref: '#/components/schemas/OthersDepotTransferResult'
+      description: >-
+        The transfer projection remains available after settlement and restart.
+        result is omitted while queued and records terminal accounting once completed.
+    OthersDepotDepositAction:
+      allOf:
+      - $ref: '#/components/schemas/OthersDepotTransferAction'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum: [depot_deposit]
+    OthersDepotWithdrawalAction:
+      allOf:
+      - $ref: '#/components/schemas/OthersDepotTransferAction'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum: [depot_withdrawal]
+    OthersDepotTransfer:
+      type: object
+      required: [depotId, resources, itemIds, capacityEce, roundTrips, durationSeconds]
+      additionalProperties: false
+      properties:
+        depotId:
+          type: string
+          minLength: 1
+        resources:
+          $ref: '#/components/schemas/OthersDepotResourceAmounts'
+        itemIds:
+          $ref: '#/components/schemas/OthersDepotItemIds'
+        capacityEce:
+          type: number
+          enum: [2]
+        roundTrips:
+          type: integer
+          minimum: 1
+          description: Number of actual indivisible loads; not just total volume divided by capacity.
+        durationSeconds:
+          type: integer
+          minimum: 600
+          multipleOf: 600
+          description: roundTrips multiplied by 600 seconds (300 outbound and 300 returning).
+    OthersDepotResourceAmounts:
+      type: object
+      additionalProperties: false
+      description: >-
+        Quantities in ECE, including deuterium cargo. Empty content is {} rather
+        than []; zero quantities are omitted. No propulsion-tank conversion occurs.
+      properties:
+        deuterium:
+          $ref: '#/components/schemas/SectorStorageResources/properties/deuterium'
+        metals:
+          $ref: '#/components/schemas/SectorStorageResources/properties/metals'
+        ice:
+          $ref: '#/components/schemas/SectorStorageResources/properties/ice'
+        carbon_compounds:
+          $ref: '#/components/schemas/SectorStorageResources/properties/carbon_compounds'
+    OthersDepotItemIds:
+      type: array
+      uniqueItems: true
+      maxItems: 500
+      items:
+        type: string
+        minLength: 1
+      description: Individual public item identities; [] when there are no items.
+    OthersDepotContent:
+      type: object
+      required: [resources, itemIds]
+      additionalProperties: false
+      properties:
+        resources:
+          $ref: '#/components/schemas/OthersDepotResourceAmounts'
+        itemIds:
+          $ref: '#/components/schemas/OthersDepotItemIds'
+    OthersDepotTransferResult:
+      type: object
+      required: [outcome, delivered, lost, released]
+      additionalProperties: false
+      properties:
+        outcome:
+          type: string
+          enum: [delivered, carrier_departure, carrier_destroyed, auxiliary_destroyed]
+        delivered:
+          allOf:
+          - $ref: '#/components/schemas/OthersDepotContent'
+          description: >-
+            Content credited to destination. Includes the whole outgoing deposit
+            on carrier departure/destruction; interrupted withdrawals deliver nothing.
+        lost:
+          allOf:
+          - $ref: '#/components/schemas/OthersDepotContent'
+          description: >-
+            Only the virtual load carried when the auxiliary was destroyed. An
+            empty leg loses nothing; earlier virtual trips are not credited separately.
+        released:
+          allOf:
+          - $ref: '#/components/schemas/OthersDepotContent'
+          description: Content left at its source and unreserved, without crediting it again.
+        dormantAuxiliaryId:
+          type: string
+          minLength: 1
+          description: >-
+            Present on carrier_departure or carrier_destroyed; public sector-object
+            id of the intact dormant auxiliary. Absent on success or auxiliary destruction.
+      example:
+        outcome: auxiliary_destroyed
+        delivered: {resources: {}, itemIds: []}
+        lost: {resources: {metals: 2}, itemIds: []}
+        released: {resources: {metals: 3}, itemIds: []}
     SectorStorageResources:
       type: object
       additionalProperties: false

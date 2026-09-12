@@ -913,6 +913,36 @@ $test->assert(is_array($openApiDocument) && $additionalFunctionalTagsAreComplete
 $openApiOthersDocument = is_string($openApiOthers) ? yaml_parse($openApiOthers) : false;
 $test->assert(is_array($openApiOthersDocument) && isset($openApiOthersDocument['openapi'], $openApiOthersDocument['info'], $openApiOthersDocument['paths'], $openApiOthersDocument['components']), 'Others OpenAPI document is a valid standalone YAML contract');
 $test->assert(is_array($openApiOthersDocument) && !isset($openApiOthersDocument['paths']['/api/probe/{probeId}/missiles']), 'Others OpenAPI document only contains Others endpoints');
+$test->assert(
+    in_array('transferring_sector_storage', $openApiDocument['components']['schemas']['Manny']['properties']['currentTask']['enum'] ?? [], true),
+    'OpenAPI Manny task enum accepts sector storage transfers',
+);
+foreach (['storage-transfers', 'transfer-deuterium-from-external-storage'] as $task) {
+    $schema = $openApiDocument['paths']['/api/probe/{probeId}/mannies/{mannyId}/' . $task]['post']['responses']['202']['content']['application/json']['schema'] ?? [];
+    $test->assertEquals(['transfer', 'manny'], $schema['required'] ?? null, $task . ' response requires its transfer and Manny');
+    $test->assertEquals('#/components/schemas/Manny', $schema['properties']['manny']['$ref'] ?? null, $task . ' response validates the canonical Manny schema');
+}
+$depotActionContracts = [
+    'build-germination-depot' => ['OthersDepotConstructionAction', 'build_germination_depot'],
+    'depot-deposits' => ['OthersDepotDepositAction', 'depot_deposit'],
+    'depot-withdrawals' => ['OthersDepotWithdrawalAction', 'depot_withdrawal'],
+];
+foreach ($depotActionContracts as $task => [$schemaName, $actionType]) {
+    $schema = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/' . $task]['post']['responses']['202']['content']['application/json']['schema'] ?? [];
+    $test->assertEquals(['action'], $schema['required'] ?? null, $task . ' response requires its action');
+    $test->assertEquals('#/components/schemas/' . $schemaName, $schema['properties']['action']['$ref'] ?? null, $task . ' response references its typed action');
+    $test->assertEquals([$actionType], $openApiOthersDocument['components']['schemas'][$schemaName]['allOf'][1]['properties']['type']['enum'] ?? null, $task . ' schema describes its exact action type');
+}
+$test->assertEquals(
+    '#/components/schemas/OthersAction',
+    $openApiOthersDocument['paths']['/api/others/actions/{actionId}']['get']['responses']['200']['content']['application/json']['schema']['properties']['action']['$ref'] ?? null,
+    'Others action lookup exposes the typed action union',
+);
+$test->assertEquals(
+    ['outcome', 'delivered', 'lost', 'released'],
+    $openApiOthersDocument['components']['schemas']['OthersDepotTransferResult']['required'] ?? null,
+    'Others depot result requires all three terminal accounting categories',
+);
 $test->assert(!is_file($root . '/docs/openapi-others.json'), 'legacy Others JSON OpenAPI document is removed');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
 $othersServiceSource = file_get_contents($root . '/src/Service/OthersService.php');

@@ -159,7 +159,7 @@ paths:
                   transfer:
                     $ref: '#/components/schemas/SectorStorageTransfer'
                   manny:
-                    type: object
+                    $ref: '#/components/schemas/Manny'
         '400':
           description: Invalid object, quantity, unknown field or malformed payload
         '401':
@@ -204,11 +204,12 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [transfer, manny]
                 properties:
                   transfer:
                     $ref: '#/components/schemas/SectorStorageTransfer'
                   manny:
-                    type: object
+                    $ref: '#/components/schemas/Manny'
         '400':
           description: Invalid payload, quantity or identifier; deuterium is not accepted
         '401':
@@ -8631,7 +8632,7 @@ components:
         currentTask:
           type: string
           nullable: true
-          enum: [repair, mining, motorizing_asteroid, refueling_motorized_asteroid, sculpting_duck_asteroid, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, unknown_too_far]
+          enum: [repair, mining, motorizing_asteroid, refueling_motorized_asteroid, sculpting_duck_asteroid, crafting, assisting_atomic_printer, salvage, installing_waypoint_bookmark, detaching_storage_container, dropping_storage_container, inspecting_sector_object, inspecting_asteroid, refilling_deuterium_tank, transferring_deuterium_to_probe, transferring_to_probe, turning_on_scut_relay, installing_scut_transit_beacon, improving_probe, assembling_probe, returning, waiting_for_space, moving_stockage, transferring_sector_storage, unknown_too_far]
         taskProgressPercent:
           type: number
           minimum: 0

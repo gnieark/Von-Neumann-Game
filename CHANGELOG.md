@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-12
+
+### Fixed
+
+- Documentation OpenAPI des dépôts Others : schémas des actions de construction, dépôt et retrait, du manifeste et des résultats livrés/perdus/libérés, également référencés par le GET de suivi. Les réponses de transfert Manny utilisent le schéma `Manny`, dont les tâches incluent désormais `transferring_sector_storage`.
+
 ## 2026-09-11
 
 ### Changed
