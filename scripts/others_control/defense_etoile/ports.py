@@ -26,6 +26,15 @@ class OthersApi(Protocol):
 
     def get_crafts(self, ship_id: str) -> list[dict[str, Any]]: ...
 
+    def start_repair(
+        self, ship_id: str, auxiliary_id: str, integrity_points: int, operation_key: str,
+    ) -> dict[str, Any]: ...
+
+    def start_inventory_resource_transfer(
+        self, source_ship_id: str, target_ship_id: str, actor_auxiliary_id: str,
+        resource_type: str, amount: float, operation_key: str,
+    ) -> dict[str, Any]: ...
+
     def start_deuterium_transfer(
         self,
         source_ship_id: str,

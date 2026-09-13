@@ -57,6 +57,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Délai maximal d'une requête HTTP (défaut : 10)",
     )
     parser.add_argument(
+        "--repair-metals-per-integrity-point", type=float, default=0.01,
+        help="ECE de métaux par point réparé, à aligner sur la configuration Manny du serveur (défaut : 0.01)",
+    )
+    parser.add_argument(
         "--request-interval-seconds", type=float, default=1.0,
         help="Intervalle minimal entre appels HTTP (défaut : 1 seconde)",
     )
@@ -86,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        if not isfinite(arguments.repair_metals_per_integrity_point) or arguments.repair_metals_per_integrity_point < 0:
+            raise ConfigurationError("Le coût de réparation doit être fini et positif ou nul.")
         configuration = load_config(arguments.config)
         controller = DefenseEtoileAttente(
             HttpOthersApi(
@@ -97,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             mothership_id=arguments.mothership_id,
             fleet_id=arguments.fleet_id,
+            repair_metals_per_point=arguments.repair_metals_per_integrity_point,
             logger=timestamped_logger,
         )
     except ConfigurationError as error:

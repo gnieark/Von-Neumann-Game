@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- Contrôle Others « défense étoile — attente » : réparation automatique des vaisseaux par un auxiliaire embarqué, livraison du complément de métaux depuis le vaisseau mère aux vaisseaux endommagés présents dans son secteur, et relève des sentinelles endommagées par un vaisseau intact armé. Les réparations précèdent la production, les actions en cours évitent les doublons après redémarrage et les vaisseaux endommagés restent au centre jusqu’à leur remise en état.
 - `POST /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/repair` : réparation du vaisseau par un auxiliaire libre embarqué, avec `integrityPercent` exprimé en points entiers. Coût et durée reprennent la configuration Manny (par défaut 0,01 ECE de métaux et 600 secondes par point), avec plafonnement à l’intégrité manquante, débit immédiat et restauration différée. L’action expose le devis et le résultat, accepte une clé d’idempotence et se suit via `GET /api/others/actions/{actionId}`.
 
 ## 2026-09-12

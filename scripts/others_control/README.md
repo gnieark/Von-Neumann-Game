@@ -110,6 +110,33 @@ Une seule munition respecte toujours l'ordre de priorité indiqué. Les missiles
 déjà lancés par les Others sont ignorés et les alertes d'impact ne provoquent
 aucune action supplémentaire.
 
+À chaque réconciliation générale, les réparations passent avant la distribution
+des missiles, le ravitaillement et la production, y compris pendant une alerte
+de défense centrale. Chaque vaisseau endommagé disposant des métaux nécessaires
+affecte un seul auxiliaire libre embarqué à la réparation de toute son intégrité
+manquante, en appelant `POST /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/repair`.
+Cela vaut aussi pour une sentinelle qui possède déjà son propre stock de métaux.
+Les réparations `auxiliary_repair` en cours sont relues depuis les auxiliaires
+à chaque cycle : un redémarrage ne lance pas une seconde réparation. Leur
+échéance participe au réveil du contrôleur.
+
+Le vaisseau mère fournit aux vaisseaux endommagés présents dans son secteur,
+sans mouvement engagé, le complément exact de métaux encore nécessaire.
+Chaque livraison utilise un auxiliaire libre du vaisseau mère et un transfert
+d'inventaire de ressource `metals`. Les métaux réservés sont exclus des stocks
+disponibles, et la capacité libre du destinataire est vérifiée. La réparation
+du vaisseau mère est prioritaire sur ces livraisons. Si le stock ou les
+auxiliaires manquent, l'opération est reportée ; aucune livraison partielle
+n'est lancée. Tout transfert d'inventaire encore actif sur les auxiliaires du
+vaisseau mère suspend les nouvelles livraisons de métaux, y compris après
+redémarrage. Après réception, le destinataire lance sa réparation au cycle suivant.
+
+Le calcul des besoins utilise **0,01 ECE de métaux par point d'intégrité**.
+Si le serveur utilise un autre coût Manny, indiquez la même valeur avec
+`--repair-metals-per-integrity-point` ; la durée reste déterminée par le serveur.
+Les vaisseaux endommagés présents auprès du vaisseau mère restent au centre
+jusqu'à leur réparation complète avant de pouvoir repartir en sentinelle.
+
 En parallèle de cette formation, le vaisseau mère entretient sa logistique :
 
 - les crafts abordables sont lancés avant la moisson, avec priorité aux
@@ -179,13 +206,17 @@ Pendant cette attente, la défense, la formation, la distribution de missiles,
 les crafts et la moisson poursuivent leurs propres cycles avec les auxiliaires
 disponibles.
 
-Une sentinelle voisine sans missile est relevée lorsqu'un vaisseau armé et
-disponible se trouve auprès du vaisseau mère. Le remplaçant part en premier ; la
-sentinelle vide ne reçoit son ordre de retour qu'après acceptation de ce
+Une sentinelle voisine sans missile **ou endommagée** est relevée lorsqu'un
+vaisseau **intact**, armé et disponible se trouve auprès du vaisseau mère.
+Le remplaçant part en premier ; la
+sentinelle ne reçoit son ordre de retour qu'après acceptation de ce
 déplacement, afin de ne pas dégarnir le secteur sur un premier échec. Une
 sentinelle engagée tactiquement n'est pas relevée. Comme les transferts
 d'inventaire exigent la présence des deux vaisseaux dans le même secteur, les
-sentinelles voisines sont réarmées exclusivement par cette rotation.
+sentinelles voisines sont réarmées et approvisionnées en métaux par cette rotation.
+Si le retour est temporairement impossible, le remplaçant intact armé conserve
+le poste à son arrivée et le vaisseau endommagé est rappelé. Un remplaçant déjà
+en route empêche un second départ de relève vers le même secteur.
 
 Les observations passent par `GET /api/others/sector`, avec le vaisseau mère
 comme désignateur de flotte. La précision du scan et l'historique de visite

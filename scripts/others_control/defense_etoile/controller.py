@@ -20,6 +20,7 @@ from .models import CycleResult, DefensePolicy
 from .observation import ScoutObserver
 from .ports import OthersApi
 from .refueling import FleetRefuelingCoordinator
+from .repairs import FleetRepairCoordinator
 
 
 class DefenseEtoileAttente:
@@ -33,6 +34,7 @@ class DefenseEtoileAttente:
         now: Callable[[], datetime] | None = None,
         policy: DefensePolicy | None = None,
         logistics_policy: LogisticsPolicy | None = None,
+        repair_metals_per_point: float = 0.01,
     ) -> None:
         if (mothership_id is None) == (fleet_id is None):
             raise ConfigurationError(
@@ -75,6 +77,7 @@ class DefenseEtoileAttente:
         )
         self.armament = FleetArmamentCoordinator(api, logger=logger)
         self.refueling = FleetRefuelingCoordinator(api, logger=logger)
+        self.repairs = FleetRepairCoordinator(api, logger=logger, metals_per_point=repair_metals_per_point)
         self.logistics = MothershipLogistics(
             api,
             logger=logger,
@@ -174,6 +177,7 @@ class DefenseEtoileAttente:
         sector = require_mapping(fleet_mothership.get("sector"), "mothership.sector")
         center = parse_coordinates(sector.get("relative"), "mothership.sector.relative")
         self.central_defense.configure(fleet_mothership, center)
+        self.repairs.reconcile(fleet_mothership, ships, result)
         if self.central_defense.reconcile(result, ships=ships):
             return result
 

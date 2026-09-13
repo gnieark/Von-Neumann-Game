@@ -11,6 +11,11 @@ from scripts.others_control.defense_etoile.models import CycleResult
 
 
 class CliTests(unittest.TestCase):
+    def test_repair_cost_option_rejects_negative_and_non_finite_values(self) -> None:
+        for value in ("-1", "nan", "inf"):
+            with self.subTest(value=value), redirect_stderr(StringIO()):
+                self.assertEqual(2, main(["--fleet-id", "fleet_test", "--repair-metals-per-integrity-point", value]))
+
     def test_cli_accepts_exactly_one_identifier_kind(self) -> None:
         parser = build_argument_parser()
 
@@ -46,9 +51,10 @@ class CliTests(unittest.TestCase):
             calls.append("cycle") or CycleResult()
         )
 
-        exit_code = main(["--fleet-id", "fleet_test", "--once"])
+        exit_code = main(["--fleet-id", "fleet_test", "--once", "--repair-metals-per-integrity-point", "0.02"])
 
         self.assertEqual(0, exit_code)
+        self.assertEqual(.02, controller_class.call_args.kwargs["repair_metals_per_point"])
         self.assertEqual(["summary", "cycle"], calls)
         self.assertEqual([call()], controller.log_fleet_summary.call_args_list)
         http_api.assert_called_once_with(

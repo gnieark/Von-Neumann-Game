@@ -20,6 +20,58 @@ from scripts.others_control.tests.support import (
 
 
 class FormationTests(unittest.TestCase):
+    def test_damaged_armed_guard_is_relieved_by_intact_armed_home_ship(self) -> None:
+        center = (0, 0, 0)
+        target = NEIGHBOR_OFFSETS[0]
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"), ship("guard", target, integrity=19), ship("replacement", center)],
+            inventories={"guard": [missile_item("g1"), missile_item("g2")], "replacement": [missile_item("r1")]},
+        )
+        DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None).run_cycle()
+        self.assertEqual([("replacement", target), ("guard", center)], api.moves)
+
+    def test_damaged_guard_stays_without_an_intact_armed_replacement(self) -> None:
+        for integrity, missiles in [(19, [missile_item("r1")]), (20, [])]:
+            with self.subTest(integrity=integrity, missiles=missiles):
+                api = FakeApi(
+                    [ship("mother", (0, 0, 0), ship_type="mothership"), ship("guard", NEIGHBOR_OFFSETS[0], integrity=18),
+                     ship("replacement", (0, 0, 0), integrity=integrity)],
+                    inventories={"guard": [missile_item("g1")], "replacement": missiles},
+                )
+                DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None).run_cycle()
+                self.assertNotIn(("guard", (0, 0, 0)), api.moves)
+                self.assertNotIn(("replacement", NEIGHBOR_OFFSETS[0]), api.moves)
+
+    def test_healthy_armed_ship_keeps_post_when_damaged_guard_recall_was_delayed(self) -> None:
+        target = NEIGHBOR_OFFSETS[0]
+        api = FakeApi(
+            [ship("mother", (0, 0, 0), ship_type="mothership"), ship("guard", target, integrity=19), ship("replacement", target)],
+            inventories={"guard": [missile_item("g1"), missile_item("g2")], "replacement": [missile_item("r1")]},
+        )
+        DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None).run_cycle()
+        self.assertEqual([("guard", (0, 0, 0))], api.moves)
+
+    def test_failed_replacement_departure_keeps_damaged_guard_in_place(self) -> None:
+        target = NEIGHBOR_OFFSETS[0]
+        api = FakeApi(
+            [ship("mother", (0, 0, 0), ship_type="mothership"), ship("guard", target, integrity=19), ship("replacement", (0, 0, 0))],
+            inventories={"guard": [missile_item("g1")], "replacement": [missile_item("r1")]},
+            move_errors={"replacement": ApiRequestError(422, "insufficient_fuel", "No fuel")},
+        )
+        DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None).run_cycle()
+        self.assertEqual([], api.moves)
+
+    def test_inbound_replacement_prevents_a_second_relief_departure(self) -> None:
+        target = NEIGHBOR_OFFSETS[0]
+        api = FakeApi(
+            [ship("mother", (0, 0, 0), ship_type="mothership"), ship("guard", target, integrity=19),
+             ship("inbound", None, movement=movement(target)), ship("replacement", (0, 0, 0))],
+            inventories={"guard": [missile_item("g1")], "replacement": [missile_item("r1")]},
+        )
+        DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None).run_cycle()
+        self.assertNotIn(("replacement", target), api.moves)
+        self.assertNotIn(("guard", (0, 0, 0)), api.moves)
+
     def test_reconciles_occupancy_transit_black_holes_surplus_and_recall(self) -> None:
         center = (0, 0, 0)
         neighbors = [add_coordinates(center, offset) for offset in NEIGHBOR_OFFSETS]

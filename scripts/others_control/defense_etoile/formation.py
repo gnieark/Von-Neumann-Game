@@ -17,6 +17,7 @@ from .geometry import (
 )
 from .hazards import SectorKnowledge
 from .models import Coordinates, CycleResult, DefensePolicy
+from .repairs import missing_integrity
 
 
 class FormationCoordinator:
@@ -90,7 +91,7 @@ class FormationCoordinator:
                 continue
             if coordinates == center:
                 self.engagement.clear_completed_return(ship_id)
-                if is_movable(ship):
+                if is_movable(ship) and missing_integrity(ship) == 0:
                     home_candidates.append(ship)
                 continue
             if coordinates in neighbor_set:
@@ -106,6 +107,7 @@ class FormationCoordinator:
                 ships_in_sector,
                 key=lambda ship: (
                     is_movable(ship),
+                    not (missing_integrity(ship) == 0 and missile_counts.get(str(ship.get("id", "")), 0) > 0),
                     -missile_counts.get(str(ship.get("id", "")), 0),
                     str(ship.get("id", "")),
                 ),
@@ -162,7 +164,7 @@ class FormationCoordinator:
                 continue
             guard_id = require_string(guard.get("id"), "guard ship.id")
             if (
-                missile_counts.get(guard_id, 0) != 0
+                (missile_counts.get(guard_id, 0) != 0 and missing_integrity(guard) == 0)
                 or guard_id in tactically_committed
                 or not is_movable(guard)
             ):

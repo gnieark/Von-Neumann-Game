@@ -22,12 +22,15 @@ def ship(
     deuterium: float = 20.0,
     auxiliary_count: int = 0,
     deployed_auxiliary_count: int = 0,
+    integrity: int | None = None,
 ) -> dict[str, Any]:
     return {
         "id": ship_id,
         "fleetId": "fleet_test",
         "type": ship_type,
         "status": status,
+        "integrity": integrity if integrity is not None else (100 if ship_type == "mothership" else 20),
+        "maxIntegrity": 100 if ship_type == "mothership" else 20,
         "location": {"state": "transit" if coordinates is None else "in_sector"},
         "sector": None if coordinates is None else sector(coordinates),
         "movement": movement,
@@ -119,6 +122,9 @@ class FakeApi:
         self.inventories = inventories or {}
         self.auxiliaries = auxiliaries or {}
         self.resources = resources or {}
+        self.resource_reservations: dict[str, dict[str, float]] = {}
+        self.repair_starts: list[tuple[str, str, int]] = []
+        self.resource_transfers: list[tuple[str, str, str, str, float]] = []
         self.crafts = crafts or {}
         self.move_errors = move_errors or {}
         self.active_actions = list(active_actions or [])
@@ -175,7 +181,7 @@ class FakeApi:
         resources = {
             resource_type: {
                 "amount": float(amounts.get(resource_type, 0.0)),
-                "reserved": 0.0,
+                "reserved": self.resource_reservations.get(ship_id, {}).get(resource_type, 0.0),
             }
             for resource_type in ("metals", "ice", "carbon_compounds", "deuterium")
         }
@@ -265,6 +271,36 @@ class FakeApi:
                 item["status"] = "busy"
                 item["action"] = action
                 break
+        return action
+
+    def start_repair(
+        self, ship_id: str, auxiliary_id: str, integrity_points: int, operation_key: str,
+    ) -> dict[str, Any]:
+        self.repair_starts.append((ship_id, auxiliary_id, integrity_points))
+        self.resources.setdefault(ship_id, {})["metals"] = round(
+            self.resources.get(ship_id, {}).get("metals", 0) - integrity_points * 0.01, 4,
+        )
+        action = {"id": f"repair-{len(self.repair_starts)}", "type": "auxiliary_repair",
+                  "status": "queued", "endsAt": "2099-01-01T00:00:00+00:00"}
+        actor = next(aux for aux in self.auxiliaries[ship_id] if aux["id"] == auxiliary_id)
+        actor.update(status="busy", action=action)
+        self.active_actions.append(action)
+        self.actions[action["id"]] = action
+        return action
+
+    def start_inventory_resource_transfer(
+        self, source_ship_id: str, target_ship_id: str, actor_auxiliary_id: str,
+        resource_type: str, amount: float, operation_key: str,
+    ) -> dict[str, Any]:
+        self.resource_transfers.append((source_ship_id, target_ship_id, actor_auxiliary_id, resource_type, amount))
+        reservations = self.resource_reservations.setdefault(source_ship_id, {})
+        reservations[resource_type] = reservations.get(resource_type, 0) + amount
+        action = {"id": f"resource-{len(self.resource_transfers)}", "type": "inventory_transfer",
+                  "status": "queued", "endsAt": "2099-01-01T00:00:00+00:00"}
+        actor = next(aux for aux in self.auxiliaries[source_ship_id] if aux["id"] == actor_auxiliary_id)
+        actor.update(status="busy", action=action)
+        self.active_actions.append(action)
+        self.actions[action["id"]] = action
         return action
 
     def start_inventory_item_transfer(

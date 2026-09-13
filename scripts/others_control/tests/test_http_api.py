@@ -25,6 +25,33 @@ class FakeResponse:
 
 
 class HttpApiTests(unittest.TestCase):
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_repair_uses_canonical_route_payload_and_stable_retry_key(self, send: Mock) -> None:
+        send.side_effect = [self.rate_limit(), FakeResponse({"action": {"id": "repair"}})]
+        api = HttpOthersApi("http://localhost", "token", 10, logger=lambda _: None)
+        self.assertEqual({"id": "repair"}, api.start_repair("ship/a", "aux/b", 3, "cycle"))
+        first, retry = [call.args[0] for call in send.call_args_list]
+        self.assertIs(first, retry)
+        self.assertEqual("http://localhost/api/others/ships/ship%2Fa/auxiliaries/aux%2Fb/repair", first.full_url)
+        self.assertEqual({"integrityPercent": 3}, json.loads(first.data))
+        self.assertIsNotNone(first.get_header("Idempotency-key"))
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_resource_transfer_sends_metals_to_the_target_inventory(self, send: Mock) -> None:
+        send.return_value = FakeResponse({"action": {"id": "supply"}})
+        api = HttpOthersApi("http://localhost", "token", 10)
+        action = api.start_inventory_resource_transfer("mother/a", "guard", "aux", "metals", .03, "wave")
+        self.assertEqual({"id": "supply"}, action)
+        request = send.call_args.args[0]
+        self.assertEqual("http://localhost/api/others/ships/mother%2Fa/inventory-transfers", request.full_url)
+        self.assertEqual({"actorAuxiliaryId": "aux", "targetShipId": "guard", "kind": "resource",
+                          "resourceType": "metals", "amount": .03}, json.loads(request.data))
+        first_key = request.get_header("Idempotency-key")
+        api.start_inventory_resource_transfer("mother/a", "guard", "aux", "metals", .03, "wave")
+        self.assertEqual(first_key, send.call_args.args[0].get_header("Idempotency-key"))
+        api.start_inventory_resource_transfer("mother/a", "guard", "aux", "metals", .03, "next-wave")
+        self.assertNotEqual(first_key, send.call_args.args[0].get_header("Idempotency-key"))
+
     def setUp(self) -> None:
         clock = [100.0]
         def advance(delay: float) -> None:

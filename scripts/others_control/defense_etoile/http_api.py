@@ -152,6 +152,35 @@ class HttpOthersApi:
         )
         return require_mapping(body.get("action"), "action")
 
+    def start_repair(
+        self, ship_id: str, auxiliary_id: str, integrity_points: int, operation_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(ship_id, safe='')}/auxiliaries/{quote(auxiliary_id, safe='')}/repair",
+            payload={"integrityPercent": integrity_points},
+            idempotency_key=command_idempotency_key(
+                "defense-repair", ship_id, auxiliary_id, str(integrity_points), operation_key,
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
+
+    def start_inventory_resource_transfer(
+        self, source_ship_id: str, target_ship_id: str, actor_auxiliary_id: str,
+        resource_type: str, amount: float, operation_key: str,
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"/api/others/ships/{quote(source_ship_id, safe='')}/inventory-transfers",
+            payload={"actorAuxiliaryId": actor_auxiliary_id, "targetShipId": target_ship_id,
+                     "kind": "resource", "resourceType": resource_type, "amount": amount},
+            idempotency_key=command_idempotency_key(
+                "defense-resource-transfer", source_ship_id, target_ship_id,
+                actor_auxiliary_id, resource_type, str(amount), operation_key,
+            ),
+        )
+        return require_mapping(body.get("action"), "action")
+
     def start_inventory_item_transfer(
         self,
         source_ship_id: str,
