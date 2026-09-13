@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-13
+
+### Added
+
+- `POST /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/repair` : réparation du vaisseau par un auxiliaire libre embarqué, avec `integrityPercent` exprimé en points entiers. Coût et durée reprennent la configuration Manny (par défaut 0,01 ECE de métaux et 600 secondes par point), avec plafonnement à l’intégrité manquante, débit immédiat et restauration différée. L’action expose le devis et le résultat, accepte une clé d’idempotence et se suit via `GET /api/others/actions/{actionId}`.
+
 ## 2026-09-12
 
 ### Fixed

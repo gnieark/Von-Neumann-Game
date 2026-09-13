@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
+use VonNeumannGame\Database\StorageTransaction;
+use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Domain\ScheduledEvent;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Repository\OthersRepository;
@@ -394,6 +396,7 @@ final class OthersService
     public function startAuxiliaryTask(array $ship, array $auxiliary, string $task, array $payload): array
     {
         return match ($task) {
+            'repair' => $this->startAuxiliaryRepair($ship, $auxiliary, $payload),
             'depot-deposits' => $this->storageTransferService()->startOthers($ship, $auxiliary, 'to_storage', $payload),
             'depot-withdrawals' => $this->storageTransferService()->startOthers($ship, $auxiliary, 'from_storage', $payload),
             'build-germination-depot' => $this->depotService()->build($ship, $auxiliary, $payload),
@@ -546,6 +549,75 @@ final class OthersService
         return $this->reserveAuxiliaryAction($ship, $auxiliary, 'auxiliary_mine', ['objectId' => $objectId, 'amount' => $amount, 'profile' => $profile], $endsAt, deployed: true, objectId: $objectId);
     }
 
+    private function startAuxiliaryRepair(array $ship, array $auxiliary, array $payload): array
+    {
+        $percent = $payload['integrityPercent'] ?? null;
+        if (array_diff(array_keys($payload), ['integrityPercent']) !== [] || !is_numeric($percent)
+            || !is_finite((float) $percent) || (float) $percent <= 0 || floor((float) $percent) !== (float) $percent) {
+            throw new OthersActionException(400, 'bad_request', 'integrityPercent must be a positive whole number of integrity points.');
+        }
+        $transaction = new StorageTransaction($this->others->pdo());
+        return $transaction->run(function () use ($transaction, $ship, $auxiliary, $percent): array {
+            $current = $transaction->lock('ship', (int) $ship['id']);
+            if ($current === null || $current['destroyed_at'] !== null || $current['status'] === 'removed') {
+                throw new OthersActionException(404, 'others_ship_not_found', 'Others ship not found.');
+            }
+            $actor = $transaction->lock('auxiliary', (int) $auxiliary['id']);
+            if ($actor === null || $actor['destroyed_at'] !== null || (int) $actor['ship_id'] !== (int) $current['id']) {
+                throw new OthersActionException(404, 'others_auxiliary_not_found', 'Others auxiliary not found.');
+            }
+            if ($actor['current_action_id'] !== null || !in_array($actor['status'], ['inactive', 'available'], true)) {
+                throw new OthersActionException(409, 'others_auxiliary_busy', 'The auxiliary is already executing an order.');
+            }
+            if ($actor['location_type'] !== 'embarked') {
+                throw new OthersActionException(409, 'others_auxiliary_not_embarked', 'The auxiliary must be embarked to repair its ship.');
+            }
+            $missing = max(0, (int) $current['max_integrity'] - (int) $current['integrity']);
+            if ($missing === 0) {
+                throw new OthersActionException(409, 'others_ship_integrity_full', 'The ship integrity is already full.');
+            }
+            $points = (int) min((float) $percent, $missing);
+            $seconds = max(1, Config::int($this->gameplayConfig, 'manny.actions.repairSecondsPerIntegrityPercent', RepairTaskHandler::REPAIR_SECONDS_PER_INTEGRITY_PERCENT));
+            $metalsCost = round($points * max(0.0, Config::float($this->gameplayConfig, 'manny.actions.repairMetalsPerIntegrityPercent', RepairTaskHandler::REPAIR_METALS_PER_INTEGRITY_PERCENT)), 4);
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            if ($metalsCost > 0) {
+                $consume = $this->others->pdo()->prepare("UPDATE others_inventory_resources SET amount = amount - CAST(:cost AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = 'metals' AND amount - reserved_amount >= CAST(:cost AS DECIMAL(20,4))");
+                $consume->execute(['cost' => $metalsCost, 'now' => $now->format('c'), 'ship_id' => (int) $current['id']]);
+                if ($consume->rowCount() !== 1) {
+                    throw new OthersActionException(422, 'insufficient_metals', 'Insufficient available metals in ship inventory for this repair.');
+                }
+            }
+            return $this->reserveAuxiliaryAction($ship, $actor, 'auxiliary_repair', ['integrityPercent' => $points, 'metalsCost' => $metalsCost], $now->modify('+' . ($points * $seconds) . ' seconds'));
+        });
+    }
+
+    private function completeAuxiliaryRepair(int $actionId, string $runAt): void
+    {
+        $pdo = $this->others->pdo();
+        $transaction = new StorageTransaction($pdo);
+        $transaction->run(function () use ($transaction, $pdo, $actionId, $runAt): void {
+            $query = $pdo->prepare('SELECT ship_id, auxiliary_id FROM others_actions WHERE id = ?');
+            $query->execute([$actionId]);
+            $ids = $query->fetch();
+            if (!$ids) { return; }
+            $ship = $transaction->lock('ship', (int) $ids['ship_id']);
+            $actor = $ids['auxiliary_id'] === null ? null : $transaction->lock('auxiliary', (int) $ids['auxiliary_id']);
+            $action = $transaction->lock('action', $actionId);
+            if ($action === null || $action['status'] !== 'queued' || new \DateTimeImmutable($runAt) < new \DateTimeImmutable($action['ends_at'])) { return; }
+            if ($ship === null || $ship['destroyed_at'] !== null || $ship['status'] === 'removed'
+                || $actor === null || $actor['destroyed_at'] !== null || (int) $actor['current_action_id'] !== $actionId) {
+                $this->failAuxiliaryAction($action, gmdate('c'), 'repair_unavailable');
+                return;
+            }
+            $payload = json_decode($action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+            $restored = min((int) $payload['integrityPercent'], max(0, (int) $ship['max_integrity'] - (int) $ship['integrity']));
+            $now = gmdate('c');
+            $pdo->prepare('UPDATE others_ships SET integrity = integrity + :restored, updated_at = :now WHERE id = :id')->execute(['restored' => $restored, 'now' => $now, 'id' => (int) $ship['id']]);
+            $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $actor['id'], 'action_id' => $actionId]);
+            $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id")->execute(['result' => json_encode(['outcome' => 'repaired', 'integrityPercent' => $restored, 'integrity' => (int) $ship['integrity'] + $restored], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => $actionId]);
+        });
+    }
+
     private function startAuxiliaryRecall(array $ship, array $auxiliary, array $payload): array
     {
         if ($payload !== []) { throw new OthersActionException(400, 'bad_request', 'Recall accepts an empty JSON object.'); }
@@ -589,6 +661,10 @@ final class OthersService
         $check = $this->others->pdo()->prepare('SELECT type FROM others_actions WHERE id=?');
         $check->execute([$event->entityId]);
         $storageActionType = $check->fetchColumn();
+        if ($storageActionType === 'auxiliary_repair') {
+            $this->completeAuxiliaryRepair($event->entityId, $event->runAt);
+            return;
+        }
         if (in_array($storageActionType, ['depot_deposit', 'depot_withdrawal'], true)) {
             $this->storageTransferService()->completeOthers($event->entityId, $event->runAt);
             return;

@@ -628,6 +628,88 @@ paths:
       responses:
         '202':
           "$ref": "#/components/responses/Accepted"
+  "/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/repair":
+    parameters:
+    - $ref: '#/components/parameters/ShipId'
+    - $ref: '#/components/parameters/AuxiliaryId'
+    post:
+      tags: [Others]
+      summary: Repair a ship with an embarked auxiliary
+      description: >-
+        Requires an owned active ship and a free embarked auxiliary belonging to it.
+        integrityPercent counts whole integrity points, including on standard ships
+        whose maximum is 20 (mothership maximum is 100). The requested amount is
+        capped at missing integrity. Duration and metals use the same configuration
+        as Manny repair: manny.actions.repairSecondsPerIntegrityPercent (default
+        600 seconds per point) and manny.actions.repairMetalsPerIntegrityPercent
+        (default 0.01 ECE per point). Available ship inventory metals are consumed
+        immediately; reserved metals cannot be spent. The auxiliary remains busy
+        until scheduled completion, which restores integrity up to max_integrity
+        and releases the auxiliary. Other repairs may run concurrently; completion
+        reports the points actually restored, without refunding an overlapping repair.
+        An embarked repair continues during carrier movement. Ship destruction
+        fails the action with carrier_destroyed without restoring integrity. Poll
+        GET /api/others/actions/{actionId} for completion. The task is also available
+        as repair through the atomic auxiliary task batch endpoint.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [integrityPercent]
+              properties:
+                integrityPercent:
+                  description: Positive whole integrity points; numeric strings are also accepted.
+                  oneOf:
+                  - type: integer
+                    minimum: 1
+                  - type: string
+                    description: A finite numeric string representing a positive integer.
+            example:
+              integrityPercent: 2
+      responses:
+        '202':
+          description: Repair queued, metals consumed and auxiliary busy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersRepairResponse'
+        '400':
+          description: bad_request — invalid JSON object, unknown fields or invalid integrityPercent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: others_ship_not_found or others_auxiliary_not_found — missing, inaccessible or destroyed actor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '409':
+          description: others_auxiliary_busy, others_auxiliary_not_embarked, others_ship_integrity_full, action_conflict or idempotency_key_conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '422':
+          description: insufficient_metals — insufficient unreserved metals in ship inventory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/OthersUnavailable'
   "/api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/transfer-deuterium":
     parameters:
     - "$ref": "#/components/parameters/ShipId"
@@ -1124,20 +1206,94 @@ components:
   schemas:
     OthersAction:
       description: >-
-        Current action returned by the shared action lookup. Depot and deuterium
+        Current action returned by the shared action lookup. Repair, depot and deuterium
         actions have typed contracts; other action families keep their own fields.
       oneOf:
       - $ref: '#/components/schemas/OthersDepotConstructionAction'
       - $ref: '#/components/schemas/OthersDepotTransferAction'
       - $ref: '#/components/schemas/OthersDeuteriumTransferAction'
+      - $ref: '#/components/schemas/OthersRepairAction'
       - type: object
         required: [id, type, status, actor, createdAt, updatedAt]
         properties:
           type:
             type: string
             not:
-              enum: [build_germination_depot, depot_deposit, depot_withdrawal, deuterium_transfer]
+              enum: [build_germination_depot, depot_deposit, depot_withdrawal, deuterium_transfer, auxiliary_repair]
         additionalProperties: true
+    OthersRepairResponse:
+      type: object
+      required: [action]
+      properties:
+        action:
+          $ref: '#/components/schemas/OthersRepairAction'
+    OthersRepairAction:
+      type: object
+      required: [id, type, status, actor, repair, createdAt, updatedAt, endsAt]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [auxiliary_repair]
+        status:
+          type: string
+          enum: [queued, succeeded, failed, canceled]
+        actor:
+          type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [others_auxiliary]
+            id:
+              type: string
+        repair:
+          type: object
+          required: [integrityPercent, metalsCost]
+          properties:
+            integrityPercent:
+              type: integer
+              minimum: 1
+              description: Planned whole integrity points after clamping to missing integrity.
+            metalsCost:
+              type: number
+              minimum: 0
+              description: Metals consumed at acceptance, in ECE, rounded to four decimals.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        result:
+          type: object
+          required: [outcome, integrityPercent, integrity]
+          properties:
+            outcome:
+              type: string
+              enum: [repaired]
+            integrityPercent:
+              type: integer
+              minimum: 0
+              description: Actual restored points, capped at missing integrity at completion.
+            integrity:
+              type: integer
+              description: Ship integrity after completion.
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
     OthersDepotActionBase:
       type: object
       required: [id, type, status, actor, createdAt, updatedAt, endsAt]

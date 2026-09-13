@@ -157,7 +157,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/crafts/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCraftResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/harvest$#', ['POST', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $ctx->method === 'POST' ? $this->othersHarvestCreateResponse($player, $ctx->stringParam(0), $ctx->body) : $this->othersHarvestCancelResponse($player, $ctx->stringParam(0))))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/tasks$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryBatchResponse($player, $ctx->stringParam(0), $ctx->body)))),
-            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/(mine|recall|recover-dormant-auxiliary|build-germination-depot|depot-deposits|depot-withdrawals)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryTaskResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->stringParam(2), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/(repair|mine|recall|recover-dormant-auxiliary|build-germination-depot|depot-deposits|depot-withdrawals)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryTaskResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->stringParam(2), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory-transfers$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersInventoryTransferCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/inventory-transfers/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersInventoryTransferResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/transfer-deuterium$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersDeuteriumTransferResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->body)))),
@@ -617,7 +617,7 @@ final class ApiKernel
 
     private function othersAuxiliaryTaskResponse(Player $player, string $shipId, string $auxiliaryId, string $task, ?string $body): ApiResponse
     {
-        if (in_array($task,['build-germination-depot','depot-deposits','depot-withdrawals'],true)) {
+        if (in_array($task,['repair','build-germination-depot','depot-deposits','depot-withdrawals'],true)) {
             $decoded=json_decode($body ?? '');
             if (!$decoded instanceof \stdClass || (isset($decoded->resources) && !$decoded->resources instanceof \stdClass)) { return ApiResponse::error(400,'bad_request','A JSON object is required.'); }
         }
@@ -1100,6 +1100,10 @@ final class ApiKernel
             'createdAt' => (string) $action['created_at'], 'updatedAt' => (string) $action['updated_at'],
             'actor' => ['kind' => (string) $action['actor_kind'], 'id' => (string) $action['actor_public_id']],
         ];
+        if ($action['type'] === 'auxiliary_repair') {
+            $payload = json_decode($action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+            $result['repair'] = array_intersect_key($payload, array_flip(['integrityPercent', 'metalsCost']));
+        }
         if (in_array($action['type'], ['depot_deposit', 'depot_withdrawal'], true)) {
             $payload = json_decode($action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
             $result['transfer'] = array_intersect_key($payload, array_flip(['depotId', 'resources', 'itemIds', 'capacityEce', 'roundTrips', 'durationSeconds']));
