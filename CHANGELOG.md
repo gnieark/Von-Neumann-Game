@@ -4,6 +4,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-14
 
+### Fixed
+
+- Documentation OpenAPI : déplacement du paragraphe sur `GET /api/others/fleets/{fleetId}/known-depots` du contrat général vers `docs/openapi-others.yaml`, où figurent déjà la définition de l’endpoint et son schéma de réponse.
+
 ### Added
 
 - `POST /api/probe/{probeId}/atomic-printer/craft` : champ optionnel `mannyId` pour choisir la Manny assistante. Elle doit appartenir à la sonde, être libre et à bord ; sinon la fabrication est refusée. Sans ce champ, la première Manny disponible reste sélectionnée automatiquement.
