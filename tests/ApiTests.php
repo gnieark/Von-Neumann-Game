@@ -6118,10 +6118,37 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     $test->assertEquals(400, $directAtomicMannyCraft->status, 'Manny craft endpoint refuses atomic-printer recipes');
     $test->assertEquals('invalid_recipe', $directAtomicMannyCraft->body['error']['code'] ?? null, 'atomic-printer recipes require the printer endpoint');
 
-    $integratedCircuitCraft = $kernel->handle('POST', '/api/probe/atomic-printer/craft', $craftHeaders, json_encode([
+    $atomicPrinterPath = '/api/probe/' . $craftProbeEntity->id . '/atomic-printer/craft';
+    foreach ([null, '', '   ', 123, true, [], ['id' => $craftMannyId]] as $invalidAssistantId) {
+        $invalidAssistant = $kernel->handle('POST', $atomicPrinterPath, $craftHeaders, json_encode([
+            'recipe' => 'integrated_circuit',
+            'mannyId' => $invalidAssistantId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(400, $invalidAssistant->status, 'atomic printer rejects malformed explicit Manny ids');
+        $test->assertEquals('bad_request', $invalidAssistant->body['error']['code'] ?? null, 'malformed assistant id returns bad_request');
+    }
+    $foreignPrinterPlayer = $auth->registerPlayerWithPassword('foreign-printer-assistant', 'secret', 'Foreign Printer Assistant');
+    $foreignPrinterProbe = $probes->findByPlayerId($foreignPrinterPlayer->id);
+    $foreignPrinterManny = $mannies->findByProbeId($foreignPrinterProbe->id)[0];
+    foreach (['mny_nonexistent', $foreignPrinterManny->uid] as $unknownAssistantId) {
+        $unknownAssistant = $kernel->handle('POST', $atomicPrinterPath, $craftHeaders, json_encode([
+            'recipe' => 'integrated_circuit',
+            'mannyId' => $unknownAssistantId,
+        ], JSON_THROW_ON_ERROR));
+        $test->assertEquals(404, $unknownAssistant->status, 'atomic printer rejects missing or foreign Manny without selecting another assistant');
+        $test->assertEquals('manny_not_found', $unknownAssistant->body['error']['code'] ?? null, 'missing or foreign assistant returns manny_not_found');
+    }
+    $test->assertEquals(0.2, probeTestStoredResource($storage, $probes, $craftPlayer->id, ResourceComposition::METALS), 'rejected assistant ids do not consume crafting resources');
+
+    $availablePrinterMannies = array_values(array_filter(
+        $mannies->findByProbeId($craftProbeEntity->id),
+        static fn(Manny $candidate): bool => $candidate->isOnProbe() && $candidate->currentTask === null,
+    ));
+    $integratedCircuitCraft = $kernel->handle('POST', $atomicPrinterPath, $craftHeaders, json_encode([
         'recipe' => 'integrated_circuit',
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $integratedCircuitCraft->status, 'Atomic printer can start an integrated-circuit craft');
+    $test->assertEquals($availablePrinterMannies[0]->uid, $integratedCircuitCraft->body['manny']['id'] ?? null, 'omitting mannyId selects the first available onboard Manny');
     $test->assertEquals('assisting_atomic_printer', $integratedCircuitCraft->body['manny']['currentTask'] ?? null, 'atomic-printer craft reserves a Manny assistant');
     $test->assertEquals('integrated_circuit', $integratedCircuitCraft->body['manny']['task']['recipe'] ?? null, 'integrated-circuit task stores its recipe');
     $test->assertEquals('atomic_3d_printer', $integratedCircuitCraft->body['manny']['task']['fabricator'] ?? null, 'integrated-circuit task records the atomic printer as fabricator');
@@ -6155,6 +6182,54 @@ if ($craftProbeEntity !== null && $craftMannyId !== '') {
     ));
     $test->assertEquals(1, count($integratedCircuits), 'completed integrated-circuit craft adds a circuit item');
     $test->assertEquals(0.001, $integratedCircuits[0]['containerSpace'] ?? null, 'integrated circuit item occupies a tiny storage space');
+
+    $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, ['metals' => 0.22, 'ice' => 0.09, 'carbon_compounds' => 0.11]);
+    $selectedPrinterManny = $availablePrinterMannies[1];
+    $busyPrinterManny = $kernel->handle('POST', '/api/probe/' . $craftProbeEntity->id . '/mannies/' . $selectedPrinterManny->uid . '/craft', $craftHeaders, json_encode([
+        'recipe' => 'steel_bar',
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $busyPrinterManny->status, 'selected printer assistant starts another task for busy validation');
+    $busyAssistant = $kernel->handle('POST', $atomicPrinterPath, $craftHeaders, json_encode([
+        'recipe' => 'integrated_circuit',
+        'mannyId' => $selectedPrinterManny->uid,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(409, $busyAssistant->status, 'atomic printer rejects a busy selected Manny even when another is available');
+    $test->assertEquals('manny_busy', $busyAssistant->body['error']['code'] ?? null, 'busy selected assistant returns manny_busy');
+    $test->assertEquals(Manny::TASK_CRAFTING, $mannies->findById($selectedPrinterManny->id)?->currentTask, 'rejection preserves the selected Manny task');
+    $test->assertEquals(0.2, probeTestStoredResource($storage, $probes, $craftPlayer->id, ResourceComposition::METALS), 'busy assistant rejection does not consume printer resources');
+    $cancelAssistantCraft = $kernel->handle('POST', '/api/probe/' . $craftProbeEntity->id . '/mannies/' . $selectedPrinterManny->uid . '/recall', $craftHeaders, '{}');
+    $test->assertEquals(202, $cancelAssistantCraft->status, 'selected printer assistant can cancel its other task');
+
+    $selectedPrinterManny = $mannies->findById($selectedPrinterManny->id);
+    $selectedPrinterManny->locationType = Manny::LOCATION_SECTOR;
+    $selectedPrinterManny->sector = $craftProbeEntity->currentSector;
+    $mannies->save($selectedPrinterManny);
+    $outsideAssistant = $kernel->handle('POST', $atomicPrinterPath, $craftHeaders, json_encode([
+        'recipe' => 'integrated_circuit',
+        'mannyId' => $selectedPrinterManny->uid,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(409, $outsideAssistant->status, 'atomic printer requires its selected assistant aboard the probe');
+    $test->assertEquals('manny_not_on_probe', $outsideAssistant->body['error']['code'] ?? null, 'outside assistant returns manny_not_on_probe');
+    $selectedPrinterManny->locationType = Manny::LOCATION_PROBE;
+    $selectedPrinterManny->sector = null;
+    $mannies->save($selectedPrinterManny);
+
+    $selectedAssistantCraft = $kernel->handle('POST', $atomicPrinterPath, $craftHeaders, json_encode([
+        'recipe' => 'integrated_circuit',
+        'mannyId' => $selectedPrinterManny->uid,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $selectedAssistantCraft->status, 'atomic printer accepts an explicit idle onboard assistant');
+    $test->assertEquals($selectedPrinterManny->uid, $selectedAssistantCraft->body['manny']['id'] ?? null, 'atomic printer uses the selected Manny instead of the first available one');
+    $test->assertEquals(Manny::TASK_ASSISTING_ATOMIC_PRINTER, $mannies->findById($selectedPrinterManny->id)?->currentTask, 'selected assistant task is persisted');
+    $test->assertEquals(null, $mannies->findById($availablePrinterMannies[0]->id)?->currentTask, 'first available Manny stays idle when another assistant is selected');
+    $printerAlreadyBusy = $kernel->handle('POST', $atomicPrinterPath, $craftHeaders, json_encode([
+        'recipe' => 'integrated_circuit',
+        'mannyId' => $availablePrinterMannies[0]->uid,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(409, $printerAlreadyBusy->status, 'selecting another assistant cannot start a second printer task');
+    $test->assertEquals('atomic_printer_busy', $printerAlreadyBusy->body['error']['code'] ?? null, 'busy printer keeps its existing error');
+    $cancelSelectedPrinterCraft = $kernel->handle('POST', '/api/probe/' . $craftProbeEntity->id . '/mannies/' . $selectedPrinterManny->uid . '/recall', $craftHeaders, '{}');
+    $test->assertEquals(202, $cancelSelectedPrinterCraft->status, 'selected assistant can cancel its atomic printer task');
 
     $craftProbeEntity = setProbeTestStoredResources($storage, $storageContainers, $probes, $craftProbeEntity, ['metals' => 0.15]);
     $rawLinearActuatorCraft = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($craftMannyId) . '/craft', $craftHeaders, json_encode([

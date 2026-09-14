@@ -1057,23 +1057,31 @@ final class MannyService implements MannyTaskRuntime
         return $this->requiredManny($probe, $uid);
     }
 
-    public function startAtomicPrinterCrafting(NeumannProbe $probe, string $recipe): Manny
+    public function startAtomicPrinterCrafting(NeumannProbe $probe, string $recipe, ?string $mannyId = null): Manny
     {
         return $this->withProbeLock(
             $probe,
-            fn(NeumannProbe $lockedProbe): Manny => $this->startAtomicPrinterCraftingLocked($lockedProbe, $recipe),
+            fn(NeumannProbe $lockedProbe): Manny => $this->startAtomicPrinterCraftingLocked($lockedProbe, $recipe, $mannyId),
         );
     }
 
-    private function startAtomicPrinterCraftingLocked(NeumannProbe $probe, string $recipe): Manny
+    private function startAtomicPrinterCraftingLocked(NeumannProbe $probe, string $recipe, ?string $mannyId): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         if ($this->atomicPrinterAssistant($probe) !== null) {
             throw new MannyActionException(409, 'atomic_printer_busy', 'The atomic printer is already executing an order.');
         }
 
-        $manny = $this->availableAtomicPrinterAssistant($probe)
-            ?? throw new MannyActionException(409, 'no_available_manny', 'No available Manny can assist the atomic printer.');
+        if ($mannyId === null) {
+            $manny = $this->availableAtomicPrinterAssistant($probe)
+                ?? throw new MannyActionException(409, 'no_available_manny', 'No available Manny can assist the atomic printer.');
+        } else {
+            $manny = $this->requiredManny($probe, $mannyId);
+            $this->ensureMannyIdle($manny);
+            if (!$manny->isOnProbe()) {
+                throw new MannyActionException(409, 'manny_not_on_probe', 'The Manny must be inside the probe to assist the atomic printer.');
+            }
+        }
 
         $recipe = CraftingRecipeCatalog::normalizeId($recipe);
         $recipeDefinition = CraftingRecipeCatalog::find($recipe, $this->craftingConfig());

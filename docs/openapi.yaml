@@ -2876,10 +2876,12 @@ paths:
       summary: Start crafting an atomic-printer item
       description: >
         Starts a recipe whose `craftableBy` includes `atomic_3d_printer`.
-        The atomic printer reserves one available Manny aboard the probe for
-        loading and unloading; that Manny exposes the
-        `assisting_atomic_printer` task until the craft completes or is
-        recalled.
+        The atomic printer reserves one idle Manny aboard the probe for
+        loading and unloading. Optional `mannyId` selects that Manny explicitly;
+        it must belong to this probe and be idle and aboard it. When omitted,
+        the first available onboard Manny is selected (by name, then internal id).
+        That Manny exposes the `assisting_atomic_printer` task until the craft
+        completes or is recalled.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       requestBody:
@@ -2891,6 +2893,8 @@ paths:
           $ref: '#/paths/~1api~1probe~1atomic-printer~1craft/post/responses/400'
         '401':
           $ref: '#/paths/~1api~1probe~1atomic-printer~1craft/post/responses/401'
+        '404':
+          $ref: '#/paths/~1api~1probe~1atomic-printer~1craft/post/responses/404'
         '409':
           $ref: '#/paths/~1api~1probe~1atomic-printer~1craft/post/responses/409'
         '422':
@@ -5062,10 +5066,12 @@ paths:
       summary: Start crafting an atomic-printer item
       description: >
         Starts a recipe whose `craftableBy` includes `atomic_3d_printer`.
-        The atomic printer reserves one available Manny aboard the probe for
-        loading and unloading; that Manny exposes the
-        `assisting_atomic_printer` task until the craft completes or is
-        recalled.
+        The atomic printer reserves one idle Manny aboard the probe for
+        loading and unloading. Optional `mannyId` selects that Manny explicitly;
+        it must belong to this probe and be idle and aboard it. When omitted,
+        the first available onboard Manny is selected (by name, then internal id).
+        That Manny exposes the `assisting_atomic_printer` task until the craft
+        completes or is recalled.
       requestBody:
         required: true
         content:
@@ -5091,8 +5097,14 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The specified Manny does not belong to this probe or does not exist (`manny_not_found`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Atomic printer busy or no Manny available to assist it
+          description: Atomic printer busy (`atomic_printer_busy`), no available assistant (`no_available_manny`), or specified Manny busy (`manny_busy`) or outside the probe (`manny_not_on_probe`)
           content:
             application/json:
               schema:
@@ -8435,7 +8447,13 @@ components:
         recipe:
           type: string
           enum: [micro_conductor, ceramic_insulator, crystal_substrate, dopant_matrix, integrated_circuit, atomic_printer_part]
-          description: Atomic-printer recipe to start. An available Manny aboard the probe is automatically reserved as assistant.
+          description: Atomic-printer recipe to start.
+        mannyId:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          description: Optional public Manny id. Must identify an idle Manny belonging to and aboard the target probe. If omitted, the first available onboard Manny is selected. Null, empty, whitespace-only, or non-string values are rejected with 400 bad_request.
+          example: mny_8d4a2c1f5a91b334
     MannySalvageRequest:
       type: object
       required: [objectId]

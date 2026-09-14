@@ -126,7 +126,11 @@ final class ProbeManniesApiController
             return ApiResponse::error(400, 'bad_request', 'JSON body must contain recipe.');
         }
 
-        $manny = $this->mannies->startAtomicPrinterCrafting($probe, $data['recipe']);
+        if (array_key_exists('mannyId', $data) && (!is_string($data['mannyId']) || trim($data['mannyId']) === '')) {
+            return ApiResponse::error(400, 'bad_request', 'mannyId must be a non-empty string.');
+        }
+
+        $manny = $this->mannies->startAtomicPrinterCrafting($probe, $data['recipe'], $data['mannyId'] ?? null);
         $probe = $this->freshProbe($probe);
 
         return new ApiResponse(202, [
