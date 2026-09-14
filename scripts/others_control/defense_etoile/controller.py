@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from math import isfinite
+from pathlib import Path
 from typing import Any, Callable
 
 from .armament import FleetArmamentCoordinator
@@ -21,6 +22,7 @@ from .observation import ScoutObserver
 from .ports import OthersApi
 from .refueling import FleetRefuelingCoordinator
 from .repairs import FleetRepairCoordinator
+from .depot_logistics import DepotLogistics
 
 
 class DefenseEtoileAttente:
@@ -35,6 +37,8 @@ class DefenseEtoileAttente:
         policy: DefensePolicy | None = None,
         logistics_policy: LogisticsPolicy | None = None,
         repair_metals_per_point: float = 0.01,
+        logistics_state_dir: Path | None = None,
+        logistics_fuel_per_hop: float = 2.0,
     ) -> None:
         if (mothership_id is None) == (fleet_id is None):
             raise ConfigurationError(
@@ -78,6 +82,8 @@ class DefenseEtoileAttente:
         self.armament = FleetArmamentCoordinator(api, logger=logger)
         self.refueling = FleetRefuelingCoordinator(api, logger=logger)
         self.repairs = FleetRepairCoordinator(api, logger=logger, metals_per_point=repair_metals_per_point)
+        self.depots = DepotLogistics(api, logger=logger, state_dir=logistics_state_dir,
+                                    fuel_per_hop=logistics_fuel_per_hop)
         self.logistics = MothershipLogistics(
             api,
             logger=logger,
@@ -177,21 +183,29 @@ class DefenseEtoileAttente:
         sector = require_mapping(fleet_mothership.get("sector"), "mothership.sector")
         center = parse_coordinates(sector.get("relative"), "mothership.sector.relative")
         self.central_defense.configure(fleet_mothership, center)
-        self.repairs.reconcile(fleet_mothership, ships, result)
-        if self.central_defense.reconcile(result, ships=ships):
+        reserved = self.depots.reserved_ships(fleet_id)
+        self.central_defense.excluded_ship_ids = reserved
+        defense_ships = [ship for ship in ships if ship['id'] not in reserved]
+        self.repairs.reconcile(fleet_mothership, defense_ships, result)
+        if self.central_defense.reconcile(result, ships=defense_ships):
             return result
 
-        armament = self.armament.reconcile(fleet_mothership, ships, result)
-        self.refueling.reconcile(fleet_mothership, ships, active_actions, result)
-        self.logistics.reconcile(
-            fleet_mothership,
-            result,
-            fleet_missile_stock=armament.total_missiles,
-            missile_transfers_active=armament.transfers_active,
-        )
+        storage_busy = self.depots.reconcile(fleet_mothership, ships, result)
+        reserved = self.depots.reserved_ships(fleet_id)
+        self.central_defense.excluded_ship_ids = reserved
+        defense_ships = [ship for ship in ships if ship['id'] not in reserved]
+        armament = self.armament.reconcile(fleet_mothership, defense_ships, result)
+        self.refueling.reconcile(fleet_mothership, defense_ships, active_actions, result)
+        if not storage_busy:
+            self.logistics.reconcile(
+                fleet_mothership,
+                result,
+                fleet_missile_stock=armament.total_missiles,
+                missile_transfers_active=armament.transfers_active,
+            )
         return self.formation.reconcile(
             fleet_mothership,
-            ships,
+            defense_ships,
             result,
             missile_counts=armament.missile_counts,
         )

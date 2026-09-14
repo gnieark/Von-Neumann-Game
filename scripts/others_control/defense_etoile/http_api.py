@@ -43,6 +43,25 @@ class HttpOthersApi:
         body = self._request("GET", f"/api/others/actions/{quote(action_id, safe='')}")
         return require_mapping(body.get("action"), "action")
 
+    def get_known_depots(self, fleet_id: str) -> list[dict[str, Any]]:
+        body = self._request("GET", f"/api/others/fleets/{quote(fleet_id, safe='')}/known-depots")
+        values = body.get("knownDepots")
+        if not isinstance(values, list):
+            raise ApiContractError("knownDepots doit être une liste.")
+        return [require_mapping(value, "knownDepots[]") for value in values]
+
+    def get_depot_inventory(self, depot_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/api/others/germination-depots/{quote(depot_id, safe='')}/inventory?limit=1")
+
+    def start_depot_deposit(self, ship_id: str, auxiliary_id: str, depot_id: str,
+                            resources: dict[str, float], operation_key: str) -> dict[str, Any]:
+        body = self._request(
+            "POST", f"/api/others/ships/{quote(ship_id, safe='')}/auxiliaries/{quote(auxiliary_id, safe='')}/depot-deposits",
+            payload={"depotId": depot_id, "resources": resources, "itemIds": []},
+            idempotency_key=command_idempotency_key("defense-depot-deposit", ship_id, auxiliary_id, operation_key),
+        )
+        return require_mapping(body.get("action"), "action")
+
     def scan_sector(self, ship_id: str, coordinates: Coordinates) -> dict[str, Any]:
         query = urlencode(
             {"shipId": ship_id, "x": coordinates[0], "y": coordinates[1], "z": coordinates[2]}

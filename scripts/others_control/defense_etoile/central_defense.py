@@ -52,6 +52,7 @@ class CentralDefenseCoordinator:
         self.visible_missile_ids: set[str] = set()
         self.laser_assignments: dict[str, LaserAssignment] = {}
         self.recalled_sentinel_ids: set[str] = set()
+        self.excluded_ship_ids: set[str] = set()
 
     def clear_context(self) -> None:
         self.mothership_id = None
@@ -102,6 +103,7 @@ class CentralDefenseCoordinator:
 
         if ships is None:
             ships = self._load_fleet_ships()
+        ships = [ship for ship in ships if ship.get("id") not in self.excluded_ship_ids]
         if not self.at_war:
             self.log(
                 "ALERTE CENTRALE : activité de sonde détectée ; rappel général "

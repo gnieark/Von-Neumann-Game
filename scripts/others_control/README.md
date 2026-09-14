@@ -37,6 +37,44 @@ et renvoie l’action de construction prévue pour trente minutes.
 
 ## Défense étoile — attente
 
+### Dépôts et navettes logistiques
+
+Lorsque la cale du vaisseau mère est effectivement pleine (`usedEce >= capacityEce`),
+le contrôleur interroge les dépôts connus de sa flotte et le secteur courant :
+
+- Sans dépôt connu ni dépôt local identifiable, un auxiliaire libre construit un dépôt.
+- En présence d'un dépôt local, un auxiliaire y dépose la moitié de chaque ressource
+  disponible, après déduction des réservations. Le deutérium brut est inclus ; les
+  objets et le carburant du réservoir restent à bord.
+- Sinon, un vaisseau standard intact, libre et présent auprès du vaisseau mère est
+  affecté au dépôt connu le plus proche. Il doit posséder un auxiliaire embarqué libre.
+  Le vaisseau mère le ravitaille pour l'aller-retour si nécessaire, puis le charge
+  via son auxiliaire, ressource par ressource, dans la limite de la capacité libre
+  de la navette. La composition de la cargaison est proportionnelle aux stocks disponibles.
+- Après confirmation de tous les chargements, la navette rejoint le dépôt par
+  étapes de dix secteurs au maximum, décharge ses ressources via son propre auxiliaire,
+  attend sa fin de tâche, puis revient auprès du vaisseau mère. Si la cale de celui-ci
+  est de nouveau pleine, une autre navette peut partir sans attendre ce retour.
+
+Les navettes restent exclues des déploiements, rappels et tâches de défense jusqu'au
+retour, y compris pendant les contrôles rapides de défense centrale. L'alerte centrale
+garde la priorité sur la progression logistique. La production et la moisson du
+vaisseau mère attendent pendant une construction de dépôt, un dépôt local ou le
+chargement d'une navette ; elles peuvent reprendre pendant le voyage.
+
+Le journal est enregistré sous `var/others-logistics`, séparément par serveur et
+flotte. Il conserve les étapes, les identifiants d'action et les requêtes avec leurs
+clés d'idempotence avant envoi, pour reprendre après un redémarrage ou une réponse
+HTTP perdue. Conservez ce répertoire et utilisez un seul contrôleur par flotte.
+`--logistics-state-dir CHEMIN` permet de changer son emplacement. Les coordonnées
+du journal sont relatives et il ne contient pas le token API.
+
+Le coût de carburant par étape est de 2 points par défaut. Ajustez
+`--logistics-fuel-per-hop` si le serveur utilise un autre coût. Le contrôleur attend
+si aucun transporteur admissible, auxiliaire ou carburant suffisant n'est disponible.
+
+### Exécution et défense
+
 Le contrôleur maintient le vaisseau mère au centre et jusqu'à une sentinelle dans
 chacun de ses douze secteurs voisins. Il tient compte des vaisseaux déjà sur
 place et de ceux qui sont en mouvement, rappelle les vaisseaux hors formation
