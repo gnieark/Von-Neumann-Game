@@ -192,6 +192,13 @@ Toutes les routes API sont dans `src/Http/ApiKernel.php`; le detail des schemas
 est dans [docs/openapi.yaml](docs/openapi.yaml). Une interface Swagger UI est
 disponible sur `/api-docs`, et la spec brute est servie par `/openapi.yaml`.
 
+La version publique retournée par `GET /api/version` est commune aux contrats
+principal et Others. Toute évolution du contrat, même additive (endpoint,
+schéma, champ ou valeur d’énumération), doit incrémenter `ApiKernel::API_VERSION`,
+`info.version` dans les deux documents OpenAPI et l’exemple de `GET /api/version`.
+Consignez cette version dans `CHANGELOG.md` et mettez à jour les tests API ;
+ils vérifient que les versions documentées correspondent à la réponse publique.
+
 Routes principales:
 
 - `GET /api/version`

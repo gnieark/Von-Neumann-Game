@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '130'
+  version: '131'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 130
+                apiVersion: 131
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -6439,7 +6439,7 @@ components:
         apiVersion:
           type: integer
           minimum: 1
-          description: Monotonic public API version. Increment it when the API contract changes.
+          description: Monotonic public API version shared by both OpenAPI documents. Increment it whenever either API contract changes, including additive endpoints, schemas, fields or enum values.
     AsteroidTrajectoryCreateRequest:
       type: object
       required: [mode]

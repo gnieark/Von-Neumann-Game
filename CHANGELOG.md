@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Version publique de l’API portée à **131**, synchronisée avec les deux documents OpenAPI et l’exemple de `GET /api/version` (issue #63). Cette version rend détectables les ajouts au contrat restés sous 130, notamment les quatre endpoints de consultation et de transfert des stockages du secteur. La règle projet impose désormais un incrément pour toute évolution du contrat, même additive ; les tests vérifient la cohérence des versions publiées.
 - `GET /api/sector` : les secteurs déjà visités sans sonde locale ne révèlent plus les vaisseaux Others ni les missiles présents en temps réel. La visibilité utilise la sonde qui fournit le scan, y compris une sonde secondaire joignable par SCUT, et exige des capteurs normaux.
 - Documentation OpenAPI : déplacement du paragraphe sur `GET /api/others/fleets/{fleetId}/known-depots` du contrat général vers `docs/openapi-others.yaml`, où figurent déjà la définition de l’endpoint et son schéma de réponse.
 
