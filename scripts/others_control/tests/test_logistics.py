@@ -119,7 +119,7 @@ class LogisticsTests(unittest.TestCase):
             [("mother", "others_auxiliary", "aux-00")],
             api.craft_starts,
         )
-        self.assertEqual([("mother", "planet-a", 10)], api.harvest_starts)
+        self.assertEqual([("mother", "planet-a", 11)], api.harvest_starts)
 
     def test_auxiliary_target_precedes_missile_target(self) -> None:
         api = FakeApi(
@@ -140,12 +140,12 @@ class LogisticsTests(unittest.TestCase):
         )
         self.assertNotIn("missile", [recipe for _, recipe, _ in api.craft_starts])
 
-    def test_missiles_are_crafted_after_twenty_projected_auxiliaries(self) -> None:
+    def test_missiles_are_crafted_after_thirty_projected_auxiliaries(self) -> None:
         api = FakeApi(
             [self.mothership],
             scans={self.center: harvestable_scan("planet-a")},
             auxiliaries={
-                "mother": [auxiliary(f"aux-{index:02d}") for index in range(20)]
+                "mother": [auxiliary(f"aux-{index:02d}") for index in range(30)]
             },
             inventories={"mother": [missile_item(f"missile-{index}") for index in range(50)]},
             resources={"mother": resource_stock(200.0, 20.0, 50.0, 10.0)},
@@ -155,7 +155,7 @@ class LogisticsTests(unittest.TestCase):
 
         self.assertEqual(10, len(api.craft_starts))
         self.assertEqual({"missile"}, {recipe for _, recipe, _ in api.craft_starts})
-        self.assertEqual([("mother", "planet-a", 10)], api.harvest_starts)
+        self.assertEqual([("mother", "planet-a", 20)], api.harvest_starts)
 
     def test_pending_crafts_count_toward_production_targets(self) -> None:
         active_craft = {
@@ -167,7 +167,7 @@ class LogisticsTests(unittest.TestCase):
         api = FakeApi(
             [self.mothership],
             auxiliaries={
-                "mother": [auxiliary(f"aux-{index:02d}") for index in range(19)]
+                "mother": [auxiliary(f"aux-{index:02d}") for index in range(29)]
             },
             inventories={"mother": [missile_item(f"missile-{index}") for index in range(60)]},
             resources={"mother": resource_stock(250.0, 25.0, 60.0, 10.5)},
@@ -186,7 +186,7 @@ class LogisticsTests(unittest.TestCase):
         api = FakeApi(
             [self.mothership, guard],
             auxiliaries={
-                "mother": [auxiliary(f"aux-{index:02d}") for index in range(20)]
+                "mother": [auxiliary(f"aux-{index:02d}") for index in range(30)]
             },
             inventories={
                 "mother": [missile_item(f"mother-{index}") for index in range(10)],
@@ -236,7 +236,7 @@ class LogisticsTests(unittest.TestCase):
         api = FakeApi(
             [self.mothership],
             auxiliaries={
-                "mother": [auxiliary(f"aux-{index:02d}") for index in range(20)]
+                "mother": [auxiliary(f"aux-{index:02d}") for index in range(30)]
             },
             inventories={"mother": [missile_item(f"missile-{index}") for index in range(60)]},
             resources={"mother": resource_stock(250.0, 25.0, 60.0, 10.5)},

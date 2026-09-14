@@ -39,7 +39,7 @@ class ShipConstructionTests(unittest.TestCase):
     def make_api(self, affordable: int = 4) -> ConstructionApi:
         api = ConstructionApi(
             [ship("mother", (0, 0, 0), ship_type="mothership")],
-            auxiliaries={"mother": [auxiliary(f"aux-{i:02d}") for i in range(20)]},
+            auxiliaries={"mother": [auxiliary(f"aux-{i:02d}") for i in range(30)]},
             inventories={"mother": [missile_item(f"missile-{i}") for i in range(60)]},
         )
         recipe = next(r for r in api.get_crafting_recipes() if r["id"] == "standard_ship")

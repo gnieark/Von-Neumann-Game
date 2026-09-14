@@ -20,11 +20,11 @@ MAX_ACTIVE_SHIP_CRAFTS = 3
 
 @dataclass(frozen=True)
 class LogisticsPolicy:
-    auxiliary_target: int = 20
+    auxiliary_target: int = 30
     missile_target: int = 60
     reserve_auxiliaries: int = 10
     reserve_missiles: int = 10
-    max_harvest_auxiliaries: int = 10
+    max_harvest_auxiliaries: int = 20
     harvest_cycle_seconds: int = 3600
 
 

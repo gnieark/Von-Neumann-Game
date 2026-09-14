@@ -260,7 +260,7 @@ jusqu'à leur réparation complète avant de pouvoir repartir en sentinelle.
 En parallèle de cette formation, le vaisseau mère entretient sa logistique :
 
 - les crafts abordables sont lancés avant la moisson, avec priorité aux
-  auxiliaires jusqu'à un total projeté de 20, puis aux missiles jusqu'à un
+  auxiliaires jusqu'à un total projeté de 30, puis aux missiles jusqu'à un
   stock global de 60 dans la flotte ;
 - les crafts déjà actifs comptent dans ces objectifs afin d'éviter une
   surproduction ;
@@ -273,7 +273,7 @@ En parallèle de cette formation, le vaisseau mère entretient sa logistique :
   répartition ; pendant ce délai, la fabrication d'auxiliaires et la moisson
   continuent, mais les nouveaux crafts de missiles attendent que le stock
   global redevienne observable ;
-- jusqu'à dix auxiliaires embarqués encore disponibles moissonnent une planète
+- jusqu'à vingt auxiliaires embarqués encore disponibles moissonnent une planète
   locale dont le scan Others indique `harvestable: true` ; avec un seul
   auxiliaire, celui-ci crafte dès que la recette d'un auxiliaire est abordable,
   sinon il moissonne ;
@@ -281,7 +281,7 @@ En parallèle de cette formation, le vaisseau mère entretient sa logistique :
   regroupées en fenêtres d'une heure. Une action encore active à la fin d'une
   fenêtre n'est pas annulée, notamment pour ne pas perdre la progression sur
   une planète habitée ;
-- une fois 20 auxiliaires et 60 missiles atteints, la moisson continue jusqu'à
+- une fois 30 auxiliaires et 60 missiles atteints, la moisson continue jusqu'à
   conserver les matières premières de 10 auxiliaires et 10 missiles, soit 250
   ECE de métaux, 25 de glace, 60 de composés carbonés et 10,5 de deutérium.
 
