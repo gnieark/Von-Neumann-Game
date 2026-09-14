@@ -51,6 +51,8 @@ class ScoutObserver:
         ejected_mannies: dict[str, str] = {}
         missiles: dict[str, str] = {}
         missiles_targeting_probes: dict[str, list[str]] = {}
+        missiles_targeting_ships: dict[str, set[str]] = {}
+        intercepted_missile_ids: set[str] = set()
         trajectories: dict[str, str] = {}
         floating_objects: dict[str, str] = {}
         waypoints: dict[str, str] = {}
@@ -74,6 +76,19 @@ class ScoutObserver:
                         "impactAt": sector_object.get("impactAt"),
                     }
                 )
+            if (
+                object_type == "missile"
+                and sector_object.get("status") == "moving"
+            ):
+                target_kind = sector_object.get("targetKind")
+                if target_kind in {"others_ship", "missile"}:
+                    target_id = identifier_string(
+                        sector_object.get("targetId"), f"sector object {object_id}.targetId"
+                    )
+                    if target_kind == "others_ship":
+                        missiles_targeting_ships.setdefault(target_id, set()).add(object_id)
+                    elif sector_object.get("launcherKind") == "others_ship":
+                        intercepted_missile_ids.add(target_id)
             if (
                 object_type == "missile"
                 and sector_object.get("launcherKind") == "others_ship"
@@ -114,6 +129,11 @@ class ScoutObserver:
                 target_id: tuple(sorted(missile_ids))
                 for target_id, missile_ids in missiles_targeting_probes.items()
             },
+            missiles_targeting_ships={
+                target_id: tuple(sorted(missile_ids))
+                for target_id, missile_ids in missiles_targeting_ships.items()
+            },
+            intercepted_missile_ids=intercepted_missile_ids,
         )
 
 

@@ -82,6 +82,8 @@ class ScoutObservation:
     waypoints: dict[str, str]
     probe_ids: tuple[str, ...]
     missiles_targeting_probes: dict[str, tuple[str, ...]]
+    missiles_targeting_ships: dict[str, tuple[str, ...]]
+    intercepted_missile_ids: set[str]
 
 
 @dataclass

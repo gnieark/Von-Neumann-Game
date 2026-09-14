@@ -1113,6 +1113,10 @@ paths:
       tags:
       - Others
       summary: Schedule an immediate Others missile launch
+      description: >-
+        targetId may identify a moving missile in the firing ship's current sector
+        to attempt an interception. Each request launches one inventory missile
+        at the selected target.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       requestBody:

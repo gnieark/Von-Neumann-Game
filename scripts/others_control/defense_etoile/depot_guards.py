@@ -40,6 +40,7 @@ class DepotGuardCoordinator:
         self.claimed_ships: set[str] = set()
         self.activity_guards: dict[str, dict[str, Any]] = {}
         self.center: Coordinates | None = None
+        self.mothership_stationary = False
 
     def load(self, fleet_id: str) -> None:
         if self.fleet_id == fleet_id:
@@ -86,6 +87,7 @@ class DepotGuardCoordinator:
                   *, excluded: set[str], allow_assignments: bool = True) -> set[str]:
         self.load(require_string(mother.get("fleetId"), "mothership.fleetId"))
         self.activity_guards.clear()
+        self.mothership_stationary = mother.get("movement") is None
         self.center = (parse_coordinates(mother["movement"]["target"], "mothership.movement.target")
                        if mother.get("movement") is not None else ship_sector(mother))
         self.known_sectors = {parse_coordinates(entry.get("relativeCoordinates"), "knownDepots[].relativeCoordinates")
@@ -161,7 +163,10 @@ class DepotGuardCoordinator:
             if assignment is None or assignment["stage"] != "guarding":
                 continue
             destination = parse_coordinates(assignment["destination"], "guardian.destination")
-            outcome = self.engagement.reconcile(ship, destination, self.center, result)
+            outcome = self.engagement.reconcile(
+                ship, destination, self.center, result,
+                intercept_missiles=not (self.mothership_stationary and destination == self.center),
+            )
             if outcome.engaged:
                 engaged.add(ship_id)
             if not outcome.remains_on_station:

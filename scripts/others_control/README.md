@@ -188,8 +188,18 @@ son heure d'arrivée prévue. Une ligne d'inventaire détaille également
 l'occupation et les réservations de la soute, les quantités de ressources et les
 objets regroupés par type.
 
-Une sonde ou une Manny détectée dans le secteur du vaisseau mère déclenche la
-défense centrale. Les sentinelles voisines disponibles sont rappelées et le
+Une sonde, une Manny ou un missile visant le vaisseau mère détecté dans son secteur
+déclenche la défense centrale. Les autres vaisseaux de la flotte présents dans ce
+secteur tirent en priorité un missile par missile entrant pour tenter de
+l'intercepter, y compris les gardiens et navettes présents. Le vaisseau mère ne
+fournit pas ces intercepteurs. Les missiles visant d'autres vaisseaux sont ignorés
+par cette défense centrale. Une tentative acceptée ou un intercepteur Others déjà
+visible empêche tout nouveau tir contre le même missile pendant sa présence,
+même si l'interception échoue ; faute de munition ou après un refus de tir,
+l'interception reste à tenter.
+Les gardiens locaux délèguent leurs réactions aux missiles à cette défense
+commune afin de respecter la limite d'un intercepteur par cible.
+Les sentinelles voisines disponibles sont rappelées et le
 redéploiement normal est suspendu pendant l'alerte. La flotte maintient quatre
 missiles en vol vers chaque sonde présente et remplace ceux qui disparaissent du
 scan. Chaque Manny détectée reçoit un verrouillage laser provenant d'un vaisseau

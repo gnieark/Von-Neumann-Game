@@ -50,6 +50,7 @@ class CentralDefenseCoordinator:
         self.at_war = False
         self.pending_missiles: dict[str, PendingMissile] = {}
         self.visible_missile_ids: set[str] = set()
+        self.interception_target_ids: set[str] = set()
         self.laser_assignments: dict[str, LaserAssignment] = {}
         self.recalled_sentinel_ids: set[str] = set()
         self.excluded_ship_ids: set[str] = set()
@@ -61,6 +62,7 @@ class CentralDefenseCoordinator:
         self.at_war = False
         self.pending_missiles.clear()
         self.visible_missile_ids.clear()
+        self.interception_target_ids.clear()
         self.laser_assignments.clear()
         self.recalled_sentinel_ids.clear()
 
@@ -91,7 +93,11 @@ class CentralDefenseCoordinator:
 
         observation = self.observer.observe(self.mothership_id, self.center)
         manny_ids = set(observation.autonomous_units) | set(observation.ejected_mannies)
-        if not observation.probe_ids and not manny_ids:
+        incoming_missile_ids = set(
+            observation.missiles_targeting_ships.get(self.mothership_id, ())
+        )
+        self.interception_target_ids.intersection_update(incoming_missile_ids)
+        if not observation.probe_ids and not manny_ids and not incoming_missile_ids:
             if self.at_war:
                 self.log("Fin d'alerte dans le secteur du vaisseau mère.")
             self.at_war = False
@@ -103,10 +109,13 @@ class CentralDefenseCoordinator:
 
         if ships is None:
             ships = self._load_fleet_ships()
+        self._intercept_incoming_missiles(
+            incoming_missile_ids, observation, self._present_ships(ships), result
+        )
         ships = [ship for ship in ships if ship.get("id") not in self.excluded_ship_ids]
         if not self.at_war:
             self.log(
-                "ALERTE CENTRALE : activité de sonde détectée ; rappel général "
+                "ALERTE CENTRALE : menace détectée ; rappel général "
                 "des sentinelles et engagement de guerre."
             )
         self.at_war = True
@@ -116,6 +125,48 @@ class CentralDefenseCoordinator:
         self._maintain_missile_screen(observation, present_ships, result)
         self._maintain_laser_assignments(manny_ids, present_ships, result)
         return True
+
+    def _intercept_incoming_missiles(
+        self,
+        incoming_missile_ids: set[str],
+        observation: ScoutObservation,
+        ships: list[dict[str, Any]],
+        result: CycleResult,
+    ) -> None:
+        self.interception_target_ids.update(
+            incoming_missile_ids & observation.intercepted_missile_ids
+        )
+        targets = sorted(incoming_missile_ids - self.interception_target_ids)
+        if not targets:
+            return
+        ammunition = {
+            require_string(ship.get("id"), "central ship.id"):
+                self.commands.available_missiles(ship["id"])
+            for ship in ships
+            if ship.get("id") != self.mothership_id and ship.get("type") != "mothership"
+        }
+        for target_id in targets:
+            while any(ammunition.values()):
+                launcher_id = min(
+                    (ship_id for ship_id, missiles in ammunition.items() if missiles),
+                    key=lambda ship_id: (-len(ammunition[ship_id]), ship_id),
+                )
+                missile_item_id = ammunition[launcher_id].pop(0)
+                action = self.commands.launch_missile(
+                    launcher_id, missile_item_id, target_id,
+                    f"central-interception:{target_id}", result,
+                )
+                if action is not None:
+                    # Une seule tentative acceptée par missile entrant, même si
+                    # l'intercepteur n'est pas encore visible ou manque sa cible.
+                    self.interception_target_ids.add(target_id)
+                    break
+        missing = incoming_missile_ids - self.interception_target_ids
+        if missing:
+            self.log(
+                f"Interception du vaisseau mère incomplète : {len(missing)} "
+                "missile(s) sans intercepteur disponible."
+            )
 
     def _load_fleet_ships(self) -> list[dict[str, Any]]:
         fleet = self.api.get_fleet(require_string(self.fleet_id, "fleet_id"))

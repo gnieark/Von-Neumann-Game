@@ -183,6 +183,7 @@ class DefenseEtoileAttente:
             self.relocation.load(fleet_id)
 
         ships, active_actions = self._load_fleet_state(fleet_id)
+        fleet_ships = ships
         fleet_mothership = self._select_mothership(ships, fleet_id)
 
         mothership_id = require_string(fleet_mothership.get("id"), "mothership.id")
@@ -205,7 +206,7 @@ class DefenseEtoileAttente:
                 self.central_defense.excluded_ship_ids = guard_ids | self.depots.reserved_ships(fleet_id) | {
                     self.relocation.state["scoutId"],
                 }
-                if self.central_defense.reconcile(result, ships=ships):
+                if self.central_defense.reconcile(result, ships=fleet_ships):
                     return result
             return self._run_relocation(fleet_mothership, ships, active_actions, result)
         movement = optional_mapping(fleet_mothership.get("movement"), "mothership.movement")
@@ -223,7 +224,7 @@ class DefenseEtoileAttente:
         defense_ships = [ship for ship in ships if ship['id'] not in reserved]
         local_guards = self._local_guard_ships(center)
         self.repairs.reconcile(fleet_mothership, defense_ships + local_guards, result)
-        if self.central_defense.reconcile(result, ships=defense_ships):
+        if self.central_defense.reconcile(result, ships=fleet_ships):
             return result
 
         if self.relocation.start_if_depleted(fleet_mothership):

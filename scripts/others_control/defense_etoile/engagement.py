@@ -53,6 +53,8 @@ class EngagementCoordinator:
         coordinates: Coordinates,
         center: Coordinates,
         result: CycleResult,
+        *,
+        intercept_missiles: bool = True,
     ) -> EngagementResult:
         ship_id = require_string(ship.get("id"), "guard ship.id")
         state = self.scout_states.setdefault(ship_id, ScoutState())
@@ -82,6 +84,11 @@ class EngagementCoordinator:
         state.observation = observation
         pending_keys = {event.key for event in state.pending_events}
         state.pending_events.extend(event for event in new_events if event.key not in pending_keys)
+        if not intercept_missiles:
+            state.pending_events = [
+                event for event in state.pending_events
+                if event.kind != EventKind.HOSTILE_MISSILE
+            ]
         state.pending_events.sort(key=lambda event: (event.kind.priority, event.key))
         engaged = bool(state.pending_events)
 

@@ -22,6 +22,8 @@ def observation(
         waypoints={},
         probe_ids=probe_ids,
         missiles_targeting_probes={},
+        missiles_targeting_ships={},
+        intercepted_missile_ids=set(),
     )
 
 

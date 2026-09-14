@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from scripts.others_control.defense_etoile.controller import DefenseEtoileAttente
+from scripts.others_control.defense_etoile.errors import ApiRequestError
 from scripts.others_control.defense_etoile.geometry import NEIGHBOR_OFFSETS, add_coordinates
 from scripts.others_control.tests.support import (
     FakeApi,
@@ -26,7 +28,160 @@ def moving_missile(missile_id: str, target_id: str) -> dict[str, str]:
     }
 
 
+def incoming_missile(missile_id: str, target_id: str = "mother") -> dict[str, str]:
+    return {
+        **moving_missile(missile_id, target_id),
+        "launcherKind": "probe",
+        "targetKind": "others_ship",
+    }
+
+
 class CentralDefenseTests(unittest.TestCase):
+    def test_local_depot_guards_leave_missile_targets_to_central_defense(self) -> None:
+        center = (0, 0, 0)
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"),
+             *[ship(f"guard-{index}", center) for index in range(4)]],
+            scans={center: detailed_scan(objects=[
+                incoming_missile("incoming"), incoming_missile("ignored", "guard-0"),
+            ])},
+            inventories={
+                f"guard-{index}": [missile_item(f"missile-{index}")]
+                for index in range(4)
+            },
+        )
+        api.known_depots = [center]
+        controller = DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None)
+
+        controller.run_cycle()
+        controller.run_activity_cycle()
+
+        self.assertEqual([("guard-0", "missile-0", "incoming")], api.missile_launches)
+
+    def test_missiles_alone_trigger_one_interception_each_by_local_escorts(self) -> None:
+        center = (0, 0, 0)
+        scan = detailed_scan(objects=[
+            incoming_missile("incoming-a"), incoming_missile("incoming-b"),
+            incoming_missile("ignored", "escort-a"),
+        ])
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"),
+             ship("escort-a", center), ship("escort-b", center),
+             ship("remote", (2, 0, 0)), ship("travelling", center, status="transit")],
+            scans={center: scan},
+            inventories={
+                ship_id: [missile_item(f"{ship_id}-{index}") for index in range(count)]
+                for ship_id, count in (("mother", 8), ("escort-a", 2), ("escort-b", 2),
+                                       ("remote", 8), ("travelling", 8))
+            },
+        )
+        controller = DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None)
+
+        result = controller.run_cycle()
+        controller.run_activity_cycle()
+        controller.run_cycle()
+
+        self.assertTrue(controller.central_defense.at_war)
+        self.assertEqual(2, result.accepted_commands)
+        self.assertEqual([
+            ("escort-a", "escort-a-0", "incoming-a"),
+            ("escort-b", "escort-b-0", "incoming-b"),
+        ], api.missile_launches)
+
+        scan["objects"] = [incoming_missile("ignored", "escort-a")]
+        controller.run_activity_cycle()
+        self.assertFalse(controller.central_defense.at_war)
+        self.assertEqual(set(), controller.central_defense.interception_target_ids)
+        self.assertEqual(2, len(api.missile_launches))
+
+    def test_interceptions_take_priority_over_probe_screen(self) -> None:
+        center = (0, 0, 0)
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"), ship("escort", center)],
+            scans={center: detailed_scan(
+                probes=[{"id": 42}], objects=[incoming_missile("incoming")]
+            )},
+            inventories={"escort": [missile_item("first"), missile_item("second")]},
+        )
+        controller = DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None)
+
+        controller.run_cycle()
+
+        self.assertEqual([
+            ("escort", "first", "incoming"), ("escort", "second", "42"),
+        ], api.missile_launches)
+
+    def test_visible_interceptor_prevents_another_attempt_even_after_disappearing(self) -> None:
+        center = (0, 0, 0)
+        scan = detailed_scan(objects=[incoming_missile("incoming"), {
+            **moving_missile("interceptor", "incoming"), "targetKind": "missile",
+        }])
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"), ship("escort", center)],
+            scans={center: scan}, inventories={"escort": [missile_item("spare")]},
+        )
+        controller = DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None)
+
+        controller.run_cycle()
+        scan["objects"].pop()
+        controller.run_activity_cycle()
+
+        self.assertEqual([], api.missile_launches)
+
+    def test_shortage_waits_for_escort_ammunition_without_using_mothership(self) -> None:
+        center = (0, 0, 0)
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"), ship("escort", center)],
+            scans={center: detailed_scan(objects=[incoming_missile("incoming")])},
+            inventories={"mother": [missile_item("mother-reserve")]},
+        )
+        controller = DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None)
+
+        controller.run_cycle()
+        self.assertEqual([], api.missile_launches)
+        api.inventories["escort"] = [missile_item("new-stock")]
+        controller.run_activity_cycle()
+        controller.run_activity_cycle()
+
+        self.assertEqual([("escort", "new-stock", "incoming")], api.missile_launches)
+
+    def test_rejected_interception_can_be_attempted_by_another_ship(self) -> None:
+        center = (0, 0, 0)
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"),
+             ship("escort-a", center), ship("escort-b", center)],
+            scans={center: detailed_scan(objects=[incoming_missile("incoming")])},
+            inventories={"escort-a": [missile_item("a")], "escort-b": [missile_item("b")]},
+        )
+        controller = DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None)
+        launch = api.launch_missile
+
+        def reject_first(ship_id, *args):
+            if ship_id == "escort-a":
+                raise ApiRequestError(409, "conflict", "Missile indisponible")
+            return launch(ship_id, *args)
+
+        with patch.object(api, "launch_missile", side_effect=reject_first):
+            controller.run_cycle()
+            controller.run_activity_cycle()
+
+        self.assertEqual([("escort-b", "b", "incoming")], api.missile_launches)
+
+    def test_reserved_local_ship_can_intercept_without_being_recalled(self) -> None:
+        center = (0, 0, 0)
+        api = FakeApi(
+            [ship("mother", center, ship_type="mothership"), ship("shuttle", center)],
+            scans={center: detailed_scan(objects=[incoming_missile("incoming")])},
+            inventories={"shuttle": [missile_item("shuttle-missile")]},
+        )
+        controller = DefenseEtoileAttente(api, mothership_id="mother", logger=lambda _: None)
+
+        with patch.object(controller.depots, "reserved_ships", return_value={"shuttle"}):
+            controller.run_cycle()
+
+        self.assertEqual([("shuttle", "shuttle-missile", "incoming")], api.missile_launches)
+        self.assertEqual([], api.moves)
+
     def test_probe_presence_recalls_sentinels_and_distributes_four_missiles(self) -> None:
         center = (0, 0, 0)
         guard_sector = add_coordinates(center, NEIGHBOR_OFFSETS[0])
