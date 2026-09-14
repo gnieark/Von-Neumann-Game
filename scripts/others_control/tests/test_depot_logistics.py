@@ -310,6 +310,7 @@ class DepotLogisticsTests(unittest.TestCase):
 
     def test_defense_does_not_deploy_or_recall_logistics_ship(self):
         self.api.add_depot((2, 0, 0))
+        self.cycle()
         controller = DefenseEtoileAttente(self.api, mothership_id='mother', logger=self.logs.append,
                                          logistics_state_dir=Path(self.directory))
         controller.run_cycle()
@@ -329,6 +330,7 @@ class DepotLogisticsTests(unittest.TestCase):
 
     def test_activity_defense_does_not_recall_a_courier_at_its_depot(self):
         self.api.add_depot((2, 0, 0))
+        self.cycle()
         controller = DefenseEtoileAttente(self.api, mothership_id='mother', logger=self.logs.append,
                                          logistics_state_dir=Path(self.directory))
         controller.run_cycle()

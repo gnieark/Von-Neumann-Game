@@ -111,7 +111,8 @@ class FleetRelocationCoordinator:
 
     def reconcile(self, mother: dict[str, Any], ships: list[dict[str, Any]],
                   active_actions: list[dict[str, Any]], reserved: set[str],
-                  depot_busy: bool, result: CycleResult) -> None:
+                  depot_busy: bool, result: CycleResult, *,
+                  stationary_ships: list[dict[str, Any]] | None = None) -> None:
         if self.state is None:
             return
         ships = [ship for ship in ships if ship.get("location", {}).get("state") not in {"destroyed", "removed"}]
@@ -122,7 +123,9 @@ class FleetRelocationCoordinator:
             if action.get("status") in ACTIVE_STATUSES:
                 result.add_event_date(action.get("endsAt"), "relocation action.endsAt")
         if self.state["phase"] == "searching":
-            self._search(mother, ships, active_actions, reserved, result)
+            observers = stationary_ships or []
+            self._search(mother, ships + observers, active_actions,
+                         reserved | {ship["id"] for ship in observers}, result)
         if self.state["phase"] != "searching":
             self._relocate(mother, ships, active_actions, reserved, depot_busy, result)
 

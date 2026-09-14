@@ -116,6 +116,7 @@ class FakeApi:
     ) -> None:
         self.ships = ships
         self.scans = scans or {}
+        self.known_depots: list[Coordinates] = []
         self.scan_calls: list[Coordinates] = []
         self.moves: list[tuple[str, Coordinates]] = []
         self.autonomous_units = autonomous_units or {}
@@ -157,6 +158,10 @@ class FakeApi:
         if action is None:
             raise ApiRequestError(404, "others_action_not_found", "Action not found")
         return action
+
+    def get_known_depots(self, fleet_id: str) -> list[dict[str, Any]]:
+        return [{"relativeCoordinates": dict(zip(("x", "y", "z"), point))}
+                for point in self.known_depots]
 
     def scan_sector(self, ship_id: str, coordinates: Coordinates) -> dict[str, Any]:
         self.scan_calls.append(coordinates)

@@ -73,6 +73,39 @@ Le coût de carburant par étape est de 2 points par défaut. Ajustez
 `--logistics-fuel-per-hop` si le serveur utilise un autre coût. Le contrôleur attend
 si aucun transporteur admissible, auxiliaire ou carburant suffisant n'est disponible.
 
+### Gardiens des dépôts connus
+
+Chaque secteur renvoyé par `GET /api/others/fleets/{fleetId}/known-depots` reçoit
+**quatre gardiens standards** de cette flotte. Plusieurs dépôts dans un même secteur
+ne multiplient pas cet effectif. Le contrôleur privilégie les vaisseaux déjà sur
+place, puis les vaisseaux disponibles auprès du vaisseau mère, avec priorité aux
+mieux armés. Les navettes en mission et l'éclaireur de déménagement sont exclus.
+Si l'effectif manque, les places restantes sont complétées aux cycles suivants.
+
+Les affectations et les trajets sont persistants : un gardien déjà en route réserve
+sa place, y compris après redémarrage. Les trajets éloignés se font par étapes d'au
+plus dix secteurs ; un départ exige le carburant de l'aller-retour. Un secteur
+voisin protégé par ces gardiens ne reçoit pas de cinquième vaisseau comme sentinelle.
+
+Chaque gardien utilise les mêmes observations, priorités de tir, engagements laser
+et retours tactiques que les sentinelles, y compris lors des contrôles d'activité
+rapides. Les gardiens continuent leur surveillance pendant une alerte centrale.
+Leur stock de missiles est inclus dans l'objectif de production de la flotte ;
+ceux présents auprès du vaisseau mère participent au réarmement, au ravitaillement
+et aux réparations.
+
+Un vaisseau disponible intact possédant **strictement plus de missiles** peut relever
+un gardien non engagé. Le remplaçant part d'abord ; l'ancien garde le poste jusqu'à
+son arrivée effective, puis revient auprès du vaisseau mère. Une relève déjà en
+route empêche d'en envoyer une seconde pour le même gardien. Un gardien perdu ou
+en retour tactique libère sa place pour un renfort.
+
+Les gardiens **restent aux dépôts lors des déménagements**. Leurs affectations et
+leurs relèves ne bloquent pas le déplacement de la flotte mobile. Un retour tactique
+vise le secteur actuel du vaisseau mère, ou sa destination lorsqu'il est en transit.
+Les affectations sont conservées dans `*.guards.json`, dans le répertoire
+`--logistics-state-dir`, séparément par serveur et flotte et en coordonnées relatives.
+
 ### Déménagement après épuisement du secteur
 
 Lorsqu'un scan détaillé du secteur du vaisseau mère ne contient plus aucune
@@ -96,9 +129,10 @@ information de scan insuffisante ne déclenche pas de déménagement.
   logistiques restent suspendues. Les navettes déjà parties finissent leur mission
   et reviennent ; les auxiliaires occupés ou déployés sont attendus. Les vaisseaux
   qui manquent de carburant pour rejoindre la destination reviennent se ravitailler.
-  Chaque vaisseau reçoit ensuite son déplacement, par étapes si nécessaire.
+  Chaque vaisseau de la flotte mobile reçoit ensuite son déplacement, par étapes si nécessaire.
   La formation se redéploie autour du nouveau centre au cycle suivant l'arrivée
-  de **toute la flotte**, y compris les vaisseaux dont le départ a été retardé.
+  de **toute la flotte mobile**, y compris les vaisseaux dont le départ a été retardé.
+  Les gardiens restent affectés à leurs dépôts et sont exclus de cette attente.
 
 Pendant la recherche, la défense reste active avec les autres vaisseaux ; l'éclaireur
 est exclu des ordres de formation et de défense centrale. La production et les

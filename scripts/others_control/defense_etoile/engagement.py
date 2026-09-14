@@ -8,6 +8,7 @@ from typing import Any, Callable
 from .commands import CommandExecutor, deuterium_amount, is_movable
 from .contracts import require_string
 from .events import detect_engagement_events
+from .geometry import movement_hop
 from .models import (
     Coordinates,
     CycleResult,
@@ -68,7 +69,9 @@ class EngagementCoordinator:
             if not is_movable(ship):
                 self.log(f"Retour tactique différé pour {ship_id} : vaisseau occupé.")
                 return EngagementResult(engaged=True, remains_on_station=True)
-            if self.commands.move(ship, center, result):
+            if coordinates == center or self.commands.move(
+                ship, movement_hop(coordinates, center, self.policy.max_movement_distance), result,
+            ):
                 self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
                 self.clear_completed_return(ship_id)
                 return EngagementResult(engaged=True, remains_on_station=False)
@@ -94,7 +97,9 @@ class EngagementCoordinator:
         if not is_movable(ship):
             self.log(f"Retour tactique différé pour {ship_id} : vaisseau occupé.")
             return EngagementResult(engaged=True, remains_on_station=True)
-        if self.commands.move(ship, center, result):
+        if coordinates == center or self.commands.move(
+            ship, movement_hop(coordinates, center, self.policy.max_movement_distance), result,
+        ):
             self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
             self.clear_completed_return(ship_id)
             return EngagementResult(engaged=True, remains_on_station=False)

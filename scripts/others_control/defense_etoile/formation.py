@@ -49,6 +49,7 @@ class FormationCoordinator:
         result: CycleResult,
         *,
         missile_counts: dict[str, int],
+        covered_sectors: set[Coordinates] | None = None,
     ) -> CycleResult:
         self.clear_activity_watch()
         mothership_id = require_string(mothership.get("id"), "mothership.id")
@@ -56,7 +57,8 @@ class FormationCoordinator:
         if center is None:
             raise ApiContractError("Le vaisseau mère n'a pas de secteur courant exploitable.")
         self.activity_center = center
-        neighbors = tuple(add_coordinates(center, offset) for offset in NEIGHBOR_OFFSETS)
+        neighbors = tuple(point for offset in NEIGHBOR_OFFSETS
+                          if (point := add_coordinates(center, offset)) not in (covered_sectors or set()))
         neighbor_set = set(neighbors)
 
         residents: dict[Coordinates, list[dict[str, Any]]] = {

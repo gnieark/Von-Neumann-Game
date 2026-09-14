@@ -13,7 +13,7 @@ from .central_defense import CentralDefenseCoordinator
 from .contracts import optional_mapping, require_mapping, require_string
 from .engagement import EngagementCoordinator
 from .errors import ApiContractError, ConfigurationError
-from .formation import FormationCoordinator
+from .formation import FormationCoordinator, ship_sector
 from .geometry import format_coordinates, parse_coordinates
 from .hazards import SectorKnowledge
 from .logistics import LogisticsPolicy, MothershipLogistics
@@ -23,6 +23,7 @@ from .ports import OthersApi
 from .refueling import FleetRefuelingCoordinator
 from .repairs import FleetRepairCoordinator
 from .depot_logistics import DepotLogistics
+from .depot_guards import DepotGuardCoordinator
 from .relocation import FleetRelocationCoordinator
 
 
@@ -72,6 +73,11 @@ class DefenseEtoileAttente:
             policy=self.policy,
             logger=logger,
         )
+        self.guards = DepotGuardCoordinator(
+            api, commands, engagement, logger=logger, state_dir=logistics_state_dir,
+            fuel_per_hop=logistics_fuel_per_hop,
+        )
+        self._guard_ships: list[dict[str, Any]] = []
         self.central_defense = CentralDefenseCoordinator(
             api,
             observer,
@@ -152,14 +158,16 @@ class DefenseEtoileAttente:
 
     def run_cycle(self) -> CycleResult:
         self.formation.clear_activity_watch()
+        self.guards.activity_guards.clear()
         result = CycleResult()
         if self.mothership_id is not None:
             mothership = self.api.get_ship(self.mothership_id)
             self._validate_mothership(mothership, self.mothership_id)
             fleet_id = require_string(mothership.get("fleetId"), "ship.fleetId")
             self.relocation.load(fleet_id)
+            self.guards.load(fleet_id)
             mothership_movement = optional_mapping(mothership.get("movement"), "ship.movement")
-            if mothership_movement is not None and self.relocation.state is None:
+            if mothership_movement is not None and self.relocation.state is None and not self.guards.assignments:
                 self.central_defense.clear_context()
                 result.add_event_date(
                     mothership_movement.get("arrivalAt"),
@@ -179,11 +187,22 @@ class DefenseEtoileAttente:
 
         mothership_id = require_string(fleet_mothership.get("id"), "mothership.id")
         self._validate_mothership(fleet_mothership, mothership_id)
+        reserved = self.depots.reserved_ships(fleet_id)
+        if self.relocation.state is not None and self.relocation.state["scoutId"] is not None:
+            reserved = reserved | {self.relocation.state["scoutId"]}
+        guard_ids = self.guards.reconcile(
+            fleet_mothership, ships, result, excluded=reserved,
+            allow_assignments=fleet_mothership.get("movement") is None and (
+                self.relocation.state is None or self.relocation.state["phase"] == "searching"
+            ),
+        )
+        self._guard_ships = [ship for ship in ships if ship["id"] in guard_ids]
+        ships = [ship for ship in ships if ship["id"] not in guard_ids]
         if self.relocation.state is not None:
             if self.relocation.state["phase"] == "searching" and fleet_mothership.get("movement") is None:
                 center = self.logistics._mothership_sector(fleet_mothership)
                 self.central_defense.configure(fleet_mothership, center)
-                self.central_defense.excluded_ship_ids = self.depots.reserved_ships(fleet_id) | {
+                self.central_defense.excluded_ship_ids = guard_ids | self.depots.reserved_ships(fleet_id) | {
                     self.relocation.state["scoutId"],
                 }
                 if self.central_defense.reconcile(result, ships=ships):
@@ -200,9 +219,10 @@ class DefenseEtoileAttente:
         center = parse_coordinates(sector.get("relative"), "mothership.sector.relative")
         self.central_defense.configure(fleet_mothership, center)
         reserved = self.depots.reserved_ships(fleet_id)
-        self.central_defense.excluded_ship_ids = reserved
+        self.central_defense.excluded_ship_ids = reserved | guard_ids
         defense_ships = [ship for ship in ships if ship['id'] not in reserved]
-        self.repairs.reconcile(fleet_mothership, defense_ships, result)
+        local_guards = self._local_guard_ships(center)
+        self.repairs.reconcile(fleet_mothership, defense_ships + local_guards, result)
         if self.central_defense.reconcile(result, ships=defense_ships):
             return result
 
@@ -211,15 +231,20 @@ class DefenseEtoileAttente:
 
         storage_busy = self.depots.reconcile(fleet_mothership, ships, result)
         reserved = self.depots.reserved_ships(fleet_id)
-        self.central_defense.excluded_ship_ids = reserved
+        self.central_defense.excluded_ship_ids = reserved | guard_ids
         defense_ships = [ship for ship in ships if ship['id'] not in reserved]
-        armament = self.armament.reconcile(fleet_mothership, defense_ships, result)
-        self.refueling.reconcile(fleet_mothership, defense_ships, active_actions, result)
+        armament = self.armament.reconcile(fleet_mothership, defense_ships + local_guards, result)
+        self.refueling.reconcile(fleet_mothership, defense_ships + local_guards, active_actions, result)
         if not storage_busy:
+            # Le stock des gardiens éloignés reste inclus dans l'objectif de flotte.
+            remote_missiles = sum(
+                self._inventory_item_count(self.api.get_inventory(ship["id"]), "missile")
+                for ship in self._guard_ships if ship["id"] not in armament.missile_counts
+            )
             self.logistics.reconcile(
                 fleet_mothership,
                 result,
-                fleet_missile_stock=armament.total_missiles,
+                fleet_missile_stock=armament.total_missiles + remote_missiles,
                 missile_transfers_active=armament.transfers_active,
             )
         return self.formation.reconcile(
@@ -227,7 +252,13 @@ class DefenseEtoileAttente:
             defense_ships,
             result,
             missile_counts=armament.missile_counts,
+            covered_sectors=self.guards.known_sectors,
         )
+
+    def _local_guard_ships(self, center: tuple[int, int, int]) -> list[dict[str, Any]]:
+        return [ship for ship in self._guard_ships
+                if ship.get("movement") is None and ship_sector(ship) == center
+                and self.guards.assignments.get(ship["id"], {}).get("stage") != "outbound"]
 
     def _run_relocation(
         self, mother: dict[str, Any], ships: list[dict[str, Any]],
@@ -239,20 +270,23 @@ class DefenseEtoileAttente:
         if mother.get("movement") is None and self.relocation.state["phase"] != "travelling":
             depot_busy = self.depots.reconcile(mother, ships, result, allow_new=False)
             reserved = self.depots.reserved_ships(fleet_id)
-        self.relocation.reconcile(mother, ships, active_actions, reserved, depot_busy, result)
+        self.relocation.reconcile(mother, ships, active_actions, reserved, depot_busy, result,
+                                  stationary_ships=self._guard_ships)
         if self.relocation.state is not None and self.relocation.state["phase"] == "searching":
             excluded = reserved | {self.relocation.state["scoutId"]}
-            self.central_defense.excluded_ship_ids = excluded
+            self.central_defense.excluded_ship_ids = excluded | self.guards.claimed_ships
             defense_ships = [ship for ship in ships if ship["id"] not in excluded]
             armament = self.armament.reconcile(mother, defense_ships, result)
             return self.formation.reconcile(mother, defense_ships, result,
-                                            missile_counts=armament.missile_counts)
+                                            missile_counts=armament.missile_counts,
+                                            covered_sectors=self.guards.known_sectors)
         self.central_defense.clear_context()
         return result
 
     def run_activity_cycle(self) -> CycleResult:
         """Observe les sentinelles en poste sans relancer la maintenance de flotte."""
         result = CycleResult()
+        self.guards.reconcile_activity(result)
         if self.central_defense.reconcile(result):
             return result
         return self.formation.reconcile_activity(result)
