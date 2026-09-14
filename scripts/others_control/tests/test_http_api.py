@@ -26,6 +26,27 @@ class FakeResponse:
 
 class HttpApiTests(unittest.TestCase):
     @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_known_depots_and_inventory_use_canonical_read_routes(self, send: Mock) -> None:
+        entries = [{"relativeCoordinates": {"x": 2, "y": 0, "z": 0}}]
+        send.side_effect = [FakeResponse({"knownDepots": entries}), FakeResponse({"items": []})]
+        api = HttpOthersApi("http://localhost", "token", 10)
+        self.assertEqual(entries, api.get_known_depots("fleet/a"))
+        self.assertEqual({"items": []}, api.get_depot_inventory("depot/a"))
+        self.assertEqual("http://localhost/api/others/fleets/fleet%2Fa/known-depots", send.call_args_list[0].args[0].full_url)
+        self.assertEqual("http://localhost/api/others/germination-depots/depot%2Fa/inventory?limit=1", send.call_args_list[1].args[0].full_url)
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
+    def test_depot_deposit_preserves_payload_and_key_on_retry(self, send: Mock) -> None:
+        send.side_effect = [self.rate_limit("1"), FakeResponse({"action": {"id": "deposit"}})]
+        api = HttpOthersApi("http://localhost", "token", 10, logger=lambda _: None)
+        self.assertEqual({"id": "deposit"}, api.start_depot_deposit("ship/a", "aux/b", "depot", {"metals": 1.2345, "deuterium": .5}, "job"))
+        first, retry = [call.args[0] for call in send.call_args_list]
+        self.assertIs(first, retry)
+        self.assertEqual("http://localhost/api/others/ships/ship%2Fa/auxiliaries/aux%2Fb/depot-deposits", first.full_url)
+        self.assertEqual({"depotId": "depot", "resources": {"metals": 1.2345, "deuterium": .5}, "itemIds": []}, json.loads(first.data))
+        self.assertIsNotNone(first.get_header("Idempotency-key"))
+
+    @patch("scripts.others_control.defense_etoile.http_api.urlopen")
     def test_repair_uses_canonical_route_payload_and_stable_retry_key(self, send: Mock) -> None:
         send.side_effect = [self.rate_limit(), FakeResponse({"action": {"id": "repair"}})]
         api = HttpOthersApi("http://localhost", "token", 10, logger=lambda _: None)

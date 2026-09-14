@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 import time
 from datetime import datetime
@@ -61,6 +62,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="ECE de métaux par point réparé, à aligner sur la configuration Manny du serveur (défaut : 0.01)",
     )
     parser.add_argument(
+        "--logistics-state-dir", type=Path,
+        default=Path(__file__).resolve().parents[3] / "var" / "others-logistics",
+        help="Répertoire du journal persistant des navettes (défaut : var/others-logistics)",
+    )
+    parser.add_argument(
+        "--logistics-fuel-per-hop", type=float, default=2.0,
+        help="Points de carburant par déplacement, à aligner sur le serveur (défaut : 2)",
+    )
+    parser.add_argument(
         "--request-interval-seconds", type=float, default=1.0,
         help="Intervalle minimal entre appels HTTP (défaut : 1 seconde)",
     )
@@ -93,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
         if not isfinite(arguments.repair_metals_per_integrity_point) or arguments.repair_metals_per_integrity_point < 0:
             raise ConfigurationError("Le coût de réparation doit être fini et positif ou nul.")
         configuration = load_config(arguments.config)
+        if not isfinite(arguments.logistics_fuel_per_hop) or arguments.logistics_fuel_per_hop <= 0:
+            raise ConfigurationError("Le coût de carburant doit être fini et strictement positif.")
         controller = DefenseEtoileAttente(
             HttpOthersApi(
                 configuration.base_url,
@@ -104,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
             mothership_id=arguments.mothership_id,
             fleet_id=arguments.fleet_id,
             repair_metals_per_point=arguments.repair_metals_per_integrity_point,
+            logistics_state_dir=arguments.logistics_state_dir / hashlib.sha256(configuration.base_url.encode()).hexdigest(),
+            logistics_fuel_per_hop=arguments.logistics_fuel_per_hop,
             logger=timestamped_logger,
         )
     except ConfigurationError as error:
