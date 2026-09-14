@@ -132,6 +132,25 @@ class DepotApi(FakeApi):
 
 
 class DepotLogisticsTests(unittest.TestCase):
+    def test_drain_only_does_not_create_new_work_for_a_full_mothership(self):
+        self.assertFalse(self.worker.reconcile(self.api.ships[0], self.api.ships,
+                                              CycleResult(), allow_new=False))
+        self.assertEqual([], self.api.requests)
+
+    def test_drain_only_completes_the_existing_courier_mission(self):
+        self.api.add_depot((20, 0, 0))
+        self.cycle()
+        self.assertEqual({"courier"}, self.worker.reserved_ships("fleet_test"))
+        for _ in range(30):
+            if self.api.effects:
+                self.api.finish()
+            self.worker.reconcile(self.api.ships[0], self.api.ships, CycleResult(), allow_new=False)
+            if not self.worker.reserved_ships("fleet_test"):
+                break
+        self.assertEqual(set(), self.worker.reserved_ships("fleet_test"))
+        self.assertEqual(("courier", (0, 0, 0)), self.api.moves[-1])
+        self.assertTrue(all(ship_id == "courier" for ship_id, _ in self.api.moves))
+
     def setUp(self):
         self.api = DepotApi()
         self.logs = []

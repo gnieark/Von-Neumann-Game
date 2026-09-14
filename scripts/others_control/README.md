@@ -73,6 +73,44 @@ Le coût de carburant par étape est de 2 points par défaut. Ajustez
 `--logistics-fuel-per-hop` si le serveur utilise un autre coût. Le contrôleur attend
 si aucun transporteur admissible, auxiliaire ou carburant suffisant n'est disponible.
 
+### Déménagement après épuisement du secteur
+
+Lorsqu'un scan détaillé du secteur du vaisseau mère ne contient plus aucune
+planète `harvestable: true`, le contrôleur cherche un nouveau système. Une
+information de scan insuffisante ne déclenche pas de déménagement.
+
+- Il examine d'abord les douze voisins directs occupés par un vaisseau standard
+  de la flotte, dans l'ordre de la formation, et choisit le premier qui contient
+  une planète moissonnable.
+- À défaut, il affecte un vaisseau disponible du secteur central, ou une sentinelle
+  si aucun vaisseau local n'est disponible. Les navettes logistiques restent réservées.
+  Cet éclaireur visite successivement les 50 secteurs FCC à distance exactement 2
+  selon la métrique du jeu, dans l'ordre des coordonnées relatives `(x, y, z)`.
+  Chaque secteur est inspecté à l'arrivée ; un scan encore imprécis est attendu.
+- Sous 4 points de deutérium, la recherche est mise en pause et l'éclaireur revient
+  auprès du vaisseau mère. Le ravitaillement existant complète son réservoir ; la
+  recherche reprend après la fin effective du transfert et le plein, au prochain
+  secteur non inspecté. Le vaisseau mère conserve le carburant d'un déplacement.
+  Si le coût configuré dépasse 2 points, le seuil protège aussi l'aller-retour.
+- Dès qu'une destination est trouvée, les nouvelles productions et missions
+  logistiques restent suspendues. Les navettes déjà parties finissent leur mission
+  et reviennent ; les auxiliaires occupés ou déployés sont attendus. Les vaisseaux
+  qui manquent de carburant pour rejoindre la destination reviennent se ravitailler.
+  Chaque vaisseau reçoit ensuite son déplacement, par étapes si nécessaire.
+  La formation se redéploie autour du nouveau centre au cycle suivant l'arrivée
+  de **toute la flotte**, y compris les vaisseaux dont le départ a été retardé.
+
+Pendant la recherche, la défense reste active avec les autres vaisseaux ; l'éclaireur
+est exclu des ordres de formation et de défense centrale. La production et les
+nouvelles missions logistiques attendent déjà pour préparer le départ. Si toute la
+couronne est vide, l'éclaireur revient et la recherche attend un voisin occupé
+moissonnable, sans refaire les mêmes visites en boucle.
+
+La progression, l'éclaireur, son retour pour ravitaillement et la destination sont
+conservés dans un fichier `*.relocation.json` du répertoire `--logistics-state-dir`,
+séparément par serveur et flotte. Conservez ce journal pour reprendre la recherche
+ou le déplacement après redémarrage. Il utilise exclusivement des coordonnées relatives.
+
 ### Exécution et défense
 
 Le contrôleur maintient le vaisseau mère au centre et jusqu'à une sentinelle dans

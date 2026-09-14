@@ -381,27 +381,7 @@ class MothershipLogistics:
         return parse_coordinates(sector.get("relative"), "mothership.sector.relative")
 
     def _select_harvest_target(self, scan: dict[str, Any]) -> dict[str, Any] | None:
-        if scan.get("knowledgeLevel") != "detailed":
-            return None
-        objects = scan.get("objects")
-        if not isinstance(objects, list):
-            raise ApiContractError("sector.objects doit être une liste.")
-
-        candidates: dict[str, dict[str, Any]] = {}
-        for value in objects:
-            object_value = require_mapping(value, "sector.objects[]")
-            self._collect_harvestable_planet(object_value, candidates)
-            for collection_name in ("bookmarkTargets", "minableTargets"):
-                nested = object_value.get(collection_name, [])
-                if not isinstance(nested, list):
-                    raise ApiContractError(
-                        f"sector.objects[].{collection_name} doit être une liste."
-                    )
-                for target_value in nested:
-                    self._collect_harvestable_planet(
-                        require_mapping(target_value, f"{collection_name}[]"),
-                        candidates,
-                    )
+        candidates = harvestable_planets(scan)
         if self._harvest_target_id in candidates:
             return candidates[self._harvest_target_id]
         if not candidates:
@@ -448,6 +428,32 @@ class MothershipLogistics:
         self._command_sequence += 1
         cycle = self._harvest_cycle_started_at or self.now()
         return f"{kind}:{cycle.isoformat()}:{self._command_sequence}"
+
+
+def harvestable_planets(scan: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Planètes moissonnables du scan canonique, y compris dans les systèmes."""
+    if scan.get("knowledgeLevel") != "detailed":
+        return {}
+    objects = scan.get("objects")
+    if not isinstance(objects, list):
+        raise ApiContractError("sector.objects doit être une liste.")
+
+    candidates: dict[str, dict[str, Any]] = {}
+    for value in objects:
+        object_value = require_mapping(value, "sector.objects[]")
+        MothershipLogistics._collect_harvestable_planet(object_value, candidates)
+        for collection_name in ("bookmarkTargets", "minableTargets"):
+            nested = object_value.get(collection_name, [])
+            if not isinstance(nested, list):
+                raise ApiContractError(
+                    f"sector.objects[].{collection_name} doit être une liste."
+                )
+            for target_value in nested:
+                MothershipLogistics._collect_harvestable_planet(
+                    require_mapping(target_value, f"{collection_name}[]"),
+                    candidates,
+                )
+    return candidates
 
 
 def _non_negative_number(value: Any, context: str) -> float:

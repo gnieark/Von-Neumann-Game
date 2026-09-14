@@ -25,6 +25,8 @@ class FleetRefuelingCoordinator:
         ships: list[dict[str, Any]],
         active_actions: list[dict[str, Any]],
         result: CycleResult,
+        *,
+        reserve_deuterium: float = 0.0,
     ) -> None:
         transfers = [
             action for action in active_actions
@@ -44,7 +46,7 @@ class FleetRefuelingCoordinator:
         fleet_id = require_string(mothership.get("fleetId"), "mothership.fleetId")
         center = require_mapping(mothership.get("sector"), "mothership.sector")
         coordinates = parse_coordinates(center.get("relative"), "mothership.sector.relative")
-        available = self._tank_units(mothership, "amount")
+        available = self._tank_units(mothership, "amount") - int(Decimal(str(reserve_deuterium)) * 10000)
         if available <= 0:
             return
 

@@ -64,7 +64,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--logistics-state-dir", type=Path,
         default=Path(__file__).resolve().parents[3] / "var" / "others-logistics",
-        help="Répertoire du journal persistant des navettes (défaut : var/others-logistics)",
+        help="Répertoire des journaux persistants des navettes et déménagements (défaut : var/others-logistics)",
     )
     parser.add_argument(
         "--logistics-fuel-per-hop", type=float, default=2.0,

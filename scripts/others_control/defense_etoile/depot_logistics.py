@@ -86,7 +86,8 @@ class DepotLogistics:
         except OSError as error:
             raise ConfigurationError(f"Impossible de sauvegarder le journal logistique : {error}") from error
 
-    def reconcile(self, mother: dict[str, Any], ships: list[dict[str, Any]], result: CycleResult) -> bool:
+    def reconcile(self, mother: dict[str, Any], ships: list[dict[str, Any]], result: CycleResult,
+                  *, allow_new: bool = True) -> bool:
         """Renvoie vrai lorsque la production doit laisser travailler les auxiliaires logistiques."""
         self.reserved_ships(require_string(mother.get("fleetId"), "mothership.fleetId"))
         by_id = {ship["id"]: ship for ship in ships}
@@ -107,6 +108,9 @@ class DepotLogistics:
             return True
         if any(mission["stage"] == "loading" for mission in self.state["missions"].values()):
             return True
+
+        if not allow_new:
+            return bool(self.state["missions"])
 
         inventory = self.api.get_inventory(mother["id"])
         # Une réservation entrante n'est pas encore une cale effectivement pleine.

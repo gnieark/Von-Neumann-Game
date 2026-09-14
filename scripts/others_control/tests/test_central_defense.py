@@ -132,6 +132,7 @@ class CentralDefenseTests(unittest.TestCase):
         self.assertEqual([], api.moves)
 
         scan["probes"] = []
+        scan["objects"] = [{"id": "planet", "type": "planet", "harvestable": True}]
         controller.run_cycle()
 
         self.assertEqual([("home", NEIGHBOR_OFFSETS[0])], api.moves)
