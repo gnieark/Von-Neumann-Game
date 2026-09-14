@@ -150,6 +150,31 @@ final class OthersRepository
         $stmt->execute($params);
     }
 
+    public function discoverFleetDepotsInSector(int $fleetId, SectorCoordinates $coordinates): void
+    {
+        $sql = 'INSERT INTO others_known_depots (fleet_id,sector_x,sector_y,sector_z)
+                SELECT :fleet_id,:x,:y,:z
+                WHERE EXISTS (SELECT 1 FROM germination_depots WHERE sector_x=:x AND sector_y=:y AND sector_z=:z)';
+        $sql .= $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? ' ON DUPLICATE KEY UPDATE fleet_id=VALUES(fleet_id)'
+            : ' ON CONFLICT(fleet_id,sector_x,sector_y,sector_z) DO NOTHING';
+        $this->pdo->prepare($sql)->execute([
+            'fleet_id' => $fleetId,
+            'x' => $coordinates->getX(),
+            'y' => $coordinates->getY(),
+            'z' => $coordinates->getZ(),
+        ]);
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function findFleetKnownDepots(int $fleetId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT sector_x,sector_y,sector_z FROM others_known_depots WHERE fleet_id=:fleet_id ORDER BY sector_x,sector_y,sector_z');
+        $stmt->execute(['fleet_id' => $fleetId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     /** @return array{targetVisited:bool,visitedSectorCount:int} */
     public function fleetSectorKnowledge(int $fleetId, SectorCoordinates $coordinates): array
     {
@@ -302,6 +327,7 @@ final class OthersRepository
                 'inventoryItems' => 0,
                 'inventoryResources' => 0,
                 'visitedSectors' => 0,
+                'knownDepots' => 0,
                 'ships' => 0,
                 'fleets' => 0,
             ];
@@ -374,6 +400,7 @@ final class OthersRepository
             $counts['inventoryItems'] += $this->deleteRowsByValues('others_inventory_items', 'ship_id', $shipIds);
             $counts['inventoryResources'] += $this->deleteRowsByValues('others_inventory_resources', 'ship_id', $shipIds);
             $counts['visitedSectors'] += $this->deleteRowsByValues('others_visited_sectors', 'fleet_id', [$fleetId]);
+            $counts['knownDepots'] += $this->deleteRowsByValues('others_known_depots', 'fleet_id', [$fleetId]);
             $counts['ships'] += $this->deleteRowsByValues('others_ships', 'id', $shipIds);
             $counts['fleets'] += $this->deleteRowsByValues('others_fleets', 'id', [$fleetId]);
 

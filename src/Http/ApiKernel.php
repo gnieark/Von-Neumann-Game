@@ -166,6 +166,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/ships/([^/]+)/move$#', ['POST', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $ctx->method === 'POST' ? $this->othersShipMoveResponse($player, $ctx->stringParam(0), $ctx->body) : $this->othersShipMoveCancelResponse($player, $ctx->stringParam(0))))),
             ApiRoute::regex('#^/api/others/fleets/([^/]+)/move$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersFleetMoveResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/fleets/([^/]+)/visited-sectors$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersFleetVisitedSectorsResponse($player, $ctx->stringParam(0), $ctx->query))),
+            ApiRoute::regex('#^/api/others/fleets/([^/]+)/known-depots$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersFleetKnownDepotsResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAuxiliaryResponse($player, $ctx->stringParam(0), $ctx->stringParam(1)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAuxiliariesResponse($player, $ctx->stringParam(0), $ctx->query))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersInventoryResponse($player, $ctx->stringParam(0)))),
@@ -525,6 +526,22 @@ final class ApiKernel
             'createdAt' => (string) $fleet['created_at'],
             'updatedAt' => (string) $fleet['updated_at'],
         ]]);
+    }
+
+    private function othersFleetKnownDepotsResponse(Player $player, string $fleetId): ApiResponse
+    {
+        $fleet = $this->others?->findFleetForPlayer($fleetId, $player->id);
+        if ($fleet === null) {
+            return ApiResponse::error(404, 'others_fleet_not_found', 'Others fleet not found.');
+        }
+        $frame = new PlayerReferenceFrame($player->homeSector);
+
+        return new ApiResponse(200, ['knownDepots' => array_map(
+            static fn(array $row): array => [
+                'relativeCoordinates' => $frame->globalToRelative(new SectorCoordinates((int) $row['sector_x'], (int) $row['sector_y'], (int) $row['sector_z'])),
+            ],
+            $this->others->findFleetKnownDepots((int) $fleet['id']),
+        )]);
     }
 
     private function othersFleetVisitedSectorsResponse(Player $player, string $fleetId, array $query): ApiResponse
