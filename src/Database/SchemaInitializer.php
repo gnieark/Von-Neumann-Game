@@ -1001,7 +1001,7 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_forum_messages_post_recent ON forum_messages(post_id, created_at, id)",
         ];
 
-        $statements = [...$statements, ...$this->sectorStorageStatements()];
+        $statements = [...$statements, $this->othersKnownDepotsStatement(), ...$this->sectorStorageStatements()];
 
         $statements = array_values(array_filter($statements, static fn(string $statement): bool => $statement !== ''));
 
@@ -1010,6 +1010,21 @@ final class SchemaInitializer
         }
 
         return array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements);
+    }
+
+    /** Canonical fleet depot knowledge schema, also used by the explicit migration. */
+    public function othersKnownDepotsStatement(): string
+    {
+        $statement = 'CREATE TABLE IF NOT EXISTS others_known_depots (
+            fleet_id INTEGER NOT NULL,
+            sector_x INTEGER NOT NULL,
+            sector_y INTEGER NOT NULL,
+            sector_z INTEGER NOT NULL,
+            PRIMARY KEY(fleet_id, sector_x, sector_y, sector_z),
+            FOREIGN KEY(fleet_id) REFERENCES others_fleets(id) ON DELETE CASCADE
+        )';
+
+        return $this->driver === 'mysql' ? $this->withMysqlEngine($statement) : $statement;
     }
 
     /** Additive canonical columns for the explicit upgrade of existing inventories. */

@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-14
+
+### Added
+
+- `GET /api/others/fleets/{fleetId}/known-depots` : liste des secteurs de dépôts de germination découverts par une flotte, en coordonnées relatives au secteur d’origine du propriétaire. Chaque arrivée de vaisseau dans un secteur contenant un dépôt terminé, ou chaque construction de dépôt achevée par un auxiliaire de la flotte, mémorise ce secteur une seule fois dans `others_known_depots`, indépendamment des autres flottes. La connaissance persiste après le départ ; une construction en cours ou interrompue n’ajoute aucune découverte.
+- Migration explicite `scripts/one-shot-scripts/migrate-others-known-depots.php` : création de la table sans reconstitution des découvertes passées ; les découvertes commencent aux prochaines arrivées ou constructions achevées.
+
 ## 2026-09-13
 
 ### Added

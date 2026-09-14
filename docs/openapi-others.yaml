@@ -9,6 +9,40 @@ servers:
 - url: /
   description: Current host
 paths:
+  /api/others/fleets/{fleetId}/known-depots:
+    parameters:
+    - $ref: '#/components/parameters/FleetId'
+    get:
+      tags: [Others]
+      summary: List depot sectors discovered by one owned fleet
+      description: >-
+        Returns all known germination depot sectors, ordered by x, y, then z.
+        Coordinates are relative to the owning player's home. A sector is recorded
+        when a ship of this fleet arrives there and at least one completed depot
+        is present, regardless of its sealed, impacted or open state, or when an
+        auxiliary of this fleet successfully completes construction of a depot.
+        Queued, unfinished or interrupted constructions do not add discoveries. Multiple
+        depots or arrivals in a sector produce a single entry. Knowledge persists
+        after departure and is private to each fleet, including fleets with the
+        same owner. Reading this endpoint does not discover depots. Existing
+        visits and constructions are not backfilled; discovery starts with arrivals
+        and successful construction completions after migration.
+      responses:
+        '200':
+          description: Complete list of known depot sectors; empty before discovery
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersKnownDepotsResponse'
+              example:
+                knownDepots:
+                - relativeCoordinates: {x: 2, y: -1, z: 0}
+        '401':
+          description: Missing or invalid bearer token
+        '403':
+          description: Player is not allowed to control Others
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/build-germination-depot:
     post:
       tags: [Others]
@@ -69,6 +103,9 @@ paths:
       description: An idle embarked auxiliary of an idle mothership reserves 2 ECE of metals and builds for 1800 seconds.
         Black-hole sectors are forbidden. Materials are lost on interruption. Each successful action creates one shared,
         indestructible, unlimited-capacity SQL depot. No client-supplied cost, duration or capacity is accepted.
+        Successful completion also records the depot sector in the builder fleet's known depots,
+        exposed by GET /api/others/fleets/{fleetId}/known-depots. Starting or interrupting construction
+        does not record a discovery.
   /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/depot-deposits:
     post:
       tags: [Others]
@@ -2167,6 +2204,18 @@ components:
         visitCount:
           type: integer
           minimum: 1
+    OthersKnownDepotsResponse:
+      type: object
+      required: [knownDepots]
+      properties:
+        knownDepots:
+          type: array
+          items:
+            type: object
+            required: [relativeCoordinates]
+            properties:
+              relativeCoordinates:
+                $ref: '#/components/schemas/RelativeCoordinates'
     OthersVisitedSectorsResponse:
       type: object
       required: [visitedSectors]

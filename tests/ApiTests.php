@@ -1486,6 +1486,8 @@ $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, 'separat
 $test->assert(is_string($openApiOthers) && str_contains($openApiOthers, '/api/others/fleets/{fleetId}/visited-sectors'), 'Others OpenAPI documents fleet-specific visited sectors');
 $othersVisitedSectorsSchema = is_array($openApiOthersDocument) ? ($openApiOthersDocument['components']['schemas']['OthersVisitedSectorsResponse'] ?? null) : null;
 $test->assert(is_array($othersVisitedSectorsSchema), 'Others OpenAPI defines the visited-sector page response');
+$test->assert(isset($openApiOthersDocument['paths']['/api/others/fleets/{fleetId}/known-depots']['get']['responses']['200']), 'Others OpenAPI documents known depot sectors');
+$test->assert(isset($openApiOthersDocument['components']['schemas']['OthersKnownDepotsResponse']), 'Others OpenAPI defines the known depot response');
 $test->assert(
     is_string($othersVisitedSectorsMigrationScript)
         && str_contains($othersVisitedSectorsMigrationScript, 'CREATE TABLE others_visited_sectors')
@@ -1856,6 +1858,20 @@ $replayedOthersVisitedMigrationStatus = 0;
 exec($othersVisitedMigrationCommand . ' 2>&1', $replayedOthersVisitedMigrationOutput, $replayedOthersVisitedMigrationStatus);
 $test->assertEquals(0, $replayedOthersVisitedMigrationStatus, 'Others visited-sector migration can be replayed safely');
 $test->assertEquals(1, (int) $othersVisitedMigrationPdo->query('SELECT COUNT(*) FROM others_visited_sectors')->fetchColumn(), 'replayed Others visited-sector migration does not duplicate history');
+
+$othersKnownDepotsMigrationCommand = escapeshellarg(PHP_BINARY)
+    . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-others-known-depots.php')
+    . ' --database-config=' . escapeshellarg($othersVisitedMigrationConfig);
+exec($othersKnownDepotsMigrationCommand . ' 2>&1', $othersKnownDepotsMigrationOutput, $othersKnownDepotsMigrationStatus);
+$test->assertEquals(0, $othersKnownDepotsMigrationStatus, 'known depot migration creates the table on an existing database');
+$test->assertEquals(0, (int) $othersVisitedMigrationPdo->query('SELECT COUNT(*) FROM others_known_depots')->fetchColumn(), 'known depot migration does not infer discoveries from historical visits');
+$othersVisitedMigrationPdo->exec('INSERT INTO others_known_depots VALUES (1,12,-4,2)');
+exec($othersKnownDepotsMigrationCommand . ' 2>&1', $othersKnownDepotsMigrationReplayOutput, $othersKnownDepotsMigrationReplayStatus);
+$test->assertEquals(0, $othersKnownDepotsMigrationReplayStatus, 'known depot migration can be replayed');
+$test->assertEquals(1, (int) $othersVisitedMigrationPdo->query('SELECT COUNT(*) FROM others_known_depots')->fetchColumn(), 'known depot migration preserves existing discoveries');
+$othersVisitedMigrationPdo->exec('PRAGMA foreign_keys=ON');
+$othersVisitedMigrationPdo->exec('DELETE FROM others_fleets WHERE id=1');
+$test->assertEquals(0, (int) $othersVisitedMigrationPdo->query('SELECT COUNT(*) FROM others_known_depots')->fetchColumn(), 'known depot schema cascades fleet deletion when foreign keys are enforced');
 
 require_once $root . '/scripts/one-shot-scripts/remove-legacy-probe-resource-stocks.php';
 $legacyStorageMigrationPdo = new PDO('sqlite::memory:');
@@ -3480,6 +3496,23 @@ $test->assertEquals(['x' => 1, 'y' => -1, 'z' => 0], $othersDetachedAuxiliaryRes
 $othersDetachedAuxiliaryList = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersVictimShip['public_id']) . '/auxiliaries', $othersAlertHeaders);
 $test->assertEquals(['x' => 1, 'y' => -1, 'z' => 0], $othersDetachedAuxiliaryList->body['auxiliaries'][0]['sector']['relative'] ?? null, 'the paginated auxiliary collection exposes separated auxiliary coordinates');
 
+$knownDepotsPath = '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/known-depots';
+$depotArrivalSector = $othersHome->add(2, 0, 0);
+$depotDiscoveryRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($pdo);
+$arrivalDepotFixtures = [];
+foreach (['sealed', 'impacted', 'open'] as $index => $state) {
+    $depot = $depotDiscoveryRepository->create(-100 - $index, $depotArrivalSector, gmdate('c'));
+    $pdo->prepare('UPDATE germination_depots SET state=? WHERE id=?')->execute([$state, $depot['id']]);
+    $arrivalDepotFixtures[] = $depot;
+}
+$initialKnownDepots = $kernel->handle('GET', $knownDepotsPath, $othersAlertHeaders);
+$test->assertEquals(200, $initialKnownDepots->status, 'known depots endpoint accepts the fleet owner');
+$test->assertEquals(['knownDepots' => []], $initialKnownDepots->body, 'reading known depots does not discover an unvisited depot');
+$others->discoverFleetDepotsInSector((int) $othersAlertFleet['id'], $othersHome);
+$test->assertEquals([], $others->findFleetKnownDepots((int) $othersAlertFleet['id']), 'a sector without a depot is not remembered as a depot sector');
+$test->assertEquals(403, $kernel->handle('GET', $knownDepotsPath, $multiProbeHeaders)->status, 'known depots requires Others control permission');
+$test->assertEquals(404, $kernel->handle('GET', '/api/others/fleets/fleet_missing/known-depots', $othersAlertHeaders)->status, 'known depots hides missing fleets');
+
 $othersFleetMove = $kernel->handle(
     'POST',
     '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/move',
@@ -3540,7 +3573,27 @@ $test->assertEquals(
     'owned ship detail retains its relative target and arrival date throughout transit',
 );
 $transitingFleetAction = $others->findActionByPublicId($transitingFleetActionId) ?? throw new RuntimeException('Updated Others transit test action not found.');
+$test->assertEquals(['knownDepots' => []], $kernel->handle('GET', $knownDepotsPath, $othersAlertHeaders)->body, 'depot discovery waits until arrival, including during transit');
 $processOthersActionNow($transitingFleetAction);
+$expectedKnownDepots = ['knownDepots' => [['relativeCoordinates' => ['x' => 2, 'y' => 0, 'z' => 0]]]];
+$test->assertEquals($expectedKnownDepots, $kernel->handle('GET', $knownDepotsPath, $othersAlertHeaders)->body, 'arrival discovers multiple depots as one sector with only owner-relative coordinates');
+$processOthersActionNow($transitingFleetAction);
+$others->discoverFleetDepotsInSector((int) $othersAlertFleet['id'], $depotArrivalSector);
+$test->assertEquals($expectedKnownDepots, $kernel->handle('GET', $knownDepotsPath, $othersAlertHeaders)->body, 'replayed arrival and repeated discovery do not duplicate depot sectors');
+$separateDepotFleet = $others->createFleet($othersAlertPlayer->id, $othersHome->getX(), $othersHome->getY(), $othersHome->getZ());
+$test->assertEquals(['knownDepots' => []], $kernel->handle('GET', '/api/others/fleets/' . $separateDepotFleet['public_id'] . '/known-depots', $othersAlertHeaders)->body, 'fleets with the same owner do not share depot discoveries');
+$foreignDepotFleet = $others->createFleet($multiProbePlayer->id, $othersHome->getX(), $othersHome->getY(), $othersHome->getZ());
+$test->assertEquals(404, $kernel->handle('GET', '/api/others/fleets/' . $foreignDepotFleet['public_id'] . '/known-depots', $othersAlertHeaders)->status, 'known depots hides fleets belonging to another player');
+foreach ([$separateDepotFleet, $foreignDepotFleet] as $depotFleetFixture) {
+    $others->discoverFleetDepotsInSector((int) $depotFleetFixture['id'], $depotArrivalSector);
+    $depotFleetDeletion = $others->deleteFleetByMothershipPublicId((string) $depotFleetFixture['ship']['public_id']);
+    $test->assertEquals(1, $depotFleetDeletion['knownDepots'] ?? null, 'fleet deletion counts removed depot knowledge');
+    $test->assertEquals([], $others->findFleetKnownDepots((int) $depotFleetFixture['id']), 'fleet deletion removes its depot knowledge');
+}
+foreach ($arrivalDepotFixtures as $depot) {
+    $pdo->prepare('DELETE FROM germination_depots WHERE id=?')->execute([$depot['id']]);
+}
+$test->assertEquals($expectedKnownDepots, $kernel->handle('GET', $knownDepotsPath, $othersAlertHeaders)->body, 'known depots retains discovered sectors without rebuilding knowledge from live depot contents');
 $othersVisitedAfterArrival = $kernel->handle('GET', '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/visited-sectors', $othersAlertHeaders);
 $test->assertEquals(2, count($othersVisitedAfterArrival->body['visitedSectors'] ?? []), 'an Others ship arrival records the destination once for its fleet');
 $test->assertEquals(
@@ -11599,6 +11652,7 @@ foreach ([
     'GET /api/others',
     'GET /api/others/sector?shipId=ship_missing&x=0&y=0&z=0',
     'GET /api/others/fleets/fleet_missing/visited-sectors',
+    'GET /api/others/fleets/fleet_missing/known-depots',
     'GET /api/others/alerts',
     'PATCH /api/others/alerts/oalert_missing',
     'POST /api/others/ships/ship_missing/missiles',

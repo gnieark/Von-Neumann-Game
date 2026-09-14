@@ -8,6 +8,10 @@ info:
     X-RateLimit-Remaining and X-RateLimit-Reset. A token over its limit
     receives HTTP 429 with Retry-After. Authentication and API-version
     endpoints are not rate-limited.
+    Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
+    are documented in the dedicated Others API contract and use coordinates
+    relative to the owning player's home sector. Discoveries are recorded on
+    ship arrival or successful depot construction by that fleet.
 servers:
   - url: /
     description: Current host

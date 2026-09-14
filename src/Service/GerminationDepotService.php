@@ -94,6 +94,7 @@ final class GerminationDepotService
             $result = ['outcome' => $interruption ?? 'built'];
             if ($interruption === null) {
                 $depot = $this->depots->create($actionId, $this->coordinates($actor), $action['ends_at']);
+                $this->others->discoverFleetDepotsInSector((int) $action['fleet_id'], $this->coordinates($actor));
                 $result['depotId'] = $depot['public_id'];
                 $this->releaseActor($actionId, (int) $actor['id'], $causalTime);
             } elseif ($interruption !== 'auxiliary_destroyed') {
