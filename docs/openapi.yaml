@@ -5782,7 +5782,11 @@ paths:
         `sector.distances` lists the distance
         from every owned probe and marks the probe whose sensors produced the
         scan. During blind cruise, only already visited sectors can be consulted
-        as historical cartography. This endpoint uses owned probes exclusively;
+        as historical cartography. Detailed cartography of a visited sector does
+        not reveal live Others ships or missiles: these require the scan source
+        probe to be in that sector with normal sensors. A passive neighbor scan
+        can report an unclassified disturbance from an Others mothership without
+        identifying the ship. This endpoint uses owned probes exclusively;
         Others fleet scans are exposed by `GET /api/others/sector`.
       parameters:
         - name: x

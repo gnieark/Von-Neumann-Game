@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- `GET /api/sector` : les secteurs déjà visités sans sonde locale ne révèlent plus les vaisseaux Others ni les missiles présents en temps réel. La visibilité utilise la sonde qui fournit le scan, y compris une sonde secondaire joignable par SCUT, et exige des capteurs normaux.
 - Documentation OpenAPI : déplacement du paragraphe sur `GET /api/others/fleets/{fleetId}/known-depots` du contrat général vers `docs/openapi-others.yaml`, où figurent déjà la définition de l’endpoint et son schéma de réponse.
 
 ### Added

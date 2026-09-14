@@ -2327,7 +2327,7 @@ final class ApiKernel
         $target = $this->observations->relativeToAbsolute($player, (int) $query['x'], (int) $query['y'], (int) $query['z']);
 
         return new ApiResponse(200, [
-            'sector' => $this->addObservedOthersEntities($this->bestSectorObservation($player, $probe, $target), $target),
+            'sector' => $this->bestSectorObservation($player, $probe, $target),
         ]);
     }
 
@@ -2451,6 +2451,11 @@ final class ApiKernel
 
     private function addObservedOthersEntities(array $sector, SectorCoordinates $target, bool $includeProjectiles = true): array
     {
+        if (($sector['sensorMode'] ?? null) !== 'normal'
+            || (($sector['knowledgeLevel'] ?? null) === 'detailed' && ($sector['distance'] ?? null) !== 0)) {
+            return $sector;
+        }
+
         $entities = $this->others?->observableEntitiesBySector($target->getX(), $target->getY(), $target->getZ()) ?? ['ships' => [], 'projectiles' => []];
         if (($sector['knowledgeLevel'] ?? null) === 'detailed') {
             $sector['objects'] ??= [];
@@ -2688,6 +2693,8 @@ final class ApiKernel
         $observation = $this->observations->observe($player, $probe, $target)->toArray();
         $observation['sensorMode'] = $sensorMode;
         $observation['dataFreshness'] = $sensorMode === 'blind' ? 'historical' : ($sensorMode === 'degraded' ? 'degraded_live' : 'live');
+        // Apply live entity visibility before replacing the source distance with the default probe distance.
+        $observation = $this->addObservedOthersEntities($observation, $target);
         if ($movement === null && $target->equals($probe->currentSector)) {
             $observation = $this->withBlackHoleTrapCountdown($observation, $probe);
         }

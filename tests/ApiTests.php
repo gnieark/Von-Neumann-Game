@@ -3361,6 +3361,34 @@ $idleObservedOthersShip = array_values(array_filter(
 ))[0] ?? null;
 $test->assertEquals('idle', $idleObservedOthersShip['status'] ?? null, 'probe sector detail identifies a stationary detected Others ship as idle');
 
+$othersVisibilityShipPosition = $others->findShipByPublicId((string) $othersVictimShip['public_id']);
+foreach ([$multiProbePlayer->homeSector->add(100, 0, 0), $multiProbePlayer->homeSector->add(1, 1, 0), $primaryProbe->currentSector] as $visibilityTarget) {
+    $visitedSectors->markVisited($multiProbePlayer, $primaryProbe, $visibilityTarget);
+    $pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,sector_z=:z WHERE id=:id')->execute([
+        'x' => $visibilityTarget->getX(), 'y' => $visibilityTarget->getY(), 'z' => $visibilityTarget->getZ(),
+        'id' => $othersVictimShip['id'],
+    ]);
+    $visibilityScan = $kernel->handle(
+        'GET',
+        '/api/sector?' . http_build_query($visibilityTarget->subtract($multiProbePlayer->homeSector)),
+        $multiProbeHeaders,
+    );
+    $test->assertEquals(200, $visibilityScan->status, 'visited-sector Others visibility scan succeeds');
+    $test->assertEquals('detailed', $visibilityScan->body['sector']['knowledgeLevel'] ?? null, 'visited-sector cartography remains detailed');
+    $hasLocalProbe = $visibilityTarget->equals($primaryProbe->currentSector);
+    $test->assertEquals(
+        $hasLocalProbe,
+        in_array($othersVictimShip['public_id'], array_column($visibilityScan->body['sector']['objects'] ?? [], 'id'), true),
+        $hasLocalProbe
+            ? 'a reachable non-default local probe reveals Others ships despite the default probe distance'
+            : 'a visited sector without a local owned probe hides live Others ships',
+    );
+}
+$pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,sector_z=:z WHERE id=:id')->execute([
+    'x' => $othersVisibilityShipPosition['sector_x'], 'y' => $othersVisibilityShipPosition['sector_y'], 'z' => $othersVisibilityShipPosition['sector_z'],
+    'id' => $othersVictimShip['id'],
+]);
+
 $harvestabilitySector = $othersHome->add(60, 0, 0);
 $harvestabilityRemoteSector = $othersHome->add(62, 0, 0);
 $harvestableAmounts = ['deuterium' => 0.0001, 'metals' => 5.0, 'ice' => 0.0, 'carbon_compounds' => 0.0];
