@@ -4393,7 +4393,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(131, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(132, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -10678,6 +10678,8 @@ if ($createdProbe !== null) {
     $abandonedTimeoutObject = $abandonedTimeoutSector->findObjectById(SectorManny::objectIdForUid($abandonedTimeoutManny->uid));
     $test->assertEquals(SectorManny::STATE_ABANDONED, $abandonedTimeoutObject?->toArray()['state'] ?? null, 'storage timeout exposes the Manny as an abandoned salvageable sector object');
     $test->assertEquals('done', $abandonedTimeoutEventId !== null ? $scheduledEvents->findById($abandonedTimeoutEventId)?->status : null, 'final Manny abandonment completes its scheduler event');
+
+    require __DIR__ . '/Support/MannyMiningTimeoutTests.php';
 
     $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.45]);
     $steelBarIds = [];

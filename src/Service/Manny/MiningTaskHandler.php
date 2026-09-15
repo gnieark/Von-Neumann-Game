@@ -216,6 +216,14 @@ final class MiningTaskHandler implements TaskHandlerInterface
             return $manny;
         }
 
+        $waitingForStorage = ($manny->taskPayload['waitingFor'] ?? null) === 'storage_space';
+        if ($waitingForStorage) {
+            $completed = $runtime->refreshStorageWaitTimeout($manny, $probe, $now);
+            if ($completed !== null) {
+                return $completed;
+            }
+        }
+
         $targetAmount = (float) ($manny->taskPayload['targetAmount'] ?? 0);
         $resourceProfile = ($this->miningResourceProfile)($manny);
         $targetContainerId = ($this->miningTaskTargetContainerId)($manny);
@@ -228,13 +236,16 @@ final class MiningTaskHandler implements TaskHandlerInterface
                 ($this->detachedContainerFreeCapacity)($targetContainer['container']),
             ), 4);
         } elseif (!($this->canAcceptMiningDelivery)($probe, $resourceProfile, $targetAmount, true)) {
+            if (!$waitingForStorage) {
+                $manny->taskPayload[Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY] = $now->format('c');
+            }
             $manny->taskPayload['waitingFor'] = 'storage_space';
             $manny->taskPayload['reason'] = 'mining_output';
             ($this->saveManny)($manny);
             return ($this->findMannyById)($manny->id) ?? $manny;
         }
 
-        unset($manny->taskPayload['waitingFor'], $manny->taskPayload['reason'], $manny->taskPayload['failureReason']);
+        unset($manny->taskPayload['waitingFor'], $manny->taskPayload['reason'], $manny->taskPayload['failureReason'], $manny->taskPayload[Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY]);
         $extracted = ($this->depleteMiningTarget)($manny, $resourceProfile, $completionAmount);
         $manny->taskPayload['extractedAmount'] = $extracted;
         $manny->taskPayload['extractedResources'] = ($this->resourceAmountsForTotal)($extracted, $resourceProfile);

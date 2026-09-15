@@ -1987,42 +1987,12 @@ final class MannyService implements MannyTaskRuntime
 
     public function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny
     {
-        $waitingSince = $this->requiredWaitingForSpaceSince($manny);
-        try {
-            $timeoutAt = (new \DateTimeImmutable($waitingSince))->modify('+' . $this->waitingForSpaceTimeoutSeconds() . ' seconds');
-        } catch (\Exception $error) {
-            throw new \RuntimeException('Waiting-for-space task has an invalid canonical start timestamp.', previous: $error);
+        $completed = $this->refreshStorageWaitTimeout($manny, $probe, $now);
+        if ($completed !== null) {
+            return $completed;
         }
-        $timedOut = $now >= $timeoutAt;
-        if (!$timedOut && !$this->cargo->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
+        if (!$this->cargo->canAcceptMannyDocking($probe, $manny, $manny->taskPayload)) {
             return $manny;
-        }
-        if ($timedOut) {
-            $droppedCargo = $this->cargo->dropWaitingMannyCargo($manny);
-            $this->cargo->clearMannyCargo($manny);
-            $resultPayload = [
-                'lastTask' => Manny::TASK_WAITING_FOR_SPACE,
-                'reason' => 'storage_space_timeout',
-                Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY => $waitingSince,
-                'droppedCargo' => $droppedCargo,
-            ];
-            if ($this->storage->placeMannyOnProbe($probe, $manny)) {
-                $resultPayload['result'] = 'returned_after_cargo_abandonment';
-                $this->removeMannyFromSector($manny);
-                $manny->locationType = Manny::LOCATION_PROBE;
-                $manny->sector = null;
-                $this->clearTask($manny, $resultPayload);
-            } else {
-                $resultPayload['result'] = 'abandoned';
-                $this->storage->releaseMannyFromStorage($manny);
-                $this->clearTask($manny, $resultPayload);
-                $manny->probeId = null;
-                $manny->locationType = Manny::LOCATION_SECTOR;
-                $this->registerMannyInSector($manny, SectorManny::STATE_ABANDONED);
-            }
-            $this->mannies->save($manny);
-
-            return $this->mannies->findById($manny->id) ?? $manny;
         }
 
         $this->cargo->transferMannyCargoToProbe($manny, $probe);
@@ -2049,6 +2019,44 @@ final class MannyService implements MannyTaskRuntime
         return $this->mannies->findById($manny->id) ?? $manny;
     }
 
+    public function refreshStorageWaitTimeout(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): ?Manny
+    {
+        $waitingSince = $this->requiredWaitingForSpaceSince($manny);
+        try {
+            $timeoutAt = (new \DateTimeImmutable($waitingSince))->modify('+' . $this->waitingForSpaceTimeoutSeconds() . ' seconds');
+        } catch (\Exception $error) {
+            throw new \RuntimeException('Storage wait has an invalid canonical start timestamp.', previous: $error);
+        }
+        if ($now < $timeoutAt) {
+            return null;
+        }
+        $droppedCargo = $this->cargo->dropWaitingMannyCargo($manny);
+        $this->cargo->clearMannyCargo($manny);
+        $resultPayload = [
+            'lastTask' => $manny->currentTask,
+            'reason' => 'storage_space_timeout',
+            Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY => $waitingSince,
+            'droppedCargo' => $droppedCargo,
+        ];
+        if ($manny->isInSameSectorAs($probe) && $this->storage->placeMannyOnProbe($probe, $manny)) {
+            $resultPayload['result'] = 'returned_after_cargo_abandonment';
+            $this->removeMannyFromSector($manny);
+            $manny->locationType = Manny::LOCATION_PROBE;
+            $manny->sector = null;
+            $this->clearTask($manny, $resultPayload);
+        } else {
+            $resultPayload['result'] = 'abandoned';
+            $this->storage->releaseMannyFromStorage($manny);
+            $this->clearTask($manny, $resultPayload);
+            $manny->probeId = null;
+            $manny->locationType = Manny::LOCATION_SECTOR;
+            $this->registerMannyInSector($manny, SectorManny::STATE_ABANDONED);
+        }
+        $this->mannies->save($manny);
+
+        return $this->mannies->findById($manny->id) ?? $manny;
+    }
+
     private function waitingForSpaceTimeoutSeconds(): int
     {
         return max(1, Config::int(
@@ -2062,7 +2070,7 @@ final class MannyService implements MannyTaskRuntime
     {
         $waitingSince = $manny->taskPayload[Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY] ?? null;
         if (!is_string($waitingSince) || trim($waitingSince) === '') {
-            throw new \RuntimeException('Waiting-for-space task is missing its canonical start timestamp; run migrate-manny-waiting-for-space-timeouts.php.');
+            throw new \RuntimeException('Storage wait is missing its canonical start timestamp; run the migration for waiting-for-space or blocked mining tasks.');
         }
 
         return $waitingSince;

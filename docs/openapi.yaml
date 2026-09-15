@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '131'
+  version: '132'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 131
+                apiVersion: 132
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -8530,7 +8530,26 @@ components:
     MannyMiningTask:
       type: object
       required: [objectId, resourceType, resourceTypes, targetAmount, depositedAmount, depositedResources, extractedAmount, extractedResources, availableResources, resourceComposition, resourceProfile, target]
+      description: >
+        Mining remains active when storage cannot accept its complete delivery and
+        the Manny itself. The storage wait fields are then present. After seven
+        continuous days, mining is canceled without extracting or delivering the
+        pending resources. The Manny drops any carried cargo and docks if its
+        probe is still in the same sector and has room for the Manny alone;
+        otherwise it becomes an unowned, salvageable abandoned Manny in its sector.
       properties:
+        waitingFor:
+          type: string
+          enum: [storage_space]
+          description: Present while the completed mining task waits for storage.
+        reason:
+          type: string
+          enum: [mining_output]
+          description: Present with waitingFor when mining delivery is blocked.
+        waitingForSpaceSince:
+          type: string
+          format: date-time
+          description: Canonical start of the continuous storage wait; required when waitingFor is storage_space. Repeated scheduler attempts do not reset it.
         objectId:
           type: string
           description: Sector object being mined.

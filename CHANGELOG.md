@@ -4,6 +4,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-15
 
+### Fixed
+
+- API **v132** : les Mannies dont le minage attend une place en stockage exposent désormais `task.waitingForSpaceSince` et appliquent le délai d'abandon de sept jours. Une livraison débloquée avant l'échéance termine normalement ; à l'échéance, la tâche est annulée sans extraire ni créditer les ressources encore en attente. La Manny abandonne sa cargaison éventuelle et rentre si sa sonde est dans le même secteur et dispose de 0,05 ECE pour elle ; sinon elle devient `abandoned` et récupérable dans son secteur. Les nouvelles tentatives du scheduler ne réinitialisent pas le délai.
+- Migration explicite `scripts/one-shot-scripts/migrate-manny-blocked-mining-timeouts.php` : initialise l'attente des minages déjà bloqués depuis leur ancienne échéance de fin, préserve les horodatages existants et remet ces événements à échéance pour traitement. Disponible avec `--dry-run` et `--database-config=PATH` ; suspendre les workers du scheduler pendant l'application, puis déployer le code et les redémarrer. Les tâches dépassant déjà sept jours seront traitées dès la reprise.
+
 ### Changed
 
 - Contrôle Others « défense étoile — attente » : moisson continue jusqu'à épuisement des planètes moissonnables du secteur, y compris lorsque les objectifs de production et la réserve sont complets ou que trois chantiers sont déjà actifs. Les constructions restent limitées à trois simultanément et démarrent dès qu'un vaisseau est finançable, en préservant la réserve de 10 auxiliaires et 10 missiles.

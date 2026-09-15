@@ -13,4 +13,6 @@ interface MannyTaskRuntime
 
     public function refreshWaitingForSpace(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): Manny;
 
+    public function refreshStorageWaitTimeout(Manny $manny, NeumannProbe $probe, \DateTimeImmutable $now): ?Manny;
+
 }
