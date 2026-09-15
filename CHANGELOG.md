@@ -4,6 +4,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-15
 
+### Added
+
+- API **v133** : `POST /api/others/alerts/mark-read` marque lues de 1 à 500 alertes désignées par `alertIds`, en une seule requête. Le lot est atomique, limité aux alertes du compte et renvoie les alertes dans l'ordre demandé ; tout identifiant inconnu ou étranger refuse l'ensemble sans modification. Les doublons sont refusés et les alertes déjà lues conservent leurs horodatages lors des nouvelles tentatives.
+
 ### Fixed
 
 - API **v132** : les Mannies dont le minage attend une place en stockage exposent désormais `task.waitingForSpaceSince` et appliquent le délai d'abandon de sept jours. Une livraison débloquée avant l'échéance termine normalement ; à l'échéance, la tâche est annulée sans extraire ni créditer les ressources encore en attente. La Manny abandonne sa cargaison éventuelle et rentre si sa sonde est dans le même secteur et dispose de 0,05 ECE pour elle ; sinon elle devient `abandoned` et récupérable dans son secteur. Les nouvelles tentatives du scheduler ne réinitialisent pas le délai.

@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 132;
+    public const API_VERSION = 133;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -140,6 +140,7 @@ final class ApiKernel
     private function routes(): array
     {
         return [
+            ApiRoute::path('/api/others/alerts/mark-read', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAlertsMarkReadResponse($player, $ctx->body))),
             ApiRoute::regex('#^/api/others/alerts/([^/]+)$#', ['PATCH'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAlertReadResponse($player, $ctx->stringParam(0)))),
             ApiRoute::path('/api/others/alerts', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersAlertsResponse($player, $ctx->query))),
             ApiRoute::path('/api/others/sector', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersSectorResponse($player, $ctx->query))),
@@ -490,6 +491,28 @@ final class ApiKernel
             return ApiResponse::error(400, 'bad_request', 'status must be unread');
         }
         $alerts = $this->others?->findAlertsForPlayer($player->id, $status === 'unread') ?? [];
+
+        return new ApiResponse(200, ['alerts' => array_map(fn(array $alert): array => $this->presentOthersAlert($alert), $alerts)]);
+    }
+
+    private function othersAlertsMarkReadResponse(Player $player, ?string $body): ApiResponse
+    {
+        $payload = json_decode($body ?? '');
+        $alertIds = $payload instanceof \stdClass ? ($payload->alertIds ?? null) : null;
+        if (!is_array($alertIds) || count($alertIds) < 1 || count($alertIds) > 500) {
+            return ApiResponse::error(400, 'bad_request', 'alertIds must be an array of 1 to 500 distinct Others alert identifiers.');
+        }
+        $seen = [];
+        foreach ($alertIds as $alertId) {
+            if (!is_string($alertId) || preg_match('/^oalert_[a-f0-9]{20}$/D', $alertId) !== 1 || isset($seen[$alertId])) {
+                return ApiResponse::error(400, 'bad_request', 'alertIds must contain distinct canonical Others alert identifiers.');
+            }
+            $seen[$alertId] = true;
+        }
+        $alerts = $this->others?->markAlertsReadForPlayer($player->id, $alertIds);
+        if ($alerts === null) {
+            return ApiResponse::error(404, 'others_alert_not_found', 'One or more Others alerts not found.');
+        }
 
         return new ApiResponse(200, ['alerts' => array_map(fn(array $alert): array => $this->presentOthersAlert($alert), $alerts)]);
     }

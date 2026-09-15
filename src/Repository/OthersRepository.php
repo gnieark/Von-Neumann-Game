@@ -81,6 +81,34 @@ final class OthersRepository
         return $stmt->fetch() ?: null;
     }
 
+    /**
+     * @param non-empty-list<string> $publicIds Distinct public alert identifiers.
+     * @return list<array<string, mixed>>|null Null when any alert is missing or not owned; nothing is changed.
+     */
+    public function markAlertsReadForPlayer(int $playerId, array $publicIds): ?array
+    {
+        return $this->transaction(function () use ($playerId, $publicIds): ?array {
+            $placeholders = implode(',', array_fill(0, count($publicIds), '?'));
+            $where = "player_id = ? AND public_id IN ($placeholders)";
+            $parameters = [$playerId, ...$publicIds];
+            $sql = "SELECT * FROM others_alerts WHERE $where ORDER BY public_id";
+            $select = $this->pdo->prepare($sql . ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite' ? ' FOR UPDATE' : ''));
+            $select->execute($parameters);
+            if (count($select->fetchAll(PDO::FETCH_ASSOC)) !== count($publicIds)) {
+                return null;
+            }
+
+            $now = gmdate('c');
+            $update = $this->pdo->prepare("UPDATE others_alerts SET status='read',read_at=COALESCE(read_at,?),updated_at=? WHERE $where AND status='unread'");
+            $update->execute([$now, $now, ...$parameters]);
+            $select = $this->pdo->prepare($sql);
+            $select->execute($parameters);
+            $alertsById = array_column($select->fetchAll(PDO::FETCH_ASSOC), null, 'public_id');
+
+            return array_map(static fn(string $id): array => $alertsById[$id], $publicIds);
+        });
+    }
+
     /** @param array<string, mixed> $alert
      *  @return array<string, mixed>
      */

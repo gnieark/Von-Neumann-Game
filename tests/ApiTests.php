@@ -3742,6 +3742,65 @@ $othersVictimAlertRead = $kernel->handle('PATCH', '/api/others/alerts/' . rawurl
 $test->assertEquals(200, $othersVictimAlertRead->status, 'PATCH /api/others/alerts/{alertId} marks an owned Others alert as read');
 $test->assertEquals('read', $othersVictimAlertRead->body['alert']['status'] ?? null, 'Others alert acknowledgement persists its read status');
 
+$batchAlertPath = '/api/others/alerts/mark-read';
+$batchAlerts = [];
+for ($index = 0; $index < 3; ++$index) {
+    $batchAlerts[] = $others->createAlert($othersAlertPlayer->id, (string) $othersVictimShip['public_id'], 'missile_damage', 'weapon_damage', 'batch-read-' . $index, 'Batch acknowledgement fixture');
+}
+$batchAlertIds = array_column($batchAlerts, 'public_id');
+$foreignBatchAlert = $others->createAlert($multiProbePlayer->id, 'oship_batch_foreign', 'missile_damage', 'weapon_damage', 'batch-read-foreign', 'Foreign alert');
+$batchAlertSchema = $openApiOthersDocument['paths'][$batchAlertPath]['post']['requestBody']['content']['application/json']['schema'] ?? [];
+$test->assertEquals(['alertIds'], $batchAlertSchema['required'] ?? null, 'Others batch acknowledgement documents its required alertIds');
+$test->assertEquals(500, $batchAlertSchema['properties']['alertIds']['maxItems'] ?? null, 'Others batch acknowledgement documents the batch limit');
+$test->assertEquals(403, $kernel->handle('POST', $batchAlertPath, $multiProbeHeaders, json_encode(['alertIds' => [$foreignBatchAlert['public_id']]], JSON_THROW_ON_ERROR))->status, 'batch acknowledgement requires Others permission');
+$test->assertEquals(405, $kernel->handle('GET', $batchAlertPath, $othersAlertHeaders)->status, 'batch acknowledgement requires POST');
+foreach ([
+    null, '', '{', '{}', '[]', 'null',
+    '{"alertIds":[]}', '{"alertIds":{}}', '{"alertIds":{"0":"' . $batchAlertIds[0] . '"}}',
+    '{"alertIds":"' . $batchAlertIds[0] . '"}',
+    json_encode(['alertIds' => [$batchAlertIds[0], 12]], JSON_THROW_ON_ERROR),
+    json_encode(['alertIds' => [$batchAlertIds[0], 'oalert_invalid']], JSON_THROW_ON_ERROR),
+    json_encode(['alertIds' => [$batchAlertIds[0], $batchAlertIds[0]]], JSON_THROW_ON_ERROR),
+    json_encode(['alertIds' => array_map(static fn(int $i): string => 'oalert_' . sprintf('%020x', $i), range(1, 501))], JSON_THROW_ON_ERROR),
+] as $invalidBatchBody) {
+    $invalidBatch = $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, $invalidBatchBody);
+    $test->assertEquals(400, $invalidBatch->status, 'batch acknowledgement rejects malformed payloads, duplicates and oversized batches');
+    $test->assertEquals('bad_request', $invalidBatch->body['error']['code'] ?? null, 'invalid batches expose bad_request');
+}
+foreach (['oalert_00000000000000000000', $foreignBatchAlert['public_id']] as $unavailableAlertId) {
+    $rejectedBatch = $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, json_encode(['alertIds' => [$batchAlertIds[0], $unavailableAlertId]], JSON_THROW_ON_ERROR));
+    $test->assertEquals(404, $rejectedBatch->status, 'a missing or foreign alert rejects the whole batch');
+    $test->assertEquals('others_alert_not_found', $rejectedBatch->body['error']['code'] ?? null, 'missing and foreign batch alerts share one error code');
+    $test->assertEquals($batchAlerts[0], $others->findAlertForPlayer($batchAlertIds[0], $othersAlertPlayer->id), 'rejected batches preserve owned alert state and timestamps');
+}
+$test->assertEquals('unread', $others->findAlertForPlayer($foreignBatchAlert['public_id'], $multiProbePlayer->id)['status'] ?? null, 'batch acknowledgement never modifies foreign alerts');
+$requestedBatchIds = [$batchAlertIds[1], $othersVictimDamageAlert['id'], $batchAlertIds[0]];
+$batchBody = json_encode(['alertIds' => $requestedBatchIds], JSON_THROW_ON_ERROR);
+$batchRead = $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, $batchBody);
+$test->assertEquals(200, $batchRead->status, 'batch acknowledgement accepts both unread and already-read alerts');
+$test->assertEquals($requestedBatchIds, array_column($batchRead->body['alerts'] ?? [], 'id'), 'batch acknowledgement preserves request order');
+$test->assertEquals(['read', 'read', 'read'], array_column($batchRead->body['alerts'] ?? [], 'status'), 'all requested alerts are returned as read');
+$test->assertEquals($othersVictimAlertRead->body['alert'], $batchRead->body['alerts'][1] ?? null, 'an already-read alert retains all its timestamps');
+$test->assertEquals('unread', $others->findAlertForPlayer($batchAlertIds[2], $othersAlertPlayer->id)['status'] ?? null, 'unselected owned alerts remain unread');
+$unreadAfterBatch = $kernel->handle('GET', '/api/others/alerts?status=unread', $othersAlertHeaders);
+$test->assertEquals([], array_values(array_intersect($requestedBatchIds, array_column($unreadAfterBatch->body['alerts'] ?? [], 'id'))), 'batch acknowledgement removes selected alerts from the unread listing');
+// Fixed old timestamps ensure replay assertions do not depend on crossing a second boundary.
+$pdo->prepare('UPDATE others_alerts SET read_at=?,updated_at=? WHERE public_id=?')->execute(['2000-01-01T00:00:00+00:00', '2000-01-01T00:00:00+00:00', $batchAlertIds[0]]);
+$beforeBatchReplay = $others->findAlertForPlayer($batchAlertIds[0], $othersAlertPlayer->id);
+$test->assertEquals(200, $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, $batchBody)->status, 'batch acknowledgement can be safely retried');
+$test->assertEquals($beforeBatchReplay, $others->findAlertForPlayer($batchAlertIds[0], $othersAlertPlayer->id), 'replayed batches preserve readAt and updatedAt');
+$test->assertEquals(200, $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, json_encode(['alertIds' => [$batchAlertIds[2]]], JSON_THROW_ON_ERROR))->status, 'a batch may contain a single alert');
+$maximumBatchIds = [];
+$others->transaction(function () use ($others, $othersAlertPlayer, $othersVictimShip, &$maximumBatchIds): void {
+    for ($index = 0; $index < 500; ++$index) {
+        $alert = $others->createAlert($othersAlertPlayer->id, (string) $othersVictimShip['public_id'], 'missile_damage', 'weapon_damage', 'maximum-batch-read-' . $index, 'Maximum batch fixture');
+        $maximumBatchIds[] = $alert['public_id'];
+    }
+});
+$maximumBatchRead = $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, json_encode(['alertIds' => $maximumBatchIds], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $maximumBatchRead->status, 'the maximum batch of 500 alerts is accepted');
+$test->assertEquals(array_fill(0, 500, 'read'), array_column($maximumBatchRead->body['alerts'] ?? [], 'status'), 'the maximum batch marks every requested alert read');
+
 $probeMissileVictim = $others->createStandardShip($othersVictimShip);
 $pdo->prepare('UPDATE others_ships SET integrity=10 WHERE id=:id')->execute(['id' => (int) $probeMissileVictim['id']]);
 $probeKillMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'probe-others-kill-counter-item');
@@ -4393,7 +4452,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(132, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(133, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -11762,6 +11821,7 @@ foreach ([
     'GET /api/others/fleets/fleet_missing/visited-sectors',
     'GET /api/others/fleets/fleet_missing/known-depots',
     'GET /api/others/alerts',
+    'POST /api/others/alerts/mark-read',
     'PATCH /api/others/alerts/oalert_missing',
     'POST /api/others/ships/ship_missing/missiles',
     'GET /api/probe/messages',

@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '132'
+  version: '133'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -388,6 +388,60 @@ paths:
                 "$ref": "#/components/schemas/OthersAlertsResponse"
         '403':
           "$ref": "#/components/responses/Forbidden"
+  "/api/others/alerts/mark-read":
+    post:
+      tags: [Others]
+      summary: Mark a batch of owned Others alerts as read
+      description: >-
+        Marks only the supplied alerts as read, atomically. All alerts must belong
+        to the authenticated account; an unknown or foreign identifier rejects
+        the entire batch with 404 others_alert_not_found. Already-read alerts
+        are accepted without changing their timestamps, so retries are safe.
+        Returns the alerts in request order. Requires Others control permission
+        and counts as one request against the normal per-token rate limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [alertIds]
+              properties:
+                alertIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: '^oalert_[a-f0-9]{20}$'
+            example:
+              alertIds: [oalert_0123456789abcdef0123, oalert_abcdef0123456789abcd]
+      responses:
+        '200':
+          description: All requested alerts, with read status
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersAlertsResponse"
+        '400':
+          description: Invalid JSON object, missing or invalid alertIds, empty batch, more than 500 identifiers, or duplicates (bad_request)
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+        '404':
+          description: At least one alert is unknown or belongs to another account; no alerts were changed (others_alert_not_found)
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersErrorResponse"
+        '429':
+          "$ref": "#/components/responses/RateLimited"
   "/api/others/alerts/{alertId}":
     parameters:
     - "$ref": "#/components/parameters/AlertId"
