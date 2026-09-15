@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.others_control.defense_etoile.controller import DefenseEtoileAttente
 from scripts.others_control.defense_etoile.depot_logistics import DepotLogistics, route
@@ -13,14 +14,21 @@ from scripts.others_control.defense_etoile.models import CycleResult
 from scripts.others_control.tests.support import FakeApi, auxiliary, detailed_scan, ship, sector
 
 
+PROTECTED = {"metals": 18250.0, "ice": 3025.0, "carbon_compounds": 6060.0, "deuterium": 310.5}
+
+
+def protected_stock(**excess):
+    return {key: value + excess.get(key, 0) for key, value in PROTECTED.items()}
+
+
 class DepotApi(FakeApi):
     """Les commandes réservent immédiatement, le worker simulé termine explicitement."""
     def __init__(self):
         super().__init__([ship('mother', (0, 0, 0), ship_type='mothership', deuterium=100),
                           ship('courier', (0, 0, 0)), ship('second', (0, 0, 0))],
                          auxiliaries={key: [auxiliary('aux-' + key)] for key in ('mother', 'courier', 'second')},
-                         resources={'mother': {'metals': 40, 'ice': 20, 'carbon_compounds': 20, 'deuterium': 20}})
-        self.capacities = {'mother': 100, 'courier': 20, 'second': 20}
+                         resources={'mother': protected_stock(metals=40, ice=20, carbon_compounds=20, deuterium=20)})
+        self.capacities = {'mother': sum(PROTECTED.values()) + 100, 'courier': 20, 'second': 20}
         self.known = []
         self.depots = {}
         self.requests = []
@@ -172,20 +180,20 @@ class DepotLogisticsTests(unittest.TestCase):
         self.api.finish()
         self.cycle()
         self.cycle()
-        self.assertEqual(1, len(self.api.requests))
+        self.assertEqual(['build', 'deposit'], [r[0] for r in self.api.requests])
 
-    def test_only_actual_fullness_triggers_overflow(self):
-        self.api.resources['mother']['metals'] = 39.99
+    def test_forty_free_ece_do_not_trigger_overflow(self):
+        self.api.resources['mother']['metals'] -= 40
         self.assertFalse(self.cycle()[0])
         self.assertEqual([], self.api.requests)
 
-    def test_local_depot_receives_half_of_every_unreserved_resource(self):
+    def test_local_depot_keeps_protected_and_reserved_resources_even_above_half_capacity(self):
         self.api.add_depot((0, 0, 0))
         self.api.resource_reservations['mother'] = {'metals': 10}
         self.cycle()
         kind, args, _ = self.api.requests[0]
         self.assertEqual('deposit', kind)
-        self.assertEqual({'metals': 15, 'ice': 10, 'carbon_compounds': 10, 'deuterium': 10}, args[3])
+        self.assertEqual({'metals': 30, 'ice': 20, 'carbon_compounds': 20, 'deuterium': 20}, args[3])
         self.assertEqual(100, self.api.ships[0]['deuterium']['amount'])
         self.cycle(self.restart())
         self.assertEqual(1, len(self.api.requests))
@@ -222,7 +230,7 @@ class DepotLogisticsTests(unittest.TestCase):
             if self.api.effects:
                 self.api.finish()
             self.worker = self.restart()
-            self.cycle()
+            self.worker.reconcile(self.api.ships[0], self.api.ships, CycleResult(), allow_new=False)
             if not self.worker.reserved_ships('fleet_test'):
                 break
         self.assertFalse(self.worker.reserved_ships('fleet_test'))
@@ -246,11 +254,145 @@ class DepotLogisticsTests(unittest.TestCase):
         for _ in range(4):
             self.api.finish()
             self.cycle()
-        self.assertEqual('move', self.api.requests[-1][0])
-        self.api.resources['mother'] = {'metals': 40, 'ice': 20, 'carbon_compounds': 20, 'deuterium': 20}
+        self.assertIn('move', [request[0] for request in self.api.requests])
         self.cycle()
         self.assertEqual({'courier', 'second'}, self.worker.reserved_ships('fleet_test'))
         self.assertEqual('second', self.api.requests[-1][1][1])
+
+    def test_less_than_two_free_ece_triggers_deposit_and_unblocks_harvest(self):
+        self.api.add_depot((0, 0, 0))
+        self.api.resources['mother']['metals'] -= 1
+        self.assertTrue(self.cycle()[0])
+        self.assertEqual('deposit', self.api.requests[0][0])
+        self.api.finish()
+        self.assertGreaterEqual(self.api.get_inventory('mother')['capacityEce']
+                                - self.api.get_inventory('mother')['usedEce'], 40)
+
+    def test_nearly_full_inventory_waits_for_reserved_arrivals(self):
+        inventory = self.api.get_inventory('mother')
+        inventory['reservedEce'] = 0.2
+        with patch.object(self.api, 'get_inventory', return_value=inventory):
+            self.assertFalse(self.cycle()[0])
+        self.assertEqual([], self.api.requests)
+
+    def test_local_deposit_targets_half_capacity_without_exporting_a_scarce_resource(self):
+        self.api.add_depot((0, 0, 0))
+        self.api.capacities['mother'] = 100000
+        self.api.resources['mother'] = protected_stock()
+        self.api.resources['mother']['ice'] = 1
+        self.api.resources['mother']['metals'] += 100000 - sum(self.api.resources['mother'].values())
+        self.cycle()
+        self.assertEqual({'metals': 50000}, self.api.requests[0][1][3])
+        self.api.finish()
+        self.assertEqual(50000, self.api.get_inventory('mother')['usedEce'])
+        self.assertEqual(1, self.api.resources['mother']['ice'])
+
+    def test_only_protected_resources_do_not_block_production(self):
+        self.api.resources['mother'] = protected_stock()
+        self.api.capacities['mother'] = sum(PROTECTED.values()) + 1
+        self.assertFalse(self.cycle()[0])
+        self.assertEqual([], self.api.requests)
+        self.assertTrue(any('aucun excédent exportable' in message for message in self.logs))
+
+    def test_loading_rechecks_protected_budget_after_stock_changes(self):
+        self.api.add_depot((2, 0, 0))
+        self.cycle()
+        self.api.finish()  # Métaux déjà chargés.
+        self.api.resources['mother']['ice'] = PROTECTED['ice']
+        self.cycle()
+        self.assertEqual('carbon_compounds', self.api.requests[-1][1][3])
+        self.assertEqual(PROTECTED['ice'], self.api.resources['mother']['ice'])
+
+    def test_couriers_drain_toward_half_capacity_across_round_trips(self):
+        self.api.add_depot((2, 0, 0))
+        self.api.capacities.update(mother=100000, courier=10000, second=10000)
+        self.api.resources['mother'] = protected_stock(metals=100000 - sum(PROTECTED.values()))
+        for _ in range(100):
+            self.worker = self.restart()
+            self.cycle()
+            if not self.api.effects and not self.worker.reserved_ships('fleet_test'):
+                break
+            if self.api.effects:
+                self.api.finish()
+        else:
+            self.fail('Les navettes ne terminent pas le déchargement.')
+        self.assertEqual(50000, self.api.get_inventory('mother')['usedEce'])
+        self.assertEqual(50000, sum(args[4] for kind, args, _ in self.api.requests if kind == 'load'))
+
+    def prepare_sentinel(self):
+        self.api.add_depot((12, 0, 0))
+        self.api.ships[1]['sector'] = sector((1, 1, 0))
+        self.api.auxiliaries['second'] = []
+        self.api.scans[(1, 1, 0)] = detailed_scan(probes=[{'id': 'hostile-probe'}])
+
+    def test_sentinel_recall_is_persistent_and_returns_to_formation_after_delivery(self):
+        self.prepare_sentinel()
+        self.cycle()
+        self.assertEqual([('courier', (0, 0, 0))], self.api.moves)
+        self.assertEqual('recalling', self.worker.state['missions']['courier']['stage'])
+        self.worker = self.restart()
+        self.assertEqual({'courier'}, self.worker.reserved_ships('fleet_test'))
+        self.cycle()
+        self.assertEqual(1, len(self.api.moves))
+        for _ in range(30):
+            if self.api.effects:
+                self.api.finish()
+            self.worker = self.restart()
+            self.worker.reconcile(self.api.ships[0], self.api.ships, CycleResult(), allow_new=False)
+            if not self.worker.reserved_ships('fleet_test'):
+                break
+        self.assertEqual(set(), self.worker.reserved_ships('fleet_test'))
+        self.assertEqual(('courier', (0, 0, 0)), self.api.moves[-1])
+        self.assertEqual(0, self.api.get_inventory('courier')['usedEce'])
+        # Après libération, la formation peut à nouveau déployer cette sentinelle.
+        controller = DefenseEtoileAttente(self.api, mothership_id='mother', logger=self.logs.append)
+        controller.formation.reconcile(self.api.ships[0], self.api.ships, CycleResult(), missile_counts={})
+        self.assertEqual(('courier', (1, 1, 0)),
+                         [move for move in self.api.moves if move[0] == 'courier'][-1])
+
+    def test_controller_recalls_under_threat_without_defensive_reassignment(self):
+        self.prepare_sentinel()
+        self.api.scans[(0, 0, 0)] = detailed_scan(objects=[
+            {'id': 'planet', 'type': 'planet', 'harvestable': True},
+        ])
+        controller = DefenseEtoileAttente(self.api, mothership_id='mother', logger=self.logs.append,
+                                         logistics_state_dir=Path(self.directory))
+        controller.run_cycle()
+        self.assertEqual([('courier', (0, 0, 0))],
+                         [move for move in self.api.moves if move[0] == 'courier'])
+        self.assertIn('courier', controller.depots.reserved_ships('fleet_test'))
+        self.assertNotIn((1, 1, 0), controller.formation.activity_guards)
+        controller.run_activity_cycle()
+        self.assertEqual(1, len([move for move in self.api.moves if move[0] == 'courier']))
+
+    def test_local_courier_is_preferred_to_a_sentinel(self):
+        self.prepare_sentinel()
+        self.api.auxiliaries['second'] = [auxiliary('aux-second')]
+        self.cycle()
+        self.assertEqual({'second'}, self.worker.reserved_ships('fleet_test'))
+        self.assertEqual([], self.api.moves)
+
+    def test_sentinel_must_have_fuel_for_recall_and_round_trip_after_refueling(self):
+        self.prepare_sentinel()
+        for mother_fuel, sentinel_fuel in [(100, 1), (0, 9)]:
+            with self.subTest(mother_fuel=mother_fuel, sentinel_fuel=sentinel_fuel):
+                self.api.ships[0]['deuterium']['amount'] = mother_fuel
+                self.api.ships[1]['deuterium']['amount'] = sentinel_fuel
+                self.assertFalse(self.cycle()[0])
+                self.assertEqual(set(), self.worker.reserved_ships('fleet_test'))
+        self.api.ships[0]['deuterium']['amount'] = 100
+        self.api.ships[1]['deuterium']['amount'] = 2
+        self.cycle()
+        self.assertEqual({'courier'}, self.worker.reserved_ships('fleet_test'))
+
+    def test_recalled_sentinel_is_released_if_production_consumed_all_excess(self):
+        self.prepare_sentinel()
+        self.cycle()
+        self.api.finish()
+        self.api.resources['mother'] = protected_stock()
+        self.cycle()
+        self.assertEqual(set(), self.worker.reserved_ships('fleet_test'))
+        self.assertEqual(['move'], [kind for kind, _, _ in self.api.requests])
 
     def test_response_lost_after_acceptance_replays_identical_command_after_restart(self):
         self.api.add_depot((2, 0, 0))
@@ -367,6 +509,7 @@ class DepotLogisticsTests(unittest.TestCase):
     def test_inventory_items_alone_do_not_produce_empty_deposit(self):
         self.api.add_depot((0, 0, 0))
         self.api.resources['mother'] = {}
+        self.api.capacities['mother'] = 100
         self.api.inventories['mother'] = [{'id': 'object', 'type': 'part', 'containerSpaceEce': 100}]
         self.cycle()
         self.assertEqual([], self.api.requests)

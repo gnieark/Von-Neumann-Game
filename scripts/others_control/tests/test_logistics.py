@@ -232,9 +232,10 @@ class LogisticsTests(unittest.TestCase):
         )
         self.assertNotIn("missile", [recipe for _, recipe, _ in api.craft_starts])
 
-    def test_complete_targets_keep_raw_resources_for_ten_auxiliaries_and_missiles(self) -> None:
+    def test_complete_targets_keep_reserve_and_continue_harvesting(self) -> None:
         api = FakeApi(
             [self.mothership],
+            scans={self.center: harvestable_scan("planet-a")},
             auxiliaries={
                 "mother": [auxiliary(f"aux-{index:02d}") for index in range(30)]
             },
@@ -245,8 +246,27 @@ class LogisticsTests(unittest.TestCase):
         self.reconcile(api, CycleResult())
 
         self.assertEqual([], api.craft_starts)
-        self.assertEqual([], api.harvest_starts)
-        self.assertIn("réserve de reconstruction complètes", self.logs[-1])
+        self.assertEqual([("mother", "planet-a", 20)], api.harvest_starts)
+
+    def test_sector_is_relocated_only_after_all_local_planets_are_depleted(self) -> None:
+        scan = harvestable_scan('planet-a', 'planet-b')
+        api = FakeApi(
+            [self.mothership], scans={self.center: scan},
+            auxiliaries={'mother': [auxiliary(f'aux-{index:02d}') for index in range(30)]},
+            inventories={'mother': [missile_item(f'missile-{index}') for index in range(60)]},
+            resources={'mother': resource_stock(250, 25, 60, 10.5)},
+        )
+        controller = DefenseEtoileAttente(api, mothership_id='mother', logger=self.logs.append,
+                                         now=lambda: self.now_value)
+        controller.run_cycle()
+        scan['objects'][0]['harvestable'] = False
+        controller.run_cycle()
+        self.assertEqual([('mother', 'planet-a', 20), ('mother', 'planet-b', 20)], api.harvest_starts)
+        self.assertIsNone(controller.relocation.state)
+        scan['objects'][1]['harvestable'] = False
+        controller.run_cycle()
+        self.assertEqual('searching', controller.relocation.state['phase'])
+        self.assertEqual(2, len(api.harvest_starts))
 
     def test_harvest_actions_are_relaunched_inside_one_hour_windows(self) -> None:
         api = FakeApi(

@@ -39,28 +39,47 @@ et renvoie l’action de construction prévue pour trente minutes.
 
 ### Dépôts et navettes logistiques
 
-Lorsque la cale du vaisseau mère est effectivement pleine (`usedEce >= capacityEce`),
-le contrôleur interroge les dépôts connus de sa flotte et le secteur courant :
+Lorsque la cale du vaisseau mère dispose de **moins de 40 ECE libres**, le
+contrôleur organise son déchargement. Les arrivées réservées (`reservedEce > 0`)
+doivent d'abord se terminer. La cible est **50 % de remplissage**, dans la limite
+des excédents exportables : chaque ressource conserve une réserve pour
+**10 auxiliaires et 10 missiles**, ainsi qu'un budget consommable pour les
+**trois prochains vaisseaux standards**, indépendamment des constructions déjà
+payées et en cours. Ces quantités sont calculées à partir des recettes API.
+Les réservations techniques sont également déduites des ressources disponibles.
 
 - Sans dépôt connu ni dépôt local identifiable, un auxiliaire libre construit un dépôt.
-- En présence d'un dépôt local, un auxiliaire y dépose la moitié de chaque ressource
-  disponible, après déduction des réservations. Le deutérium brut est inclus ; les
-  objets et le carburant du réservoir restent à bord.
+- En présence d'un dépôt local, un auxiliaire y dépose les excédents, répartis
+  proportionnellement jusqu'à la cible. Une ressource rare reste à bord même si
+  une autre encombre la cale. Le deutérium brut est inclus ; les objets et le
+  carburant du réservoir restent à bord. Les ressources protégées peuvent
+  maintenir l'occupation au-dessus de 50 %.
 - Sinon, un vaisseau standard intact, libre et présent auprès du vaisseau mère est
   affecté au dépôt connu le plus proche. Il doit posséder un auxiliaire embarqué libre.
   Le vaisseau mère le ravitaille pour l'aller-retour si nécessaire, puis le charge
   via son auxiliaire, ressource par ressource, dans la limite de la capacité libre
-  de la navette. La composition de la cargaison est proportionnelle aux stocks disponibles.
+  de la navette. La composition de la cargaison est proportionnelle aux excédents.
+- Si aucun transporteur local n'est admissible, le contrôleur rappelle une
+  sentinelle intacte et disponible d'un secteur voisin, même en présence d'une
+  menace à son poste. Les sentinelles voisines ont la même durée de retour et
+  sont départagées par identifiant. Elle doit avoir ses auxiliaires libres et
+  embarqués, de la place en soute et le carburant pour rentrer, puis pouvoir
+  effectuer l'aller-retour au dépôt après ravitaillement. Elle est réservée
+  dès le rappel, puis réintègre la formation après la mission. Les gardiens
+  affectés aux dépôts ne sont pas réquisitionnés.
 - Après confirmation de tous les chargements, la navette rejoint le dépôt par
   étapes de dix secteurs au maximum, décharge ses ressources via son propre auxiliaire,
-  attend sa fin de tâche, puis revient auprès du vaisseau mère. Si la cale de celui-ci
-  est de nouveau pleine, une autre navette peut partir sans attendre ce retour.
+  attend sa fin de tâche, puis revient auprès du vaisseau mère. D'autres navettes
+  peuvent partir sans attendre ce retour pour poursuivre le déchargement vers
+  50 %. Le budget protégé et la cible sont réévalués à chaque chargement.
 
 Les navettes restent exclues des déploiements, rappels et tâches de défense jusqu'au
 retour, y compris pendant les contrôles rapides de défense centrale. L'alerte centrale
 garde la priorité sur la progression logistique. La production et la moisson du
 vaisseau mère attendent pendant une construction de dépôt, un dépôt local ou le
-chargement d'une navette ; elles peuvent reprendre pendant le voyage.
+chargement d'une navette ; elles peuvent reprendre pendant le rappel et le voyage.
+Sans excédent exportable ou transporteur admissible, un message explique le
+blocage du déchargement et la production reste autorisée à libérer de la place.
 
 Le journal est enregistré sous `var/others-logistics`, séparément par serveur et
 flotte. Il conserve les étapes, les identifiants d'action et les requêtes avec leurs
@@ -281,9 +300,11 @@ En parallèle de cette formation, le vaisseau mère entretient sa logistique :
   regroupées en fenêtres d'une heure. Une action encore active à la fin d'une
   fenêtre n'est pas annulée, notamment pour ne pas perdre la progression sur
   une planète habitée ;
-- une fois 30 auxiliaires et 60 missiles atteints, la moisson continue jusqu'à
-  conserver les matières premières de 10 auxiliaires et 10 missiles, soit 250
-  ECE de métaux, 25 de glace, 60 de composés carbonés et 10,5 de deutérium.
+- une fois 30 auxiliaires et 60 missiles atteints, la moisson continue tant
+  qu'une planète locale est moissonnable, même si la réserve est complète ou
+  si trois constructions de vaisseaux sont déjà actives. La réserve de
+  reconstruction représente 250 ECE de métaux, 25 de glace, 60 de composés
+  carbonés et 10,5 de deutérium.
 
 Lorsque ces objectifs logistiques sont atteints, les ressources excédant la
 réserve de reconstruction peuvent financer des vaisseaux standards. Le
@@ -291,15 +312,17 @@ contrôleur lance jusqu'à **trois constructions actives simultanément**, avec
 un auxiliaire embarqué libre par construction. Il lit les coûts dans la
 recette API `standard_ship` : actuellement 6 000 ECE de métaux, 1 000 de glace,
 2 000 de composés carbonés et 100 de deutérium de soute, pour sept jours de
-construction. La réserve reste disponible après chaque lancement.
+construction. La réserve reste disponible après chaque lancement. Le budget
+protégé des dépôts est consommable pour ces constructions : un seul vaisseau
+finançable suffit pour lancer un chantier, sans attendre le financement des trois.
 
 Les crafts `standard_ship` en état `queued` ou `running` sont recomptés depuis
 l'API à chaque cycle, y compris après redémarrage. Une construction achevée
 ou échouée libère une place pour le cycle suivant, sous les mêmes conditions
 de ressources et de disponibilité. Les autres fonctions continuent et la
-production d'auxiliaires/missiles reste prioritaire. La moisson conserve ses
-objectifs existants : elle n'est pas prolongée uniquement pour financer des
-vaisseaux supplémentaires.
+production d'auxiliaires/missiles reste prioritaire. La moisson continue avec
+les auxiliaires restants après les constructions, jusqu'à épuisement de toutes
+les planètes moissonnables du secteur, puis le déménagement prend le relais.
 
 La capacité libre de la soute et les réservations en cours limitent toujours la
 taille de l'essaim. Les planètes non habitées sont choisies avant les planètes

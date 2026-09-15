@@ -57,6 +57,27 @@ class WorkshopRecipe:
         return cls(identifier, int(duration), ingredients, output_kind, output_space)
 
 
+def load_workshop_recipes(api: OthersApi) -> dict[str, WorkshopRecipe]:
+    recipes = {
+        recipe.identifier: recipe
+        for recipe in (WorkshopRecipe.from_api(value) for value in api.get_crafting_recipes())
+    }
+    missing = {"others_auxiliary", "missile", "standard_ship"} - recipes.keys()
+    if missing:
+        raise ApiContractError("Recettes Others manquantes : " + ", ".join(sorted(missing)) + ".")
+    return recipes
+
+
+def reconstruction_requirements(
+    recipes: dict[str, WorkshopRecipe], policy: LogisticsPolicy,
+) -> dict[str, float]:
+    return {
+        resource: recipes["others_auxiliary"].ingredients[resource] * policy.reserve_auxiliaries
+        + recipes["missile"].ingredients[resource] * policy.reserve_missiles
+        for resource in RESOURCE_TYPES
+    }
+
+
 class MothershipLogistics:
     def __init__(
         self,
@@ -156,7 +177,7 @@ class MothershipLogistics:
                 projected_missiles += 1
             self.log(f"Craft {recipe.identifier} lancé avec l'auxiliaire {assistant_id}.")
 
-        reserve = self._reserve_requirements(auxiliary_recipe, missile_recipe)
+        reserve = reconstruction_requirements(recipes, self.policy)
         production_complete = (
             projected_auxiliaries >= self.policy.auxiliary_target
             and projected_missiles >= self.policy.missile_target
@@ -166,13 +187,10 @@ class MothershipLogistics:
             for resource_type in RESOURCE_TYPES
         )
         if production_complete and reserve_complete:
-            self._clear_harvest_cycle()
-            self.log("Objectifs logistiques atteints : production et réserve de reconstruction complètes.")
             self._start_ship_constructions(
                 ship_id, recipes["standard_ship"], active_crafts,
                 available_auxiliaries, resources, reserve, free_capacity, result,
             )
-            return
 
         if active_harvest_actions:
             self._ensure_harvest_cycle()
@@ -190,6 +208,8 @@ class MothershipLogistics:
             self.log("Moisson suspendue : aucune planète locale moissonnable.")
             return
 
+        # Les ingrédients des crafts sont débités dès leur acceptation.
+        free_capacity = self._free_capacity(self.api.get_inventory(ship_id))
         capacity_limited_count = floor((free_capacity + 0.00001) / 2.0)
         harvest_count = min(
             self.policy.max_harvest_auxiliaries,
@@ -263,6 +283,7 @@ class MothershipLogistics:
                     break
                 raise
             self._consume_recipe(recipe, surplus)
+            self._consume_recipe(recipe, resources)
             free_capacity -= recipe.output_space_ece
             active_ships += 1
             result.accepted_commands += 1
@@ -275,18 +296,7 @@ class MothershipLogistics:
 
     def _workshop_recipes(self) -> dict[str, WorkshopRecipe]:
         if self._recipes is None:
-            self._recipes = {
-                recipe.identifier: recipe
-                for recipe in (
-                    WorkshopRecipe.from_api(value)
-                    for value in self.api.get_crafting_recipes()
-                )
-            }
-            missing = {"others_auxiliary", "missile", "standard_ship"} - self._recipes.keys()
-            if missing:
-                raise ApiContractError(
-                    "Recettes Others manquantes : " + ", ".join(sorted(missing)) + "."
-                )
+            self._recipes = load_workshop_recipes(self.api)
         return self._recipes
 
     @staticmethod
@@ -359,21 +369,6 @@ class MothershipLogistics:
     def _consume_recipe(recipe: WorkshopRecipe, resources: dict[str, float]) -> None:
         for resource_type, amount in recipe.ingredients.items():
             resources[resource_type] = max(0.0, resources[resource_type] - amount)
-
-    def _reserve_requirements(
-        self,
-        auxiliary_recipe: WorkshopRecipe,
-        missile_recipe: WorkshopRecipe,
-    ) -> dict[str, float]:
-        return {
-            resource_type: (
-                auxiliary_recipe.ingredients[resource_type]
-                * self.policy.reserve_auxiliaries
-                + missile_recipe.ingredients[resource_type]
-                * self.policy.reserve_missiles
-            )
-            for resource_type in RESOURCE_TYPES
-        }
 
     @staticmethod
     def _mothership_sector(mothership: dict[str, Any]) -> tuple[int, int, int]:

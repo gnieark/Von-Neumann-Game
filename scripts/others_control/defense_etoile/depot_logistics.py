@@ -16,8 +16,11 @@ from .commands import is_movable
 from .contracts import require_mapping, require_string
 from .errors import ApiContractError, ApiRequestError, ConfigurationError
 from .formation import ship_sector
-from .geometry import coordinate_distance, movement_hop, parse_coordinates
-from .logistics import ACTIVE_STATUSES, MothershipLogistics
+from .geometry import NEIGHBOR_OFFSETS, add_coordinates, coordinate_distance, movement_hop, parse_coordinates
+from .logistics import (
+    ACTIVE_STATUSES, MAX_ACTIVE_SHIP_CRAFTS, LogisticsPolicy, MothershipLogistics,
+    load_workshop_recipes, reconstruction_requirements,
+)
 from .models import Coordinates, CycleResult
 from .ports import OthersApi
 from .refueling import FleetRefuelingCoordinator
@@ -43,11 +46,14 @@ def route(origin: Coordinates, target: Coordinates) -> list[Coordinates]:
 
 class DepotLogistics:
     def __init__(self, api: OthersApi, *, logger: Callable[[str], None],
-                 state_dir: Path | None = None, fuel_per_hop: float = 2.0) -> None:
+                 state_dir: Path | None = None, fuel_per_hop: float = 2.0,
+                 policy: LogisticsPolicy | None = None) -> None:
         self.api = api
         self.log = logger
         self.state_dir = state_dir
         self.fuel_per_hop = units(fuel_per_hop)
+        self.policy = policy or LogisticsPolicy()
+        self._protected_resources: dict[str, int] | None = None
         self.fleet_id: str | None = None
         self.path: Path | None = None
         self.state: dict[str, Any] = {"missions": {}, "motherJob": None}
@@ -64,7 +70,7 @@ class DepotLogistics:
                         if not isinstance(state, dict) or set(state) != {"missions", "motherJob"} or not isinstance(state["missions"], dict):
                             raise ValueError("format de journal invalide")
                         for mission in state["missions"].values():
-                            if mission["stage"] not in {"loading", "outbound", "unloading", "returning"}:
+                            if mission["stage"] not in {"recalling", "loading", "outbound", "unloading", "returning"}:
                                 raise ValueError("étape de navette invalide")
                             parse_coordinates(mission["destination"], "mission.destination")
                         self.state = state
@@ -90,6 +96,7 @@ class DepotLogistics:
                   *, allow_new: bool = True) -> bool:
         """Renvoie vrai lorsque la production doit laisser travailler les auxiliaires logistiques."""
         self.reserved_ships(require_string(mother.get("fleetId"), "mothership.fleetId"))
+        draining = bool(self.state["missions"])
         by_id = {ship["id"]: ship for ship in ships}
         for ship_id, mission in list(self.state["missions"].items()):
             ship = by_id.get(ship_id)
@@ -111,10 +118,16 @@ class DepotLogistics:
 
         if not allow_new:
             return bool(self.state["missions"])
+        if any(mission["stage"] == "recalling" for mission in self.state["missions"].values()):
+            return False
 
         inventory = self.api.get_inventory(mother["id"])
-        # Une réservation entrante n'est pas encore une cale effectivement pleine.
-        if units(inventory["usedEce"]) < units(inventory["capacityEce"]):
+        # Attendre les arrivées réservées avant d'évaluer le désengorgement.
+        if units(inventory["reservedEce"]) > 0:
+            return False
+        if not draining and units(MothershipLogistics._free_capacity(inventory)) >= units(40):
+            return False
+        if units(inventory["usedEce"]) <= units(inventory["capacityEce"]) // 2:
             return False
         auxiliaries = self.api.get_auxiliaries(mother["id"])
         active = [aux["action"] for aux in auxiliaries if isinstance(aux.get("action"), dict)
@@ -129,61 +142,100 @@ class DepotLogistics:
         center = ship_sector(mother)
         if center is None:
             return True
+        stock = self._exportable(inventory)
+        if not any(stock.values()):
+            self.log("Déchargement bloqué : aucun excédent exportable après protection de la réserve "
+                     "et du budget des trois prochains vaisseaux ; production maintenue.")
+            return False
         known = [parse_coordinates(entry.get("relativeCoordinates"), "knownDepots[].relativeCoordinates")
                  for entry in self.api.get_known_depots(self.fleet_id)]
         # Le scan local permet aussi de réutiliser un dépôt antérieur à la migration.
         depot = self._local_depot(mother, center)
-        stock = available(inventory)
         if depot is not None:
-            payload = {key: (value // 2) / 10000 for key, value in stock.items() if value >= 2}
+            payload = {key: value / 10000 for key, value in stock.items() if value > 0}
             if payload:
                 self._mother_command("start_depot_deposit", [mother["id"], free[0]["id"], depot, payload], result)
-                self.log("Cale pleine : transfert de la moitié des ressources disponibles vers le dépôt local.")
+                self.log("Cale presque pleine : dépôt des excédents vers une occupation de 50 %, "
+                         "réserve et budget de construction préservés.")
             return True
         if not known:
             self._mother_command("start_germination_depot", [mother["id"], free[0]["id"]], result)
-            self.log("Cale pleine : construction d'un dépôt de germination demandée.")
+            self.log("Cale presque pleine : construction d'un dépôt de germination demandée.")
             return True
         destinations = sorted((destination for destination in known if destination != center),
                               key=lambda point: (coordinate_distance(center, point), point))
         if not destinations:
             self.log("Dépôt local connu mais pas encore identifiable : nouveau scan au prochain cycle.")
             return True
-        for destination in destinations:
-            fuel = (len(route(center, destination)) + len(route(destination, center))) * self.fuel_per_hop
-            for ship in sorted(ships, key=lambda value: value["id"]):
-                if (ship["id"] in self.state["missions"] or ship.get("type") != "standard"
-                        or ship.get("fleetId") != mother.get("fleetId") or not is_movable(ship)
-                        or ship_sector(ship) != center or ship.get("integrity", 0) < ship.get("maxIntegrity", 0)):
-                    continue
-                assistants = self.api.get_auxiliaries(ship["id"])
-                if not assistants or len(MothershipLogistics._available_auxiliaries(assistants)) != len(assistants):
-                    continue
+        neighbors = {add_coordinates(center, offset) for offset in NEIGHBOR_OFFSETS}
+        # Tous les standards ont la même vitesse : les résidents précèdent les
+        # sentinelles voisines, à durée de retour égale départagées par identifiant.
+        candidates = sorted(
+            (ship for ship in ships if ship_sector(ship) in neighbors | {center}),
+            key=lambda ship: (coordinate_distance(ship_sector(ship), center), ship["id"]),
+        )
+        for ship in candidates:
+            position = ship_sector(ship)
+            recall_fuel = len(route(position, center)) * self.fuel_per_hop
+            if (ship["id"] in self.state["missions"] or ship.get("type") != "standard"
+                    or ship.get("fleetId") != mother.get("fleetId") or not is_movable(ship)
+                    or ship.get("integrity", 0) < ship.get("maxIntegrity", 0)):
+                continue
+            assistants = self.api.get_auxiliaries(ship["id"])
+            if not assistants or len(MothershipLogistics._available_auxiliaries(assistants)) != len(assistants):
+                continue
+            ship_fuel = FleetRefuelingCoordinator._tank_units(ship, "amount")
+            if ship_fuel < recall_fuel:
+                continue
+            ship_inventory = self.api.get_inventory(ship["id"])
+            if units(ship_inventory["reservedEce"]) > 0:
+                continue
+            capacity = units(MothershipLogistics._free_capacity(ship_inventory))
+            if capacity <= 0:
+                continue
+            for destination in destinations:
+                fuel = (len(route(center, destination)) + len(route(destination, center))) * self.fuel_per_hop
                 if FleetRefuelingCoordinator._tank_units(ship, "capacity") < fuel:
                     continue
-                if fuel > FleetRefuelingCoordinator._tank_units(ship, "amount") + FleetRefuelingCoordinator._tank_units(mother, "amount"):
+                if fuel > ship_fuel - recall_fuel + FleetRefuelingCoordinator._tank_units(mother, "amount"):
                     continue
-                ship_inventory = self.api.get_inventory(ship["id"])
-                if units(ship_inventory["reservedEce"]) > 0:
-                    continue
-                capacity = units(MothershipLogistics._free_capacity(ship_inventory))
-                total = sum(stock.values())
-                if capacity <= 0 or total <= 0:
-                    continue
-                budget = min(capacity, total)
-                manifest = {key: value * budget // total for key, value in stock.items()}
-                for key, value in stock.items():
-                    extra = min(value - manifest[key], budget - sum(manifest.values()))
-                    manifest[key] += extra
-                mission = {"stage": "loading", "destination": dict(zip(("x", "y", "z"), destination)),
+                manifest = self._distribute(stock, capacity)
+                mission = {"stage": "loading" if position == center else "recalling",
+                           "destination": dict(zip(("x", "y", "z"), destination)),
                            "remaining": manifest, "pending": None}
                 self.state["missions"][ship["id"]] = mission
                 self._save()
+                if position != center:
+                    self.log(f"Rappel logistique de la sentinelle {ship['id']}, même sous menace : "
+                             "poste temporairement dégarni.")
                 self.log(f"Navette {ship['id']} affectée au dépôt du secteur relatif {destination}.")
                 self._advance(mother, ship, mission, result)
-                return True
-        self.log("Cale pleine : aucune navette locale disponible avec auxiliaire et autonomie aller-retour suffisante.")
-        return True
+                return mission["stage"] == "loading"
+        self.log("Déchargement bloqué : aucune navette locale ni sentinelle admissible "
+                 "avec auxiliaire et autonomie suffisante ; production maintenue.")
+        return False
+
+    @staticmethod
+    def _distribute(stock: dict[str, int], capacity: int) -> dict[str, int]:
+        total = sum(stock.values())
+        budget = min(capacity, total)
+        manifest = {key: value * budget // total if total else 0 for key, value in stock.items()}
+        for key, value in stock.items():
+            manifest[key] += min(value - manifest[key], budget - sum(manifest.values()))
+        return manifest
+
+    def _exportable(self, inventory: dict[str, Any]) -> dict[str, int]:
+        if self._protected_resources is None:
+            recipes = load_workshop_recipes(self.api)
+            reserve = reconstruction_requirements(recipes, self.policy)
+            self._protected_resources = {
+                key: units(value + MAX_ACTIVE_SHIP_CRAFTS * recipes["standard_ship"].ingredients[key])
+                for key, value in reserve.items()
+            }
+        surplus = {key: max(0, value - self._protected_resources[key])
+                   for key, value in available(inventory).items()}
+        target = max(0, units(inventory["usedEce"]) - units(inventory["capacityEce"]) // 2)
+        return self._distribute(surplus, target)
 
     def _mother_command(self, method: str, args: list[Any], result: CycleResult) -> None:
         job: dict[str, Any] = {"pending": None}
@@ -247,10 +299,24 @@ class DepotLogistics:
         if position is None or center is None:
             return
         destination = parse_coordinates(mission["destination"], "mission.destination")
+        if mission["stage"] == "recalling":
+            if position != center:
+                self._command(mission, "move_ship", [ship, movement_hop(position, center)], result)
+                return
+            mission["stage"] = "loading"
+            self._save()
         if mission["stage"] == "loading":
             if position != center:
                 mission["stage"] = "outbound" if sum(available(self.api.get_inventory(ship["id"])).values()) else "returning"
                 self._save()
+                return
+            stock = self._exportable(self.api.get_inventory(mother["id"]))
+            ship_inventory = self.api.get_inventory(ship["id"])
+            if not any(min(wanted, stock[key]) for key, wanted in mission["remaining"].items()) \
+                    and not any(available(ship_inventory).values()):
+                del self.state["missions"][ship["id"]]
+                self._save()
+                self.log(f"Navette {ship['id']} libérée : aucun excédent à charger.")
                 return
             assistants = MothershipLogistics._available_auxiliaries(self.api.get_auxiliaries(mother["id"]))
             if not assistants:
@@ -263,7 +329,9 @@ class DepotLogistics:
                     return
                 self._command(mission, "start_deuterium_transfer", [mother["id"], ship["id"], assistants[0]["id"], missing / 10000], result)
                 return
-            stock = available(self.api.get_inventory(mother["id"]))
+            # Le stock peut avoir changé pendant le rappel ou un chargement :
+            # ne jamais puiser dans la réserve ni dans le budget de construction.
+            stock = self._exportable(self.api.get_inventory(mother["id"]))
             capacity = units(MothershipLogistics._free_capacity(self.api.get_inventory(ship["id"])))
             for key, wanted in mission["remaining"].items():
                 amount = min(wanted, stock[key], capacity)

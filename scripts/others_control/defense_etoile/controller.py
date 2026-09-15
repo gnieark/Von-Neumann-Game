@@ -90,7 +90,7 @@ class DefenseEtoileAttente:
         self.refueling = FleetRefuelingCoordinator(api, logger=logger)
         self.repairs = FleetRepairCoordinator(api, logger=logger, metals_per_point=repair_metals_per_point)
         self.depots = DepotLogistics(api, logger=logger, state_dir=logistics_state_dir,
-                                    fuel_per_hop=logistics_fuel_per_hop)
+                                    fuel_per_hop=logistics_fuel_per_hop, policy=logistics_policy)
         self.relocation = FleetRelocationCoordinator(
             api, logger=logger, state_dir=logistics_state_dir, fuel_per_hop=logistics_fuel_per_hop,
         )

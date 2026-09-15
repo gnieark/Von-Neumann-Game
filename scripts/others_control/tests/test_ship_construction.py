@@ -9,6 +9,7 @@ from scripts.others_control.defense_etoile.errors import ApiRequestError
 from scripts.others_control.defense_etoile.logistics import MothershipLogistics
 from scripts.others_control.defense_etoile.models import CycleResult
 from scripts.others_control.tests.support import FakeApi, auxiliary, missile_item, ship
+from scripts.others_control.tests.test_logistics import harvestable_scan
 
 
 RESERVE = {"metals": 250.0, "ice": 25.0, "carbon_compounds": 60.0, "deuterium": 10.5}
@@ -159,6 +160,44 @@ class ShipConstructionTests(unittest.TestCase):
             self.assertEqual(0, self.reconcile(api).accepted_commands)
             self.assertEqual(1, command.call_count)
         self.assertEqual(3, self.reconcile(api).accepted_commands)
+
+    def test_one_affordable_ship_starts_without_waiting_for_three_and_harvest_continues(self) -> None:
+        api = self.make_api(1)
+        api.scans[(0, 0, 0)] = harvestable_scan('planet')
+        self.assertEqual(2, self.reconcile(api).accepted_commands)
+        self.assertEqual([('mother', 'standard_ship', 'aux-00')], api.craft_starts)
+        self.assertEqual([('mother', 'planet', 20)], api.harvest_starts)
+        self.assertEqual(RESERVE, api.resources['mother'])
+
+    def test_three_active_ship_constructions_do_not_stop_harvest(self) -> None:
+        api = self.make_api()
+        api.scans[(0, 0, 0)] = harvestable_scan('planet')
+        for _ in range(3):
+            self.add_craft(api, 'running')
+        self.reconcile(api)
+        self.assertEqual([], api.craft_starts)
+        self.assertEqual([('mother', 'planet', 20)], api.harvest_starts)
+
+    def test_missing_ship_ingredient_does_not_stop_harvest(self) -> None:
+        api = self.make_api(1)
+        api.resources['mother']['ice'] -= 1
+        api.scans[(0, 0, 0)] = harvestable_scan('planet')
+        self.reconcile(api)
+        self.assertEqual([], api.craft_starts)
+        self.assertEqual([('mother', 'planet', 20)], api.harvest_starts)
+
+    def test_construction_immediately_frees_space_for_harvest(self) -> None:
+        api = self.make_api(1)
+        api.scans[(0, 0, 0)] = harvestable_scan('planet')
+        capacity = api.get_inventory('mother')['usedEce'] + 1
+        get_inventory = api.get_inventory
+
+        def inventory(ship_id):
+            return {**get_inventory(ship_id), 'capacityEce': capacity}
+
+        with patch.object(api, 'get_inventory', side_effect=inventory):
+            self.reconcile(api)
+        self.assertEqual([('mother', 'planet', 20)], api.harvest_starts)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-15
+
+### Changed
+
+- Contrôle Others « défense étoile — attente » : moisson continue jusqu'à épuisement des planètes moissonnables du secteur, y compris lorsque les objectifs de production et la réserve sont complets ou que trois chantiers sont déjà actifs. Les constructions restent limitées à trois simultanément et démarrent dès qu'un vaisseau est finançable, en préservant la réserve de 10 auxiliaires et 10 missiles.
+- Déchargement Others déclenché sous 40 ECE libres après réception des arrivées réservées, avec une cible de 50 % d'occupation. Dépôts et navettes exportent les excédents après protection de la réserve et d'un budget consommable pour les trois prochains vaisseaux. Les chargements réévaluent ces protections ; l'absence d'excédent ou de transporteur est signalée sans interdire la production.
+- Navettes Others : rappel persistant d'une sentinelle voisine admissible lorsqu'aucun transporteur local ne convient, même sous menace à son poste, avec vérification du carburant de retour et de l'autonomie vers le dépôt. Exclusion de la formation dès le rappel et libération après la mission ; plusieurs rotations peuvent poursuivre le déchargement vers sa cible.
+
 ## 2026-09-14
 
 ### Fixed
