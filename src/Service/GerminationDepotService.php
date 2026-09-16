@@ -120,6 +120,7 @@ final class GerminationDepotService
         $object = DormantConstruct::fromOthersAuxiliary($actor['public_id']);
         $this->effects->enqueue('storage-dormant-' . $actionId, $this->coordinates($actor), 'add_object', $object->getId(), $object->toArray(), $now);
         $this->pdo->prepare('UPDATE others_actions SET auxiliary_id=NULL WHERE auxiliary_id=?')->execute([$actor['id']]);
+        $this->pdo->prepare('DELETE FROM others_swarm_participants WHERE auxiliary_id=?')->execute([$actor['id']]);
         $this->pdo->prepare('DELETE FROM others_auxiliaries WHERE id=?')->execute([$actor['id']]);
         return $object->getId();
     }

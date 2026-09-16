@@ -11,6 +11,38 @@ from scripts.others_control.defense_etoile.models import CycleResult
 
 
 class CliTests(unittest.TestCase):
+    def test_alert_deadline_does_not_trigger_extra_activity_scans(self) -> None:
+        clock = [0.0]
+        poll_times = []
+        activity_times = []
+        with patch("scripts.others_control.defense_etoile.cli.load_config", return_value=ApiConfiguration("http://localhost", "token")), \
+                patch("scripts.others_control.defense_etoile.cli.HttpOthersApi"), \
+                patch("scripts.others_control.defense_etoile.cli.DefenseEtoileAttente") as controller_class, \
+                patch("scripts.others_control.defense_etoile.cli.SpectatorJournal") as journal_class, \
+                patch("scripts.others_control.defense_etoile.cli.time.monotonic", side_effect=lambda: clock[0]), \
+                patch("scripts.others_control.defense_etoile.cli.time.sleep") as sleep:
+            journal = journal_class.return_value
+            journal.state = {}
+            journal.next_alerts_at = 0.0
+            def poll(api):
+                if clock[0] >= journal.next_alerts_at:
+                    poll_times.append(clock[0])
+                    journal.next_alerts_at = clock[0] + 300
+            journal.poll_alerts.side_effect = poll
+            controller = controller_class.return_value
+            controller.run_cycle.return_value = CycleResult()
+            controller.run_activity_cycle.side_effect = lambda: activity_times.append(clock[0]) or CycleResult()
+            def advance(delay):
+                if clock[0] >= 400:
+                    raise KeyboardInterrupt
+                clock[0] += delay
+            sleep.side_effect = advance
+            self.assertEqual(0, main(["--fleet-id", "fleet_test", "--idle-refresh-seconds", "600", "--activity-refresh-seconds", "200"]))
+            self.assertEqual([0.0, 300.0], poll_times)
+            self.assertEqual([200.0, 400.0], activity_times)
+            controller.run_cycle.assert_called_once()
+            journal.close.assert_called_once()
+
     def test_repair_cost_option_rejects_negative_and_non_finite_values(self) -> None:
         for value in ("-1", "nan", "inf"):
             with self.subTest(value=value), redirect_stderr(StringIO()):
@@ -60,6 +92,7 @@ class CliTests(unittest.TestCase):
         http_api.assert_called_once_with(
             "http://localhost", "token", 10.0, request_interval_seconds=1.0,
             logger=timestamped_logger,
+            spectator=controller_class.call_args.kwargs["logger"],
         )
 
     @patch("scripts.others_control.defense_etoile.cli.time.sleep")

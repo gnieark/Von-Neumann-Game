@@ -11908,5 +11908,6 @@ require __DIR__ . '/Support/StorageBudgetTests.php';
 require __DIR__ . '/Support/GerminationDepotTests.php';
 require __DIR__ . '/Support/SectorStorageHttpTests.php';
 require __DIR__ . '/Support/OthersRepairTests.php';
+require __DIR__ . '/Support/OthersDestructionTests.php';
 removeDirectory($tmp);
 exit($test->finish());

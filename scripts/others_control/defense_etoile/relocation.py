@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .spectator import SpectatorEvent
+
 import hashlib
 import json
 import os
@@ -106,7 +108,7 @@ class FleetRelocationCoordinator:
                       "destination": None, "scoutId": None, "visited": [],
                       "waypoint": None, "returning": False}
         self._save()
-        self.log("Secteur épuisé : recherche d'un nouveau système pour la flotte.")
+        self.log(SpectatorEvent("EXPLORATION", "Secteur épuisé : recherche d'un nouveau système pour la flotte.", state="relocation"))
         return True
 
     def reconcile(self, mother: dict[str, Any], ships: list[dict[str, Any]],
@@ -142,7 +144,7 @@ class FleetRelocationCoordinator:
         self.state["destination"] = coordinates_json(point)
         self.state["phase"] = "preparing"
         self._save()
-        self.log(f"Déménagement : destination relative choisie {point} ; préparation de la flotte.")
+        self.log(SpectatorEvent("DÉMÉNAGEMENT", f"Déménagement : destination relative choisie {point} ; préparation de la flotte.", state="relocation"))
 
     def _search(self, mother: dict[str, Any], ships: list[dict[str, Any]],
                 actions: list[dict[str, Any]], reserved: set[str], result: CycleResult) -> None:
@@ -172,12 +174,12 @@ class FleetRelocationCoordinator:
             candidates.sort(key=lambda ship: (ship_sector(ship) != center, ship["id"]))
             scout = next((ship for ship in candidates if self._ready(ship, result)), None)
             if scout is None:
-                self.log("Recherche en attente d'un vaisseau local ou d'une sentinelle disponible.")
+                self.log(SpectatorEvent("EXPLORATION", "Recherche en attente d'un vaisseau local ou d'une sentinelle disponible.", state="relocation"))
                 return
             self.state["scoutId"] = scout["id"]
             self.state["returning"] = False
             self._save()
-            self.log(f"Recherche confiée à {scout['id']}.")
+            self.log(SpectatorEvent("EXPLORATION", f"Recherche confiée à {scout['id']}."))
         if scout.get("movement") is not None or not self._ready(scout, result):
             return
         position = ship_sector(scout)
@@ -204,11 +206,11 @@ class FleetRelocationCoordinator:
             self._save()
         if self.state["returning"]:
             if position != center:
-                self.log(f"Recherche en pause : retour de {scout['id']} auprès du vaisseau mère.")
+                self.log(SpectatorEvent("EXPLORATION", f"Recherche en pause : retour de {scout['id']} auprès du vaisseau mère."))
                 self._move(scout, center, result)
                 return
             if len(visited) == len(ring):
-                self.log("Recherche en attente : aucun système moissonnable dans la couronne à distance 2.")
+                self.log(SpectatorEvent("EXPLORATION", "Recherche en attente : aucun système moissonnable dans la couronne à distance 2.", state="relocation"))
                 return
             if any(action.get("type") == "deuterium_transfer" and action.get("status") in ACTIVE_STATUSES for action in actions):
                 return
@@ -217,7 +219,7 @@ class FleetRelocationCoordinator:
                                          reserve_deuterium=self.fuel_per_hop)
                 return
             if deuterium_amount(scout) < max(4.0, 2 * self.fuel_per_hop):
-                self.log("Recherche en attente : autonomie insuffisante pour un aller-retour.")
+                self.log(SpectatorEvent("EXPLORATION", "Recherche en attente : autonomie insuffisante pour un aller-retour.", state="relocation"))
                 return
             self.state["returning"] = False
             self._save()
@@ -254,7 +256,7 @@ class FleetRelocationCoordinator:
         if origin is None or origin == target or not self._ready(ship, result):
             return False
         if deuterium_amount(ship) < self.fuel_per_hop:
-            self.log(f"Déplacement de {ship['id']} en attente de carburant.")
+            self.log(SpectatorEvent("RAVITAILLEMENT", f"Déplacement de {ship['id']} en attente de carburant.", state=f"fuel:{ship['id']}"))
             return False
         return self.commands.move(ship, movement_hop(origin, target), result)
 
@@ -265,7 +267,7 @@ class FleetRelocationCoordinator:
         if all(ship.get("movement") is None and ship_sector(ship) == destination for ship in ships):
             self.state = None
             self._save()
-            self.log("Toute la flotte a rejoint le nouveau système : reprise de la défense en étoile.")
+            self.log(SpectatorEvent("DÉMÉNAGEMENT", "Toute la flotte a rejoint le nouveau système : reprise de la défense en étoile.", state="relocation"))
             return
         if self.state["phase"] == "preparing":
             center = ship_sector(mother)
@@ -283,7 +285,7 @@ class FleetRelocationCoordinator:
                 if deuterium_amount(ship) < self._fuel_needed(origin, destination):
                     waiting = True
                     if ship["id"] == mother["id"]:
-                        self.log("Déménagement en attente de carburant pour le vaisseau mère.")
+                        self.log(SpectatorEvent("RAVITAILLEMENT", "Déménagement en attente de carburant pour le vaisseau mère.", state=f"fuel:{mother['id']}"))
                     elif origin == center:
                         recipients.append(ship)
                     else:

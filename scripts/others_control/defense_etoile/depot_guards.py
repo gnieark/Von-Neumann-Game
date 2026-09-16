@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .spectator import SpectatorEvent
+
 import hashlib
 import json
 import os
@@ -234,8 +236,8 @@ class DepotGuardCoordinator:
                                     and self._can_reach_and_return(ship, destination)), None)
                 if replacement is None:
                     continue
-                self.log(f"Relève du gardien {incumbent_id} par {replacement['id']} : "
-                         f"{missiles(replacement['id'])} missiles contre {missiles(incumbent_id)}.")
+                self.log(SpectatorEvent("FORMATION", f"Relève du gardien {incumbent_id} par {replacement['id']} : "
+                         f"{missiles(replacement['id'])} missiles contre {missiles(incumbent_id)}."))
                 self._attach(replacement, destination, incumbent_id, result)
                 available.remove(replacement)
 
@@ -247,7 +249,7 @@ class DepotGuardCoordinator:
                                      "replaces": replaces}
         self.claimed_ships.add(ship_id)
         self._save()
-        self.log(f"Gardien {ship_id} affecté au secteur de dépôt relatif {destination}.")
+        self.log(SpectatorEvent("FORMATION", f"Gardien {ship_id} affecté au secteur de dépôt relatif {destination}."))
         if ship_sector(ship) == destination:
             self.activity_guards[ship_id] = ship
         else:
@@ -282,6 +284,6 @@ class DepotGuardCoordinator:
         if origin is None or origin == target or not self._ready(ship):
             return False
         if deuterium_amount(ship) < self.fuel_per_hop:
-            self.log(f"Gardien {ship['id']} en attente de carburant pour son déplacement.")
+            self.log(SpectatorEvent("RAVITAILLEMENT", f"Gardien {ship['id']} en attente de carburant pour son déplacement.", state=f"fuel:{ship['id']}"))
             return False
         return self.commands.move(ship, movement_hop(origin, target), result)

@@ -37,6 +37,76 @@ et renvoie l’action de construction prévue pour trente minutes.
 
 ## Défense étoile — attente
 
+### Journaux spectateur
+
+Le contrôleur écrit automatiquement un journal de bord dans
+`scripts/others_control/logs/{mothership-id}.log`, en complément de la sortie
+habituelle accessible via `journalctl`. Avec `--fleet-id`, le nom du fichier
+utilise également l'identifiant du vaisseau mère, résolu lors de la lecture de
+la flotte. Aucun changement des commandes systemd n'est nécessaire si leur
+utilisateur peut écrire dans `scripts/others_control/logs`.
+
+Le dossier est créé automatiquement et ignoré par Git, y compris les archives
+et l'état de suivi. Son chemin dépend de l'emplacement du script, pas du
+répertoire de lancement. Chaque ligne contient une date avec fuseau et une
+catégorie ; le fichier est en UTF-8 et ouvert en ajout. Il tourne à **10 Mio**,
+avec **cinq archives** (`.log.1` à `.log.5`). Exemple de consultation :
+
+```console
+tail -F scripts/others_control/logs/ship_0123456789abcdefabcd.log
+```
+
+Événements retenus :
+
+- Démarrage/reprise du contrôleur, effectif et vaisseau mère.
+- Moissons lancées : planète, vaisseau, nombre d'auxiliaires et échéance prévue ;
+  blocages et reprise. Une ligne est produite par moisson lancée.
+- Fabrications de missiles, auxiliaires et vaisseaux : lancement, puis fin ou
+  échec lorsque les lectures habituelles des crafts le confirment.
+- Alertes centrales, missiles hostiles détectés, tirs et engagements laser,
+  rappels de guerre et retraites tactiques.
+- Transferts de missiles, carburant et ressources, réparations engagées et
+  restauration d'intégrité constatée.
+- Affectations, retours et déchargements de navettes, construction de dépôts,
+  relèves et déploiements de sentinelles et gardiens.
+- Départs programmés, départs et arrivées constatés, recherche d'un nouveau
+  système et étapes du déménagement. Les secteurs sont toujours **relatifs**.
+
+Les attentes sélectionnées ne sont pas répétées tant que leur état reste
+identique. Les scans ordinaires, requêtes HTTP, délais entre contrôles et erreurs
+techniques restent dans la sortie de diagnostic. Le journal n'annonce jamais
+une destruction ou une réussite à partir d'une simple disparition du scan ou
+de la liste des actions actives. Les résultats disponibles dans les lectures
+déjà effectuées sont repris sans requête supplémentaire dédiée ; cela ne
+constitue pas un historique exhaustif des fins de moisson, réparations ou impacts.
+
+#### Collecte des alertes
+
+Au démarrage après identification de la flotte, puis toutes les **cinq minutes**,
+le contrôleur appelle `GET /api/others/alerts?status=unread`. Il retient uniquement
+les alertes des `shipId` connus de sa flotte, les écrit de la plus ancienne à la
+plus récente avec leur date d'origine, puis appelle
+`POST /api/others/alerts/mark-read` par lots de **500** identifiants maximum.
+Il faut donc une requête de lecture et une requête par lot non vide ; toutes
+utilisent l'espacement et la gestion de rate-limit habituels. Une API ralentie
+peut retarder la collecte. Les messages d'alerte sont conservés tels que fournis
+par le serveur, y compris leur langue (actuellement l'anglais).
+
+L'historique des vaisseaux et les identifiants d'alertes écrites en attente
+d'acquittement sont sauvegardés dans `logs/.state/{mothership-id}.json`.
+Conservez ce fichier lors des redémarrages : il permet de rattacher une alerte
+à un vaisseau désormais absent, et de retenter un acquittement sans répéter le
+message. Les anciens vaisseaux jamais observés ne peuvent pas être attribués :
+leurs alertes restent non lues. Plusieurs contrôleurs du même compte peuvent
+ainsi suivre des flottes distinctes ; utilisez **un seul contrôleur par flotte**
+et **un serveur de jeu par répertoire de logs**.
+
+Une erreur d'écriture ou d'acquittement est signalée dans `journalctl` sans
+interrompre le contrôle de la flotte. Les alertes ne sont acquittées qu'après
+écriture durable du journal et de leur suivi. Une coupure précisément entre ces
+deux écritures peut laisser un doublon exceptionnel, jamais justifier
+l'acquittement d'une alerte non sauvegardée. Un état corrompu n'est pas écrasé.
+
 ### Dépôts et navettes logistiques
 
 Lorsque la cale du vaisseau mère dispose de **moins de 40 ECE libres**, le

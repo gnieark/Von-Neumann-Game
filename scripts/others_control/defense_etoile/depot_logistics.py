@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .spectator import SpectatorEvent, resolve_condition
+
 import hashlib
 import json
 import os
@@ -126,8 +128,10 @@ class DepotLogistics:
         if units(inventory["reservedEce"]) > 0:
             return False
         if not draining and units(MothershipLogistics._free_capacity(inventory)) >= units(40):
+            resolve_condition(self.log, "LOGISTIQUE", "unloading", "La cale dispose à nouveau d'une capacité suffisante.")
             return False
         if units(inventory["usedEce"]) <= units(inventory["capacityEce"]) // 2:
+            resolve_condition(self.log, "LOGISTIQUE", "unloading", "Déchargement achevé : occupation de la cale à 50 % ou moins.")
             return False
         auxiliaries = self.api.get_auxiliaries(mother["id"])
         active = [aux["action"] for aux in auxiliaries if isinstance(aux.get("action"), dict)
@@ -144,8 +148,8 @@ class DepotLogistics:
             return True
         stock = self._exportable(inventory)
         if not any(stock.values()):
-            self.log("Déchargement bloqué : aucun excédent exportable après protection de la réserve "
-                     "et du budget des trois prochains vaisseaux ; production maintenue.")
+            self.log(SpectatorEvent("LOGISTIQUE", "Déchargement bloqué : aucun excédent exportable après protection de la réserve "
+                     "et du budget des trois prochains vaisseaux ; production maintenue.", state="unloading"))
             return False
         known = [parse_coordinates(entry.get("relativeCoordinates"), "knownDepots[].relativeCoordinates")
                  for entry in self.api.get_known_depots(self.fleet_id)]
@@ -206,13 +210,13 @@ class DepotLogistics:
                 self.state["missions"][ship["id"]] = mission
                 self._save()
                 if position != center:
-                    self.log(f"Rappel logistique de la sentinelle {ship['id']}, même sous menace : "
-                             "poste temporairement dégarni.")
-                self.log(f"Navette {ship['id']} affectée au dépôt du secteur relatif {destination}.")
+                    self.log(SpectatorEvent("LOGISTIQUE", f"Rappel logistique de la sentinelle {ship['id']}, même sous menace : "
+                             "poste temporairement dégarni."))
+                self.log(SpectatorEvent("LOGISTIQUE", f"Navette {ship['id']} affectée au dépôt du secteur relatif {destination}."))
                 self._advance(mother, ship, mission, result)
                 return mission["stage"] == "loading"
-        self.log("Déchargement bloqué : aucune navette locale ni sentinelle admissible "
-                 "avec auxiliaire et autonomie suffisante ; production maintenue.")
+        self.log(SpectatorEvent("LOGISTIQUE", "Déchargement bloqué : aucune navette locale ni sentinelle admissible "
+                 "avec auxiliaire et autonomie suffisante ; production maintenue.", state="unloading"))
         return False
 
     @staticmethod
@@ -271,6 +275,8 @@ class DepotLogistics:
             pending["actionId"] = require_string(action.get("id"), "logistics action.id")
             self._save()
             result.accepted_commands += 1
+            if pending["method"] in {"start_depot_deposit", "start_germination_depot", "start_inventory_resource_transfer"}:
+                resolve_condition(self.log, "LOGISTIQUE", "unloading", "Reprise des opérations de déchargement.")
         else:
             action = self.api.get_action(pending["actionId"])
         if action.get("status") in ACTIVE_STATUSES:
@@ -316,7 +322,7 @@ class DepotLogistics:
                     and not any(available(ship_inventory).values()):
                 del self.state["missions"][ship["id"]]
                 self._save()
-                self.log(f"Navette {ship['id']} libérée : aucun excédent à charger.")
+                self.log(SpectatorEvent("LOGISTIQUE", f"Navette {ship['id']} libérée : aucun excédent à charger."))
                 return
             assistants = MothershipLogistics._available_auxiliaries(self.api.get_auxiliaries(mother["id"]))
             if not assistants:
@@ -325,7 +331,7 @@ class DepotLogistics:
             missing = max(0, fuel - FleetRefuelingCoordinator._tank_units(ship, "amount"))
             if missing:
                 if FleetRefuelingCoordinator._tank_units(mother, "amount") < missing:
-                    self.log(f"Navette {ship['id']} en attente du carburant nécessaire à l'aller-retour.")
+                    self.log(SpectatorEvent("RAVITAILLEMENT", f"Navette {ship['id']} en attente du carburant nécessaire à l'aller-retour.", state=f"fuel:{ship['id']}"))
                     return
                 self._command(mission, "start_deuterium_transfer", [mother["id"], ship["id"], assistants[0]["id"], missing / 10000], result)
                 return
@@ -355,10 +361,11 @@ class DepotLogistics:
             if mission["stage"] == "returning":
                 del self.state["missions"][ship["id"]]
                 self._save()
-                self.log(f"Navette {ship['id']} revenue auprès du vaisseau mère.")
+                self.log(SpectatorEvent("LOGISTIQUE", f"Navette {ship['id']} revenue auprès du vaisseau mère."))
                 return
             mission["stage"] = "unloading"
             self._save()
+            self.log(SpectatorEvent("LOGISTIQUE", f"Navette {ship['id']} arrivée au dépôt : préparation du déchargement."))
         if mission["stage"] == "unloading":
             inventory = self.api.get_inventory(ship["id"])
             stock = available(inventory)
@@ -372,14 +379,16 @@ class DepotLogistics:
                 return
             assistants = MothershipLogistics._available_auxiliaries(self.api.get_auxiliaries(ship["id"]))
             if not assistants:
-                self.log(f"Navette {ship['id']} attend un auxiliaire libre pour décharger.")
+                self.log(SpectatorEvent("LOGISTIQUE", f"Navette {ship['id']} attend un auxiliaire libre pour décharger.", state=f"courier:{ship['id']}"))
                 return
             depot = self._local_depot(ship, position)
             if depot is None:
-                self.log(f"Navette {ship['id']} attend l'identification du dépôt dans le secteur relatif {position}.")
+                self.log(SpectatorEvent("LOGISTIQUE", f"Navette {ship['id']} attend l'identification du dépôt dans le secteur relatif {position}.", state=f"courier:{ship['id']}"))
                 return
             self._command(mission, "start_depot_deposit", [ship["id"], assistants[0]["id"], depot,
                           {key: value / 10000 for key, value in stock.items() if value > 0}], result)
+            if mission["pending"] is not None and mission["pending"]["actionId"] is not None:
+                resolve_condition(self.log, "LOGISTIQUE", f"courier:{ship['id']}", f"Déchargement de la navette {ship['id']} débloqué.")
 
     def _local_depot(self, ship: dict[str, Any], position: Coordinates) -> str | None:
         try:

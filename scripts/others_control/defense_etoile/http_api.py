@@ -15,16 +15,19 @@ from .contracts import parse_json_object, parse_retry_after, require_mapping, re
 from .errors import ApiContractError, ApiRequestError
 from .identifiers import command_idempotency_key
 from .models import Coordinates
+from .spectator import SpectatorJournal, RESOURCE_LABELS
 
 
 class HttpOthersApi:
     def __init__(self, base_url: str, api_token: str, timeout_seconds: float,
         *, request_interval_seconds: float = 1.0,
         logger: Callable[[str], None] = print,
+        spectator: SpectatorJournal | None = None,
     ) -> None:
         if not isfinite(request_interval_seconds) or request_interval_seconds <= 0:
             raise ValueError("L’intervalle HTTP doit être fini et strictement positif.")
         self.log = logger
+        self.spectator = spectator
         self.request_interval_seconds = request_interval_seconds
         self._next_request_at = 0.0
         self.base_url = base_url.rstrip("/")
@@ -33,15 +36,24 @@ class HttpOthersApi:
 
     def get_ship(self, ship_id: str) -> dict[str, Any]:
         body = self._request("GET", f"/api/others/ships/{quote(ship_id, safe='')}")
-        return require_mapping(body.get("ship"), "ship")
+        ship = require_mapping(body.get("ship"), "ship")
+        if self.spectator is not None:
+            self.spectator.ship(ship)
+        return ship
 
     def get_fleet(self, fleet_id: str) -> dict[str, Any]:
         body = self._request("GET", f"/api/others/fleets/{quote(fleet_id, safe='')}")
-        return require_mapping(body.get("fleet"), "fleet")
+        fleet = require_mapping(body.get("fleet"), "fleet")
+        if self.spectator is not None:
+            self.spectator.fleet(fleet)
+        return fleet
 
     def get_action(self, action_id: str) -> dict[str, Any]:
         body = self._request("GET", f"/api/others/actions/{quote(action_id, safe='')}")
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.action(action)
+        return action
 
     def get_known_depots(self, fleet_id: str) -> list[dict[str, Any]]:
         body = self._request("GET", f"/api/others/fleets/{quote(fleet_id, safe='')}/known-depots")
@@ -60,14 +72,20 @@ class HttpOthersApi:
             payload={"depotId": depot_id, "resources": resources, "itemIds": []},
             idempotency_key=command_idempotency_key("defense-depot-deposit", ship_id, auxiliary_id, operation_key),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "LOGISTIQUE", f"Déchargement engagé de {ship_id} vers le dépôt {depot_id}, auxiliaire {auxiliary_id} : {self._resources(resources)}.")
+        return action
 
     def scan_sector(self, ship_id: str, coordinates: Coordinates) -> dict[str, Any]:
         query = urlencode(
             {"shipId": ship_id, "x": coordinates[0], "y": coordinates[1], "z": coordinates[2]}
         )
         body = self._request("GET", f"/api/others/sector?{query}")
-        return require_mapping(body.get("sector"), "sector")
+        sector = require_mapping(body.get("sector"), "sector")
+        if self.spectator is not None:
+            self.spectator.scan(ship_id, coordinates, sector)
+        return sector
 
     def get_autonomous_units(self, ship_id: str) -> list[dict[str, Any]]:
         units: list[dict[str, Any]] = []
@@ -111,6 +129,10 @@ class HttpOthersApi:
             auxiliaries.extend(require_mapping(item, "auxiliaries[]") for item in page)
             next_cursor = body.get("nextCursor")
             if next_cursor is None:
+                if self.spectator is not None:
+                    for auxiliary in auxiliaries:
+                        if isinstance(auxiliary.get("action"), dict):
+                            self.spectator.action(auxiliary["action"])
                 return auxiliaries
             cursor = require_string(next_cursor, "nextCursor")
 
@@ -129,7 +151,10 @@ class HttpOthersApi:
         crafts = body.get("crafts")
         if not isinstance(crafts, list):
             raise ApiContractError("crafts doit être une liste.")
-        return [require_mapping(craft, "crafts[]") for craft in crafts]
+        values = [require_mapping(craft, "crafts[]") for craft in crafts]
+        if self.spectator is not None:
+            self.spectator.crafts(ship_id, values)
+        return values
 
     def start_germination_depot(
         self,
@@ -149,7 +174,10 @@ class HttpOthersApi:
                 operation_key,
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "DÉPÔT", f"Construction d’un dépôt de germination engagée par {mothership_id}, auxiliaire {auxiliary_id}.")
+        return action
 
     def start_deuterium_transfer(
         self,
@@ -169,7 +197,10 @@ class HttpOthersApi:
                 actor_auxiliary_id, str(amount), operation_key,
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "RAVITAILLEMENT", f"Ravitaillement engagé : {source_ship_id} → {target_ship_id}, {amount:g} points de deutérium, auxiliaire {actor_auxiliary_id}.")
+        return action
 
     def start_repair(
         self, ship_id: str, auxiliary_id: str, integrity_points: int, operation_key: str,
@@ -182,7 +213,10 @@ class HttpOthersApi:
                 "defense-repair", ship_id, auxiliary_id, str(integrity_points), operation_key,
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "RÉPARATION", f"Réparation engagée de {ship_id} : {integrity_points} points, auxiliaire {auxiliary_id}.")
+        return action
 
     def start_inventory_resource_transfer(
         self, source_ship_id: str, target_ship_id: str, actor_auxiliary_id: str,
@@ -198,7 +232,10 @@ class HttpOthersApi:
                 actor_auxiliary_id, resource_type, str(amount), operation_key,
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "LOGISTIQUE", f"Chargement/transfert engagé : {source_ship_id} → {target_ship_id}, {amount:g} ECE de {RESOURCE_LABELS[resource_type]}, auxiliaire {actor_auxiliary_id}.")
+        return action
 
     def start_inventory_item_transfer(
         self,
@@ -226,7 +263,10 @@ class HttpOthersApi:
                 operation_key,
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "RAVITAILLEMENT", f"Transfert engagé : {source_ship_id} → {target_ship_id}, {len(item_ids)} missile(s) ({', '.join(item_ids)}), auxiliaire {actor_auxiliary_id}.")
+        return action
 
     def start_craft(
         self,
@@ -250,7 +290,11 @@ class HttpOthersApi:
                 operation_key,
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "PRODUCTION", f"Fabrication de {recipe_id} lancée à bord de {ship_id}, auxiliaire {assistant_auxiliary_id}.")
+            self.spectator.crafts(ship_id, [body.get("craft")])
+        return action
 
     def start_harvest(
         self,
@@ -274,7 +318,10 @@ class HttpOthersApi:
                 operation_key,
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "MOISSON", f"Moisson lancée par {ship_id} sur {target_object_id} avec {auxiliary_count} auxiliaire(s).")
+        return action
 
     def launch_missile(
         self,
@@ -291,7 +338,10 @@ class HttpOthersApi:
                 "defense-missile", ship_id, missile_item_id, target_id, event_key
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "COMBAT", f"Missile {missile_item_id} lancé par {ship_id} vers {target_id}.")
+        return action
 
     def start_laser(
         self,
@@ -307,7 +357,10 @@ class HttpOthersApi:
                 "defense-laser", ship_id, target_id, event_key
             ),
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "COMBAT", f"Engagement laser de {ship_id} sur {target_id}.")
+        return action
 
     def move_ship(self, ship: dict[str, Any], target: Coordinates) -> dict[str, Any]:
         ship_id = require_string(ship.get("id"), "ship.id")
@@ -324,7 +377,28 @@ class HttpOthersApi:
             },
             idempotency_key=f"defense-etoile-{fingerprint}",
         )
-        return require_mapping(body.get("action"), "action")
+        action = require_mapping(body.get("action"), "action")
+        if self.spectator is not None:
+            self.spectator.accepted(action, "DÉPLACEMENT", f"Départ programmé de {ship_id} vers le secteur relatif {target}.", movement=(ship_id, target))
+        return action
+
+    @staticmethod
+    def _resources(resources: dict[str, float]) -> str:
+        return ", ".join(f"{amount:g} ECE de {RESOURCE_LABELS[name]}" for name, amount in resources.items())
+
+    def get_unread_alerts(self) -> list[dict[str, Any]]:
+        body = self._request("GET", "/api/others/alerts?status=unread")
+        values = body.get("alerts")
+        if not isinstance(values, list):
+            raise ApiContractError("alerts doit être une liste.")
+        return [require_mapping(value, "alerts[]") for value in values]
+
+    def mark_alerts_read(self, alert_ids: list[str]) -> list[dict[str, Any]]:
+        body = self._request("POST", "/api/others/alerts/mark-read", payload={"alertIds": alert_ids})
+        values = body.get("alerts")
+        if not isinstance(values, list):
+            raise ApiContractError("alerts doit être une liste.")
+        return [require_mapping(value, "alerts[]") for value in values]
 
     def _request(
         self,

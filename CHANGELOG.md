@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-16
+
+### Fixed
+
+- Destruction des vaisseaux Others : suppression des références de participation aux moissons avant celle des auxiliaires, embarqués, déployés ou devenus dormants après interruption d'un chantier de dépôt. Les anciennes moissons conservent leurs résultats ; leurs références ne bloquent plus les impacts mortels par une erreur de clé étrangère. La destruction du vaisseau mère peut ainsi terminer la dissolution de sa flotte. Aucun événement de production n'est rejoué automatiquement.
+
 ## 2026-09-15
 
 ### Added
@@ -15,6 +21,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Contrôle Others « défense étoile — attente » : ajout d'un journal spectateur automatique `scripts/others_control/logs/{mothership-id}.log` (UTF-8, rotation à 10 Mio, cinq archives). Sélection explicite des moissons, productions, combats, transferts, réparations, navettes, relèves et déménagements, en complément de la sortie de diagnostic. Collecte des alertes non lues toutes les cinq minutes, filtrage par historique persistant des vaisseaux de la flotte, écriture durable puis acquittement via `POST /api/others/alerts/mark-read` par lots de 500. Reprises et erreurs d'écriture couvertes sans requêtes de suivi supplémentaires pour les résultats de jeu.
 - Contrôle Others « défense étoile — attente » : moisson continue jusqu'à épuisement des planètes moissonnables du secteur, y compris lorsque les objectifs de production et la réserve sont complets ou que trois chantiers sont déjà actifs. Les constructions restent limitées à trois simultanément et démarrent dès qu'un vaisseau est finançable, en préservant la réserve de 10 auxiliaires et 10 missiles.
 - Déchargement Others déclenché sous 40 ECE libres après réception des arrivées réservées, avec une cible de 50 % d'occupation. Dépôts et navettes exportent les excédents après protection de la réserve et d'un budget consommable pour les trois prochains vaisseaux. Les chargements réévaluent ces protections ; l'absence d'excédent ou de transporteur est signalée sans interdire la production.
 - Navettes Others : rappel persistant d'une sentinelle voisine admissible lorsqu'aucun transporteur local ne convient, même sous menace à son poste, avec vérification du carburant de retour et de l'autonomie vers le dépôt. Exclusion de la formation dès le rappel et libération après la mission ; plusieurs rotations peuvent poursuivre le déchargement vers sa cible.

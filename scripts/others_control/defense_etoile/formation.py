@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .spectator import SpectatorEvent
+
 from typing import Any, Callable
 
 from .commands import CommandExecutor, is_movable
@@ -184,8 +186,8 @@ class FormationCoordinator:
                 break
             replacement_id = require_string(replacement.get("id"), "replacement.id")
             self.log(
-                f"Relève de {guard_id} par {replacement_id} : "
-                "départ prioritaire du vaisseau armé."
+                SpectatorEvent("FORMATION", f"Relève de {guard_id} par {replacement_id} : "
+                "départ prioritaire du vaisseau armé.")
             )
             if not self.commands.move(replacement, coordinates, result):
                 continue
@@ -193,7 +195,7 @@ class FormationCoordinator:
             if self.commands.move(guard, center, result):
                 self.activity_guards.pop(coordinates, None)
                 self.log(
-                    f"Relève engagée : {guard_id} retourne auprès du vaisseau mère."
+                    SpectatorEvent("FORMATION", f"Relève engagée : {guard_id} retourne auprès du vaisseau mère.")
                 )
             else:
                 self.log(
@@ -212,11 +214,11 @@ class FormationCoordinator:
             target = movement_hop(origin, center, self.policy.max_movement_distance)
             if target != center:
                 self.log(
-                    f"Rappel par étape de {ship_id} vers {format_coordinates(target)} "
-                    f"(destination finale {format_coordinates(center)})."
+                    SpectatorEvent("FORMATION", f"Rappel par étape de {ship_id} vers {format_coordinates(target)} "
+                    f"(destination finale {format_coordinates(center)}).")
                 )
             else:
-                self.log(f"Rappel de {ship_id} vers le secteur du vaisseau mère.")
+                self.log(SpectatorEvent("FORMATION", f"Rappel de {ship_id} vers le secteur du vaisseau mère."))
             self.commands.move(ship, target, result)
 
         available_home_candidates = [
@@ -228,7 +230,7 @@ class FormationCoordinator:
         available_home_candidates.sort(key=lambda ship: str(ship.get("id", "")))
         for ship, target in zip(available_home_candidates, missing_neighbors):
             ship_id = require_string(ship.get("id"), "deployment ship.id")
-            self.log(f"Déploiement de {ship_id} vers {format_coordinates(target)}.")
+            self.log(SpectatorEvent("FORMATION", f"Déploiement de {ship_id} vers {format_coordinates(target)}."))
             self.commands.move(ship, target, result)
 
         self.log(

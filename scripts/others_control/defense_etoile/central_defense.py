@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .spectator import SpectatorEvent, resolve_condition
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -98,8 +100,10 @@ class CentralDefenseCoordinator:
         )
         self.interception_target_ids.intersection_update(incoming_missile_ids)
         if not observation.probe_ids and not manny_ids and not incoming_missile_ids:
+            resolve_condition(self.log, "COMBAT", "interception-shortage", "Fin de la menace de missiles entrants.")
+            resolve_condition(self.log, "COMBAT", "missile-screen", "Fin de la demande d'écran de missiles.")
             if self.at_war:
-                self.log("Fin d'alerte dans le secteur du vaisseau mère.")
+                self.log(SpectatorEvent("COMBAT", "Fin d'alerte dans le secteur du vaisseau mère.", state="central-alert"))
             self.at_war = False
             self.pending_missiles.clear()
             self.visible_missile_ids.clear()
@@ -115,8 +119,8 @@ class CentralDefenseCoordinator:
         ships = [ship for ship in ships if ship.get("id") not in self.excluded_ship_ids]
         if not self.at_war:
             self.log(
-                "ALERTE CENTRALE : menace détectée ; rappel général "
-                "des sentinelles et engagement de guerre."
+                SpectatorEvent("COMBAT", "ALERTE CENTRALE : menace détectée ; rappel général "
+                "des sentinelles et engagement de guerre.", state="central-alert")
             )
         self.at_war = True
 
@@ -138,6 +142,7 @@ class CentralDefenseCoordinator:
         )
         targets = sorted(incoming_missile_ids - self.interception_target_ids)
         if not targets:
+            resolve_condition(self.log, "COMBAT", "interception-shortage", "Tous les missiles entrants ont une interception engagée.")
             return
         ammunition = {
             require_string(ship.get("id"), "central ship.id"):
@@ -160,13 +165,16 @@ class CentralDefenseCoordinator:
                     # Une seule tentative acceptée par missile entrant, même si
                     # l'intercepteur n'est pas encore visible ou manque sa cible.
                     self.interception_target_ids.add(target_id)
+                    self.log(SpectatorEvent("COMBAT", f"Interception engagée par {launcher_id} contre le missile {target_id}."))
                     break
         missing = incoming_missile_ids - self.interception_target_ids
         if missing:
             self.log(
-                f"Interception du vaisseau mère incomplète : {len(missing)} "
-                "missile(s) sans intercepteur disponible."
+                SpectatorEvent("COMBAT", f"Interception du vaisseau mère incomplète : {len(missing)} "
+                "missile(s) sans intercepteur disponible.", state="interception-shortage")
             )
+        else:
+            resolve_condition(self.log, "COMBAT", "interception-shortage", "Tous les missiles entrants ont une interception engagée.")
 
     def _load_fleet_ships(self) -> list[dict[str, Any]]:
         fleet = self.api.get_fleet(require_string(self.fleet_id, "fleet_id"))
@@ -204,7 +212,7 @@ class CentralDefenseCoordinator:
                 continue
             if self.commands.move(ship, center, result):
                 self.recalled_sentinel_ids.add(ship_id)
-                self.log(f"Rappel de guerre de la sentinelle {ship_id} engagé.")
+                self.log(SpectatorEvent("COMBAT", f"Rappel de guerre de la sentinelle {ship_id} engagé."))
 
     def _present_ships(self, ships: list[dict[str, Any]]) -> list[dict[str, Any]]:
         center = self._required_center()
@@ -311,7 +319,9 @@ class CentralDefenseCoordinator:
             details = ", ".join(
                 f"sonde {probe_id}: {count}" for probe_id, count in shortages.items()
             )
-            self.log(f"Écran de missiles incomplet, munitions manquantes — {details}.")
+            self.log(SpectatorEvent("COMBAT", f"Écran de missiles incomplet, munitions manquantes — {details}.", state="missile-screen"))
+        else:
+            resolve_condition(self.log, "COMBAT", "missile-screen", "Écran de missiles complet.")
 
     def _maintain_laser_assignments(
         self,

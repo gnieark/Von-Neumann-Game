@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .spectator import SpectatorEvent
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import floor
@@ -108,7 +110,7 @@ class MothershipLogistics:
         ship_id = require_string(mothership.get("id"), "mothership.id")
         auxiliaries = self.api.get_auxiliaries(ship_id)
         if not auxiliaries:
-            self.log("Logistique suspendue : le vaisseau mère ne possède aucun auxiliaire.")
+            self.log(SpectatorEvent("MOISSON", "Logistique suspendue : le vaisseau mère ne possède aucun auxiliaire.", state="harvest"))
             return
 
         recipes = self._workshop_recipes()
@@ -205,7 +207,7 @@ class MothershipLogistics:
         target = self._select_harvest_target(scan)
         if target is None:
             self._clear_harvest_cycle()
-            self.log("Moisson suspendue : aucune planète locale moissonnable.")
+            self.log(SpectatorEvent("MOISSON", "Moisson suspendue : aucune planète locale moissonnable.", state="harvest"))
             return
 
         # Les ingrédients des crafts sont débités dès leur acceptation.
@@ -217,7 +219,7 @@ class MothershipLogistics:
             capacity_limited_count,
         )
         if harvest_count <= 0:
-            self.log("Moisson suspendue : capacité d'inventaire insuffisante.")
+            self.log(SpectatorEvent("MOISSON", "Moisson suspendue : capacité d'inventaire insuffisante.", state="harvest"))
             return
 
         cycle_started = self._ensure_harvest_cycle()

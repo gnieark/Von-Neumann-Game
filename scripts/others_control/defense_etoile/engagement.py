@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .spectator import SpectatorEvent
+
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -74,7 +76,7 @@ class EngagementCoordinator:
             if coordinates == center or self.commands.move(
                 ship, movement_hop(coordinates, center, self.policy.max_movement_distance), result,
             ):
-                self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
+                self.log(SpectatorEvent("COMBAT", f"Retour tactique de {ship_id} vers le vaisseau mère engagé."))
                 self.clear_completed_return(ship_id)
                 return EngagementResult(engaged=True, remains_on_station=False)
             return EngagementResult(engaged=True, remains_on_station=True)
@@ -107,7 +109,7 @@ class EngagementCoordinator:
         if coordinates == center or self.commands.move(
             ship, movement_hop(coordinates, center, self.policy.max_movement_distance), result,
         ):
-            self.log(f"Retour tactique de {ship_id} vers le vaisseau mère engagé.")
+            self.log(SpectatorEvent("COMBAT", f"Retour tactique de {ship_id} vers le vaisseau mère engagé."))
             self.clear_completed_return(ship_id)
             return EngagementResult(engaged=True, remains_on_station=False)
         return EngagementResult(engaged=True, remains_on_station=True)
@@ -179,5 +181,7 @@ class EngagementCoordinator:
             ):
                 continue
             missiles.pop(0)
+            if event.kind is EventKind.HOSTILE_MISSILE and target_id == event.primary_target_id:
+                self.log(SpectatorEvent("COMBAT", f"Interception engagée par {ship_id} contre le missile {target_id}."))
             fired += 1
         return fired

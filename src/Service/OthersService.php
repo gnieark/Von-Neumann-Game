@@ -1303,6 +1303,8 @@ final class OthersService
                 ->execute(['now' => $now, 'ship_id' => (int) $victim['id']]);
             $pdo->prepare("UPDATE others_actions SET status='failed',error_json=:error,completed_at=:now,updated_at=:now WHERE ship_id=:ship_id AND status IN ('queued','running','cancel_requested')")
                 ->execute(['error' => json_encode(['code' => 'carrier_destroyed', 'message' => 'The carrier was destroyed.'], JSON_THROW_ON_ERROR), 'now' => $now, 'ship_id' => (int) $victim['id']]);
+            // Completed harvests still reference their participants; keep the actions, not links to deleted auxiliaries.
+            $pdo->prepare('DELETE FROM others_swarm_participants WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id=:ship_id)')->execute(['ship_id' => (int) $victim['id']]);
             $pdo->prepare('DELETE FROM others_auxiliaries WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
             $pdo->prepare('DELETE FROM others_inventory_items WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
             $pdo->prepare('DELETE FROM others_inventory_resources WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
@@ -1724,6 +1726,7 @@ final class OthersService
         $this->sectors->saveSector($sector);
         $pdo->prepare('UPDATE others_cross_store_operations SET sector_applied = 1, updated_at = :now WHERE public_id = :id')->execute(['now' => $now, 'id' => $operationId]);
         $pdo->prepare("UPDATE others_actions SET auxiliary_id = NULL WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed')")->execute(['ship_id' => $shipId]);
+        $pdo->prepare("DELETE FROM others_swarm_participants WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed')")->execute(['ship_id' => $shipId]);
         $pdo->prepare("DELETE FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed'")->execute(['ship_id' => $shipId]);
         $pdo->prepare("UPDATE others_cross_store_operations SET sql_applied = 1, status = 'succeeded', updated_at = :now WHERE public_id = :id")->execute(['now' => $now, 'id' => $operationId]);
     }
