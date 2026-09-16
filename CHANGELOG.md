@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API **v135** : `POST /api/probe/{probeId}/mannies/tasks` accepte désormais `ignite_missile`, avec `payload.targetId` obligatoire et `payload.missileItemId` facultatif. Chaque résultat reprend la réponse unitaire (`manny`, `missile`, `missileItemId`, `targetId`). Les missiles sont réservés dans l'ordre du lot ; tout rejet annule l'ensemble des tâches, réservations et événements planifiés du lot.
+
 - API **v134** : la réponse `POST /api/probe/{probeId}/mannies/{mannyId}/ignite_missile` expose désormais la Manny sélectionnée dans `manny`, tout en conservant `missileItemId` et `targetId` au niveau de la réponse, ainsi que le détail `missile`.
 
 ### Fixed

@@ -1100,6 +1100,10 @@ $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/inspect-secto
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/assemble-probe'), 'OpenAPI documents the Manny probe assembly endpoint');
 $test->assert(str_contains($openApi, '/api/probe/mannies/{mannyId}/transfer-to-probe'), 'OpenAPI documents the Manny probe transfer endpoint');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/mannies/tasks'), 'OpenAPI documents atomic Manny task batches');
+$batchTaskSchema = $openApiDocument['components']['schemas']['MannyTaskBatchRequest']['properties']['tasks']['items'] ?? [];
+$test->assert(in_array('ignite_missile', $batchTaskSchema['properties']['task']['enum'] ?? [], true), 'OpenAPI allows ignite_missile in Manny task batches');
+$batchResultProperties = $openApiDocument['components']['schemas']['MannyTaskBatchResponse']['properties']['results']['items']['properties'] ?? [];
+$test->assert(isset($batchResultProperties['manny'], $batchResultProperties['missile'], $batchResultProperties['missileItemId'], $batchResultProperties['targetId']), 'OpenAPI documents the complete batched missile preparation result');
 $test->assert(
     str_contains($openApi, '/api/probe/{probeId}/mannies/{mannyId}:')
         && str_contains($openApi, 'summary: Get one persisted Manny robot'),
@@ -4455,7 +4459,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(134, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(135, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -9378,6 +9382,102 @@ $duplicateBatchManny = $kernel->handle('POST', '/api/probe/' . $batchProbe->id .
     ],
 ], JSON_THROW_ON_ERROR));
 $test->assertEquals(400, $duplicateBatchManny->status, 'Manny task batch rejects duplicate Manny ids');
+
+$batchMissileTarget = $probes->createForPlayer($batchPlayer->id, 'Batch missile target', $batchProbe->currentSector);
+$batchMissileTarget->excludeFromStats = true;
+$probes->save($batchMissileTarget);
+$batchMissileOperators = [
+    $mannies->createForProbe($batchProbe->id, 'Batch missile operator 1'),
+    $mannies->createForProbe($batchProbe->id, 'Batch missile operator 2'),
+];
+$batchMissileItems = [
+    $items->create($batchProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05),
+    $items->create($batchProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05),
+];
+$batchMineTask = [
+    'mannyId' => $batchMannyIds[2],
+    'task' => 'mine',
+    'payload' => ['objectId' => 'batch-mine-rock', 'resources' => ['metals'], 'targetAmount' => 0.01],
+];
+$batchMissileTask = [
+    'mannyId' => $batchMissileOperators[0]->uid,
+    'task' => 'ignite_missile',
+    'payload' => ['targetId' => (string) $batchMissileTarget->id],
+];
+$batchMissilePath = '/api/probe/' . $batchProbe->id . '/mannies/tasks';
+$batchLaunchCount = static function () use ($pdo, $batchProbe): int {
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM missile_launches WHERE probe_id = :probe_id');
+    $statement->execute(['probe_id' => $batchProbe->id]);
+    return (int) $statement->fetchColumn();
+};
+$batchEventCountBefore = (int) $pdo->query('SELECT COUNT(*) FROM scheduled_events')->fetchColumn();
+foreach ([
+    [[], 400, 'bad_request'],
+    [['targetId' => (string) $batchMissileTarget->id, 'missileItemId' => null], 400, 'bad_request'],
+    [['targetId' => 'missing-batch-missile-target'], 404, 'target_not_found'],
+    [['targetId' => (string) $batchMissileTarget->id, 'missileItemId' => 'missing-batch-missile-item'], 404, 'missile_item_not_found'],
+] as [$invalidMissilePayload, $expectedStatus, $expectedCode]) {
+    $invalidMissileTask = array_replace($batchMissileTask, ['payload' => $invalidMissilePayload]);
+    $rejectedMissileBatch = $kernel->handle('POST', $batchMissilePath, $batchHeaders, json_encode([
+        'tasks' => [$batchMineTask, $invalidMissileTask],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals($expectedStatus, $rejectedMissileBatch->status, 'Batched missile validation preserves the individual HTTP status');
+    $test->assertEquals($expectedCode, $rejectedMissileBatch->body['error']['code'] ?? null, 'Batched missile validation preserves the individual error code');
+    $test->assertEquals(1, $rejectedMissileBatch->body['error']['details']['taskIndex'] ?? null, 'Batched missile validation identifies the rejected task index');
+    $test->assertEquals($batchMissileOperators[0]->uid, $rejectedMissileBatch->body['error']['details']['mannyId'] ?? null, 'Batched missile validation identifies the rejected Manny');
+    $test->assertEquals(null, $mannies->findByUidForProbe($batchProbe->id, $batchMannyIds[2])?->currentTask, 'Rejected missile task rolls back the preceding mining task');
+}
+$rejectedAfterMissile = $kernel->handle('POST', $batchMissilePath, $batchHeaders, json_encode([
+    'tasks' => [$batchMissileTask, array_replace($batchMineTask, ['payload' => []])],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $rejectedAfterMissile->status, 'Invalid mining payload rejects a batch after missile preparation');
+$test->assertEquals(0, $batchLaunchCount(), 'Rejected batch removes the preceding missile launch reservation');
+$test->assertEquals(null, $mannies->findById($batchMissileOperators[0]->id)?->currentTask, 'Rejected batch releases the preceding missile operator');
+
+$conflictingMissileTask = [
+    'mannyId' => $batchMissileOperators[1]->uid,
+    'task' => 'ignite_missile',
+    'payload' => ['targetId' => (string) $batchMissileTarget->id, 'missileItemId' => $batchMissileItems[0]->uid],
+];
+$conflictingMissileBatch = $kernel->handle('POST', $batchMissilePath, $batchHeaders, json_encode([
+    'tasks' => [$batchMissileTask, $conflictingMissileTask],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(409, $conflictingMissileBatch->status, 'A missile cannot be reserved twice within one batch');
+$test->assertEquals('action_conflict', $conflictingMissileBatch->body['error']['code'] ?? null, 'Duplicate missile reservation reports action_conflict');
+$test->assertEquals(1, $conflictingMissileBatch->body['error']['details']['taskIndex'] ?? null, 'Duplicate missile reservation identifies the second task');
+$test->assertEquals($batchMissileOperators[1]->uid, $conflictingMissileBatch->body['error']['details']['mannyId'] ?? null, 'Duplicate missile reservation identifies the second Manny');
+$test->assertEquals(0, $batchLaunchCount(), 'Duplicate missile reservation rolls back every launch in the batch');
+$test->assertEquals($batchEventCountBefore, (int) $pdo->query('SELECT COUNT(*) FROM scheduled_events')->fetchColumn(), 'Rejected missile batches leave no scheduler events behind');
+foreach ($batchMissileOperators as $operator) {
+    $test->assertEquals(null, $mannies->findById($operator->id)?->currentTask, 'Rejected missile batches leave each missile operator idle');
+}
+
+// Two automatic reservations must select different items, even in the same transaction.
+$automaticMissileBatch = $kernel->handle('POST', $batchMissilePath, $batchHeaders, json_encode([
+    'tasks' => [$batchMissileTask, array_replace($batchMissileTask, ['mannyId' => $batchMissileOperators[1]->uid]), array_replace($batchMineTask, ['payload' => []])],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $automaticMissileBatch->status, 'Two automatic missile reservations reach the later invalid mining task');
+$test->assertEquals(2, $automaticMissileBatch->body['error']['details']['taskIndex'] ?? null, 'Automatic missile selection skips items reserved earlier in the batch');
+$test->assertEquals(0, $batchLaunchCount(), 'Later task rejection rolls back both automatic missile reservations');
+
+$explicitMissileTask = array_replace($conflictingMissileTask, [
+    'payload' => ['targetId' => (string) $batchMissileTarget->id, 'missileItemId' => $batchMissileItems[1]->uid],
+]);
+$acceptedMissileBatch = $kernel->handle('POST', $batchMissilePath, $batchHeaders, json_encode([
+    'tasks' => [$batchMissileTask, $batchMineTask, $explicitMissileTask],
+], JSON_THROW_ON_ERROR));
+$test->assertEquals(202, $acceptedMissileBatch->status, 'Manny batches accept mixed missile and mining tasks');
+$test->assertEquals(3, count($acceptedMissileBatch->body['results'] ?? []), 'Mixed missile batch returns every result');
+$test->assertEquals([$batchMissileOperators[0]->uid, $batchMannyIds[2], $batchMissileOperators[1]->uid], array_column(array_column($acceptedMissileBatch->body['results'] ?? [], 'manny'), 'id'), 'Mixed missile batch preserves request order');
+foreach ([0 => 0, 2 => 1] as $resultIndex => $operatorIndex) {
+    $result = $acceptedMissileBatch->body['results'][$resultIndex] ?? [];
+    $test->assertEquals($batchMissileItems[$operatorIndex]->uid, $result['missileItemId'] ?? null, 'Batched missile result exposes the automatically or explicitly selected item');
+    $test->assertEquals((string) $batchMissileTarget->id, $result['targetId'] ?? null, 'Batched missile result exposes its target');
+    $test->assertEquals('preparing', $result['missile']['status'] ?? null, 'Batched missile result includes the individual missile response');
+    $test->assertEquals('preparing_missile', $mannies->findById($batchMissileOperators[$operatorIndex]->id)?->currentTask, 'Accepted batch persists missile preparation on each operator');
+    $test->assertEquals(60, strtotime((string) ($result['missile']['launchAt'] ?? '')) - strtotime((string) ($result['missile']['createdAt'] ?? '')), 'Batched missile preparation lasts one minute');
+}
+$test->assertEquals(2, $batchLaunchCount(), 'Accepted mixed batch persists both missile reservations');
 
 $hintPlayer = $auth->registerPlayerWithPassword('manny-hint-limit-user', 'secret', 'Manny Hint Limit User');
 $hintHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($hintPlayer)['token']];

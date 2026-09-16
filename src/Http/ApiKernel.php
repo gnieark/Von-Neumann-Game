@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 134;
+    public const API_VERSION = 135;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -373,6 +373,7 @@ final class ApiKernel
             $this->storage,
             $this->items,
             $this->probeManniesPresenter(),
+            $this->probeMannyMissileCreateResponse(...),
         );
     }
 

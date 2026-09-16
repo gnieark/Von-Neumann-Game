@@ -13,6 +13,7 @@ use VonNeumannGame\Http\ApiResponse;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\OthersActionException;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeStorageService;
 
@@ -22,6 +23,7 @@ final class ProbeManniesApiController
     private const SCHEDULER_SETTLE_DELAY_MS = 5000;
     private const MAX_BATCH_TASKS = 100;
     private const BATCH_ACTIONS = [
+        'ignite_missile',
         'repair',
         'mine',
         'motorize-asteroid',
@@ -45,6 +47,7 @@ final class ProbeManniesApiController
         'recall',
     ];
 
+    /** @param \Closure(Player, NeumannProbe, string, ?string): ApiResponse $igniteMissile */
     public function __construct(
         private readonly NeumannProbeRepository $probes,
         private readonly ProbeMovementService $movements,
@@ -52,6 +55,7 @@ final class ProbeManniesApiController
         private readonly ProbeStorageService $storage,
         private readonly ProbeItemRepository $items,
         private readonly ProbeManniesApiPresenter $presenter,
+        private readonly \Closure $igniteMissile,
     ) {}
 
     public function list(Player $player, ?NeumannProbe $probe = null): ApiResponse
@@ -188,13 +192,21 @@ final class ProbeManniesApiController
                 function (NeumannProbe $lockedProbe) use ($player, $normalizedTasks): array {
                     $results = [];
                     foreach ($normalizedTasks as $index => $task) {
-                        $response = $this->action(
-                            $player,
-                            $task['mannyId'],
-                            $task['task'],
-                            json_encode($task['payload'], JSON_THROW_ON_ERROR),
-                            $lockedProbe,
-                        );
+                        try {
+                            $response = $this->action(
+                                $player,
+                                $task['mannyId'],
+                                $task['task'],
+                                json_encode($task['payload'], JSON_THROW_ON_ERROR),
+                                $lockedProbe,
+                            );
+                        } catch (OthersActionException $error) {
+                            throw new BatchMannyActionRejected($index, ApiResponse::error(
+                                $error->httpStatus,
+                                $error->errorCode,
+                                $error->getMessage(),
+                            ));
+                        }
                         if ($response->status !== 202) {
                             throw new BatchMannyActionRejected($index, $response);
                         }
@@ -222,6 +234,10 @@ final class ProbeManniesApiController
 
     public function action(Player $player, string $uid, string $action, ?string $body, ?NeumannProbe $probe = null): ApiResponse
     {
+        if ($action === 'ignite_missile') {
+            return ($this->igniteMissile)($player, $probe ?? $this->requiredProbe($player), $uid, $body);
+        }
+
         $probe = $this->movements->refreshProbeMovementState($probe ?? $this->requiredProbe($player));
         $data = $this->decodeJsonBody($body) ?? [];
 

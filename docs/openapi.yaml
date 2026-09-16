@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '134'
+  version: '135'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 134
+                apiVersion: 135
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2262,6 +2262,10 @@ paths:
         batch is atomic: if one task is rejected, none of its tasks are
         retained. An error identifies the rejected zero-based `taskIndex` and
         its `mannyId`. A Manny may occur only once in a batch.
+        `ignite_missile` requires `payload.targetId` and accepts an optional
+        `payload.missileItemId`; when omitted, each task reserves the first
+        missile still available in the probe inventory. Its result contains
+        `manny`, `missile`, `missileItemId` and `targetId`, as on the individual endpoint.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       requestBody:
@@ -2282,6 +2286,10 @@ paths:
                     objectId: asteroid-42
                     resources: [metals]
                     targetAmount: 0.02
+                - mannyId: mny_628aa08b732042b1
+                  task: ignite_missile
+                  payload:
+                    targetId: others_ship_42
       responses:
         '202':
           description: All Manny tasks accepted, in request order
@@ -8759,7 +8767,7 @@ components:
                 type: string
               task:
                 type: string
-                enum: [repair, mine, craft, salvage, install-bookmark, detach-storage-container, drop-storage-container, drop-manny-cargo, inspect-sector-object, recover-storage-container, refill-deuterium-tank, transfer-deuterium-to-probe, transfer-to-probe, turn-on-relay, install-scut-transit-beacon, improve-probe, assemble-probe, recall]
+                enum: [ignite_missile, repair, mine, craft, salvage, install-bookmark, detach-storage-container, drop-storage-container, drop-manny-cargo, inspect-sector-object, recover-storage-container, refill-deuterium-tank, transfer-deuterium-to-probe, transfer-to-probe, turn-on-relay, install-scut-transit-beacon, improve-probe, assemble-probe, recall]
               payload:
                 type: object
                 additionalProperties: true
@@ -8784,6 +8792,14 @@ components:
                 items:
                   type: object
                   additionalProperties: true
+              missile:
+                $ref: '#/paths/~1api~1probe~1{probeId}~1mannies~1{mannyId}~1ignite_missile/post/responses/202/content/application~1json/schema/properties/missile'
+              missileItemId:
+                type: string
+                description: Missile item reserved by an ignite_missile task.
+              targetId:
+                type: string
+                description: Target of an ignite_missile task.
     MannyLocation:
       type: object
       required: [type]
