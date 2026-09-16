@@ -186,7 +186,10 @@ final class OthersService
             $manny->taskPayload = ['missileLaunchId' => $missileId, 'targetObjectId' => $target['id']];
             $this->mannies->save($manny);
             $pdo->prepare('UPDATE missile_launches SET scheduled_event_id=:event_id WHERE public_id=:public_id')->execute(['event_id' => $manny->taskScheduledEventId, 'public_id' => $missileId]);
-            return $this->findMissileForPlayer($missileId, $playerId) ?? [];
+            $missile = $this->findMissileForPlayer($missileId, $playerId) ?? [];
+            $missile['missileItemId'] = (string) $item['uid'];
+            $missile['targetId'] = (string) $target['id'];
+            return $missile;
         });
     }
 

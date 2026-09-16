@@ -3133,6 +3133,9 @@ $igniteMissileResponse = $kernel->handle(
     json_encode(['targetId' => (string) $secondaryProbe->id], JSON_THROW_ON_ERROR),
 );
 $test->assertEquals(202, $igniteMissileResponse->status, 'POST /api/probe/{probeId}/mannies/{mannyId}/ignite_missile accepts a target-only payload');
+$test->assertEquals($igniteMissileManny->uid, $igniteMissileResponse->body['manny']['id'] ?? null, 'Manny missile response includes the selected Manny');
+$test->assertEquals($firstIgniteMissileItem->uid, $igniteMissileResponse->body['missileItemId'] ?? null, 'Manny missile response preserves the selected missile item id');
+$test->assertEquals((string) $secondaryProbe->id, $igniteMissileResponse->body['targetId'] ?? null, 'Manny missile response preserves the target id');
 $igniteMissileId = $igniteMissileResponse->body['missile']['id'] ?? null;
 $igniteMissileRowStatement = $pdo->prepare('SELECT * FROM missile_launches WHERE public_id = :public_id');
 $igniteMissileRowStatement->execute(['public_id' => $igniteMissileId]);
@@ -4452,7 +4455,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(133, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(134, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');

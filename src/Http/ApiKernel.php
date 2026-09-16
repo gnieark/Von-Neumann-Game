@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 133;
+    public const API_VERSION = 134;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -898,7 +898,13 @@ final class ApiKernel
         $payload = $this->decodeJsonBody($body);
         if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
         $missile = $this->othersService?->igniteProbeMissile($probe, $player->id, $mannyId, $payload) ?? throw new \RuntimeException('Probe missile service is unavailable.');
-        return new ApiResponse(202, ['missile' => $this->presentMissile($missile)]);
+        $manny = $this->mannies->mannyForProbeApi($probe, $mannyId);
+        return new ApiResponse(202, [
+            'manny' => $this->probeManniesPresenter()->manny($player, $probe, $manny),
+            'missile' => $this->presentMissile($missile),
+            'missileItemId' => (string) ($missile['missileItemId'] ?? ''),
+            'targetId' => (string) ($missile['targetId'] ?? $missile['target_public_id'] ?? ''),
+        ]);
     }
 
     private function missileResponse(Player $player, string $missileId): ApiResponse

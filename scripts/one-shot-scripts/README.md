@@ -3,6 +3,23 @@ qui le demandent. Pour les évolutions nouvelles, les changements purement
 structurels de la base restent du ressort de `SchemaInitializer` ; un script
 one-shot est réservé aux transformations de données ou de fichiers.
 
+## Rejeu de la destruction du vaisseau mère du 16 septembre 2026
+
+Après déploiement du correctif des références de moisson,
+`requeue-mothership-e4-fatal-missile.php` vérifie précisément le vaisseau
+`mother_e4e6495132d2b1db10f7` et son dernier impact en échec, événement `1820151`.
+Il abaisse son intégrité à 1/100 et remet uniquement cet événement à échéance
+immédiate dans une transaction. L'heure historique de l'impact et le compteur
+de tentatives sont conservés ; le scheduler réalise ensuite la destruction.
+
+```bash
+php scripts/one-shot-scripts/requeue-mothership-e4-fatal-missile.php --database-config=var/database-prod.json --dry-run
+php scripts/one-shot-scripts/requeue-mothership-e4-fatal-missile.php --database-config=var/database-prod.json --apply
+```
+
+Le mode par défaut est la simulation. Un état inattendu interrompt le script
+sans écriture ; une destruction déjà terminée ne provoque aucune modification.
+
 ## Nettoyage des anciennes références de containers détachés
 
 Après l’import des containers détachés dans SQL avec l’ancienne migration,

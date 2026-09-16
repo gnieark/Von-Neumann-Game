@@ -4,6 +4,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-16
 
+### Changed
+
+- API **v134** : la réponse `POST /api/probe/{probeId}/mannies/{mannyId}/ignite_missile` expose désormais la Manny sélectionnée dans `manny`, tout en conservant `missileItemId` et `targetId` au niveau de la réponse, ainsi que le détail `missile`.
+
 ### Fixed
 
 - Destruction des vaisseaux Others : suppression des références de participation aux moissons avant celle des auxiliaires, embarqués, déployés ou devenus dormants après interruption d'un chantier de dépôt. Les anciennes moissons conservent leurs résultats ; leurs références ne bloquent plus les impacts mortels par une erreur de clé étrangère. La destruction du vaisseau mère peut ainsi terminer la dissolution de sa flotte. Aucun événement de production n'est rejoué automatiquement.
