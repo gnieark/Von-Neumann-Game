@@ -57,6 +57,7 @@ class EngagementCoordinator:
         result: CycleResult,
         *,
         intercept_missiles: bool = True,
+        allow_retreat: bool = True,
     ) -> EngagementResult:
         ship_id = require_string(ship.get("id"), "guard ship.id")
         state = self.scout_states.setdefault(ship_id, ScoutState())
@@ -96,7 +97,7 @@ class EngagementCoordinator:
 
         while state.pending_events and not state.return_required:
             event = state.pending_events.pop(0)
-            self._execute_event(ship, event, state, result)
+            self._execute_event(ship, event, state, result, allow_retreat=allow_retreat)
 
         if not state.return_required:
             return EngagementResult(engaged=engaged, remains_on_station=True)
@@ -120,6 +121,8 @@ class EngagementCoordinator:
         event: EngagementEvent,
         state: ScoutState,
         result: CycleResult,
+        *,
+        allow_retreat: bool,
     ) -> None:
         ship_id = require_string(ship.get("id"), "engagement ship.id")
         missiles = self.commands.available_missiles(ship_id)
@@ -130,19 +133,20 @@ class EngagementCoordinator:
                 if event.primary_target_id is not None and self.commands.start_laser(
                     ship_id, event.primary_target_id, event.key, result
                 ):
-                    state.laser_return_due = self.now() + timedelta(
-                        seconds=self.policy.laser_engagement_seconds + 1
-                    )
+                    if allow_retreat:
+                        state.laser_return_due = self.now() + timedelta(
+                            seconds=self.policy.laser_engagement_seconds + 1
+                        )
                     self.log(
                         f"Laser de {ship_id} verrouillé sur la Manny {event.primary_target_id} "
                         "pour dix minutes."
                     )
-            state.return_required = True
+            state.return_required = allow_retreat
             return
 
         if event.kind is EventKind.HOSTILE_MISSILE:
             self._fire_at_targets(ship_id, missiles, event, result)
-            state.return_required = True
+            state.return_required = allow_retreat
             return
         if event.kind is EventKind.EJECTED_MANNY:
             self._fire_at_targets(ship_id, missiles, event, result, include_probe=False)
@@ -152,7 +156,7 @@ class EngagementCoordinator:
             return
         if event.kind in {EventKind.FLOATING_OBJECT_CHANGE, EventKind.WAYPOINT_CHANGE}:
             self._fire_at_targets(ship_id, missiles, event, result, include_primary=False)
-            state.return_required = True
+            state.return_required = allow_retreat
             return
         raise RuntimeError(f"Type d'engagement inconnu : {event.kind}.")
 

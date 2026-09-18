@@ -111,6 +111,11 @@ class FleetRelocationCoordinator:
         self.log(SpectatorEvent("EXPLORATION", "Secteur épuisé : recherche d'un nouveau système pour la flotte.", state="relocation"))
         return True
 
+    def cancel(self) -> None:
+        """Abandonne la recherche ou le déménagement au profit d'une mobilisation."""
+        self.state = None
+        self._save()
+
     def reconcile(self, mother: dict[str, Any], ships: list[dict[str, Any]],
                   active_actions: list[dict[str, Any]], reserved: set[str],
                   depot_busy: bool, result: CycleResult, *,
@@ -207,7 +212,7 @@ class FleetRelocationCoordinator:
         if self.state["returning"]:
             if position != center:
                 self.log(SpectatorEvent("EXPLORATION", f"Recherche en pause : retour de {scout['id']} auprès du vaisseau mère."))
-                self._move(scout, center, result)
+                self.move_towards(scout, center, result)
                 return
             if len(visited) == len(ring):
                 self.log(SpectatorEvent("EXPLORATION", "Recherche en attente : aucun système moissonnable dans la couronne à distance 2.", state="relocation"))
@@ -228,7 +233,7 @@ class FleetRelocationCoordinator:
         # Sauver l'intention avant la commande : un redémarrage conserve le même cap.
         self.state["waypoint"] = coordinates_json(target)
         self._save()
-        self._move(scout, target, result)
+        self.move_towards(scout, target, result)
 
     def _ready(self, ship: dict[str, Any], result: CycleResult) -> bool:
         if not is_movable(ship) or ship_sector(ship) is None:
@@ -244,14 +249,14 @@ class FleetRelocationCoordinator:
         return inventory["reservedEce"] == 0 and all(
             resource["reserved"] == 0 for resource in inventory["resources"].values())
 
-    def _fuel_needed(self, origin: Coordinates, target: Coordinates) -> float:
+    def fuel_needed(self, origin: Coordinates, target: Coordinates) -> float:
         count = 0
         while origin != target:
             origin = movement_hop(origin, target)
             count += 1
         return count * self.fuel_per_hop
 
-    def _move(self, ship: dict[str, Any], target: Coordinates, result: CycleResult) -> bool:
+    def move_towards(self, ship: dict[str, Any], target: Coordinates, result: CycleResult) -> bool:
         origin = ship_sector(ship)
         if origin is None or origin == target or not self._ready(ship, result):
             return False
@@ -282,17 +287,17 @@ class FleetRelocationCoordinator:
                 if not self._ready(ship, result) or origin is None:
                     waiting = True
                     continue
-                if deuterium_amount(ship) < self._fuel_needed(origin, destination):
+                if deuterium_amount(ship) < self.fuel_needed(origin, destination):
                     waiting = True
                     if ship["id"] == mother["id"]:
                         self.log(SpectatorEvent("RAVITAILLEMENT", "Déménagement en attente de carburant pour le vaisseau mère.", state=f"fuel:{mother['id']}"))
                     elif origin == center:
                         recipients.append(ship)
                     else:
-                        self._move(ship, center, result)
+                        self.move_towards(ship, center, result)
             if recipients:
                 self.refueling.reconcile(mother, recipients, actions, result,
-                                         reserve_deuterium=self._fuel_needed(center, destination))
+                                         reserve_deuterium=self.fuel_needed(center, destination))
             if any(action.get("status") in ACTIVE_STATUSES and action.get("type") in {
                 "deuterium_transfer", "inventory_transfer",
             } for action in actions):
@@ -303,4 +308,4 @@ class FleetRelocationCoordinator:
             self._save()
         for ship in sorted(ships, key=lambda ship: (ship["id"] == mother["id"], ship["id"])):
             if ship.get("movement") is None and ship_sector(ship) != destination:
-                self._move(ship, destination, result)
+                self.move_towards(ship, destination, result)

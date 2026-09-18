@@ -128,7 +128,7 @@ class DepotGuardTests(unittest.TestCase):
         self.assertEqual([("better-0", DEPOT)], self.api.moves)
         self.assertEqual(5, len(self.worker.assignments))
 
-    def test_all_four_guards_use_sentinel_missile_tactics_on_manny_detection(self):
+    def test_all_four_guards_fire_on_manny_without_retreat(self):
         guards = self.add_ships(4, position=DEPOT, missiles=2)
         self.api.scans[DEPOT] = detailed_scan(probes=[{"id": "probe"}])
         self.api.autonomous_units = {guard["id"]: [observed_manny("manny", "probe")] for guard in guards}
@@ -136,10 +136,11 @@ class DepotGuardTests(unittest.TestCase):
         self.assertEqual(8, len(self.api.missile_launches))
         for guard in guards:
             self.assertEqual(["manny", "probe"], [target for actor, _, target in self.api.missile_launches if actor == guard["id"]])
-            self.assertEqual("returning", self.worker.assignments[guard["id"]]["stage"])
-        self.assertEqual({(guard["id"], CENTER) for guard in guards}, set(self.api.moves))
+            self.assertEqual("guarding", self.worker.assignments[guard["id"]]["stage"])
+        self.assertEqual([], self.api.moves)
+        self.assertEqual({DEPOT}, self.worker.threatened_sectors)
 
-    def test_activity_polling_observes_every_guard_and_ignores_returning_guards(self):
+    def test_activity_polling_keeps_guards_on_station_without_duplicate_shots(self):
         guards = self.add_ships(4, position=DEPOT, missiles=2)
         self.cycle()
         self.api.scans[DEPOT] = detailed_scan(probes=[{"id": "probe"}])
@@ -148,10 +149,10 @@ class DepotGuardTests(unittest.TestCase):
         self.worker.reconcile_activity(result)
         self.worker.reconcile_activity(result)
         self.assertEqual(8, len(self.api.missile_launches))
-        self.assertEqual(4, len(self.api.moves))
-        self.assertEqual({}, self.worker.activity_guards)
+        self.assertEqual([], self.api.moves)
+        self.assertEqual(4, len(self.worker.activity_guards))
 
-    def test_laser_engagement_delays_return_and_relief(self):
+    def test_laser_engagement_never_causes_retreat(self):
         guards = self.add_ships(4, position=DEPOT, missiles=0)
         self.cycle()
         self.add_ships(1, missiles=3, prefix="better")
@@ -164,9 +165,10 @@ class DepotGuardTests(unittest.TestCase):
         self.assertEqual([], self.api.moves)
         self.now += timedelta(seconds=1)
         self.worker.reconcile_activity(CycleResult())
-        self.assertEqual(4, len(self.api.moves))
+        self.assertEqual([], self.api.moves)
+        self.assertEqual(4, len(self.api.laser_locks))
 
-    def test_distant_deployment_and_tactical_return_use_steps_across_restarts(self):
+    def test_distant_deployment_uses_steps_and_guard_stays_when_attacked(self):
         distant = (26, 0, 0)
         self.api.known_depots = [distant]
         guards = self.add_ships(1, missiles=2)
@@ -181,14 +183,9 @@ class DepotGuardTests(unittest.TestCase):
         self.api.scans[distant] = detailed_scan(probes=[{"id": "probe"}])
         self.api.autonomous_units[guards[0]["id"]] = [observed_manny("manny", "probe")]
         self.cycle()
-        self.assertEqual(("guard-0", (16, 0, 0)), self.api.moves[-1])
-        self.api.arrive("guard-0")
-        self.worker = self.restart()
-        self.cycle()
-        self.assertEqual(("guard-0", (6, 0, 0)), self.api.moves[-1])
-        self.api.arrive("guard-0")
-        self.cycle()
-        self.assertEqual(("guard-0", CENTER), self.api.moves[-1])
+        self.assertEqual(3, len(self.api.moves))
+        self.assertEqual("guarding", self.worker.assignments["guard-0"]["stage"])
+        self.assertEqual({distant}, self.worker.threatened_sectors)
 
     def test_insufficient_round_trip_fuel_prevents_distant_assignment(self):
         self.api.known_depots = [(26, 0, 0)]
@@ -209,14 +206,14 @@ class DepotGuardTests(unittest.TestCase):
         self.assertEqual([("replacement-0", DEPOT)], self.api.moves)
         self.assertEqual(4, len(self.worker._slots(DEPOT)))
 
-    def test_guard_at_mothership_sector_returns_without_same_destination_command(self):
+    def test_guard_at_mothership_sector_stays_on_station(self):
         self.api.known_depots = [CENTER]
         self.add_ships(4)
         self.api.autonomous_units = {f"guard-{index}": [observed_manny("manny", "probe")] for index in range(4)}
         self.cycle()
         self.assertEqual(4, len(self.api.missile_launches))
         self.assertEqual([], self.api.moves)
-        self.assertTrue(all(value["stage"] == "returning" for value in self.worker.assignments.values()))
+        self.assertTrue(all(value["stage"] == "guarding" for value in self.worker.assignments.values()))
 
     def test_controller_does_not_add_a_fifth_sentinel_to_a_neighbor_depot(self):
         neighbor = (1, 1, 0)
@@ -239,7 +236,7 @@ class DepotGuardTests(unittest.TestCase):
         self.api.autonomous_units = {guard["id"]: [observed_manny("manny", "probe")] for guard in guards}
         controller.run_activity_cycle()
         self.assertEqual(8, len(self.api.missile_launches))
-        self.assertEqual(4, len(self.api.moves))
+        self.assertEqual([("mother", DEPOT)], self.api.moves)
 
     def test_guards_stay_at_depot_during_relocation_and_do_not_block_completion(self):
         target = (1, 1, 0)
@@ -269,7 +266,11 @@ class DepotGuardTests(unittest.TestCase):
         resumed = self.controller()
         resumed.run_cycle()
         self.assertEqual(8, len(self.api.missile_launches))
-        self.assertEqual({(guard["id"], target) for guard in guards}, set(self.api.moves))
+        self.assertEqual([], self.api.moves)
+        self.assertEqual(DEPOT, resumed.depot_defense.destination)
+        self.api.arrive("mother")
+        resumed.run_activity_cycle()
+        self.assertEqual([("mother", DEPOT)], self.api.moves)
 
     def test_invalid_guard_journal_fails_without_losing_assignments(self):
         self.add_ships(4)

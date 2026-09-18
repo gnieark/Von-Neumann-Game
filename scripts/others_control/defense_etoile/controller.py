@@ -24,6 +24,7 @@ from .refueling import FleetRefuelingCoordinator
 from .repairs import FleetRepairCoordinator
 from .depot_logistics import DepotLogistics
 from .depot_guards import DepotGuardCoordinator
+from .depot_defense import DepotDefenseCoordinator
 from .relocation import FleetRelocationCoordinator
 
 
@@ -93,6 +94,9 @@ class DefenseEtoileAttente:
                                     fuel_per_hop=logistics_fuel_per_hop, policy=logistics_policy)
         self.relocation = FleetRelocationCoordinator(
             api, logger=logger, state_dir=logistics_state_dir, fuel_per_hop=logistics_fuel_per_hop,
+        )
+        self.depot_defense = DepotDefenseCoordinator(
+            self.guards, self.central_defense, self.relocation, now=self.now, logger=logger,
         )
         self.logistics = MothershipLogistics(
             api,
@@ -167,7 +171,8 @@ class DefenseEtoileAttente:
             self.relocation.load(fleet_id)
             self.guards.load(fleet_id)
             mothership_movement = optional_mapping(mothership.get("movement"), "ship.movement")
-            if mothership_movement is not None and self.relocation.state is None and not self.guards.assignments:
+            if (mothership_movement is not None and self.relocation.state is None
+                    and not self.guards.assignments and self.depot_defense.destination is None):
                 self.central_defense.clear_context()
                 result.add_event_date(
                     mothership_movement.get("arrivalAt"),
@@ -188,6 +193,8 @@ class DefenseEtoileAttente:
 
         mothership_id = require_string(fleet_mothership.get("id"), "mothership.id")
         self._validate_mothership(fleet_mothership, mothership_id)
+        if self.depot_defense.destination is not None:
+            return self._run_depot_defense(fleet_mothership, ships, active_actions, result)
         reserved = self.depots.reserved_ships(fleet_id)
         if self.relocation.state is not None and self.relocation.state["scoutId"] is not None:
             reserved = reserved | {self.relocation.state["scoutId"]}
@@ -197,6 +204,12 @@ class DefenseEtoileAttente:
                 self.relocation.state is None or self.relocation.state["phase"] == "searching"
             ),
         )
+        if self.depot_defense.start_if_alerted():
+            # Les réactions locales ont pu lancer des actions : reprendre une photographie fraîche.
+            ships, active_actions = self._load_fleet_state(fleet_id)
+            return self._run_depot_defense(
+                self._select_mothership(ships, fleet_id), ships, active_actions, result,
+            )
         self._guard_ships = [ship for ship in ships if ship["id"] in guard_ids]
         ships = [ship for ship in ships if ship["id"] not in guard_ids]
         if self.relocation.state is not None:
@@ -287,10 +300,36 @@ class DefenseEtoileAttente:
     def run_activity_cycle(self) -> CycleResult:
         """Observe les sentinelles en poste sans relancer la maintenance de flotte."""
         result = CycleResult()
+        if self.depot_defense.destination is not None:
+            ships, actions = self._load_fleet_state(require_string(self.guards.fleet_id, "fleet_id"))
+            return self._run_depot_defense(
+                self._select_mothership(ships, self.guards.fleet_id), ships, actions, result,
+                maintenance=False,
+            )
         self.guards.reconcile_activity(result)
+        if self.depot_defense.start_if_alerted():
+            ships, actions = self._load_fleet_state(require_string(self.guards.fleet_id, "fleet_id"))
+            return self._run_depot_defense(
+                self._select_mothership(ships, self.guards.fleet_id), ships, actions, result,
+                maintenance=False,
+            )
         if self.central_defense.reconcile(result):
             return result
         return self.formation.reconcile_activity(result)
+
+    def _run_depot_defense(self, mother: dict[str, Any], ships: list[dict[str, Any]],
+                          actions: list[dict[str, Any]], result: CycleResult,
+                          *, maintenance: bool = True) -> CycleResult:
+        self.formation.clear_activity_watch()
+        self.depot_defense.reconcile(mother, ships, actions, result)
+        if maintenance and self.depot_defense.hold_until is not None:
+            self.repairs.reconcile(mother, ships, result)
+            armament = self.armament.reconcile(mother, ships, result)
+            self.refueling.reconcile(mother, ships, actions, result)
+            if not self.central_defense.at_war:
+                self.logistics.reconcile(mother, result, fleet_missile_stock=armament.total_missiles,
+                                         missile_transfers_active=armament.transfers_active)
+        return result
 
     def _load_fleet_state(
         self, fleet_id: str,

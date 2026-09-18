@@ -89,6 +89,7 @@ class CentralDefenseCoordinator:
         result: CycleResult,
         *,
         ships: list[dict[str, Any]] | None = None,
+        recall_sentinels: bool = True,
     ) -> bool:
         if self.mothership_id is None or self.fleet_id is None or self.center is None:
             return False
@@ -124,7 +125,8 @@ class CentralDefenseCoordinator:
             )
         self.at_war = True
 
-        self._recall_sentinels(ships, result)
+        if recall_sentinels:
+            self._recall_sentinels(ships, result)
         present_ships = self._present_ships(ships)
         self._maintain_missile_screen(observation, present_ships, result)
         self._maintain_laser_assignments(manny_ids, present_ships, result)

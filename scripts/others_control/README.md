@@ -145,7 +145,9 @@ Les réservations techniques sont également déduites des ressources disponible
 
 Les navettes restent exclues des déploiements, rappels et tâches de défense jusqu'au
 retour, y compris pendant les contrôles rapides de défense centrale. L'alerte centrale
-garde la priorité sur la progression logistique. La production et la moisson du
+garde la priorité sur la progression logistique. Une attaque détectée par un gardien
+de dépôt mobilise cependant aussi les navettes : leur mission logistique est suspendue
+jusqu'à la fin du maintien défensif au dépôt. La production et la moisson du
 vaisseau mère attendent pendant une construction de dépôt, un dépôt local ou le
 chargement d'une navette ; elles peuvent reprendre pendant le rappel et le voyage.
 Sans excédent exportable ou transporteur admissible, un message explique le
@@ -176,9 +178,11 @@ sa place, y compris après redémarrage. Les trajets éloignés se font par éta
 plus dix secteurs ; un départ exige le carburant de l'aller-retour. Un secteur
 voisin protégé par ces gardiens ne reçoit pas de cinquième vaisseau comme sentinelle.
 
-Chaque gardien utilise les mêmes observations, priorités de tir, engagements laser
-et retours tactiques que les sentinelles, y compris lors des contrôles d'activité
-rapides. Les gardiens continuent leur surveillance pendant une alerte centrale.
+Chaque gardien utilise les mêmes observations, priorités de tir, interceptions et
+engagements laser que les sentinelles, y compris lors des contrôles d'activité
+rapides, mais **ne se replie jamais en réponse à une menace**, même sans munitions
+ou après un engagement laser. Les gardiens continuent leur surveillance pendant
+une alerte centrale.
 Leur stock de missiles est inclus dans l'objectif de production de la flotte ;
 ceux présents auprès du vaisseau mère participent au réarmement, au ravitaillement
 et aux réparations.
@@ -186,14 +190,36 @@ et aux réparations.
 Un vaisseau disponible intact possédant **strictement plus de missiles** peut relever
 un gardien non engagé. Le remplaçant part d'abord ; l'ancien garde le poste jusqu'à
 son arrivée effective, puis revient auprès du vaisseau mère. Une relève déjà en
-route empêche d'en envoyer une seconde pour le même gardien. Un gardien perdu ou
-en retour tactique libère sa place pour un renfort.
+route empêche d'en envoyer une seconde pour le même gardien. Un gardien perdu
+libère sa place pour un renfort. Les relèves sont suspendues pendant une mobilisation.
 
-Les gardiens **restent aux dépôts lors des déménagements**. Leurs affectations et
-leurs relèves ne bloquent pas le déplacement de la flotte mobile. Un retour tactique
-vise le secteur actuel du vaisseau mère, ou sa destination lorsqu'il est en transit.
+Les gardiens **restent aux dépôts lors des déménagements pour les ressources**.
+Leurs affectations et leurs relèves ne bloquent pas le déplacement de la flotte mobile.
 Les affectations sont conservées dans `*.guards.json`, dans le répertoire
 `--logistics-state-dir`, séparément par serveur et flotte et en coordonnées relatives.
+
+Une réaction tactique d'un gardien déclenche le rassemblement de **toute la flotte**
+dans son secteur : vaisseau mère, sentinelles, navettes, éclaireur et gardiens des
+autres dépôts. La simple présence d'une sonde reste sans effet déclencheur tant
+qu'aucun événement tactique n'est détecté. La recherche de ressources en cours est
+abandonnée. Les déplacements se font par étapes de dix secteurs au maximum ; les
+vaisseaux en transit terminent leur étape, et les vaisseaux occupés attendent leurs
+auxiliaires ou réservations avant de partir. Un manque de carburant local est traité
+avant le départ du vaisseau mère. Les gardiens du dépôt attaqué restent à leur poste.
+Si plusieurs dépôts signalent une menace dans le même contrôle, le premier dans
+l'ordre des coordonnées relatives est retenu ; cette destination reste fixe jusqu'à
+la fin de la mobilisation.
+
+Dès l'arrivée du vaisseau mère, la **défense centrale** prend le relais sur place,
+avec tous les vaisseaux présents, gardiens et navettes compris. Après l'arrivée du
+dernier vaisseau survivant, la flotte reste regroupée pendant **au moins deux heures**,
+puis tant que la défense centrale détecte une menace, notamment une sonde.
+La formation en étoile, les relèves, les navettes et les déménagements sont suspendus
+pendant ce maintien. Les réparations, le réarmement et le ravitaillement locaux
+continuent ; la production et la moisson locales restent possibles hors combat.
+Les missions habituelles reprennent ensuite depuis la nouvelle position du vaisseau
+mère. L'alerte et le délai de deux heures sont uniquement conservés en mémoire :
+un redémarrage du script ne les restaure pas.
 
 ### Déménagement après épuisement du secteur
 

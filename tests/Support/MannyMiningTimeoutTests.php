@@ -121,3 +121,5 @@ $test->assertEquals($originalRows[2], $migratedRows[2], 'migration preserves an 
 exec($migrationCommand . ' 2>&1', $migrationOutput, $migrationStatus);
 $test->assertEquals(0, $migrationStatus, 'blocked mining migration can be replayed');
 $test->assertEquals($migratedRows, $miningMigrationPdo->query('SELECT * FROM scheduled_events ORDER BY id')->fetchAll(PDO::FETCH_ASSOC), 'migration replay does not reset storage wait deadlines');
+
+require __DIR__ . '/FailedMiningStorageWaitMigrationTests.php';

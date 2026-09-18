@@ -43,6 +43,7 @@ class DepotGuardCoordinator:
         self.activity_guards: dict[str, dict[str, Any]] = {}
         self.center: Coordinates | None = None
         self.mothership_stationary = False
+        self.threatened_sectors: set[Coordinates] = set()
 
     def load(self, fleet_id: str) -> None:
         if self.fleet_id == fleet_id:
@@ -106,6 +107,19 @@ class DepotGuardCoordinator:
                 assignment["stage"] = "returning"
                 self._save()
 
+        # Détecter une attaque avant toute relève ou reprise de trajet.
+        for ship_id, assignment in self.assignments.items():
+            ship = by_id[ship_id]
+            if (ship_id not in excluded and assignment["stage"] != "returning"
+                    and ship.get("movement") is None
+                    and ship_sector(ship) == parse_coordinates(assignment["destination"], "guardian.destination")):
+                assignment["stage"] = "guarding"
+                self.activity_guards[ship_id] = ship
+        engaged = self._observe(result)
+        if self.threatened_sectors:
+            self._save()
+            return set(self.claimed_ships)
+
         # Un retour ou un déplacement engagé garde son affectation jusqu'à l'arrivée.
         for ship_id, assignment in list(self.assignments.items()):
             ship = by_id[ship_id]
@@ -133,7 +147,6 @@ class DepotGuardCoordinator:
             self._save()
             self.activity_guards[ship_id] = ship
 
-        engaged = self._observe(result)
         # Une relève n'autorise le retour de l'ancien gardien qu'après l'arrivée.
         for ship_id, assignment in list(self.assignments.items()):
             replaced_id = assignment["replaces"]
@@ -168,12 +181,33 @@ class DepotGuardCoordinator:
             outcome = self.engagement.reconcile(
                 ship, destination, self.center, result,
                 intercept_missiles=not (self.mothership_stationary and destination == self.center),
+                allow_retreat=False,
             )
             if outcome.engaged:
                 engaged.add(ship_id)
-            if not outcome.remains_on_station:
-                self._return(ship_id)
+                self.threatened_sectors.add(destination)
+            observation = self.engagement.scout_states[ship_id].observation
+            if observation is not None and observation.missiles:
+                # L'interception locale peut être déléguée au centre sans perdre l'alerte.
+                self.threatened_sectors.add(destination)
         return engaged
+
+    def observe_during_mobilization(self, mother: dict[str, Any], ships: list[dict[str, Any]],
+                                   result: CycleResult, *, central_sector: Coordinates | None) -> None:
+        """Surveille les gardiens encore à leur poste sans ordonner de relève ni de trajet."""
+        self.center = (parse_coordinates(mother["movement"]["target"], "mothership.movement.target")
+                       if mother.get("movement") is not None else ship_sector(mother))
+        self.mothership_stationary = mother.get("movement") is None
+        self.activity_guards = {}
+        for ship in ships:
+            assignment = self.assignments.get(ship["id"])
+            if assignment is None or assignment["stage"] == "returning" or ship.get("movement") is not None:
+                continue
+            destination = parse_coordinates(assignment["destination"], "guardian.destination")
+            if ship_sector(ship) == destination and destination != central_sector:
+                assignment["stage"] = "guarding"
+                self.activity_guards[ship["id"]] = ship
+        self._observe(result)
 
     def reconcile_activity(self, result: CycleResult) -> None:
         self._observe(result)
@@ -222,6 +256,8 @@ class DepotGuardCoordinator:
                 available.remove(ship)
 
             engaged.update(self._observe(result, ship_ids=newly_stationed))
+            if self.threatened_sectors:
+                return
 
             covered = {assignment["replaces"] for assignment in self.assignments.values()
                        if assignment["stage"] != "returning"}

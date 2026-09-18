@@ -2,7 +2,17 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-18
+
+### Changed
+
+- Contrôle Others « défense étoile — attente » : les gardiens des dépôts conservent leurs tirs, lasers et interceptions sans aucun repli tactique. Une réaction mobilise toute la flotte vers le dépôt, y compris les navettes, l'éclaireur et les gardiens des autres dépôts ; les missions et relèves sont suspendues, les vaisseaux indisponibles rejoignent dès que possible par étapes. La défense centrale prend le relais dès l'arrivée du vaisseau mère. Après l'arrivée de toute la flotte survivante, aucun redéploiement pendant au moins deux heures, puis tant qu'une menace centrale, notamment une sonde, reste détectée. Alerte et délai conservés uniquement en mémoire, sans reprise après redémarrage. Aucun changement du contrat API.
+
 ## 2026-09-16
+
+### Fixed
+
+- Migration corrective `scripts/one-shot-scripts/requeue-failed-mining-storage-waits.php` : répare les événements de minage passés en échec faute de `waitingForSpaceSince` après un déploiement sans la migration v132. Initialise le délai depuis la fin historique du minage et remet les événements en file ; les rappels demandés depuis l'échec restent des retours, sans reprise du minage annulé. Sélection limitée à l'erreur concernée, transaction avec verrouillage des lignes, sauvegarde obligatoire via `--backup=NEW_FILE`, simulation via `--dry-run` et choix de base via `--database-config=PATH`. Les attentes dépassant sept jours suivent la règle d'expiration existante à la reprise du scheduler.
 
 ### Changed
 
