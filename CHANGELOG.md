@@ -2,6 +2,16 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-20
+
+### Added
+
+- WebUI : affichage de l’intégrité en pourcentage parmi les métriques de la page sonde (`/` et `/{probeId}`), actualisée avec la télémétrie existante.
+
+### Fixed
+
+- Migration corrective `scripts/one-shot-scripts/requeue-mothership-e4-stranded-missiles.php` : remise en file des 18 impacts restés en échec sur `others_swarm_participants` après la réparation du missile fatal du vaisseau mère `mother_e4e6495132d2b1db10f7`. Vérification des identités et de la destruction de la cible, transaction, simulation par défaut et sauvegarde obligatoire avant application. Le scheduler résout ensuite ces missiles selon les règles courantes de perte de cible, sans modification du contrat API.
+
 ## 2026-09-18
 
 ### Changed

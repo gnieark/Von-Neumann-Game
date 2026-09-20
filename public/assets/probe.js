@@ -600,6 +600,12 @@
                 "valueId": "probe-metric-status",
             },
             {
+                "name": "integrity",
+                "label": translate("integrity", "Integrity"),
+                "value": probe.systems ? window.VNG.numberValue(probe.systems.integrityPercent, "%") : "-",
+                "valueId": "probe-metric-integrity",
+            },
+            {
                 "name": "sensors",
                 "label": translate("sensors", "Sensors"),
                 "value": sensorModeLabel(probe.sensorMode),
@@ -833,6 +839,12 @@
                 "label": translate("status", "Status"),
                 "value": error && error.message ? error.message : translate("requestDenied", "Request denied"),
                 "valueId": "probe-metric-status",
+            },
+            {
+                "name": "integrity",
+                "label": translate("integrity", "Integrity"),
+                "value": "-",
+                "valueId": "probe-metric-integrity",
             },
             {
                 "name": "sensors",
