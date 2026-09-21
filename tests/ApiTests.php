@@ -1501,7 +1501,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260911-sector-storage-retrieval"), 'asset version is bumped for visible frontend UI');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260921-alerts-sector-acknowledgement"), 'asset version is bumped for bulk alert controls so cached scripts cannot leave the new buttons disabled');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');

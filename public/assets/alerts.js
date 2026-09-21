@@ -165,7 +165,7 @@
         const markRead = document.getElementById("alerts-mark-all-read");
         const deleteAll = document.getElementById("alerts-delete-all");
         if (markRead) {
-            markRead.disabled = busy || !persistent.some((alert) => !alert.acknowledged);
+            markRead.disabled = busy || !currentAlerts.some((alert) => !alert.acknowledged);
         }
         if (deleteAll) {
             deleteAll.disabled = busy || persistent.length === 0;
@@ -176,7 +176,18 @@
         }
     }
 
-    async function runBulkAction(path, method) {
+    async function markAllAlertsRead() {
+        const unread = currentAlerts.filter((alert) => !alert.acknowledged);
+        const sector = currentSector || {};
+        if (unread.some((alert) => alert.kind === "persistent-alert")) {
+            await window.VNG.apiJson(window.VNG.probeApiPath("/alerts/mark-all-read"), {"method": "POST"});
+        }
+        unread.filter((alert) => alert.kind === "sector-alert").forEach((alert) => {
+            window.VNG.acknowledgeSectorAlert(alert.type, sector, alert.signature);
+        });
+    }
+
+    async function runBulkAction(action) {
         if (loadInProgress || bulkActionInProgress) {
             return;
         }
@@ -191,7 +202,7 @@
             status.textContent = "";
         }
         try {
-            await window.VNG.apiJson(window.VNG.probeApiPath(path), {"method": method});
+            await action();
             bulkActionInProgress = false;
             await refreshAlertsPage();
             await window.VNG.syncNavigationWarnings();
@@ -276,8 +287,8 @@
     }
 
     function bindEvents() {
-        document.getElementById("alerts-mark-all-read")?.addEventListener("click", () => runBulkAction("/alerts/mark-all-read", "POST"));
-        document.getElementById("alerts-delete-all")?.addEventListener("click", () => runBulkAction("/alerts", "DELETE"));
+        document.getElementById("alerts-mark-all-read")?.addEventListener("click", () => runBulkAction(markAllAlertsRead));
+        document.getElementById("alerts-delete-all")?.addEventListener("click", () => runBulkAction(() => window.VNG.apiJson(window.VNG.probeApiPath("/alerts"), {"method": "DELETE"})));
         document.querySelector("[data-refresh=\"alerts\"]")?.addEventListener("click", refreshAlertsPage);
         document.getElementById("console-alerts-list")?.addEventListener("click", (event) => {
             if (bulkActionInProgress) {

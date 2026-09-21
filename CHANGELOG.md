@@ -4,6 +4,11 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-21
 
+### Fixed
+
+- WebUI `/alerts` : « Tout marquer lu » prend aussi en compte les avertissements de secteur (containers détachés, sondes et marque-pages), avec le même acquittement local que leur bouton individuel. Le bouton fonctionne même sans alerte persistante ; la suppression reste limitée aux alertes persistantes.
+- WebUI : renouvellement de la version des fichiers statiques pour charger le JavaScript des actions groupées d’alertes après déploiement, même lorsque le navigateur conserve les anciens scripts en cache.
+
 ### Added
 
 - WebUI `/alerts` : pictogrammes « Tout marquer lu » et « Supprimer toutes les alertes » avant le bouton de rafraîchissement, pour les alertes persistantes de la sonde sélectionnée. Libellés accessibles en français et en anglais, désactivation pendant le traitement et actualisation de la liste et des indicateurs de navigation après l’action.
