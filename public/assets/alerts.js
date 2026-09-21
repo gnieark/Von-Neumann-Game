@@ -6,6 +6,7 @@
     let i18n = {};
     let refreshTimer = null;
     let loadInProgress = false;
+    let bulkActionInProgress = false;
     let currentSector = null;
     let currentAlerts = [];
 
@@ -158,6 +159,55 @@
         )).join("");
     }
 
+    function updateBulkButtons() {
+        const persistent = currentAlerts.filter((alert) => alert.kind === "persistent-alert");
+        const busy = loadInProgress || bulkActionInProgress;
+        const markRead = document.getElementById("alerts-mark-all-read");
+        const deleteAll = document.getElementById("alerts-delete-all");
+        if (markRead) {
+            markRead.disabled = busy || !persistent.some((alert) => !alert.acknowledged);
+        }
+        if (deleteAll) {
+            deleteAll.disabled = busy || persistent.length === 0;
+        }
+        const refresh = document.querySelector("[data-refresh=\"alerts\"]");
+        if (refresh) {
+            refresh.disabled = busy;
+        }
+    }
+
+    async function runBulkAction(path, method) {
+        if (loadInProgress || bulkActionInProgress) {
+            return;
+        }
+        bulkActionInProgress = true;
+        if (refreshTimer !== null) {
+            window.clearTimeout(refreshTimer);
+            refreshTimer = null;
+        }
+        updateBulkButtons();
+        const status = document.getElementById("alerts-action-status");
+        if (status) {
+            status.textContent = "";
+        }
+        try {
+            await window.VNG.apiJson(window.VNG.probeApiPath(path), {"method": method});
+            bulkActionInProgress = false;
+            await refreshAlertsPage();
+            await window.VNG.syncNavigationWarnings();
+        } catch (error) {
+            if (status) {
+                status.textContent = error.message || tr("alertsActionFailed", "Unable to update alerts.");
+            }
+        } finally {
+            bulkActionInProgress = false;
+            updateBulkButtons();
+            if (refreshTimer === null) {
+                scheduleRefresh({});
+            }
+        }
+    }
+
     function scheduleRefresh(payload) {
         if (refreshTimer !== null) {
             window.clearTimeout(refreshTimer);
@@ -171,10 +221,11 @@
     }
 
     async function refreshAlertsPage() {
-        if (loadInProgress) {
+        if (loadInProgress || bulkActionInProgress) {
             return;
         }
         loadInProgress = true;
+        updateBulkButtons();
         if (refreshTimer !== null) {
             window.clearTimeout(refreshTimer);
             refreshTimer = null;
@@ -206,6 +257,7 @@
             }
             scheduleRefresh({"sector": sectorData, "alerts": alertData.alerts || []});
         } catch (error) {
+            currentAlerts = [];
             const list = document.getElementById("console-alerts-list");
             const empty = document.getElementById("console-alerts-empty");
             if (list) {
@@ -219,12 +271,18 @@
             scheduleRefresh({});
         } finally {
             loadInProgress = false;
+            updateBulkButtons();
         }
     }
 
     function bindEvents() {
+        document.getElementById("alerts-mark-all-read")?.addEventListener("click", () => runBulkAction("/alerts/mark-all-read", "POST"));
+        document.getElementById("alerts-delete-all")?.addEventListener("click", () => runBulkAction("/alerts", "DELETE"));
         document.querySelector("[data-refresh=\"alerts\"]")?.addEventListener("click", refreshAlertsPage);
         document.getElementById("console-alerts-list")?.addEventListener("click", (event) => {
+            if (bulkActionInProgress) {
+                return;
+            }
             const deleteButton = event.target.closest(".sector-alert-delete");
             const clickedAcknowledgeButton = event.target.closest(".sector-alert-acknowledge");
             const button = deleteButton || clickedAcknowledgeButton;

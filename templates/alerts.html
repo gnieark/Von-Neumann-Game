@@ -3,8 +3,13 @@
         <div>
             <h2>{{t.tabAlerts}}</h2>
         </div>
-        <button class="icon-button" data-refresh="alerts" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+        <div class="panel-heading-actions">
+            <button id="alerts-mark-all-read" class="icon-button" type="button" title="{{t.markAllAlertsRead}}" aria-label="{{t.markAllAlertsRead}}" disabled><span aria-hidden="true">&#10003;&#10003;</span></button>
+            <button id="alerts-delete-all" class="icon-button" type="button" title="{{t.deleteAllAlerts}}" aria-label="{{t.deleteAllAlerts}}" disabled><span aria-hidden="true">&#128465;</span></button>
+            <button class="icon-button" data-refresh="alerts" type="button" title="{{t.refresh}}" aria-label="{{t.refresh}}">&#10227;</button>
+        </div>
     </div>
+    <p id="alerts-action-status" class="action-status" role="alert"></p>
     <div id="console-alerts-list" class="console-alerts-list" aria-live="polite"></div>
     <p id="console-alerts-empty" class="sector-context">{{t.noActiveAlerts}}</p>
 </article>

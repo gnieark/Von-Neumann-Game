@@ -597,6 +597,31 @@ final class ProbeDamageWarningRepository
         return $this->findById($warning->id) ?? $warning;
     }
 
+    public function markAllReadForProbe(int $probeId): int
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            "UPDATE probe_damage_warnings
+             SET status = 'read', read_at = :read_at, updated_at = :updated_at
+             WHERE probe_id = :probe_id AND status = 'unread'"
+        );
+        $stmt->execute([
+            'probe_id' => $probeId,
+            'read_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $stmt->rowCount();
+    }
+
+    public function deleteAllForProbe(int $probeId): int
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id');
+        $stmt->execute(['probe_id' => $probeId]);
+
+        return $stmt->rowCount();
+    }
+
     public function setIllustrationImageUrl(ProbeDamageWarning $warning, ?string $illustrationImageUrl): ProbeDamageWarning
     {
         $illustrationImageUrl = $this->normalizeIllustrationImageUrl($illustrationImageUrl);

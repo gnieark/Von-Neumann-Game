@@ -2,9 +2,17 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-21
+
+### Added
+
+- WebUI `/alerts` : pictogrammes « Tout marquer lu » et « Supprimer toutes les alertes » avant le bouton de rafraîchissement, pour les alertes persistantes de la sonde sélectionnée. Libellés accessibles en français et en anglais, désactivation pendant le traitement et actualisation de la liste et des indicateurs de navigation après l’action.
+
 ## 2026-09-20
 
 ### Added
+
+- API **v136** : ajout de `POST /api/probe/{probeId}/alerts/mark-all-read` et `DELETE /api/probe/{probeId}/alerts`, avec variantes pour la sonde par défaut. Marquage de toutes les alertes persistantes non lues ou suppression de toutes les alertes persistantes de la sonde, tous types confondus ; réponses `200` avec `markedReadCount` ou `deletedCount`, à zéro si aucune alerte n’est concernée. Les alertes déjà lues conservent leurs horodatages et les autres sondes restent inchangées.
 
 - WebUI : affichage de l’intégrité en pourcentage parmi les métriques de la page sonde (`/` et `/{probeId}`), actualisée avec la télémétrie existante.
 

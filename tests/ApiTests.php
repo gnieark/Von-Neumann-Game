@@ -30,6 +30,7 @@ use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Domain\StorageContainer;
 use VonNeumannGame\Forum\ForumRepository;
 use VonNeumannGame\FrontRoute\FrontRoute;
+use VonNeumannGame\FrontRoute\FrontRouteAlerts;
 use VonNeumannGame\FrontRoute\FrontRouteApiDocs;
 use VonNeumannGame\FrontRoute\FrontRouteAuthByPwd;
 use VonNeumannGame\FrontRoute\FrontRouteFactory;
@@ -1115,6 +1116,19 @@ $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the leg
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
 $test->assert(str_contains($openApi, 'summary: Delete a persistent probe alert'), 'OpenAPI documents persistent alert deletion');
+foreach (['/api/probe/alerts', '/api/probe/{probeId}/alerts'] as $bulkAlertsDocumentedPath) {
+    foreach ([
+        [$bulkAlertsDocumentedPath, 'delete', 'ProbeAlertsDeleteAllResponse', 'deletedCount'],
+        [$bulkAlertsDocumentedPath . '/mark-all-read', 'post', 'ProbeAlertsMarkAllReadResponse', 'markedReadCount'],
+    ] as [$bulkPath, $bulkMethod, $bulkSchema, $bulkCounter]) {
+        $bulkOperation = $openApiDocument['paths'][$bulkPath][$bulkMethod] ?? [];
+        $test->assertEquals('#/components/schemas/' . $bulkSchema, $bulkOperation['responses']['200']['content']['application/json']['schema']['$ref'] ?? null, 'OpenAPI documents the bulk alert response schema');
+        $test->assert(!isset($bulkOperation['requestBody']), 'bulk alert operations require no request body');
+        $test->assertEquals([$bulkCounter], $openApiDocument['components']['schemas'][$bulkSchema]['required'] ?? null, 'bulk alert responses require their affected-row counter');
+        $test->assertEquals('integer', $openApiDocument['components']['schemas'][$bulkSchema]['properties'][$bulkCounter]['type'] ?? null, 'bulk alert counters are integers');
+        $test->assertEquals(0, $openApiDocument['components']['schemas'][$bulkSchema]['properties'][$bulkCounter]['minimum'] ?? null, 'bulk alert counters cannot be negative');
+    }
+}
 $test->assert(str_contains($openApi, 'summary: Delete a movement damage warning'), 'OpenAPI documents damage-warning deletion');
 $test->assert(str_contains($openApi, 'illustrationImageUrl:') && str_contains($openApi, "pattern: '^https?://'"), 'OpenAPI documents absolute optional alert illustration URLs');
 $test->assert(str_contains($openApi, '/api/probe/{probeId}/probe-improvement-blueprints/{improvementId}/share:'), 'OpenAPI documents SCUT blueprint sharing');
@@ -1379,6 +1393,15 @@ $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'crafting_reservations_cannot_be_reassigned'), 'mannies JS explains impossible crafting reservation reassignment');
 $test->assert(is_string($inventoriesScript) && str_contains($inventoriesScript, 'crafting_reservations_cannot_be_reassigned'), 'inventories JS explains impossible crafting reservation reassignment');
 $alertsScript = file_get_contents(__DIR__ . '/../public/assets/alerts.js');
+foreach ([
+    'fr' => ['Tout marquer lu', 'Supprimer toutes les alertes'],
+    'en' => ['Mark all as read', 'Delete all alerts'],
+] as $alertsLanguage => [$markAllLabel, $deleteAllLabel]) {
+    $alertsView = (new FrontRouteAlerts())->getContent('GET', '/alerts', 'test-bearer', $alertsLanguage);
+    $test->assert(str_contains($alertsView, 'title="' . $markAllLabel . '" aria-label="' . $markAllLabel . '"'), 'bulk mark-read icon has a localized tooltip and accessible name');
+    $test->assert(str_contains($alertsView, 'title="' . $deleteAllLabel . '" aria-label="' . $deleteAllLabel . '"'), 'bulk delete icon has a localized tooltip and accessible name');
+    $test->assert(preg_match('/id="alerts-mark-all-read".*id="alerts-delete-all".*data-refresh="alerts"/s', $alertsView) === 1, 'bulk alert icons appear immediately before refresh in the requested order');
+}
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'warning.risk.ruleStartsAtAdditionalContainers'), 'alerts JS reads the effective fragile-container threshold from each warning');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, 'sector-alert-delete'), 'alerts JS renders a delete icon for persistent alerts');
 $test->assert(is_string($alertsScript) && str_contains($alertsScript, '"method": "DELETE"'), 'alerts JS deletes persistent alerts through the API');
@@ -4429,6 +4452,79 @@ $test->assert($damageWarnings->findById($sameScutProbeWarningId) !== null, 'a re
 $scopedDamageWarningDelete = $kernel->handle('DELETE', '/api/probe/' . $sameSectorProbe->id . '/damage-warnings/' . $sameScutProbeWarningId, $multiProbeHeaders);
 $test->assertEquals(204, $scopedDamageWarningDelete->status, 'DELETE /api/probe/{probeId}/damage-warnings/{damageWarningId} deletes an owned warning');
 $test->assert($damageWarnings->findById($sameScutProbeWarningId) === null, 'probe-scoped damage-warning deletion removes the warning from storage');
+// Bulk operations cover both probe selectors, preserve other probes, and count only changed rows.
+foreach ([
+    ['/api/probe/alerts', $primaryProbe, $sameSectorProbe],
+    ['/api/probe/' . $sameSectorProbe->id . '/alerts', $sameSectorProbe, $primaryProbe],
+] as [$bulkAlertsPath, $bulkProbe, $untouchedProbe]) {
+    $bulkReadAlert = $damageWarnings->createMannyReportAlert($bulkProbe->id, $bulkProbe->currentSector, 'bulk-read-report', 'Read report', 'Already read.');
+    $pdo->prepare("UPDATE probe_damage_warnings SET status = 'read', read_at = :read_at, updated_at = :updated_at WHERE id = :id")->execute([
+        'id' => $bulkReadAlert->id,
+        'read_at' => '2026-01-01T00:00:00+00:00',
+        'updated_at' => '2026-01-02T00:00:00+00:00',
+    ]);
+    $bulkReadBefore = $damageWarnings->findById($bulkReadAlert->id);
+    $bulkUnreadAlert = $damageWarnings->createMannyReportAlert($bulkProbe->id, $bulkProbe->currentSector, 'bulk-unread-report', 'Unread report', 'Report ready.');
+    $bulkMissileAlert = $damageWarnings->createOthersAlert($bulkProbe->id, null, ProbeDamageWarning::TYPE_OTHERS_WEAPON, 'bulk-missile', $bulkProbe->currentSector, 'Missile targeted.', ProbeDamageWarning::PHASE_WEAPON_TARGETED);
+    $damageWarnings->createMannyReportAlert($untouchedProbe->id, $untouchedProbe->currentSector, 'bulk-untouched-report', 'Other probe report', 'Keep unread.');
+    $untouchedBefore = $damageWarnings->findByProbeId($untouchedProbe->id);
+    $foreignBefore = $damageWarnings->findByProbeId($foreignProbe->id);
+    $expectedMarkedCount = count($damageWarnings->findByProbeId($bulkProbe->id, true));
+    $expectedTotal = count($damageWarnings->findByProbeId($bulkProbe->id));
+
+    $bulkMark = $kernel->handle('POST', $bulkAlertsPath . '/mark-all-read', $multiProbeHeaders);
+    $test->assertEquals(200, $bulkMark->status, "$bulkAlertsPath bulk marking succeeds without a body");
+    $test->assertEquals(['markedReadCount' => $expectedMarkedCount], $bulkMark->body, 'bulk marking counts only unread alerts');
+    $test->assertEquals([], $damageWarnings->findByProbeId($bulkProbe->id, true), 'bulk marking leaves no unread persistent alert');
+    $test->assertEquals($expectedTotal, count($damageWarnings->findByProbeId($bulkProbe->id)), 'bulk marking retains every alert');
+    $test->assert($bulkReadBefore == $damageWarnings->findById($bulkReadAlert->id), 'bulk marking preserves all fields and timestamps of already-read alerts');
+    foreach ([$bulkUnreadAlert, $bulkMissileAlert] as $bulkChangedAlert) {
+        $bulkChangedAfter = $damageWarnings->findById($bulkChangedAlert->id);
+        $test->assertEquals(ProbeDamageWarning::STATUS_READ, $bulkChangedAfter?->status, 'bulk marking includes reports and missile alerts');
+        $test->assert($bulkChangedAfter?->readAt !== null, 'bulk marking sets the read timestamp');
+        $test->assertEquals($bulkChangedAfter?->readAt, $bulkChangedAfter?->updatedAt, 'bulk marking sets matching read and update timestamps');
+    }
+    $bulkAfterMark = $damageWarnings->findByProbeId($bulkProbe->id);
+    $bulkMarkAgain = $kernel->handle('POST', $bulkAlertsPath . '/mark-all-read', $multiProbeHeaders);
+    $test->assertEquals(200, $bulkMarkAgain->status, 'repeated bulk marking succeeds');
+    $test->assertEquals(['markedReadCount' => 0], $bulkMarkAgain->body, 'repeated bulk marking reports zero changes');
+    $test->assert($bulkAfterMark == $damageWarnings->findByProbeId($bulkProbe->id), 'repeated bulk marking preserves alert timestamps');
+    $test->assert($untouchedBefore == $damageWarnings->findByProbeId($untouchedProbe->id), 'bulk marking leaves sibling probe alerts untouched');
+    $test->assert($foreignBefore == $damageWarnings->findByProbeId($foreignProbe->id), 'bulk marking leaves other player alerts untouched');
+
+    $damageWarnings->createOthersAlert($bulkProbe->id, null, ProbeDamageWarning::TYPE_OTHERS_WEAPON, 'bulk-new-missile', $bulkProbe->currentSector, 'New missile targeted.', ProbeDamageWarning::PHASE_WEAPON_TARGETED);
+    $bulkDelete = $kernel->handle('DELETE', $bulkAlertsPath, $multiProbeHeaders);
+    $test->assertEquals(200, $bulkDelete->status, "$bulkAlertsPath bulk deletion succeeds without a body");
+    $test->assertEquals(['deletedCount' => $expectedTotal + 1], $bulkDelete->body, 'bulk deletion counts both read alerts and newly arrived unread alerts');
+    $test->assertEquals([], $damageWarnings->findByProbeId($bulkProbe->id), 'bulk deletion removes every persistent alert');
+    $test->assert($untouchedBefore == $damageWarnings->findByProbeId($untouchedProbe->id), 'bulk deletion leaves sibling probe alerts untouched');
+    $test->assert($foreignBefore == $damageWarnings->findByProbeId($foreignProbe->id), 'bulk deletion leaves other player alerts untouched');
+    $bulkDeleteAgain = $kernel->handle('DELETE', $bulkAlertsPath, $multiProbeHeaders);
+    $test->assertEquals(200, $bulkDeleteAgain->status, 'bulk deletion on an empty collection succeeds');
+    $test->assertEquals(['deletedCount' => 0], $bulkDeleteAgain->body, 'empty collection deletion reports zero');
+    $bulkMarkEmpty = $kernel->handle('POST', $bulkAlertsPath . '/mark-all-read', $multiProbeHeaders);
+    $test->assertEquals(200, $bulkMarkEmpty->status, 'bulk marking on an empty collection succeeds');
+    $test->assertEquals(['markedReadCount' => 0], $bulkMarkEmpty->body, 'empty collection marking reports zero');
+
+    foreach (['GET', 'PATCH', 'DELETE'] as $wrongMethod) {
+        $test->assertEquals(405, $kernel->handle($wrongMethod, $bulkAlertsPath . '/mark-all-read', $multiProbeHeaders)->status, 'bulk marking rejects unsupported methods');
+    }
+    foreach (['POST', 'PATCH'] as $wrongMethod) {
+        $test->assertEquals(405, $kernel->handle($wrongMethod, $bulkAlertsPath, $multiProbeHeaders)->status, 'alert collection rejects unsupported methods');
+    }
+}
+$unreachableBulkAlert = $damageWarnings->createMannyReportAlert($farOwnedProbe->id, $farOwnedProbe->currentSector, 'bulk-unreachable', 'Unreachable report', 'Keep unread.');
+foreach ([['POST', '/mark-all-read'], ['DELETE', '']] as [$bulkMethod, $bulkSuffix]) {
+    $foreignBefore = $damageWarnings->findByProbeId($foreignProbe->id);
+    $test->assertEquals(404, $kernel->handle($bulkMethod, '/api/probe/' . $foreignProbe->id . '/alerts' . $bulkSuffix, $multiProbeHeaders)->status, 'bulk alert operations hide foreign probes');
+    $test->assert($foreignBefore == $damageWarnings->findByProbeId($foreignProbe->id), 'rejected bulk operations preserve foreign alerts');
+    $test->assertEquals(404, $kernel->handle($bulkMethod, '/api/probe/999999999/alerts' . $bulkSuffix, $multiProbeHeaders)->status, 'bulk alert operations reject unknown probes');
+    $unreachableBulkResponse = $kernel->handle($bulkMethod, '/api/probe/' . $farOwnedProbe->id . '/alerts' . $bulkSuffix, $multiProbeHeaders);
+    $test->assertEquals(422, $unreachableBulkResponse->status, 'bulk alert operations reject probes outside SCUT reach');
+    $test->assertEquals('probe_not_in_same_sector', $unreachableBulkResponse->body['error']['code'] ?? null, 'bulk alert operations preserve the existing reachability error');
+    $test->assert($unreachableBulkAlert == $damageWarnings->findById($unreachableBulkAlert->id), 'rejected bulk operations preserve unreachable probe alerts');
+}
+
 $primaryOnlyVisitedSector = new SectorCoordinates(26, 0, 0);
 $sameScutOnlyVisitedSector = new SectorCoordinates(28, 0, 0);
 $visitedSectors->markVisited($multiProbePlayer, $primaryProbe, $primaryOnlyVisitedSector);
@@ -4459,7 +4555,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(135, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(136, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -11932,6 +12028,10 @@ foreach ([
     'GET /api/probe/1/logbook-pages',
     'POST /api/probe/1/logbook-page',
     'POST /api/probe/1/probe-improvement-blueprints/deuterium_compression/share',
+    'POST /api/probe/alerts/mark-all-read',
+    'POST /api/probe/1/alerts/mark-all-read',
+    'DELETE /api/probe/alerts',
+    'DELETE /api/probe/1/alerts',
     'DELETE /api/probe/alerts/1',
     'DELETE /api/probe/1/alerts/1',
     'DELETE /api/probe/damage-warnings/1',

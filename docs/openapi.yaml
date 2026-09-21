@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '135'
+  version: '136'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 135
+                apiVersion: 136
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1785,6 +1785,70 @@ paths:
           $ref: '#/paths/~1api~1probe~1alerts/get/responses/200'
         '401':
           $ref: '#/paths/~1api~1probe~1alerts/get/responses/401'
+    delete:
+      tags: [alerts]
+      summary: Delete all persistent probe alerts
+      description: >
+        Permanently deletes all persistent alerts, read or unread and of any type,
+        for the selected owned probe. No request body is required.
+        Returns the number of deleted alerts, or zero when none exist.
+        Other probes and live sector warnings are unaffected.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+      responses:
+        '200':
+          description: All persistent alerts deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeAlertsDeleteAllResponse'
+              example:
+                deletedCount: 57
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The selected probe is outside the default probe’s sector and shared SCUT coverage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /api/probe/{probeId}/alerts/mark-all-read:
+    post:
+      tags: [alerts]
+      summary: Mark all persistent probe alerts as read
+      description: >
+        Marks every unread persistent alert, of any type, as read for the
+        selected owned probe. No request body is required.
+        Already-read alerts keep their readAt and updatedAt timestamps.
+        Returns the number of newly marked alerts, or zero when none are unread.
+        Other probes and live sector warnings are unaffected.
+      parameters:
+        - $ref: '#/components/parameters/ProbeId'
+      responses:
+        '200':
+          description: All unread persistent alerts marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeAlertsMarkAllReadResponse'
+              example:
+                markedReadCount: 42
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The selected probe is outside the default probe’s sector and shared SCUT coverage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
   /api/probe/{probeId}/alerts/{alertId}:
     parameters:
       - $ref: '#/components/parameters/ProbeId'
@@ -4244,6 +4308,54 @@ paths:
                     message: From 5 additional containers onward, movement stress can break one container link. Risk is 10% at 5 containers, 20% at 6, and continues up to 100%.
         '401':
           $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [default probe]
+      summary: Delete all persistent probe alerts
+      description: >
+        Permanently deletes all persistent alerts, read or unread and of any type,
+        for the authenticated player’s default probe. No request body is required.
+        Returns the number of deleted alerts, or zero when none exist.
+        Other probes and live sector warnings are unaffected.
+      responses:
+        '200':
+          description: All persistent alerts deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeAlertsDeleteAllResponse'
+              example:
+                deletedCount: 57
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /api/probe/alerts/mark-all-read:
+    post:
+      tags: [default probe]
+      summary: Mark all persistent probe alerts as read
+      description: >
+        Marks every unread persistent alert, of any type, as read for the
+        authenticated player’s default probe. No request body is required.
+        Already-read alerts keep their readAt and updatedAt timestamps.
+        Returns the number of newly marked alerts, or zero when none are unread.
+        Other probes and live sector warnings are unaffected.
+      responses:
+        '200':
+          description: All unread persistent alerts marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeAlertsMarkAllReadResponse'
+              example:
+                markedReadCount: 42
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
   /api/probe/alerts/{alertId}:
     patch:
       tags: [default probe]
@@ -7893,6 +8005,22 @@ components:
           properties:
             storageContainerBreak:
               $ref: '#/components/schemas/ProbeDamageWarningRule'
+    ProbeAlertsMarkAllReadResponse:
+      type: object
+      required: [markedReadCount]
+      properties:
+        markedReadCount:
+          type: integer
+          minimum: 0
+          description: Number of alerts changed from unread to read.
+    ProbeAlertsDeleteAllResponse:
+      type: object
+      required: [deletedCount]
+      properties:
+        deletedCount:
+          type: integer
+          minimum: 0
+          description: Number of persistent alerts deleted, whether read or unread.
     ProbeAlertResponse:
       type: object
       required: [alert]
