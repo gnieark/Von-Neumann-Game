@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '136'
+  version: '137'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 136
+                apiVersion: 137
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -3058,8 +3058,8 @@ paths:
         The container, its stored resources/items, and routing rules are
         removed from the probe inventory when the order is accepted. On
         completion it becomes either a visible drifting detached container, a
-        hidden container attached to an asteroid, or a container attached to
-        another owned probe in the same sector. Hidden-asteroid detaches expose
+        hidden container attached to an asteroid or an Others mothership wreck, or a container attached to
+        another owned probe in the same sector. Hidden-container detaches expose
         artificialObjectDetected in the Manny task/result so clients can
         immediately reference the hidden detached container id.
       parameters:
@@ -3080,6 +3080,11 @@ paths:
                   containerId: container-itm_extra
                   mode: hidden_on_asteroid
                   objectId: asteroid-abc123
+              hiddenOnDormantConstruct:
+                value:
+                  containerId: container-itm_extra
+                  mode: hidden_on_dormant_construct
+                  objectId: dormant-wreck-abc123
               attachToProbe:
                 value:
                   containerId: container-itm_extra
@@ -3109,7 +3114,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Container or asteroid target is invalid
+          description: Container or hiding target is invalid
           content:
             application/json:
               schema:
@@ -5316,8 +5321,8 @@ paths:
         The container, its stored resources/items, and routing rules are
         removed from the probe inventory when the order is accepted. On
         completion it becomes either a visible drifting detached container, a
-        hidden container attached to an asteroid, or a container attached to
-        another owned probe in the same sector. Hidden-asteroid detaches expose
+        hidden container attached to an asteroid or an Others mothership wreck, or a container attached to
+        another owned probe in the same sector. Hidden-container detaches expose
         artificialObjectDetected in the Manny task/result so clients can
         immediately reference the hidden detached container id.
       parameters:
@@ -5338,6 +5343,11 @@ paths:
                   containerId: container-itm_extra
                   mode: hidden_on_asteroid
                   objectId: asteroid-abc123
+              hiddenOnDormantConstruct:
+                value:
+                  containerId: container-itm_extra
+                  mode: hidden_on_dormant_construct
+                  objectId: dormant-wreck-abc123
               attachToProbe:
                 value:
                   containerId: container-itm_extra
@@ -5367,7 +5377,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Container or asteroid target is invalid
+          description: Container or hiding target is invalid
           content:
             application/json:
               schema:
@@ -8557,8 +8567,8 @@ components:
             same-SCUT mining requires this field and the referenced container
             must be detached in the Manny sector. When it targets a visible
             drifting container or a hidden container on
-            another asteroid, normal mining travel time still applies. When it
-            targets a hidden container on the asteroid being mined, travel time
+            another object, normal mining travel time still applies. When it
+            targets a hidden container on the asteroid or mothership wreck being mined, travel time
             is deducted and only extraction time remains. If the container has
             less free capacity than targetAmount, the task is capped to its
             free capacity. Detached storage containers cannot receive
@@ -8637,10 +8647,10 @@ components:
           example: container-itm_extra
         mode:
           type: string
-          enum: [drifting, hidden_on_asteroid, attach_to_probe]
+          enum: [drifting, hidden_on_asteroid, hidden_on_dormant_construct, attach_to_probe]
         objectId:
           type: string
-          description: Required when mode is hidden_on_asteroid or attach_to_probe. For hidden_on_asteroid, this must be an asteroid id in the current sector. For attach_to_probe, this must be another owned probe id in the same sector.
+          description: Required for all modes except drifting. For hidden_on_asteroid, this must be an asteroid id in the current sector. For hidden_on_dormant_construct, this must be an Others mothership wreck id in the current sector, including an exhausted wreck; other dormant constructs are rejected. For attach_to_probe, this must be another owned probe id in the same sector.
     MannyDropStorageContainerRequest:
       type: object
       required: [containerId, planetId]
@@ -8669,7 +8679,7 @@ components:
           description: Detached container object id returned by observation or hidden-object detection.
         source:
           type: string
-          enum: [drifting, asteroid]
+          enum: [drifting, asteroid, dormant_construct]
           description: Optional hint for clients; recovery is resolved by objectId.
     ArtificialObjectDetection:
       type: object
@@ -8680,14 +8690,14 @@ components:
           enum: [detached_storage_container]
         detection:
           type: string
-          enum: [hidden_on_asteroid]
+          enum: [hidden_on_asteroid, hidden_on_dormant_construct]
         objectId:
           type: string
           description: Recoverable detached container id when detection yields one.
         targetObjectId:
           type: string
           nullable: true
-          description: Asteroid id that holds the hidden detached container when known.
+          description: Asteroid or mothership wreck id that holds the hidden detached container when known.
     MannyMiningTask:
       type: object
       required: [objectId, resourceType, resourceTypes, targetAmount, depositedAmount, depositedResources, extractedAmount, extractedResources, availableResources, resourceComposition, resourceProfile, target]
@@ -8767,7 +8777,7 @@ components:
         miningTravelSeconds:
           type: integer
           minimum: 0
-          description: Travel time applied to each outbound or return leg for this mining task; 0 when mining directly into a hidden container on the mined asteroid.
+          description: Travel time applied to each outbound or return leg for this mining task; 0 when mining directly into a hidden container on the mined asteroid or mothership wreck.
         targetContainer:
           type: object
           description: Present when mined resources are delivered to a detached storage container instead of the probe.
@@ -8783,7 +8793,7 @@ components:
               nullable: true
             mode:
               type: string
-              enum: [drifting, hidden_on_asteroid]
+              enum: [drifting, hidden_on_asteroid, hidden_on_dormant_construct]
             targetObjectId:
               type: string
               nullable: true
@@ -9369,7 +9379,7 @@ components:
           description: Present on planets in detailed current-sector or already-visited-sector observations.
         salvageable:
           type: boolean
-          description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage. Drifting item stacks expose true only when each unit fits within Manny cargo capacity. Detached containers expose true only when mode is drifting; hidden_on_asteroid containers must be recovered with POST /api/probe/mannies/{mannyId}/recover-storage-container.
+          description: True when the object can be recovered with POST /api/probe/mannies/{mannyId}/salvage. Drifting item stacks expose true only when each unit fits within Manny cargo capacity. Detached containers expose true only when mode is drifting; hidden_on_asteroid and hidden_on_dormant_construct containers must be recovered with POST /api/probe/mannies/{mannyId}/recover-storage-container.
         waypointBookmarks:
           type: array
           items:
@@ -9405,7 +9415,7 @@ components:
           description: Per-item storage space for drifting item stacks.
         mode:
           type: string
-          enum: [drifting, hidden_on_asteroid]
+          enum: [drifting, hidden_on_asteroid, hidden_on_dormant_construct]
           description: Present only for detached containers. Hidden containers are included only for players who have discovered them.
         targetObjectId:
           type: string

@@ -728,7 +728,7 @@ final class SectorContent
             $container = $this->mergeDetachedContainer($existingContainer, $container);
         }
 
-        if ($container->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+        if (SectorDetachedContainer::isHiddenMode($container->getMode())) {
             $this->hiddenDetachedContainers[] = $container;
             return;
         }

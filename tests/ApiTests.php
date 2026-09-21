@@ -539,7 +539,7 @@ $test->assert(is_string($mainScript) && str_contains($mainScript, 'inventories|s
 $test->assert(is_string($sectorStorageRoute) && str_contains($sectorStorageRoute, '/assets/sector-storage.js'), 'sector-storage front route loads its page script');
 $test->assert(is_string($sectorStorageTemplate) && str_contains($sectorStorageTemplate, 'id="sector-storage-inventory"'), 'sector-storage template exposes its inventory region');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'object.inventoryAccessible === true'), 'sector-storage UI lists open accessible sector storage');
-$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, '["drifting", "hidden_on_asteroid"].includes(object.mode)'), 'sector-storage UI lists drifting and player-visible hidden containers');
+$test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, '["drifting", "hidden_on_asteroid", "hidden_on_dormant_construct"].includes(object.mode)'), 'sector-storage UI lists drifting and player-visible hidden containers');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'explicitProbeApiPath("/sector")'), 'sector-storage UI reads selected-probe sector observation through the canonical explicit route');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, '"/sector-objects/" + encodeURIComponent(objectId) + "/inventory?"'), 'sector-storage UI loads the selected external inventory');
 $test->assert(is_string($sectorStorageScript) && str_contains($sectorStorageScript, 'probeData.probe.id') && str_contains($sectorStorageScript, 'explicitProbeApiPath('), 'sector-storage UI resolves the default probe before calling explicit-only inventory routes');
@@ -1111,7 +1111,7 @@ $test->assert(
     'OpenAPI documents the single Manny detail endpoint',
 );
 $test->assert(str_contains($openApi, 'transferring_to_probe'), 'OpenAPI documents the Manny probe transfer task type');
-$test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, attach_to_probe]'), 'OpenAPI documents attach-to-probe storage detachment mode');
+$test->assert(str_contains($openApi, 'enum: [drifting, hidden_on_asteroid, hidden_on_dormant_construct, attach_to_probe]'), 'OpenAPI documents attach-to-probe storage detachment mode');
 $test->assert(str_contains($openApi, 'deprecated: true'), 'OpenAPI marks the legacy asteroid inspection endpoint as deprecated');
 $test->assert(str_contains($openApi, 'manny_report'), 'OpenAPI documents Manny report alerts');
 $test->assert(str_contains($openApi, 'probe_destroyed'), 'OpenAPI documents destroyed-probe alerts');
@@ -1455,7 +1455,7 @@ $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "scut_relay" && object.status !== "off"'), 'mannies JS excludes active SCUT relays from salvage targets');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "drifting_item" && Number.isFinite(containerSpace) && containerSpace > MANNY_CARGO_CAPACITY'), 'mannies JS excludes drifting items too large for Manny salvage');
 $test->assert(is_string($manniesScript) && str_contains($manniesScript, '"status": object.status || null'), 'mannies JS keeps inactive relay status in salvage targets');
-$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "detached_container" && object.mode === "hidden_on_asteroid"'), 'mannies JS excludes hidden detached containers from generic salvage targets');
+$test->assert(is_string($manniesScript) && str_contains($manniesScript, 'object.type === "detached_container" && ["hidden_on_asteroid", "hidden_on_dormant_construct"].includes(object.mode)'), 'mannies JS excludes hidden detached containers from generic salvage targets');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Envoyez une Manny souder le dernier circuit électronique du relais pour le mettre en marche.'"), 'French translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'turnOnScutRelayHint' => 'Send a Manny to solder the final electronic circuit onto the relay and bring it online.'"), 'English translations include the SCUT relay activation hint');
 $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'installingScutTransitBeacon' => 'Installation de balise transit SCUT'"), 'French translations include the SCUT transit beacon installation task label');
@@ -1501,7 +1501,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260921-alerts-sector-acknowledgement"), 'asset version is bumped for bulk alert controls so cached scripts cannot leave the new buttons disabled');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260921-dormant-container"), 'asset version is bumped for dormant container controls');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
@@ -4555,7 +4555,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(136, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(137, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -12106,6 +12106,7 @@ $test->assertEquals(0, (int) ($requeuedReservationEvent['attempts'] ?? -1), 'fai
 $test->assertEquals(null, $requeuedReservationEvent['last_error'] ?? null, 'failed Others reservation-event repair clears its obsolete SQL error');
 $reservationRepairCheckPdo = null;
 
+require __DIR__ . '/Support/DormantContainerTests.php';
 require __DIR__ . '/Support/TransferLoadPlannerTests.php';
 require __DIR__ . '/Support/StorageBudgetTests.php';
 require __DIR__ . '/Support/GerminationDepotTests.php';

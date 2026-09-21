@@ -11,6 +11,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- API **v137** : mode `hidden_on_dormant_construct` pour cacher un conteneur sur une épave de vaisseau-mère Others, même épuisée. Découverte par inspection ou minage, stockage et récupération comme les caches sur astéroïdes ; minage vers la cache sans trajet lorsqu’elle est sur l’épave exploitée. Le deutérium reste exclu des conteneurs. Formulaires et affichages WebUI adaptés ; les autres structures dormantes ne sont pas des cibles de pose valides.
+
 - WebUI `/alerts` : pictogrammes « Tout marquer lu » et « Supprimer toutes les alertes » avant le bouton de rafraîchissement, pour les alertes persistantes de la sonde sélectionnée. Libellés accessibles en français et en anglais, désactivation pendant le traitement et actualisation de la liste et des indicateurs de navigation après l’action.
 
 ## 2026-09-20

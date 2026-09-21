@@ -8,6 +8,7 @@ use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeInventory;
 use VonNeumannGame\Sector\Asteroid;
+use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorDetachedContainer;
 use VonNeumannGame\Service\MannyActionException;
@@ -28,7 +29,7 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
      * @param \Closure(int): ?NeumannProbe $findProbeById
      * @param \Closure(NeumannProbe): bool $probeAcceptsMannyOrders
      * @param \Closure(NeumannProbe, array<string, mixed>): void $restoreDetachedContainerSnapshot
-     * @param \Closure(string, ?string): array<string, mixed> $hiddenDetachedContainerDetectionPayload
+     * @param \Closure(string, ?string, string): array<string, mixed> $hiddenDetachedContainerDetectionPayload
      * @param \Closure(Manny): void $saveManny
      * @param \Closure(mixed): SectorContent $getOrCreateSector
      * @param \Closure(SectorContent): void $saveSector
@@ -77,18 +78,22 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
         }
 
         $mode = strtolower(trim($mode));
-        if (!in_array($mode, [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_ATTACH_TO_PROBE], true)) {
-            throw new MannyActionException(400, 'bad_request', 'Detach mode must be drifting, hidden_on_asteroid, or attach_to_probe.');
+        if (!in_array($mode, [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_HIDDEN_ON_DORMANT_CONSTRUCT, SectorDetachedContainer::MODE_ATTACH_TO_PROBE], true)) {
+            throw new MannyActionException(400, 'bad_request', 'Detach mode must be drifting, hidden_on_asteroid, hidden_on_dormant_construct, or attach_to_probe.');
         }
 
         $target = null;
-        if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+        if (SectorDetachedContainer::isHiddenMode($mode)) {
             if ($objectId === null || trim($objectId) === '') {
-                throw new MannyActionException(400, 'bad_request', 'objectId is required for hidden_on_asteroid mode.');
+                throw new MannyActionException(400, 'bad_request', 'objectId is required for hidden container modes.');
             }
             $target = ($this->findObjectInCurrentSector)($probe, $objectId);
-            if (!$target instanceof Asteroid) {
+            if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID && !$target instanceof Asteroid) {
                 throw new MannyActionException(422, 'invalid_asteroid_target', 'Hidden containers must be attached to an asteroid in the current sector.');
+            }
+            if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_DORMANT_CONSTRUCT
+                && (!$target instanceof DormantConstruct || $target->getSubtype() !== DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK)) {
+                throw new MannyActionException(422, 'invalid_dormant_construct_target', 'Hidden containers must be attached to a mothership wreck in the current sector.');
             }
         } elseif ($mode === SectorDetachedContainer::MODE_ATTACH_TO_PROBE) {
             if ($objectId === null || trim($objectId) === '') {
@@ -109,7 +114,7 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
         }
 
         $snapshot = ($this->detachAdditionalContainerSnapshot)($probe, $containerId, $ownerPlayerId);
-        $targetObjectId = in_array($mode, [SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_ATTACH_TO_PROBE], true) ? $objectId : null;
+        $targetObjectId = in_array($mode, [SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_HIDDEN_ON_DORMANT_CONSTRUCT, SectorDetachedContainer::MODE_ATTACH_TO_PROBE], true) ? $objectId : null;
         $detachedObjectId = SectorDetachedContainer::objectIdForContainer((string) $snapshot['sourceContainerId']);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $durationSeconds = ($this->detachStorageContainerSeconds)();
@@ -124,13 +129,13 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
             'targetObjectId' => $targetObjectId,
             'durationSeconds' => $durationSeconds,
             'snapshot' => $snapshot,
-            'target' => $target instanceof Asteroid ? ($this->targetArray)($target) : null,
+            'target' => ($target instanceof Asteroid || $target instanceof DormantConstruct) ? ($this->targetArray)($target) : null,
             'targetProbe' => $target instanceof NeumannProbe ? [
                 'id' => $target->id,
                 'name' => $target->name,
             ] : null,
-        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
-            ? ['artificialObjectDetected' => ($this->hiddenDetachedContainerDetectionPayload)($detachedObjectId, (string) $targetObjectId)]
+        ] + (SectorDetachedContainer::isHiddenMode($mode)
+            ? ['artificialObjectDetected' => ($this->hiddenDetachedContainerDetectionPayload)($detachedObjectId, (string) $targetObjectId, $mode)]
             : []);
         ($this->saveManny)($manny);
 
@@ -202,14 +207,16 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
                 'sector' => $sectorCoordinates->toArray(),
                 'targetObjectId' => $targetObjectId,
             ],
-            $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
-                ? 'Detached storage container hidden on an asteroid.'
+            SectorDetachedContainer::isHiddenMode($mode)
+                ? ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_DORMANT_CONSTRUCT
+                    ? 'Detached storage container hidden on a dormant construct.'
+                    : 'Detached storage container hidden on an asteroid.')
                 : 'Detached storage container drifting in open space.',
             [],
-            $mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID ? [(int) ($snapshot['ownerPlayerId'] ?? $probe->playerId)] : [],
+            SectorDetachedContainer::isHiddenMode($mode) ? [(int) ($snapshot['ownerPlayerId'] ?? $probe->playerId)] : [],
         );
 
-        if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID) {
+        if (SectorDetachedContainer::isHiddenMode($mode)) {
             $sector->addHiddenDetachedContainer($object);
         } else {
             if (!$sector->replaceObject($object)) {
@@ -225,8 +232,8 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
             'mode' => $mode,
             'targetObjectId' => $targetObjectId,
             'detachedContainer' => ($this->detachedContainerPublicArray)($object),
-        ] + ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
-            ? ['artificialObjectDetected' => ($this->hiddenDetachedContainerDetectionPayload)($object->getId(), $targetObjectId)]
+        ] + (SectorDetachedContainer::isHiddenMode($mode)
+            ? ['artificialObjectDetected' => ($this->hiddenDetachedContainerDetectionPayload)($object->getId(), $targetObjectId, $mode)]
             : []));
         ($this->saveManny)($manny);
 

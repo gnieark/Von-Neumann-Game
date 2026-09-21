@@ -20,6 +20,7 @@ final class DetachedContainerJsonAuditService
     private const MODES = [
         SectorDetachedContainer::MODE_DRIFTING,
         SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
+        SectorDetachedContainer::MODE_HIDDEN_ON_DORMANT_CONSTRUCT,
         SectorDetachedContainer::MODE_DROPPED_ON_PLANET,
     ];
 
@@ -306,7 +307,7 @@ final class DetachedContainerJsonAuditService
         if ($mode !== '' && !in_array($mode, self::MODES, true)) {
             $this->addFinding($findings, 'invalid_container_mode', "Unsupported detached container mode '{$mode}'.", $entry);
         }
-        if ($mode === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID && trim((string) ($container['targetObjectId'] ?? '')) === '') {
+        if (SectorDetachedContainer::isHiddenMode($mode) && trim((string) ($container['targetObjectId'] ?? '')) === '') {
             $this->addFinding($findings, 'incomplete_container', "Hidden detached container is missing 'targetObjectId'.", $entry);
         }
         if (isset($container['capacity']) && (!is_numeric($container['capacity']) || (float) $container['capacity'] < 0.0)) {

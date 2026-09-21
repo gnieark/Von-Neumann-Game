@@ -188,8 +188,8 @@ final class MannyStorageTransferService
             return ['kind'=>'depot','id'=>(int)$row['id'],'row'=>$row,'port'=>new SqlInventoryTransferPort($this->pdo,'depot',(int)$row['id'])];
         }
         $row=$this->transaction->lock('detached',$objectId);
-        if(!$row||!$this->local($probe,$row)||!in_array($row['mode'],['drifting','hidden_on_asteroid'],true)){throw new MannyActionException(404,'not_found','Storage not found.');}
-        if($row['mode']==='hidden_on_asteroid'){
+        if(!$row||!$this->local($probe,$row)||!in_array($row['mode'],['drifting','hidden_on_asteroid','hidden_on_dormant_construct'],true)){throw new MannyActionException(404,'not_found','Storage not found.');}
+        if(\VonNeumannGame\Sector\SectorDetachedContainer::isHiddenMode($row['mode'])){
             $query=$this->pdo->prepare('SELECT 1 FROM detached_storage_container_discoveries WHERE container_object_id=? AND player_id=?');$query->execute([$objectId,$probe->playerId]);
             if($query->fetchColumn()===false){throw new MannyActionException(404,'not_found','Storage not found.');}
         }

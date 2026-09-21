@@ -13,6 +13,7 @@ use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Domain\ScutRelay;
 use VonNeumannGame\Sector\SectorCoordinates;
 use VonNeumannGame\Sector\SectorGrid;
+use VonNeumannGame\Sector\SectorDetachedContainer;
 
 final class UniverseStatsService
 {
@@ -765,15 +766,15 @@ final class UniverseStatsService
         $stmt = $this->pdo->query(
             "SELECT mode, COUNT(*) AS container_count
              FROM detached_storage_containers
-             WHERE mode IN ('drifting', 'hidden_on_asteroid')
+             WHERE mode IN ('drifting', 'hidden_on_asteroid', 'hidden_on_dormant_construct')
              GROUP BY mode"
         );
         $stats = ['drifting' => 0, 'hidden' => 0];
         foreach ($stmt !== false ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [] as $row) {
             if (($row['mode'] ?? null) === 'drifting') {
                 $stats['drifting'] = (int) $row['container_count'];
-            } elseif (($row['mode'] ?? null) === 'hidden_on_asteroid') {
-                $stats['hidden'] = (int) $row['container_count'];
+            } elseif (SectorDetachedContainer::isHiddenMode((string) ($row['mode'] ?? ''))) {
+                $stats['hidden'] += (int) $row['container_count'];
             }
         }
 
@@ -952,7 +953,7 @@ final class UniverseStatsService
             if (!is_array($container)) {
                 continue;
             }
-            if ((string) ($container['mode'] ?? 'drifting') === 'hidden_on_asteroid') {
+            if (SectorDetachedContainer::isHiddenMode((string) ($container['mode'] ?? 'drifting'))) {
                 $stats['hiddenContainers']++;
             } else {
                 $stats['driftingContainers']++;

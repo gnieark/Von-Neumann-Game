@@ -94,7 +94,7 @@ final class InspectSectorObjectTaskHandler implements TaskHandlerInterface
             throw new MannyActionException(422, 'invalid_sector_object_target', 'This object cannot be inspected by a Manny.');
         }
 
-        $detection = $target instanceof Asteroid
+        $detection = ($target instanceof Asteroid || $target instanceof DormantConstruct)
             ? ($this->hiddenDetachedContainerDetection)($sector, $objectId, $probe->playerId)
             : null;
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
@@ -126,7 +126,7 @@ final class InspectSectorObjectTaskHandler implements TaskHandlerInterface
         $sector = ($this->getOrCreateSector)($manny->sector ?? $probe->currentSector);
         $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
         $target = ($this->findInspectableSectorObject)($sector, $objectId, $probe->playerId);
-        $detection = $target instanceof Asteroid
+        $detection = ($target instanceof Asteroid || $target instanceof DormantConstruct)
             ? ($this->hiddenDetachedContainerDetection)($sector, $objectId, $probe->playerId)
             : null;
         $result = [

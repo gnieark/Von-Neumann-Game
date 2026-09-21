@@ -178,7 +178,7 @@ final class MannyService implements MannyTaskRuntime
             fn(float $amount, array $resourceProfile): array => $this->resourceAmountsForTotal($amount, $resourceProfile),
             fn(NeumannProbe $probe, array $incomingResources, Manny $manny): bool => $this->storage->canStoreIncoming($probe, $incomingResources, [['type' => 'manny', 'space' => $this->mannyContainerSpace()]], $manny->uid),
             fn(UniverseObject $target): array => $this->miningTargetArray($target),
-            fn(SectorDetachedContainer $container, bool $sameAsteroid): array => $this->miningTargetContainerPayload($container, $sameAsteroid),
+            fn(SectorDetachedContainer $container, bool $sameObject): array => $this->miningTargetContainerPayload($container, $sameObject),
             fn(): int => $this->miningTravelSeconds(),
             fn(float $targetAmount, ?int $travelSeconds): int => $this->miningDurationSeconds($targetAmount, $travelSeconds),
             function (Manny $manny): void {
@@ -237,7 +237,7 @@ final class MannyService implements MannyTaskRuntime
             function (NeumannProbe $probe, array $snapshot): void {
                 $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
             },
-            fn(string $objectId, ?string $targetObjectId): array => $this->hiddenDetachedContainerDetectionPayload($objectId, $targetObjectId),
+            fn(string $objectId, ?string $targetObjectId, string $mode): array => $this->hiddenDetachedContainerDetectionPayload($objectId, $targetObjectId, $mode),
             function (Manny $manny): void {
                 $this->mannies->save($manny);
             },
@@ -2355,17 +2355,17 @@ final class MannyService implements MannyTaskRuntime
             $this->sectors->saveSector($sector);
         }
 
-        return $this->hiddenDetachedContainerDetectionPayload($detectedContainer->getId(), $objectId);
+        return $this->hiddenDetachedContainerDetectionPayload($detectedContainer->getId(), $objectId, $detectedContainer->getMode());
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function hiddenDetachedContainerDetectionPayload(string $objectId, ?string $targetObjectId): array
+    private function hiddenDetachedContainerDetectionPayload(string $objectId, ?string $targetObjectId, string $mode): array
     {
         return [
             'type' => 'detached_storage_container',
-            'detection' => SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID,
+            'detection' => $mode,
             'objectId' => $objectId,
             'targetObjectId' => $targetObjectId,
         ];
@@ -2661,19 +2661,19 @@ final class MannyService implements MannyTaskRuntime
     }
 
     /**
-     * @return array{container:SectorDetachedContainer, sameAsteroid:bool}
+     * @return array{container:SectorDetachedContainer, sameObject:bool}
      */
     private function miningTargetContainer(SectorContent $sector, string $containerId, string $objectId): array
     {
         $container = $sector->findDetachedContainerById($containerId)
             ?? throw new MannyActionException(404, 'detached_container_not_found', 'Detached storage container not found.');
-        if (!in_array($container->getMode(), [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID], true)) {
+        if (!in_array($container->getMode(), [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_HIDDEN_ON_DORMANT_CONSTRUCT], true)) {
             throw new MannyActionException(422, 'invalid_storage_container', 'This detached container cannot receive mined resources.');
         }
 
         return [
             'container' => $container,
-            'sameAsteroid' => $container->getMode() === SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID
+            'sameObject' => SectorDetachedContainer::isHiddenMode($container->getMode())
                 && $container->getTargetObjectId() === $objectId,
         ];
     }
@@ -2681,7 +2681,7 @@ final class MannyService implements MannyTaskRuntime
     /**
      * @return array<string, mixed>
      */
-    private function miningTargetContainerPayload(SectorDetachedContainer $container, bool $sameAsteroid): array
+    private function miningTargetContainerPayload(SectorDetachedContainer $container, bool $sameObject): array
     {
         return [
             'id' => $container->getId(),
@@ -2691,7 +2691,7 @@ final class MannyService implements MannyTaskRuntime
             'targetObjectId' => $container->getTargetObjectId(),
             'capacity' => $container->getCapacity(),
             'capacityUnit' => $container->getCapacityUnit(),
-            'travelDeducted' => $sameAsteroid,
+            'travelDeducted' => $sameObject,
         ];
     }
 

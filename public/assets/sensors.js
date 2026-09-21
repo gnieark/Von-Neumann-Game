@@ -1166,7 +1166,7 @@
         }
         if (object.type === "detached_container") {
             return "<p>" + window.VNG.escapeHtml([
-                tr("detachStorageMode", "Mode") + " " + (object.mode === "hidden_on_asteroid" ? tr("hiddenOnAsteroid", "hidden on asteroid") : tr("detachModeDrifting", "Leave drifting")),
+                tr("detachStorageMode", "Mode") + " " + (object.mode === "hidden_on_dormant_construct" ? tr("hiddenOnDormantConstruct", "hidden on dormant construct") : object.mode === "hidden_on_asteroid" ? tr("hiddenOnAsteroid", "hidden on asteroid") : tr("detachModeDrifting", "Leave drifting")),
                 tr("storageCapacity", "Storage capacity") + " " + window.VNG.numberValue(object.capacity || 0),
             ].filter(Boolean).join(" - ")) + "</p>";
         }

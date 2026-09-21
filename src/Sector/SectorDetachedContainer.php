@@ -10,6 +10,7 @@ final class SectorDetachedContainer extends UniverseObject
 {
     public const MODE_DRIFTING = 'drifting';
     public const MODE_HIDDEN_ON_ASTEROID = 'hidden_on_asteroid';
+    public const MODE_HIDDEN_ON_DORMANT_CONSTRUCT = 'hidden_on_dormant_construct';
     public const MODE_ATTACH_TO_PROBE = 'attach_to_probe';
     public const MODE_DROPPED_ON_PLANET = 'dropped_on_planet';
 
@@ -52,6 +53,11 @@ final class SectorDetachedContainer extends UniverseObject
     public function getMode(): string
     {
         return $this->mode;
+    }
+
+    public static function isHiddenMode(string $mode): bool
+    {
+        return in_array($mode, [self::MODE_HIDDEN_ON_ASTEROID, self::MODE_HIDDEN_ON_DORMANT_CONSTRUCT], true);
     }
 
     public function getOwnerProbeId(): int

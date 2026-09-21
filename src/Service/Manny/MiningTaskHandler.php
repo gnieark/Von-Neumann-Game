@@ -31,7 +31,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
      * @param \Closure(UniverseObject): array<string, float> $resourceComposition
      * @param \Closure(array<string, float>, array<string, float>, float): void $ensureAsteroidHasResources
      * @param \Closure(SectorContent, string, ?int): ?array<string, mixed> $hiddenDetachedContainerDetection
-     * @param \Closure(SectorContent, string, string): array{container:SectorDetachedContainer, sameAsteroid:bool} $miningTargetContainer
+     * @param \Closure(SectorContent, string, string): array{container:SectorDetachedContainer, sameObject:bool} $miningTargetContainer
      * @param \Closure(SectorDetachedContainer): float $detachedContainerFreeCapacity
      * @param \Closure(float, array<string, float>): array<string, float> $resourceAmountsForTotal
      * @param \Closure(NeumannProbe, array<string, float>, Manny): bool $canAcceptMiningStart
@@ -158,14 +158,14 @@ final class MiningTaskHandler implements TaskHandlerInterface
                 throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Target detached container is full.');
             }
             $targetAmount = round(min($targetAmount, $targetContainerFreeCapacity), 4);
-            $miningTravelSeconds = $targetContainer['sameAsteroid'] ? 0 : $miningTravelSeconds;
+            $miningTravelSeconds = $targetContainer['sameObject'] ? 0 : $miningTravelSeconds;
         }
 
         $resourceProfile = ResourceComposition::profileForSelection($composition, $selectedResources);
         if (($target instanceof Asteroid || $target instanceof DormantConstruct) && $availableAmounts !== null) {
             ($this->ensureAsteroidHasResources)($availableAmounts, $resourceProfile, $targetAmount);
         }
-        $artificialObjectDetected = $target instanceof Asteroid
+        $artificialObjectDetected = ($target instanceof Asteroid || $target instanceof DormantConstruct)
             ? ($this->hiddenDetachedContainerDetection)($sector, $target->getId(), $probe->playerId)
             : null;
         $probeIncomingResources = $targetContainer === null ? ($this->resourceAmountsForTotal)($targetAmount, $resourceProfile) : [];
@@ -197,7 +197,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
             Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY => $manny->taskEndsAt,
         ]
             + ($requestedTargetAmount > $targetAmount ? ['requestedTargetAmount' => $requestedTargetAmount] : [])
-            + ($targetContainer !== null ? ['targetContainer' => ($this->miningTargetContainerPayload)($targetContainer['container'], $targetContainer['sameAsteroid'])] : [])
+            + ($targetContainer !== null ? ['targetContainer' => ($this->miningTargetContainerPayload)($targetContainer['container'], $targetContainer['sameObject'])] : [])
             + ($artificialObjectDetected !== null ? ['artificialObjectDetected' => $artificialObjectDetected] : []);
         $manny->cargoDeuterium = 0.0;
         $manny->cargoMetals = 0.0;

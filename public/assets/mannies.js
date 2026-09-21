@@ -761,7 +761,7 @@
 
         return Boolean(
             object && object.salvageable === true && object.id
-            && !(object.type === "detached_container" && object.mode === "hidden_on_asteroid")
+            && !(object.type === "detached_container" && ["hidden_on_asteroid", "hidden_on_dormant_construct"].includes(object.mode))
             && !(object.type === "scut_relay" && object.status !== "off")
             && !(object.type === "drifting_item" && Number.isFinite(containerSpace) && containerSpace > MANNY_CARGO_CAPACITY + 0.00001)
         );
@@ -823,6 +823,13 @@
 
         (Array.isArray(objects) ? objects : []).forEach(collect);
         return targets;
+    }
+
+    function containerHidingTargets(mode) {
+        if (mode !== "hidden_on_dormant_construct") return asteroidTargets();
+        // Only mothership wrecks expose mannyMineable, including false after depletion.
+        return (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
+            .filter((object) => object && object.type === "dormant_construct" && typeof object.mannyMineable === "boolean");
     }
 
     function asteroidTargets() {
@@ -937,7 +944,7 @@
                 add({
                     "id": detection.objectId,
                     "name": tr("detectedDetachedContainer", "Detected detached container"),
-                    "source": "asteroid",
+                    "source": detection.detection === "hidden_on_dormant_construct" ? "dormant_construct" : "asteroid",
                     "hidden": true,
                     "targetObjectId": detection.targetObjectId || (manny && manny.task ? manny.task.targetObjectId || manny.task.objectId || null : null),
                 });
@@ -982,8 +989,8 @@
             .map((object) => ({
                 "id": object.id,
                 "name": object.name || object.id,
-                "source": object.mode === "hidden_on_asteroid" ? "asteroid" : "drifting",
-                "hidden": object.mode === "hidden_on_asteroid",
+                "source": object.mode === "hidden_on_dormant_construct" ? "dormant_construct" : (object.mode === "hidden_on_asteroid" ? "asteroid" : "drifting"),
+                "hidden": ["hidden_on_asteroid", "hidden_on_dormant_construct"].includes(object.mode),
                 "targetObjectId": object.targetObjectId || null,
             }));
     }
@@ -1014,7 +1021,7 @@
     function miningStorageTargetLabel(target) {
         const name = target && (target.name || target.id) ? (target.name || target.id) : tr("detachedContainerObject", "Detached container");
         const suffix = target && target.hidden
-            ? tr("hiddenOnAsteroid", "hidden on asteroid")
+            ? (target.source === "dormant_construct" ? tr("hiddenOnDormantConstruct", "hidden on dormant construct") : tr("hiddenOnAsteroid", "hidden on asteroid"))
             : tr("detachModeDrifting", "Leave drifting");
 
         return name + " - " + suffix;
@@ -1029,7 +1036,9 @@
         }
 
         const name = container.name || container.id;
-        const mode = container.mode === "hidden_on_asteroid"
+        const mode = container.mode === "hidden_on_dormant_construct"
+            ? tr("hiddenOnDormantConstruct", "hidden on dormant construct")
+            : container.mode === "hidden_on_asteroid"
             ? tr("detachedContainerHiddenOnAsteroid", "hidden on asteroid")
             : tr("detachedContainerDrifting", "drifting");
 
@@ -1062,7 +1071,7 @@
 
     function detachedContainerRecoveryTargetLabel(target) {
         const name = target && (target.name || target.id) ? (target.name || target.id) : tr("detachedContainerObject", "Detached container");
-        return name + (target && target.hidden ? " - " + tr("hiddenOnAsteroid", "hidden on asteroid") : "");
+        return name + (target && target.hidden ? " - " + (target.source === "dormant_construct" ? tr("hiddenOnDormantConstruct", "hidden on dormant construct") : tr("hiddenOnAsteroid", "hidden on asteroid")) : "");
     }
 
     function currentStorageContainers() {
@@ -2204,7 +2213,9 @@
                     + "<p>" + escaped(tr("taskProgress", "Progress")) + " " + progress + "</p>"
                     + "</section>";
             }
-            const modeLabel = payload.mode === "hidden_on_asteroid"
+            const modeLabel = payload.mode === "hidden_on_dormant_construct"
+                ? tr("detachModeHiddenOnDormantConstruct", "Hide on a dormant construct")
+                : payload.mode === "hidden_on_asteroid"
                 ? tr("detachModeHiddenOnAsteroid", "Hide on an asteroid")
                 : tr("detachModeDrifting", "Leave drifting");
             return "<section class=\"manny-task-panel\">"
@@ -2634,7 +2645,7 @@
     function sectorStorageTargets() {
         return (state.currentSectorObjects || []).filter((object) => object && (
             object.inventoryAccessible === true
-            || (object.type === "detached_container" && ["drifting", "hidden_on_asteroid"].includes(object.mode))
+            || (object.type === "detached_container" && ["drifting", "hidden_on_asteroid", "hidden_on_dormant_construct"].includes(object.mode))
         ));
     }
 
@@ -2889,9 +2900,10 @@
             + "<label>" + escaped(tr("detachStorageMode", "Mode")) + "<select class=\"manny-detach-storage-mode\" name=\"mode\" required>"
             + "<option value=\"drifting\">" + escaped(tr("detachModeDrifting", "Leave drifting")) + "</option>"
             + "<option value=\"hidden_on_asteroid\">" + escaped(tr("detachModeHiddenOnAsteroid", "Hide on an asteroid")) + "</option>"
+            + "<option value=\"hidden_on_dormant_construct\">" + escaped(tr("detachModeHiddenOnDormantConstruct", "Hide on a dormant construct")) + "</option>"
             + "<option value=\"attach_to_probe\">" + escaped(tr("detachModeAttachToProbe", "Attach to another probe")) + "</option>"
             + "</select></label>"
-            + "<label class=\"manny-detach-asteroid-label\" hidden>" + escaped(tr("asteroidObject", "Asteroid")) + "<select class=\"manny-detach-asteroid-target\" name=\"objectId\">" + asteroidTargetOptions("") + "</select></label>"
+            + "<label class=\"manny-detach-asteroid-label\" hidden>" + escaped(tr("sectorObject", "Sector object")) + "<select class=\"manny-detach-asteroid-target\" name=\"objectId\">" + asteroidTargetOptions("") + "</select></label>"
             + "<label class=\"manny-detach-probe-label\" hidden>" + escaped(tr("detachStorageTargetProbe", "Target probe")) + "<select class=\"manny-detach-probe-target\" name=\"targetProbeObjectId\">" + storageAttachProbeTargetOptions("") + "</select></label>"
             + "<button class=\"manny-detach-storage-button\" type=\"submit\"" + (hasContainer ? "" : " disabled aria-disabled=\"true\"") + ">" + escaped(tr("detachStorageContainerShort", "Detach")) + "</button>"
             + "<p class=\"manny-detach-storage-hint\">" + escaped(hasContainer ? tr("detachStorageHint", "The container and its content leave the probe when the order is accepted.") : tr("noDetachableContainer", "No additional container can be detached."))
@@ -4016,9 +4028,9 @@
             const selectedAsteroid = asteroidSelect ? asteroidSelect.value : "";
             const selectedProbe = probeSelect ? probeSelect.value : "";
             const containers = detachableStorageContainers();
-            const asteroids = asteroidTargets();
+            const asteroids = containerHidingTargets(modeSelect ? modeSelect.value : "");
             const targetProbes = storageAttachProbeTargets();
-            const hiddenMode = modeSelect && modeSelect.value === "hidden_on_asteroid";
+            const hiddenMode = modeSelect && ["hidden_on_asteroid", "hidden_on_dormant_construct"].includes(modeSelect.value);
             const attachMode = modeSelect && modeSelect.value === "attach_to_probe";
 
             if (containerSelect) {
@@ -4028,7 +4040,7 @@
                 }
             }
             if (asteroidSelect) {
-                asteroidSelect.innerHTML = asteroidTargetOptions(selectedAsteroid);
+                asteroidSelect.innerHTML = asteroids.map((target) => "<option value=\"" + escaped(target.id) + "\"" + (target.id === selectedAsteroid ? " selected" : "") + ">" + escaped(sectorObjectInspectionTargetLabel(target)) + "</option>").join("");
                 if (!asteroids.some((target) => target.id === asteroidSelect.value)) {
                     asteroidSelect.value = asteroids[0] ? asteroids[0].id : "";
                 }
@@ -4058,7 +4070,7 @@
                 hint.textContent = containers.length === 0
                     ? tr("noDetachableContainer", "No additional container can be detached.")
                     : (hiddenMode && asteroids.length === 0
-                        ? tr("noAsteroidTarget", "No asteroid available in the current sector.")
+                        ? tr("noContainerHidingTarget", "No eligible object available in the current sector.")
                         : (attachMode && targetProbes.length === 0
                             ? tr("noSameSectorAttachProbe", "No owned probe or drone is available in this sector.")
                             : tr("detachStorageHint", "The container and its content leave the probe when the order is accepted.")));
@@ -4663,7 +4675,7 @@
             const objectId = mode === "attach_to_probe"
                 ? String(formData.get("targetProbeObjectId") || "")
                 : String(formData.get("objectId") || "");
-            if (!containerId || !["drifting", "hidden_on_asteroid", "attach_to_probe"].includes(mode) || (mode !== "drifting" && !objectId)) {
+            if (!containerId || !["drifting", "hidden_on_asteroid", "hidden_on_dormant_construct", "attach_to_probe"].includes(mode) || (mode !== "drifting" && !objectId)) {
                 setStatus(tr("invalidDetachStorageOrder", "Invalid container detachment order."));
                 return null;
             }

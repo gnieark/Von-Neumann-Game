@@ -79,6 +79,9 @@
     }
 
     function storageKindLabel(target) {
+        if (target.type === "detached_container" && target.mode === "hidden_on_dormant_construct") {
+            return tr("hiddenOnDormantConstruct", "hidden on dormant construct");
+        }
         if (target.type === "detached_container" && target.mode === "hidden_on_asteroid") {
             return tr("sectorStorageHidden", "Hidden on an asteroid");
         }
@@ -97,7 +100,7 @@
         return (Array.isArray(objects) ? objects : [])
             .filter((object) => object && object.id && (
                 object.inventoryAccessible === true
-                || (object.type === "detached_container" && ["drifting", "hidden_on_asteroid"].includes(object.mode))
+                || (object.type === "detached_container" && ["drifting", "hidden_on_asteroid", "hidden_on_dormant_construct"].includes(object.mode))
             ))
             .sort((left, right) => storageLabel(left).localeCompare(storageLabel(right)));
     }

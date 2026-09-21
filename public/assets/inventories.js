@@ -836,6 +836,13 @@
         return Boolean(id) && itemIds.some((itemId) => id === "container-" + String(itemId));
     }
 
+    function containerHidingTargets(mode) {
+        if (mode !== "hidden_on_dormant_construct") return asteroidTargets();
+        // Only mothership wrecks expose mannyMineable, including false after depletion.
+        return (Array.isArray(state.currentSectorObjects) ? state.currentSectorObjects : [])
+            .filter((object) => object && object.type === "dormant_construct" && typeof object.mannyMineable === "boolean");
+    }
+
     function asteroidTargets() {
         const targets = [];
         const seen = new Set();
@@ -993,9 +1000,10 @@
             + "<label>" + window.VNG.escapeHtml(tr("detachStorageMode", "Mode")) + "<select class=\"detach-storage-mode\" name=\"mode\" required>"
             + "<option value=\"drifting\">" + window.VNG.escapeHtml(tr("detachModeDrifting", "Leave drifting")) + "</option>"
             + "<option value=\"hidden_on_asteroid\">" + window.VNG.escapeHtml(tr("detachModeHiddenOnAsteroid", "Hide on an asteroid")) + "</option>"
+            + "<option value=\"hidden_on_dormant_construct\">" + window.VNG.escapeHtml(tr("detachModeHiddenOnDormantConstruct", "Hide on a dormant construct")) + "</option>"
             + "<option value=\"attach_to_probe\">" + window.VNG.escapeHtml(tr("detachModeAttachToProbe", "Attach to another probe")) + "</option>"
             + "</select></label>"
-            + "<label class=\"detach-asteroid-label\" hidden>" + window.VNG.escapeHtml(tr("asteroidObject", "Asteroid")) + "<select class=\"detach-asteroid-target\" name=\"objectId\">" + asteroidOptions + "</select></label>"
+            + "<label class=\"detach-asteroid-label\" hidden>" + window.VNG.escapeHtml(tr("sectorObject", "Sector object")) + "<select class=\"detach-asteroid-target\" name=\"objectId\">" + asteroidOptions + "</select></label>"
             + "<label class=\"detach-probe-label\" hidden>" + window.VNG.escapeHtml(tr("detachStorageTargetProbe", "Target probe")) + "<select class=\"detach-probe-target\" name=\"targetProbeObjectId\">" + targetProbeOptions + "</select></label>"
             + "<button class=\"detach-storage-button\" type=\"submit\"" + (hasFormChoices ? "" : " disabled aria-disabled=\"true\"") + ">" + window.VNG.escapeHtml(tr("detachStorageContainerShort", "Detach")) + "</button>"
             + (hasFormChoices ? "" : "<p class=\"inventory-muted\">" + window.VNG.escapeHtml(unavailableMessage) + "</p>")
@@ -1014,12 +1022,17 @@
         const probeLabel = form.querySelector(".detach-probe-label");
         const probe = form.querySelector(".detach-probe-target");
         const button = form.querySelector(".detach-storage-button");
-        const hiddenMode = mode && mode.value === "hidden_on_asteroid";
+        const hiddenMode = mode && ["hidden_on_asteroid", "hidden_on_dormant_construct"].includes(mode.value);
         const attachMode = mode && mode.value === "attach_to_probe";
         if (asteroidLabel) {
             asteroidLabel.hidden = !hiddenMode;
         }
         if (asteroid) {
+            const selected = asteroid.value;
+            asteroid.innerHTML = containerHidingTargets(mode ? mode.value : "").map((target) => (
+                "<option value=\"" + window.VNG.escapeHtml(target.id) + "\"" + (target.id === selected ? " selected" : "") + ">"
+                + window.VNG.escapeHtml([objectTypeLabel(target.type), target.name || target.id].join(" ")) + "</option>"
+            )).join("");
             asteroid.required = Boolean(hiddenMode);
             asteroid.disabled = !hiddenMode;
         }
@@ -1051,7 +1064,7 @@
         const objectId = mode === "attach_to_probe"
             ? String(formData.get("targetProbeObjectId") || "")
             : String(formData.get("objectId") || "");
-        if (!actorMannyId || !containerId || !["drifting", "hidden_on_asteroid", "attach_to_probe"].includes(mode)) {
+        if (!actorMannyId || !containerId || !["drifting", "hidden_on_asteroid", "hidden_on_dormant_construct", "attach_to_probe"].includes(mode)) {
             return null;
         }
         if (mode !== "drifting" && !objectId) {
