@@ -39,8 +39,13 @@ use VonNeumannGame\Service\SectorEffectService;
         try {
             $files->save(new SectorContent($coordinates, [new Planet('harvest-planet', 'Harvest planet', 'rocky', 1.0, 1.0, true, 0.0, ['metals'], resourceAmounts: ['deuterium' => 0.0, 'metals' => 100.0, 'ice' => 0.0, 'carbon_compounds' => 0.0])]));
             $sectors = new SectorService($files, new SectorContentGenerator(), 'destruction-test');
-            $effects = new SectorEffectService($db, $events, $sectors);
-            $depots = new GerminationDepotService($others, $events, $sectors, $effects, new AnomalyBroadcastService($db, $events));
+            $transaction = new \VonNeumannGame\Database\StorageTransaction($db);
+            $locks = new \VonNeumannGame\Repository\Storage\StorageLockRepository($db);
+            $depotRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($db);
+            $detached = new \VonNeumannGame\Repository\DetachedStorageContainerRepository($db);
+            $effects = new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db), $events, $sectors);
+            $waves = new AnomalyBroadcastService(new \VonNeumannGame\Repository\Storage\AnomalyBroadcastRepository($db), $transaction, $locks, $events, new \VonNeumannGame\Repository\OthersAuditRepository($db));
+            $depots = new GerminationDepotService($others, $events, $sectors, $effects, $waves, $transaction, $locks, new \VonNeumannGame\Repository\Storage\StorageActorRepository($db), $depotRepository, $detached);
             $service = new OthersService($others, $events, $reinstantiation, sectors: $sectors, players: $players, germinationDepots: $depots);
             $scheduler = new SchedulerService($events, $probes, $movements, $movementService, othersService: $service, sectorEffects: $effects);
             $harvests = [];

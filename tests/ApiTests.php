@@ -2629,13 +2629,18 @@ $saveSectorFixture = static function (SectorContent $content) use ($sectorReposi
     }
     $sectorRepository->save($content);
 };
-$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers, germinationDepots: new \VonNeumannGame\Repository\GerminationDepotRepository($pdo));
+$depotRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($pdo);
+$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers, germinationDepots: $depotRepository);
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
-$mannyStorageTransfers = new \VonNeumannGame\Service\MannyStorageTransferService($pdo, $mannies, $probes, $storage);
-$sectorEffects = new \VonNeumannGame\Service\SectorEffectService($pdo, $scheduledEvents, $sectorService);
-$anomalyBroadcasts = new \VonNeumannGame\Service\AnomalyBroadcastService($pdo, $scheduledEvents);
-$germinationDepots = new \VonNeumannGame\Service\GerminationDepotService($others, $scheduledEvents, $sectorService, $sectorEffects, $anomalyBroadcasts, mannyStorageTransfers: $mannyStorageTransfers);
-$storageTransfers = new \VonNeumannGame\Service\SectorStorageTransferService($pdo, $germinationDepots);
+$storageTransaction = new \VonNeumannGame\Database\StorageTransaction($pdo);
+$storageLocks = new \VonNeumannGame\Repository\Storage\StorageLockRepository($pdo);
+$storageTransferRepository = new \VonNeumannGame\Repository\Storage\SectorStorageTransferRepository($pdo);
+$inventoryTransfers = new \VonNeumannGame\Repository\Storage\InventoryTransferRepositoryFactory($pdo);
+$mannyStorageTransfers = new \VonNeumannGame\Service\MannyStorageTransferService($storageTransaction, $storageLocks, $storageTransferRepository, new \VonNeumannGame\Repository\Storage\StorageReservationRepository($pdo), $inventoryTransfers, $depotRepository, $detachedStorageContainers, $storageContainers, $mannies, $probes, $storage);
+$sectorEffects = new \VonNeumannGame\Service\SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), $scheduledEvents, $sectorService);
+$anomalyBroadcasts = new \VonNeumannGame\Service\AnomalyBroadcastService(new \VonNeumannGame\Repository\Storage\AnomalyBroadcastRepository($pdo), $storageTransaction, $storageLocks, $scheduledEvents, new \VonNeumannGame\Repository\OthersAuditRepository($pdo));
+$germinationDepots = new \VonNeumannGame\Service\GerminationDepotService($others, $scheduledEvents, $sectorService, $sectorEffects, $anomalyBroadcasts, $storageTransaction, $storageLocks, new \VonNeumannGame\Repository\Storage\StorageActorRepository($pdo), $depotRepository, $detachedStorageContainers, mannyStorageTransfers: $mannyStorageTransfers);
+$storageTransfers = new \VonNeumannGame\Service\SectorStorageTransferService($storageTransaction, $storageLocks, $storageTransferRepository, $inventoryTransfers, $depotRepository, $germinationDepots);
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, 7, $mannies, $apiKeys, $sectorService);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
 $reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings);

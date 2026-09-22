@@ -102,7 +102,7 @@ function addInventoryItemRun(array $argv): int
         $addedResource = null;
         $pdo->beginTransaction();
         try {
-            $locked=(new \VonNeumannGame\Database\StorageTransaction($pdo))->lock('ship',(int)$ship['id']);
+            $locked=(new \VonNeumannGame\Repository\Storage\StorageLockRepository($pdo))->lock('ship',(int)$ship['id']);
             if($locked===null){throw new RuntimeException('Others ship disappeared.');}
             $ship=array_replace($ship,$locked);
             $itemSpace = $isResource

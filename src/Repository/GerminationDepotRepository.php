@@ -59,6 +59,46 @@ final class GerminationDepotRepository
         return (bool) $query->fetchColumn();
     }
 
+    public function open(int $id, string $now): bool
+    {
+        $query = $this->pdo->prepare("UPDATE germination_depots SET state='open',opened_at=?,version=version+1 WHERE id=? AND state='impacted'");
+        $query->execute([$now, $id]);
+        return $query->rowCount() === 1;
+    }
+
+    public function impact(int $id): bool
+    {
+        $query = $this->pdo->prepare("UPDATE germination_depots SET state='impacted',version=version+1 WHERE id=? AND state='sealed'");
+        $query->execute([$id]);
+        return $query->rowCount() === 1;
+    }
+
+    public function recordInspection(int $depotId, int $probeId, string $now, ?string $access): void
+    {
+        $query = $this->pdo->prepare('SELECT 1 FROM germination_depot_probe_knowledge WHERE depot_id=? AND probe_id=?');
+        $query->execute([$depotId, $probeId]);
+        if ($query->fetchColumn() === false) {
+            $this->pdo->prepare('INSERT INTO germination_depot_probe_knowledge(depot_id,probe_id,inspected_at,access_discovered_at) VALUES(?,?,?,?)')->execute([$depotId, $probeId, $now, $access]);
+        } elseif ($access !== null) {
+            $this->pdo->prepare('UPDATE germination_depot_probe_knowledge SET access_discovered_at=COALESCE(access_discovered_at,?) WHERE depot_id=? AND probe_id=?')->execute([$now, $depotId, $probeId]);
+        }
+    }
+
+    public function hasKnowledge(int $depotId, int $probeId): bool
+    {
+        $query = $this->pdo->prepare('SELECT 1 FROM germination_depot_probe_knowledge WHERE depot_id=? AND probe_id=?');
+        $query->execute([$depotId, $probeId]);
+        return $query->fetchColumn() !== false;
+    }
+
+    public function hasAccess(int $depotId, int $probeId): bool
+    {
+        $query = $this->pdo->prepare('SELECT access_discovered_at FROM germination_depot_probe_knowledge WHERE depot_id=? AND probe_id=?');
+        $query->execute([$depotId, $probeId]);
+        $access = $query->fetchColumn();
+        return $access !== false && $access !== null;
+    }
+
     /** Must run under the depot lock, including when reading multiple pages. */
     public function inventory(array $depot, int $limit = 100, ?string $cursor = null): array
     {

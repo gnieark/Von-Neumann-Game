@@ -129,6 +129,51 @@ final class DetachedStorageContainerRepository
         return $stmt->rowCount() > 0;
     }
 
+    public function deleteWithoutTransferCheck(string $objectId): void
+    {
+        $this->pdo->prepare('DELETE FROM detached_storage_containers WHERE object_id=?')->execute([$objectId]);
+    }
+
+    public function attachedToTarget(string $targetObjectId, SectorCoordinates $sector): array
+    {
+        $query = $this->pdo->prepare('SELECT object_id FROM detached_storage_containers WHERE target_object_id=? AND sector_x=? AND sector_y=? AND sector_z=? ORDER BY object_id');
+        $query->execute([$targetObjectId, $sector->getX(), $sector->getY(), $sector->getZ()]);
+        return $query->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    public function isDiscovered(string $objectId, int $playerId): bool
+    {
+        $query = $this->pdo->prepare('SELECT 1 FROM detached_storage_container_discoveries WHERE container_object_id=? AND player_id=?');
+        $query->execute([$objectId, $playerId]);
+        return $query->fetchColumn() !== false;
+    }
+
+    public function excludedResourceTypes(string $objectId): array
+    {
+        $query = $this->pdo->prepare("SELECT resource_type FROM detached_storage_container_rules WHERE container_object_id=? AND rule_kind='strictExclusion'");
+        $query->execute([$objectId]);
+        return $query->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    public function occupiedSpace(string $objectId): float
+    {
+        $query = $this->pdo->prepare("SELECT (SELECT COALESCE(SUM(amount),0) FROM detached_storage_container_resources WHERE container_object_id=?) +(SELECT COALESCE(SUM(container_space),0) FROM detached_storage_container_items WHERE container_object_id=? AND is_backing_item=0)+(SELECT COALESCE(SUM(amount),0) FROM sector_storage_capacity_reservations WHERE inventory_kind='detached' AND inventory_id=?)");
+        $query->execute([$objectId, $objectId, $objectId]);
+        return (float) $query->fetchColumn();
+    }
+
+    public function inventoryRows(string $objectId, int $after, int $limit): array
+    {
+        $query = $this->pdo->prepare('SELECT * FROM detached_storage_container_items WHERE container_object_id=? AND is_backing_item=0 AND id>? ORDER BY id LIMIT ' . ($limit + 1));
+        $query->execute([$objectId, $after]);
+        $items = $query->fetchAll(PDO::FETCH_ASSOC);
+        $more = count($items) > $limit;
+        if ($more) { array_pop($items); }
+        $query = $this->pdo->prepare('SELECT resource_type,amount,reserved_amount FROM detached_storage_container_resources WHERE container_object_id=? ORDER BY resource_type');
+        $query->execute([$objectId]);
+        return ['items' => $items, 'resources' => $query->fetchAll(PDO::FETCH_ASSOC), 'more' => $more];
+    }
+
     private function assertNoContentTransfer(string $objectId): void
     {
         $this->pdo->prepare('UPDATE detached_storage_containers SET updated_at=updated_at WHERE object_id=?')->execute([$objectId]);

@@ -4,24 +4,29 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
-use PDO;
 use VonNeumannGame\Database\StorageTransaction;
 use VonNeumannGame\Repository\GerminationDepotRepository;
 use VonNeumannGame\Repository\OthersRepository;
-use VonNeumannGame\Service\Storage\SqlInventoryTransferPort;
+use VonNeumannGame\Repository\Storage\InventoryTransferRepositoryFactory;
+use VonNeumannGame\Repository\Storage\SectorStorageTransferRepository;
+use VonNeumannGame\Repository\Storage\StorageLockRepository;
 use VonNeumannGame\Service\Storage\TransferLoadPlanner;
 
 final class SectorStorageTransferService
 {
-    private readonly StorageTransaction $transaction;
-    private readonly GerminationDepotRepository $depots;
     private readonly TransferLoadPlanner $planner;
     private readonly \Closure $clock;
 
-    public function __construct(private readonly PDO $pdo, private readonly GerminationDepotService $construction, ?\Closure $clock = null)
+    public function __construct(
+        private readonly StorageTransaction $transaction,
+        private readonly StorageLockRepository $locks,
+        private readonly SectorStorageTransferRepository $transfers,
+        private readonly InventoryTransferRepositoryFactory $inventories,
+        private readonly GerminationDepotRepository $depots,
+        private readonly GerminationDepotService $construction,
+        ?\Closure $clock = null,
+    )
     {
-        $this->transaction = new StorageTransaction($pdo);
-        $this->depots = new GerminationDepotRepository($pdo);
         $this->planner = new TransferLoadPlanner();
         $this->clock = $clock ?? static fn(): \DateTimeImmutable => new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
     }
@@ -47,15 +52,15 @@ final class SectorStorageTransferService
             if ($resources === [] && $ids === []) { throw new \InvalidArgumentException('Empty transfer.'); }
         } catch (\InvalidArgumentException $error) { throw new OthersActionException(400, 'bad_request', $error->getMessage()); }
         return $this->transaction->run(function () use ($ship, $auxiliary, $payload, $resources, $ids, $direction): array {
-            $carrier = $this->transaction->lock('ship', (int) $ship['id']);
-            $actor = $this->transaction->lock('auxiliary', (int) $auxiliary['id']);
+            $carrier = $this->locks->lock('ship', (int) $ship['id']);
+            $actor = $this->locks->lock('auxiliary', (int) $auxiliary['id']);
             $this->construction->assertActor($carrier, $actor, (int) $ship['id']);
             $depot = $this->depots->find($payload['depotId']);
             if ($depot === null) { throw new OthersActionException(404, 'target_not_found', 'Storage not found.'); }
-            $depot = $this->transaction->lock('depot', (int) $depot['id']);
+            $depot = $this->locks->lock('depot', (int) $depot['id']);
             if ($this->construction->coordinates($depot)->toKey() !== $this->construction->coordinates($carrier)->toKey()) { throw new OthersActionException(422, 'target_out_of_range', 'Storage must be in the carrier sector.'); }
-            $shipPort = new SqlInventoryTransferPort($this->pdo, 'ship', (int) $carrier['id']);
-            $depotPort = new SqlInventoryTransferPort($this->pdo, 'depot', (int) $depot['id']);
+            $shipPort = $this->inventories->create('ship', (int) $carrier['id']);
+            $depotPort = $this->inventories->create('depot', (int) $depot['id']);
             [$source, $destination] = $direction === 'to_storage' ? [$shipPort, $depotPort] : [$depotPort, $shipPort];
             $items = $source->items($ids);
             $now = ($this->clock)();
@@ -65,10 +70,7 @@ final class SectorStorageTransferService
                 'capacityEce' => 2.0, 'roundTrips' => $plan['tripCount'], 'durationSeconds' => $plan['durationSeconds']];
             $action = $this->construction->createAction($carrier, $actor, $direction === 'to_storage' ? 'depot_deposit' : 'depot_withdrawal', $projection, $now, $end);
             $id = OthersRepository::publicId('storage_transfer');
-            $query = $this->pdo->prepare("INSERT INTO sector_storage_transfers(public_id,player_id,actor_kind,actor_public_id,others_ship_id,others_action_id,external_storage_kind,external_storage_id,direction,status,manifest_json,resources_json,items_json,started_at,ends_at,updated_at) VALUES(?,?,'others_auxiliary',?,?,?,'depot',?,?,'queued',?,?,?,?,?,?)");
-            $query->execute([$id, $ship['player_id'], $actor['public_id'], $carrier['id'], $action['id'], (string) $depot['id'], $direction,
-                json_encode($plan, JSON_THROW_ON_ERROR), json_encode($resources, JSON_THROW_ON_ERROR), json_encode($items, JSON_THROW_ON_ERROR), $now->format('c'), $end->format('c'), $now->format('c')]);
-            $transferId = (int) $this->pdo->lastInsertId();
+            $transferId = $this->transfers->createOthers($id, (int) $ship['player_id'], $actor, $carrier, $action, (int) $depot['id'], $direction, $plan, $resources, $items, $now->format('c'), $end->format('c'));
             $source->reserve($transferId, (int) $action['id'], $resources, $items, $now->format('c'));
             $destination->reserveCapacity($transferId, $plan['totalUnits'] / 10000, $now->format('c'));
             return $action;
@@ -78,22 +80,18 @@ final class SectorStorageTransferService
     public function completeOthers(int $actionId, string $causalTime, ?string $reason = null): void
     {
         $this->transaction->run(function () use ($actionId, $causalTime, $reason): void {
-            $query = $this->pdo->prepare('SELECT * FROM sector_storage_transfers WHERE others_action_id=?');
-            $query->execute([$actionId]);
-            $initial = $query->fetch(PDO::FETCH_ASSOC);
+            $initial = $this->transfers->findByActionId($actionId);
             if (!$initial || $initial['status'] !== 'queued') { return; }
-            $ship = $this->transaction->lock('ship', (int) $initial['others_ship_id']);
-            $query = $this->pdo->prepare('SELECT id FROM others_auxiliaries WHERE public_id=?');
-            $query->execute([$initial['actor_public_id']]);
-            $actorId = $query->fetchColumn();
-            $actor = $actorId === false ? null : $this->transaction->lock('auxiliary', (int) $actorId);
-            $action = $this->transaction->lock('action', $actionId);
-            $transfer = $this->transaction->lock('transfer', (int) $initial['id']);
+            $ship = $this->locks->lock('ship', (int) $initial['others_ship_id']);
+            $actorId = $this->transfers->actorId($initial['actor_public_id']);
+            $actor = $actorId === null ? null : $this->locks->lock('auxiliary', $actorId);
+            $action = $this->locks->lock('action', $actionId);
+            $transfer = $this->locks->lock('transfer', (int) $initial['id']);
             if ($transfer['status'] !== 'queued') { return; }
             if ($ship === null || $actor === null || $action === null || (int) $actor['current_action_id'] !== $actionId) { throw new \RuntimeException('Transfer actor reservation is missing.'); }
-            $this->transaction->lock('depot', (int) $transfer['external_storage_id']);
-            $shipPort = new SqlInventoryTransferPort($this->pdo, 'ship', (int) $ship['id']);
-            $depotPort = new SqlInventoryTransferPort($this->pdo, 'depot', (int) $transfer['external_storage_id']);
+            $this->locks->lock('depot', (int) $transfer['external_storage_id']);
+            $shipPort = $this->inventories->create('ship', (int) $ship['id']);
+            $depotPort = $this->inventories->create('depot', (int) $transfer['external_storage_id']);
             [$source, $destination] = $transfer['direction'] === 'to_storage' ? [$shipPort, $depotPort] : [$depotPort, $shipPort];
             $resources = json_decode($transfer['resources_json'], true, 512, JSON_THROW_ON_ERROR);
             $items = json_decode($transfer['items_json'], true, 512, JSON_THROW_ON_ERROR);
@@ -126,9 +124,8 @@ final class SectorStorageTransferService
             if ($reason === null) { $this->construction->releaseActor($actionId, (int) $actor['id'], $causalTime); }
             elseif ($reason !== 'auxiliary_destroyed') { $result['dormantAuxiliaryId'] = $this->construction->makeDormant($actor, $actionId, $causalTime); }
             $status = $reason === null ? 'succeeded' : ($reason === 'auxiliary_destroyed' ? 'failed' : 'canceled');
-            $json = json_encode($result, JSON_THROW_ON_ERROR);
-            $this->pdo->prepare('UPDATE sector_storage_transfers SET status=?,version=version+1,result_json=?,updated_at=? WHERE id=?')->execute([$status, $json, $causalTime, $transfer['id']]);
-            $this->pdo->prepare('UPDATE others_actions SET status=?,result_json=?,completed_at=?,updated_at=? WHERE id=?')->execute([$status, $json, $causalTime, $causalTime, $actionId]);
+            $this->transfers->finish((int) $transfer['id'], $status, $result, $causalTime);
+            $this->construction->finishAction($actionId, $status, $result, $causalTime);
         });
     }
 }

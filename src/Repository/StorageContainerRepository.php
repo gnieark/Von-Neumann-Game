@@ -6,6 +6,7 @@ namespace VonNeumannGame\Repository;
 
 use PDO;
 use PDOException;
+use VonNeumannGame\Database\StorageTransaction;
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\StorageContainer;
@@ -199,6 +200,58 @@ final class StorageContainerRepository
                 'updated_at' => $now,
             ]);
         }
+    }
+
+    /**
+     * Loads the ordered stock once, computes the allocation in memory, then applies one
+     * conditional resource update. The whole allocation rolls back if any row changed.
+     */
+    public function consumeAvailableResource(int $probeId, string $resourceType, float $amount, ?int $onlyContainerId = null): float
+    {
+        $amount = round(max(0.0, $amount), 4);
+        if ($amount <= 0.0) { return 0.0; }
+        return (new StorageTransaction($this->pdo))->run(function () use ($probeId, $resourceType, $amount, $onlyContainerId): float {
+            $mysql = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql';
+            $sql = 'SELECT c.id AS container_id,ROUND(r.amount-r.reserved_amount,4) AS available
+                FROM storage_containers c JOIN storage_container_resources r ON r.container_id=c.id
+                WHERE c.probe_id=? AND r.resource_type=?' . ($onlyContainerId === null ? '' : ' AND c.id=?') .
+                ' ORDER BY c.sort_order,c.id' . ($mysql ? ' FOR UPDATE' : '');
+            $query = $this->pdo->prepare($sql);
+            $query->execute([$probeId, $resourceType, ...($onlyContainerId === null ? [] : [$onlyContainerId])]);
+            $remaining = $amount;
+            $debits = [];
+            foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $available = round(max(0.0, (float) $row['available']), 4);
+                $taken = round(min($available, $remaining), 4);
+                if ($taken > 0.0) { $debits[(int) $row['container_id']] = $taken; }
+                $remaining = round($remaining - $taken, 4);
+                if ($remaining <= 0.00001) { break; }
+            }
+            if ($debits === []) { return 0.0; }
+
+            foreach (array_chunk($debits, 200, true) as $chunk) {
+                $case = []; $guards = []; $parameters = [];
+                foreach ($chunk as $containerId => $taken) {
+                    $case[] = 'WHEN ? THEN CAST(? AS DECIMAL(20,4))';
+                    array_push($parameters, $containerId, $taken);
+                }
+                $parameters[] = gmdate('c');
+                $parameters[] = $resourceType;
+                foreach ($chunk as $containerId => $taken) {
+                    $guards[] = '(container_id=? AND ROUND(amount-reserved_amount,4)>=CAST(? AS DECIMAL(20,4)))';
+                    array_push($parameters, $containerId, $taken);
+                }
+                $update = $this->pdo->prepare('UPDATE storage_container_resources SET amount=ROUND(amount-(CASE container_id ' . implode(' ', $case) . ' ELSE 0 END),4),updated_at=? WHERE resource_type=? AND (' . implode(' OR ', $guards) . ')');
+                $update->execute($parameters);
+                if ($update->rowCount() !== count($chunk)) { throw new \VonNeumannGame\Service\MannyActionException(409, 'storage_reserved', 'Resource stock changed concurrently.'); }
+
+                $ids = array_keys($chunk);
+                $marks = implode(',', array_fill(0, count($ids), '?'));
+                $this->pdo->prepare("UPDATE storage_containers SET storage_version=storage_version+1 WHERE id IN ($marks)")->execute($ids);
+                $this->pdo->prepare("DELETE FROM storage_container_resources WHERE resource_type=? AND amount<=0 AND reserved_amount<=0 AND container_id IN ($marks)")->execute([$resourceType, ...$ids]);
+            }
+            return round($amount - max(0.0, $remaining), 4);
+        });
     }
 
     public function delete(StorageContainer $container): void

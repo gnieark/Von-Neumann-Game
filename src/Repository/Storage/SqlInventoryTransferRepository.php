@@ -2,13 +2,14 @@
 
 declare(strict_types=1);
 
-namespace VonNeumannGame\Service\Storage;
+namespace VonNeumannGame\Repository\Storage;
 
 use PDO;
 use VonNeumannGame\Service\OthersActionException;
+use VonNeumannGame\Service\Storage\InventoryTransferPort;
 
 /** Closed SQL inventory adapters. The caller holds their root locks. */
-final class SqlInventoryTransferPort implements InventoryTransferPort
+final class SqlInventoryTransferRepository implements InventoryTransferPort
 {
     private readonly string $resourcesTable;
     private readonly string $itemsTable;

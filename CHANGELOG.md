@@ -2,6 +2,17 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-22
+
+### Changed
+
+- Stockages de secteur : extraction de la persistance des transferts, réservations, inventaires, effets et diffusions dans des repositories dédiés. Le gestionnaire de transaction ne connaît plus les tables métier ; l’ordre des verrous, les transitions conditionnelles et les unités atomiques restent communs aux commandes, workers et interruptions. Aucun changement du contrat API.
+- Consommation des ressources d’une sonde : chargement groupé des stocks disponibles et débits conditionnels par lots de 200 conteneurs. Le parcours complet supprime les lectures par conteneur et borne désormais son coût SQLite à `3 + 3 × ceil(N / 200)` requêtes.
+
+### Fixed
+
+- Reprises des effets et diffusions de stockage : la persistance des tentatives, curseurs, livraisons et acquittements est isolée des services, avec conservation des intentions avant publication JSON et du rejeu idempotent après une coupure.
+
 ## 2026-09-21
 
 ### Fixed

@@ -6,6 +6,7 @@ namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Database\StorageTransaction;
+use VonNeumannGame\Repository\Storage\StorageLockRepository;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Domain\ScheduledEvent;
 use VonNeumannGame\Domain\ResourceComposition;
@@ -70,8 +71,9 @@ final class OthersService
     public function launchOthersMissile(array $ship, array $payload): array
     {
         $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        return $transaction->run(function () use ($transaction, $ship, $payload): array {
-            $transaction->lock('ship', (int) $ship['id']);
+        $locks = new StorageLockRepository($this->others->pdo());
+        return $transaction->run(function () use ($locks, $ship, $payload): array {
+            $locks->lock('ship', (int) $ship['id']);
             $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
             return $this->launchOthersMissileLocked($current, $payload);
         });
@@ -319,11 +321,12 @@ final class OthersService
     public function createInventoryTransfer(array $source, array $payload): array
     {
         $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        return $transaction->run(function () use ($transaction, $source, $payload): array {
+        $locks = new StorageLockRepository($this->others->pdo());
+        return $transaction->run(function () use ($locks, $source, $payload): array {
             $target = is_string($payload['targetShipId'] ?? null) ? $this->others->findShipByPublicId($payload['targetShipId']) : null;
             $ids = array_unique([(int) $source['id'], (int) ($target['id'] ?? $source['id'])]);
             sort($ids, SORT_NUMERIC);
-            foreach ($ids as $id) { $transaction->lock('ship', $id); }
+            foreach ($ids as $id) { $locks->lock('ship', $id); }
             $source = $this->others->findShipByPublicId($source['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
             return $this->createInventoryTransferLocked($source, $payload);
         });
@@ -414,8 +417,9 @@ final class OthersService
     public function startHarvest(array $ship, array $payload): array
     {
         $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        return $transaction->run(function () use ($transaction, $ship, $payload): array {
-            $transaction->lock('ship', (int) $ship['id']);
+        $locks = new StorageLockRepository($this->others->pdo());
+        return $transaction->run(function () use ($locks, $ship, $payload): array {
+            $locks->lock('ship', (int) $ship['id']);
             $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
             return $this->startHarvestLocked($current, $payload);
         });
@@ -477,8 +481,9 @@ final class OthersService
     public function startCraft(array $ship, array $payload): array
     {
         $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        return $transaction->run(function () use ($transaction, $ship, $payload): array {
-            $transaction->lock('ship', (int) $ship['id']);
+        $locks = new StorageLockRepository($this->others->pdo());
+        return $transaction->run(function () use ($locks, $ship, $payload): array {
+            $locks->lock('ship', (int) $ship['id']);
             $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
             return $this->startCraftLocked($current, $payload);
         });
@@ -560,12 +565,13 @@ final class OthersService
             throw new OthersActionException(400, 'bad_request', 'integrityPercent must be a positive whole number of integrity points.');
         }
         $transaction = new StorageTransaction($this->others->pdo());
-        return $transaction->run(function () use ($transaction, $ship, $auxiliary, $percent): array {
-            $current = $transaction->lock('ship', (int) $ship['id']);
+        $locks = new StorageLockRepository($this->others->pdo());
+        return $transaction->run(function () use ($locks, $ship, $auxiliary, $percent): array {
+            $current = $locks->lock('ship', (int) $ship['id']);
             if ($current === null || $current['destroyed_at'] !== null || $current['status'] === 'removed') {
                 throw new OthersActionException(404, 'others_ship_not_found', 'Others ship not found.');
             }
-            $actor = $transaction->lock('auxiliary', (int) $auxiliary['id']);
+            $actor = $locks->lock('auxiliary', (int) $auxiliary['id']);
             if ($actor === null || $actor['destroyed_at'] !== null || (int) $actor['ship_id'] !== (int) $current['id']) {
                 throw new OthersActionException(404, 'others_auxiliary_not_found', 'Others auxiliary not found.');
             }
@@ -598,14 +604,15 @@ final class OthersService
     {
         $pdo = $this->others->pdo();
         $transaction = new StorageTransaction($pdo);
-        $transaction->run(function () use ($transaction, $pdo, $actionId, $runAt): void {
+        $locks = new StorageLockRepository($pdo);
+        $transaction->run(function () use ($locks, $pdo, $actionId, $runAt): void {
             $query = $pdo->prepare('SELECT ship_id, auxiliary_id FROM others_actions WHERE id = ?');
             $query->execute([$actionId]);
             $ids = $query->fetch();
             if (!$ids) { return; }
-            $ship = $transaction->lock('ship', (int) $ids['ship_id']);
-            $actor = $ids['auxiliary_id'] === null ? null : $transaction->lock('auxiliary', (int) $ids['auxiliary_id']);
-            $action = $transaction->lock('action', $actionId);
+            $ship = $locks->lock('ship', (int) $ids['ship_id']);
+            $actor = $ids['auxiliary_id'] === null ? null : $locks->lock('auxiliary', (int) $ids['auxiliary_id']);
+            $action = $locks->lock('action', $actionId);
             if ($action === null || $action['status'] !== 'queued' || new \DateTimeImmutable($runAt) < new \DateTimeImmutable($action['ends_at'])) { return; }
             if ($ship === null || $ship['destroyed_at'] !== null || $ship['status'] === 'removed'
                 || $actor === null || $actor['destroyed_at'] !== null || (int) $actor['current_action_id'] !== $actionId) {
