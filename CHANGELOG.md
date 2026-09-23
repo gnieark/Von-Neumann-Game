@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Largage d’un conteneur contenant une archive biologique dans le secteur d’origine d’une mission Oracle : la planète et le conteneur sont enregistrés ensemble, sans conflit de révision qui laisse le Manny bloqué à 100 %. Aucun changement du contrat API.
+- Script `scripts/one-shot-scripts/requeue-failed-oracle-container-drop.php` pour remettre en file, après déploiement du correctif, un largage Oracle resté en échec avec ce conflit ; simulation par défaut et vérifications de l’événement, de la mission et de l’absence de conteneur livré.
 - API **v138** : documentation du corps JSON obligatoire de `POST /api/others/ships/{shipId}/harvest`, avec les champs requis `targetObjectId` et `auxiliaryCount` (entier supérieur ou égal à 1), leurs descriptions et un exemple. Le comportement de l’endpoint reste inchangé.
 
 ## 2026-09-21

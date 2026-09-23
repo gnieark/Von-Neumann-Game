@@ -7850,12 +7850,13 @@ if ($failedOracleProbe !== null) {
         $players,
         $damageWarnings,
     );
-    $saveSectorFixture(new SectorContent($failedOracleSector, [$failedOraclePlanet]));
-    $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
     $thresholdPlanet = new Planet('oracle-threshold-planet', 'Barely unsuitable', 'terrestrial', 1.0, 1.0, true, 0.5, ['water']);
+    $saveSectorFixture(new SectorContent($failedOracleSector, [$failedOraclePlanet, $thresholdPlanet]));
+    $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
+    $failedOracleDropSector = $sectorService->getOrCreateSector($failedOracleSector);
     $failedOracleMissionService->handleOracleBiologicalArchiveDrop(
         $failedOracleProbe,
-        new SectorContent($failedOracleProbe->currentSector, [$thresholdPlanet]),
+        $failedOracleDropSector,
         $thresholdPlanet,
         $failedOraclePlayer->id,
         'oracle-invalid-drop',
@@ -7864,6 +7865,7 @@ if ($failedOracleProbe !== null) {
             'type' => ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
         ]],
     );
+    $sectorService->saveSector($failedOracleDropSector);
     $failedOracleMission = $missions->findByUidForPlayer($failedOraclePlayer->id, (string) $failedOracleMission?->uid);
     $test->assertEquals(Mission::STATUS_FAILED, $failedOracleMission?->status, 'Oracle fails when archives are dropped on a planet at the strict habitability threshold');
     $failedOracleOriginAfterFailure = $sectorRepository->load($failedOracleSector)->findObjectById($failedOraclePlanet->getId());
