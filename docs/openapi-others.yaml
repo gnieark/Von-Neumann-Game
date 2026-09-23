@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '137'
+  version: '138'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -1008,6 +1008,27 @@ paths:
         and inventoryEce.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        description: Target planet and number of auxiliaries to deploy for the harvest.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - targetObjectId
+              - auxiliaryCount
+              properties:
+                targetObjectId:
+                  type: string
+                  description: Identifier of the target planet in the coordinator ship's current sector.
+                auxiliaryCount:
+                  type: integer
+                  minimum: 1
+                  description: Number of available auxiliaries embarked on the coordinator ship to deploy. Reserves 2 ECE of inventory capacity per auxiliary.
+            example:
+              targetObjectId: planet_123
+              auxiliaryCount: 10
       responses:
         '202':
           "$ref": "#/components/responses/Accepted"

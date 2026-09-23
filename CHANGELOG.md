@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-23
+
+### Fixed
+
+- API **v138** : documentation du corps JSON obligatoire de `POST /api/others/ships/{shipId}/harvest`, avec les champs requis `targetObjectId` et `auxiliaryCount` (entier supérieur ou égal à 1), leurs descriptions et un exemple. Le comportement de l’endpoint reste inchangé.
+
 ## 2026-09-21
 
 ### Fixed
