@@ -551,7 +551,7 @@ final class MissionService
         $isDifferentPlanet = $planet->getId() !== (string) ($mission->metadata['planetId'] ?? '');
         $isHabitableEnough = $planet->getHabitabilityScore() > $minimumHabitability;
         if (!$isDifferentPlanet || !$isHabitableEnough) {
-            $this->removeIntelligentLifeFromOraclePlanet($mission);
+            $this->removeIntelligentLifeFromOraclePlanet($mission, $sector);
             $this->missions->markFailed($mission);
             $this->alerts?->createMannyReportAlert(
                 $probe->id,
@@ -588,7 +588,7 @@ final class MissionService
         return ['delivered' => $delivered, 'status' => $mission->status];
     }
 
-    private function removeIntelligentLifeFromOraclePlanet(Mission $mission): void
+    private function removeIntelligentLifeFromOraclePlanet(Mission $mission, SectorContent $dropSector): void
     {
         if ($this->sectors === null) {
             return;
@@ -600,11 +600,13 @@ final class MissionService
             return;
         }
 
-        $sector = $this->sectors->getOrCreateSector(new SectorCoordinates(
+        $originCoordinates = new SectorCoordinates(
             (int) $sectorData['x'],
             (int) $sectorData['y'],
             (int) $sectorData['z'],
-        ));
+        );
+        $sameSector = $dropSector->getCoordinates()->equals($originCoordinates);
+        $sector = $sameSector ? $dropSector : $this->sectors->getOrCreateSector($originCoordinates);
         $planet = $sector->findObjectById($planetId);
         if (!$planet instanceof Planet || !$planet->hasIntelligentLife()) {
             return;
@@ -612,7 +614,7 @@ final class MissionService
 
         $planetData = $planet->toArray();
         $planetData['intelligentLife'] = false;
-        if ($sector->replaceObject(Planet::fromArray($planetData))) {
+        if ($sector->replaceObject(Planet::fromArray($planetData)) && !$sameSector) {
             $this->sectors->saveSector($sector);
         }
     }

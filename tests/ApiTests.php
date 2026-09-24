@@ -600,6 +600,12 @@ $test->assert(
 $othersInventoryTransferCreateOperation = is_array($openApiOthersDocument)
     ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/inventory-transfers']['post'] ?? null)
     : null;
+$othersJettisonOperation = is_array($openApiOthersDocument)
+    ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/inventory/jettisons']['post'] ?? null)
+    : null;
+$test->assertEquals('#/components/schemas/OthersInventoryJettisonRequest', $othersJettisonOperation['requestBody']['content']['application/json']['schema']['$ref'] ?? null, 'Others OpenAPI documents both inventory jettison request variants');
+$test->assertEquals('#/components/schemas/OthersInventoryJettisonResponse', $othersJettisonOperation['responses']['200']['content']['application/json']['schema']['$ref'] ?? null, 'Others OpenAPI documents the immediate jettison response');
+$test->assertEquals('kind', $openApiOthersDocument['components']['schemas']['OthersInventoryJettisonRequest']['discriminator']['propertyName'] ?? null, 'Others inventory jettison request uses its canonical kind discriminator');
 $othersCraftOperation = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/crafts']['post'] ?? [];
 $test->assertEquals(
     ['recipeId', 'assistantAuxiliaryId'],
@@ -3290,6 +3296,64 @@ $pdo->prepare('UPDATE others_ships SET sector_x=:x,sector_y=:y,sector_z=:z,deute
 $pdo->prepare('UPDATE others_ships SET deuterium_stock=10 WHERE id=:id')->execute(['id' => (int) $othersVictimShip['id']]);
 $othersStandardShip = $others->findShipByPublicId((string) $othersStandardShip['public_id']) ?? throw new RuntimeException('Others standard ship not found.');
 
+$jettisonPath = '/api/others/ships/' . rawurlencode((string) $othersStandardShip['public_id']) . '/inventory/jettisons';
+$pdo->prepare("UPDATE others_inventory_resources SET amount=1,reserved_amount=0.25,updated_at=:now WHERE ship_id=:ship_id AND resource_type='metals'")
+    ->execute(['ship_id' => (int) $othersStandardShip['id'], 'now' => gmdate('c')]);
+$resourceJettisonBody = json_encode(['kind' => 'resource', 'resourceType' => 'metals', 'amount' => 0.5], JSON_THROW_ON_ERROR);
+$resourceJettisonHeaders = $othersAlertHeaders + ['Idempotency-Key' => 'others-jettison-metals-test'];
+$resourceJettison = $kernel->handle('POST', $jettisonPath, $resourceJettisonHeaders, $resourceJettisonBody);
+$test->assertEquals(200, $resourceJettison->status, 'Others resource jettison succeeds immediately');
+$test->assertEquals(['kind' => 'resource', 'resourceType' => 'metals', 'amount' => 0.5], $resourceJettison->body['jettisoned'] ?? null, 'Others resource jettison reports the exact removed ECE');
+$test->assertEquals(['amount' => 0.5, 'reserved' => 0.25], $resourceJettison->body['inventory']['resources']['metals'] ?? null, 'Others resource jettison preserves reserved stock');
+$resourceJettisonReplay = $kernel->handle('POST', $jettisonPath, $resourceJettisonHeaders, $resourceJettisonBody);
+$test->assertEquals(json_decode(json_encode($resourceJettison->body, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR), $resourceJettisonReplay->body, 'Others resource jettison idempotency replay returns the original JSON response');
+$test->assertEquals(0.5, $others->inventory((int) $othersStandardShip['id'])['resources']['metals']['amount'] ?? null, 'Others resource jettison replay does not remove cargo twice');
+$resourceJettisonUnavailable = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, json_encode(['kind' => 'resource', 'resourceType' => 'metals', 'amount' => 0.3], JSON_THROW_ON_ERROR));
+$test->assertEquals(422, $resourceJettisonUnavailable->status, 'Others jettison cannot consume reserved resource stock');
+$test->assertEquals('insufficient_resources', $resourceJettisonUnavailable->body['error']['code'] ?? null, 'Others reserved resource refusal has a stable code');
+$resourceJettisonPrecision = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, json_encode(['kind' => 'resource', 'resourceType' => 'metals', 'amount' => 0.12345], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $resourceJettisonPrecision->status, 'Others jettison rejects resource amounts beyond ECE precision');
+$resourceJettisonExtra = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, json_encode(['kind' => 'resource', 'resourceType' => 'metals', 'amount' => 0.1, 'itemId' => 'unexpected'], JSON_THROW_ON_ERROR));
+$test->assertEquals(400, $resourceJettisonExtra->status, 'Others jettison rejects mixed resource and item fields');
+$pdo->prepare("UPDATE others_inventory_resources SET amount=0.2 WHERE ship_id=:ship_id AND resource_type='deuterium'")
+    ->execute(['ship_id' => (int) $othersStandardShip['id']]);
+$cargoDeuteriumJettison = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, json_encode(['kind' => 'resource', 'resourceType' => 'deuterium', 'amount' => 0.1], JSON_THROW_ON_ERROR));
+$test->assertEquals(200, $cargoDeuteriumJettison->status, 'Others jettison accepts deuterium carried as inventory cargo');
+$test->assertEquals(0.1, $cargoDeuteriumJettison->body['inventory']['resources']['deuterium']['amount'] ?? null, 'Others cargo deuterium jettison updates only inventory stock');
+$test->assertEquals(10.0, (float) ($others->findShipByPublicId((string) $othersStandardShip['public_id'])['deuterium_stock'] ?? -1), 'Others cargo deuterium jettison leaves propulsion fuel untouched');
+
+$jettisonMissileId = OthersRepository::publicId('item');
+$pdo->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,NULL,:now,:now)")
+    ->execute(['public_id' => $jettisonMissileId, 'ship_id' => (int) $othersStandardShip['id'], 'now' => gmdate('c')]);
+$jettisonSector = $othersHome->add(1, 1, 0);
+$driftingMissileObjectId = SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE);
+$driftingBefore = $sectorService->getOrCreateSector($jettisonSector)->findObjectById($driftingMissileObjectId);
+$driftingBeforeCount = $driftingBefore instanceof SectorDriftingItem ? $driftingBefore->getQuantity() : 0;
+$itemJettisonBody = json_encode(['kind' => 'item', 'itemId' => $jettisonMissileId], JSON_THROW_ON_ERROR);
+$itemJettisonHeaders = $othersAlertHeaders + ['Idempotency-Key' => 'others-jettison-item-test'];
+$pdo->prepare('UPDATE others_inventory_items SET reserved_action_id=999999 WHERE public_id=:id')->execute(['id' => $jettisonMissileId]);
+$reservedItemJettison = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, $itemJettisonBody);
+$test->assertEquals(409, $reservedItemJettison->status, 'Others jettison refuses a reserved missile');
+$test->assertEquals('inventory_changed', $reservedItemJettison->body['error']['code'] ?? null, 'Others reserved missile refusal has a stable code');
+$pdo->prepare('UPDATE others_inventory_items SET reserved_action_id=NULL WHERE public_id=:id')->execute(['id' => $jettisonMissileId]);
+$itemJettison = $kernel->handle('POST', $jettisonPath, $itemJettisonHeaders, $itemJettisonBody);
+$test->assertEquals(200, $itemJettison->status, 'Others missile jettison succeeds immediately');
+$test->assertEquals($driftingMissileObjectId, $itemJettison->body['jettisoned']['objectId'] ?? null, 'Others missile jettison reports the drifting item');
+$test->assertEquals($driftingBeforeCount + 1, $itemJettison->body['jettisoned']['driftingQuantity'] ?? null, 'Others missile jettison increases the sector stack by one');
+$test->assertEquals(0.05, $itemJettison->body['jettisoned']['containerSpaceEce'] ?? null, 'Others missile becomes a recoverable probe-sized drifting missile');
+$test->assertEquals([], $itemJettison->body['inventory']['items'] ?? null, 'Others missile jettison removes the item from ship inventory');
+$itemJettisonReplay = $kernel->handle('POST', $jettisonPath, $itemJettisonHeaders, $itemJettisonBody);
+$test->assertEquals(json_decode(json_encode($itemJettison->body, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR), $itemJettisonReplay->body, 'Others missile jettison idempotency replay returns the original JSON response');
+$driftingAfter = $sectorRepository->load($jettisonSector)->findObjectById($driftingMissileObjectId);
+$test->assertEquals($driftingBeforeCount + 1, $driftingAfter instanceof SectorDriftingItem ? $driftingAfter->getQuantity() : null, 'Others missile jettison replay does not duplicate the drifting item');
+$missingJettisonItem = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, $itemJettisonBody);
+$test->assertEquals(404, $missingJettisonItem->status, 'Others missile jettison cannot consume a missing item');
+$test->assertEquals(403, $kernel->handle('POST', $jettisonPath, $multiProbeHeaders, $itemJettisonBody)->status, 'Others jettison requires Others control');
+$pdo->prepare("UPDATE others_ships SET status='transit' WHERE id=:id")->execute(['id' => (int) $othersStandardShip['id']]);
+$transitJettison = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, $resourceJettisonBody);
+$test->assertEquals(409, $transitJettison->status, 'Others ship in transit cannot jettison inventory');
+$pdo->prepare("UPDATE others_ships SET status='inactive' WHERE id=:id")->execute(['id' => (int) $othersStandardShip['id']]);
+
 $localOthersSectorScan = $kernel->handle(
     'GET',
     '/api/others/sector?' . http_build_query(['shipId' => $othersVictimShip['public_id'], 'x' => 0, 'y' => 0, 'z' => 0]),
@@ -4560,7 +4624,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(137, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(139, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -7855,12 +7919,13 @@ if ($failedOracleProbe !== null) {
         $players,
         $damageWarnings,
     );
-    $saveSectorFixture(new SectorContent($failedOracleSector, [$failedOraclePlanet]));
-    $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
     $thresholdPlanet = new Planet('oracle-threshold-planet', 'Barely unsuitable', 'terrestrial', 1.0, 1.0, true, 0.5, ['water']);
+    $saveSectorFixture(new SectorContent($failedOracleSector, [$failedOraclePlanet, $thresholdPlanet]));
+    $failedOracleMission = $failedOracleMissionService->startIntelligentLifeScenario($failedOracleProbe, $failedOracleSector, $failedOraclePlanet);
+    $failedOracleDropSector = $sectorService->getOrCreateSector($failedOracleSector);
     $failedOracleMissionService->handleOracleBiologicalArchiveDrop(
         $failedOracleProbe,
-        new SectorContent($failedOracleProbe->currentSector, [$thresholdPlanet]),
+        $failedOracleDropSector,
         $thresholdPlanet,
         $failedOraclePlayer->id,
         'oracle-invalid-drop',
@@ -7869,6 +7934,7 @@ if ($failedOracleProbe !== null) {
             'type' => ProbeItem::TYPE_BIOLOGICAL_ARCHIVE,
         ]],
     );
+    $sectorService->saveSector($failedOracleDropSector);
     $failedOracleMission = $missions->findByUidForPlayer($failedOraclePlayer->id, (string) $failedOracleMission?->uid);
     $test->assertEquals(Mission::STATUS_FAILED, $failedOracleMission?->status, 'Oracle fails when archives are dropped on a planet at the strict habitability threshold');
     $failedOracleOriginAfterFailure = $sectorRepository->load($failedOracleSector)->findObjectById($failedOraclePlanet->getId());

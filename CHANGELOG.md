@@ -2,6 +2,20 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-24
+
+### Added
+
+- API **v139** : `POST /api/others/ships/{shipId}/inventory/jettisons` permet de larguer une quantité non réservée de ressource (en ECE, y compris le deutérium d’inventaire) ou un missile non réservé. Les ressources sont abandonnées ; le missile devient un objet dérivant récupérable dans le secteur courant. La commande renvoie l’inventaire actualisé, accepte `Idempotency-Key` et refuse les vaisseaux en transit. Le réservoir de propulsion n’est pas concerné.
+
+## 2026-09-23
+
+### Fixed
+
+- Largage d’un conteneur contenant une archive biologique dans le secteur d’origine d’une mission Oracle : la planète et le conteneur sont enregistrés ensemble, sans conflit de révision qui laisse le Manny bloqué à 100 %. Aucun changement du contrat API.
+- Script `scripts/one-shot-scripts/requeue-failed-oracle-container-drop.php` pour remettre en file, après déploiement du correctif, un largage Oracle resté en échec avec ce conflit ; simulation par défaut et vérifications de l’événement, de la mission et de l’absence de conteneur livré.
+- API **v138** : documentation du corps JSON obligatoire de `POST /api/others/ships/{shipId}/harvest`, avec les champs requis `targetObjectId` et `auxiliaryCount` (entier supérieur ou égal à 1), leurs descriptions et un exemple. Le comportement de l’endpoint reste inchangé.
+
 ## 2026-09-22
 
 ### Changed

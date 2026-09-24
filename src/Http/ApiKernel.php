@@ -61,7 +61,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 137;
+    public const API_VERSION = 139;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -160,6 +160,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/tasks$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryBatchResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/(repair|mine|recall|recover-dormant-auxiliary|build-germination-depot|depot-deposits|depot-withdrawals)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryTaskResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->stringParam(2), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory-transfers$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersInventoryTransferCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory/jettisons$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersInventoryJettisonResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/inventory-transfers/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersInventoryTransferResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/transfer-deuterium$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersDeuteriumTransferResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->body)))),
             ApiRoute::regex('#^/api/probe/(\d+)/sector/autonomous-units$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedRoute($ctx->method, ['GET'], $ctx->headers, fn(Player $player): ApiResponse => $this->probeAutonomousUnitsResponse($player, $ctx->intParam(0), $ctx->query))),
@@ -729,6 +730,18 @@ final class ApiKernel
             'resources' => $inventory['resources'],
             'items' => array_map(static fn(array $item): array => ['id' => (string) $item['public_id'], 'type' => (string) $item['type'], 'containerSpaceEce' => (float) $item['container_space']], $inventory['items']),
         ]]);
+    }
+
+    private function othersInventoryJettisonResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        if (!is_array($payload)) { return ApiResponse::error(400, 'bad_request', 'A JSON object is required.'); }
+        $jettisoned = $this->othersService?->jettisonInventory($ship, $payload)
+            ?? throw new \RuntimeException('Others inventory service is unavailable.');
+        $inventory = $this->othersInventoryResponse($player, $shipId)->body['inventory'];
+        return new ApiResponse(200, ['jettisoned' => $jettisoned, 'inventory' => $inventory]);
     }
 
     private function othersInventoryTransferCreateResponse(Player $player, string $sourceShipId, ?string $body): ApiResponse

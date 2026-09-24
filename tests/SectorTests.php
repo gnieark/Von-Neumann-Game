@@ -15,6 +15,7 @@ use VonNeumannGame\Sector\SectorSeedGenerator;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorContentGenerator;
 use VonNeumannGame\Sector\SectorDetachedContainer;
+use VonNeumannGame\Sector\SectorDriftingItem;
 use VonNeumannGame\Sector\SectorFileRepository;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\SectorManny;
@@ -740,6 +741,13 @@ $loadedExisting = $service->getOrCreateSector($coord000);
 $test->assertEquals('loaded', $loadedExisting->getSource(), 'an existing sector is loaded from storage');
 $test->assertCount(13, $service->getCreatedSectorKeys(), 'an existing sector is not regenerated');
 $test->assert($createdOrigin->getCoordinates()->equals($loadedExisting->getCoordinates()), 'loaded sector has the requested coordinates');
+$firstDriftingMissile = $service->addDriftingItem($coord000, 'others-jettison-test-1', 'missile', 'Missile', 0.05);
+$test->assertEquals(1, $firstDriftingMissile->getQuantity(), 'first Others jettison creates a drifting missile');
+$replayedDriftingMissile = $service->addDriftingItem($coord000, 'others-jettison-test-1', 'missile', 'Missile', 0.05);
+$test->assertEquals(1, $replayedDriftingMissile->getQuantity(), 'replaying a sector jettison effect does not duplicate the missile');
+$secondDriftingMissile = $service->addDriftingItem($coord000, 'others-jettison-test-2', 'missile', 'Missile', 0.05);
+$test->assertEquals(2, $secondDriftingMissile->getQuantity(), 'separate Others jettisons accumulate in the drifting missile stack');
+$test->assertEquals(2, $serviceRepository->load($coord000)->findObjectById(SectorDriftingItem::objectIdForItemType('missile'))?->getQuantity(), 'drifting missile stack survives a sector reload');
 
 echo "\n>>> Testing asteroid trajectory calculators\n\n";
 

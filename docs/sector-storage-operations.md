@@ -24,6 +24,14 @@ Une lecture sans verrou sert seulement à trouver une racine. Tout état mutable
 
 La référence S0 exécutait les suites fonctionnelles et de concurrence existantes sans échec. Elle a isolé une anomalie de coût dans la consommation de ressources : le parcours historique effectuait deux lectures initiales puis cinq requêtes par conteneur effectivement débité (`2 + 5N`). Cette anomalie préexistante est corrigée en S3 par le chargement ordonné unique et les écritures conditionnelles groupées décrits plus bas; les autres budgets de référence sont conservés.
 
+## Intégration de main du 24 septembre 2026
+
+La branche `removesqlonmetier` intègre les commits de `main` jusqu’à `7e442a3` : documentation de la récolte Others (v138), correction du largage Oracle et largage d’inventaire Others (v139). Les extractions S0–S4 sont conservées. Le nouveau largage emploie `StorageLockRepository` pour verrouiller le vaisseau ; `StorageTransaction` conserve uniquement son rôle transactionnel. Cette intégration n’ajoute ni format de données ni contrat API à la version 139 de main.
+
+Validation de cette intégration : 4 062 assertions API (dont les budgets du stockage), 196 assertions secteur et 245 tests des contrôleurs Others réussis. Les 25 contrôles de concurrence et de migration passent sur SQLite 3.46.1 et sur MariaDB 10.11.18, cette dernière en isolation `READ-COMMITTED`, avec les tables préfixées du lanceur. La syntaxe des sept fichiers PHP apportés ou modifiés par la fusion est valide.
+
+Le parcours `OthersService::jettisonInventory()` doit être inclus dans O0/O1 (inventaire et persistance) et O4 (effets SQL/JSON). Comme dans main, son largage de missile publie le JSON avant le commit SQL ; le marqueur d’effet évite un ajout répété dans le même secteur, mais ne garantit pas l’absence d’objet publié si SQL est ensuite annulé. Les garanties S4 décrites ici portent sur les intentions durables des transferts de stockage et ne valent pas encore pour ce parcours Others. Sa convergence vers ces intentions et ses scénarios de panne restent à traiter explicitement dans les lots Others.
+
 ## Bascule d’une installation existante
 
 1. Suspendre les commandes de logistique et arrêter les workers. Sauvegarder la base SQL complète et le répertoire `universePath` du fichier `config/app.json`, ainsi que la version du code.
