@@ -952,7 +952,7 @@ $test->assertEquals(
 );
 $test->assert(!is_file($root . '/docs/openapi-others.json'), 'legacy Others JSON OpenAPI document is removed');
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
-$othersServiceSource = file_get_contents($root . '/src/Service/OthersService.php');
+$othersServiceSource = implode('\n', array_map('file_get_contents', glob($root . '/src/Repository/Others/*Repository.php')));
 $mannyTaskRefresherSource = file_get_contents($root . '/src/Service/Manny/MannyTaskRefresher.php');
 $probeMovementServiceSource = file_get_contents($root . '/src/Service/ProbeMovementService.php');
 $probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
@@ -2636,7 +2636,7 @@ $saveSectorFixture = static function (SectorContent $content) use ($sectorReposi
     $sectorRepository->save($content);
 };
 $depotRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($pdo);
-$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers, germinationDepots: $depotRepository);
+$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers, germinationDepots: $depotRepository, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo));
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $storageTransaction = new \VonNeumannGame\Database\StorageTransaction($pdo);
 $storageLocks = new \VonNeumannGame\Repository\Storage\StorageLockRepository($pdo);
@@ -2649,7 +2649,7 @@ $germinationDepots = new \VonNeumannGame\Service\GerminationDepotService($others
 $storageTransfers = new \VonNeumannGame\Service\SectorStorageTransferService($storageTransaction, $storageLocks, $storageTransferRepository, $inventoryTransfers, $depotRepository, $germinationDepots);
 $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, 7, $mannies, $apiKeys, $sectorService);
 $missionService = new MissionService($missions, $messages, [], 'api-test-world', $sectorService, $probes, $players);
-$reinstantiation = new ProbeReinstantiationService($pdo, $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings);
+$reinstantiation = new ProbeReinstantiationService(new \VonNeumannGame\Repository\ProbeReinstantiationRepository($pdo), $players, $probes, $mannies, $visitedSectors, $storage, $sectorService, $damageWarnings, sectorChanges: new \VonNeumannGame\Service\OthersSectorService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), new \VonNeumannGame\Service\SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), new \VonNeumannGame\Repository\ScheduledEventRepository($pdo), $sectorService), $sectorService));
 $movementService = new ProbeMovementService($probes, $movements, $visitedSectors, $scheduledEvents, $sectorService, mannies: $mannies, storage: $storage, damageWarnings: $damageWarnings, missions: $missionService, improvements: $probeImprovements, reinstantiation: $reinstantiation, scut: $scut, worldSeed: 'api-test-world', sectorStorageTransfers: $mannyStorageTransfers);
 $bookmarkService = new WaypointBookmarkService($items, $sectorService);
 $mannyService = new MannyService($mannies, $probes, $sectorService, $items, $storage, bookmarks: $bookmarkService, missions: $missionService, scut: $scut, alerts: $damageWarnings, improvements: $probeImprovements, scheduledEvents: $scheduledEvents, movements: $movements, asteroidTrajectories: $asteroidTrajectories, germinationDepots: $germinationDepots, sectorStorageTransfers: $mannyStorageTransfers);
@@ -2669,7 +2669,7 @@ $asteroidTrajectoryService = new AsteroidTrajectoryService(
 $othersService = new OthersService(
     $others,
     $scheduledEvents,
-    $reinstantiation,
+    $reinstantiation, new \VonNeumannGame\Repository\Others\OthersPersistence($pdo),
     json_decode((string) file_get_contents($root . '/config/gameplay.json'), true, 512, JSON_THROW_ON_ERROR),
     sectors: $sectorService,
     probes: $probes,
@@ -2761,7 +2761,7 @@ $kernel = new ApiKernel($auth, $players, $probes, new SectorObservationService(
     mannies: $mannies,
     asteroidTrajectories: $asteroidTrajectories,
     asteroidTrajectoryService: $asteroidTrajectoryService,
-), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService, sectorStorageTransfers: $mannyStorageTransfers, probeCommands: new \VonNeumannGame\Repository\ProbeCommandRepository($pdo), othersIdempotency: new \VonNeumannGame\Repository\OthersIdempotencyRepository($pdo));
+), $movementService, $visitedSectors, $mannyService, $items, $storage, $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut, improvements: $probeImprovements, asteroidTrajectories: $asteroidTrajectoryService, others: $others, othersService: $othersService, sectorStorageTransfers: $mannyStorageTransfers, probeCommands: new \VonNeumannGame\Repository\ProbeCommandRepository($pdo), othersCommands: new \VonNeumannGame\Service\OthersCommandService(new \VonNeumannGame\Database\StorageTransaction($pdo), new \VonNeumannGame\Repository\OthersIdempotencyRepository($pdo)));
 
 $portableReservationSector = new SectorCoordinates(210, 10, 0);
 $saveSectorFixture(new SectorContent($portableReservationSector, [
@@ -3980,12 +3980,10 @@ $replayedWreckMissiles = $wreckSectorAfterReplay->findObjectById(SectorDriftingI
 $test->assertEquals(1, count($replayedWrecks), 'replaying mothership damage does not duplicate its wreck');
 $test->assertEquals(2, $replayedWreckMissiles instanceof SectorDriftingItem ? $replayedWreckMissiles->getQuantity() : null, 'replaying mothership damage does not duplicate drifting missiles');
 $test->assertEquals($wreckCounterBefore + 1, $players->findById($multiProbePlayer->id)?->othersMothershipsDestroyed, 'replaying mothership damage does not duplicate victory counters');
-$wreckOperationId = 'xstore-mothership-wreck-' . substr(hash('sha256', (string) $wreckMothership['public_id']), 0, 20);
-$wreckOperationStatement = $pdo->prepare('SELECT operation_type,sector_applied,sql_applied,status FROM others_cross_store_operations WHERE public_id=:id');
-$wreckOperationStatement->execute(['id' => $wreckOperationId]);
-$wreckOperation = $wreckOperationStatement->fetch(PDO::FETCH_ASSOC);
+$wreckOperationStatement = $pdo->prepare("SELECT COUNT(*) FROM sector_effects WHERE effect_type='patch_objects' AND status='applied' AND payload_json LIKE ?");
+$wreckOperationStatement->execute(['%' . $wreckObjectId . '%']);
+$test->assertEquals(1, (int) $wreckOperationStatement->fetchColumn(), 'mothership wreck has one committed and applied sector intention');
 $wreckOperationStatement->closeCursor();
-$test->assertEquals(['operation_type' => 'mothership_wreck', 'sector_applied' => 1, 'sql_applied' => 1, 'status' => 'succeeded'], $wreckOperation ?: null, 'mothership wreck journal reaches its final cross-store state');
 
 $othersMissileVictim = $others->createStandardShip($othersVictimShip);
 $pdo->prepare('UPDATE others_ships SET integrity=10 WHERE id=:id')->execute(['id' => (int) $othersMissileVictim['id']]);
@@ -4669,11 +4667,11 @@ $multiScanVisited = new VisitedSectorRepository($multiScanPdo);
 $multiScanDetachedStorageContainers = new DetachedStorageContainerRepository($multiScanPdo);
 $multiScanUniversePath = $tmp . DIRECTORY_SEPARATOR . 'multi-scan-universe';
 $multiScanSectorRepository = new SectorFileRepository($multiScanUniversePath);
-$multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world', detachedContainers: $multiScanDetachedStorageContainers);
+$multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world', detachedContainers: $multiScanDetachedStorageContainers, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($multiScanPdo));
 $multiScanStorage = new ProbeStorageService($multiScanStorageContainers, $multiScanItems, $multiScanMannies, $multiScanProbes, improvements: $multiScanProbeImprovements);
 $multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $multiScanProbes, $multiScanSessions, $multiScanVisited, $multiScanStorage, 7, $multiScanMannies, $multiScanApiKeys, $multiScanSectorService);
 $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMessages, [], 'multi-scan-world', $multiScanSectorService, $multiScanProbes, $multiScanPlayers);
-$multiScanReinstantiation = new ProbeReinstantiationService($multiScanPdo, $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanStorage, $multiScanSectorService, $multiScanWarnings);
+$multiScanReinstantiation = new ProbeReinstantiationService(new \VonNeumannGame\Repository\ProbeReinstantiationRepository($multiScanPdo), $multiScanPlayers, $multiScanProbes, $multiScanMannies, $multiScanVisited, $multiScanStorage, $multiScanSectorService, $multiScanWarnings, sectorChanges: new \VonNeumannGame\Service\OthersSectorService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($multiScanPdo), new \VonNeumannGame\Service\SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($multiScanPdo), new \VonNeumannGame\Repository\ScheduledEventRepository($multiScanPdo), $multiScanSectorService), $multiScanSectorService));
 $multiScanMovementService = new ProbeMovementService($multiScanProbes, $multiScanMovements, $multiScanVisited, $multiScanScheduledEvents, $multiScanSectorService, mannies: $multiScanMannies, storage: $multiScanStorage, damageWarnings: $multiScanWarnings, missions: $multiScanMissionService, improvements: $multiScanProbeImprovements, reinstantiation: $multiScanReinstantiation, scut: $multiScanScut, worldSeed: 'multi-scan-world');
 $multiScanBookmarkService = new WaypointBookmarkService($multiScanItems, $multiScanSectorService);
 $multiScanMannyService = new MannyService($multiScanMannies, $multiScanProbes, $multiScanSectorService, $multiScanItems, $multiScanStorage, bookmarks: $multiScanBookmarkService, missions: $multiScanMissionService, scut: $multiScanScut, alerts: $multiScanWarnings, improvements: $multiScanProbeImprovements, scheduledEvents: $multiScanScheduledEvents, movements: $multiScanMovements);
@@ -12179,10 +12177,16 @@ $reservationRepairCheckPdo = null;
 
 require __DIR__ . '/Support/DormantContainerTests.php';
 require __DIR__ . '/Support/TransferLoadPlannerTests.php';
+require_once __DIR__ . '/Support/PersistenceArchitecture.php';
+$test->assertEquals([], PersistenceArchitecture::audit($root), 'migrated persistence boundaries pass the PHP token architecture guard');
+$test->assert(PersistenceArchitecture::violations('<?php use PDO as Connection; new Connection();', false) !== [], 'architecture guard rejects aliased PDO dependencies');
+$test->assert(PersistenceArchitecture::violations('<?php class R { public function run($input) { return $this->db->prepare($input); } }', true) !== [], 'architecture guard rejects arbitrary SQL independent of parameter name');
+$test->assertEquals([], PersistenceArchitecture::violations('<?php // $pdo->query("SELECT * FROM x");', false), 'architecture guard ignores SQL mentioned in comments');
 require __DIR__ . '/Support/StorageBudgetTests.php';
 require __DIR__ . '/Support/GerminationDepotTests.php';
 require __DIR__ . '/Support/SectorStorageHttpTests.php';
 require __DIR__ . '/Support/OthersRepairTests.php';
 require __DIR__ . '/Support/OthersDestructionTests.php';
+require __DIR__ . '/Support/OthersPersistenceTests.php';
 removeDirectory($tmp);
 exit($test->finish());

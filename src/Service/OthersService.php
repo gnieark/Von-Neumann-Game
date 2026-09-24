@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
-use VonNeumannGame\Database\StorageTransaction;
-use VonNeumannGame\Repository\Storage\StorageLockRepository;
 use VonNeumannGame\Service\Manny\RepairTaskHandler;
 use VonNeumannGame\Domain\ScheduledEvent;
 use VonNeumannGame\Domain\ResourceComposition;
@@ -38,6 +36,7 @@ final class OthersService
         'others_auxiliary' => ['duration' => 3600, 'ingredients' => ['metals' => 5.0, 'ice' => 0.5, 'carbon_compounds' => 1.0, 'deuterium' => 0.05], 'outputSpace' => 0.0],
         'missile' => ['duration' => 1800, 'ingredients' => ['metals' => 20.0, 'ice' => 2.0, 'carbon_compounds' => 5.0, 'deuterium' => 1.0], 'outputSpace' => 2.0],
     ];
+    private readonly ?OthersSectorService $sectorChanges;
     private readonly SectorGrid $grid;
     private readonly MovementDurationCalculator $durations;
     private readonly array $movementConfig;
@@ -47,6 +46,7 @@ final class OthersService
         private readonly OthersRepository $others,
         private readonly ScheduledEventRepository $events,
         private readonly ProbeReinstantiationService $reinstantiation,
+        private readonly \VonNeumannGame\Repository\Others\OthersPersistence $persistence,
         array $gameplayConfig = [],
         ?SectorGrid $grid = null,
         ?MovementDurationCalculator $durations = null,
@@ -61,6 +61,7 @@ final class OthersService
         private readonly ?SectorStorageTransferService $storageTransfers = null,
         private readonly ?MannyStorageTransferService $mannyStorageTransfers = null,
     ) {
+        $this->sectorChanges = $sectors === null ? null : new OthersSectorService($persistence->effects, new SectorEffectService($persistence->effects, $events, $sectors), $sectors);
         $this->grid = $grid ?? new SectorGrid();
         $this->gameplayConfig = $gameplayConfig;
         $this->movementConfig = Config::getArray($gameplayConfig, 'movement', $gameplayConfig);
@@ -70,8 +71,8 @@ final class OthersService
     /** @return array{missile:array<string,mixed>,action:array<string,mixed>} */
     public function launchOthersMissile(array $ship, array $payload): array
     {
-        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        $locks = new StorageLockRepository($this->others->pdo());
+        $transaction = $this->persistence->transaction;
+        $locks = $this->persistence->locks;
         return $transaction->run(function () use ($locks, $ship, $payload): array {
             $locks->lock('ship', (int) $ship['id']);
             $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
@@ -94,11 +95,9 @@ final class OthersService
             throw new OthersActionException(404, 'target_not_found', 'An admissible missile target was not found in this sector.');
         }
 
-        return $this->others->transaction(function () use ($ship, $itemId, $target): array {
-            $pdo = $this->others->pdo();
-            $stmt = $pdo->prepare("SELECT * FROM others_inventory_items WHERE ship_id=:ship_id AND public_id=:public_id AND type='missile' AND reserved_action_id IS NULL");
-            $stmt->execute(['ship_id' => (int) $ship['id'], 'public_id' => $itemId]);
-            $item = $stmt->fetch();
+        return $this->persistence->transaction->run(function () use ($ship, $itemId, $target): array {
+            $stmt = $this->persistence->combat->findAvailableMissile(['ship_id' => (int) $ship['id'], 'public_id' => $itemId]);
+            $item = $stmt;
             if (!$item) {
                 throw new OthersActionException(404, 'missile_item_not_found', 'An available missile item was not found in this ship inventory.');
             }
@@ -107,19 +106,18 @@ final class OthersService
             $now = gmdate('c');
             $action = $this->others->createAction($ship, 'missile_launch', 'others_ship', (string) $ship['public_id'], ['targetId' => $target['id'], 'targetKind' => $target['kind']]);
             $missileId = OthersRepository::publicId('missile');
-            $pdo->prepare("INSERT INTO missile_launches (public_id,launcher_kind,launcher_public_id,player_id,probe_id,manny_id,probe_item_id,others_action_id,others_item_id,target_public_id,target_kind,sector_x,sector_y,sector_z,status,projectile_public_id,launch_at,impact_at,result,scheduled_event_id,created_at,updated_at) VALUES (:public_id,'others_ship',:launcher,:player_id,NULL,NULL,NULL,:action_id,:item_id,:target,:kind,:x,:y,:z,'queued',NULL,:launch_at,NULL,NULL,NULL,:created_at,:updated_at)")->execute([
+            $insertedLaunchId = $this->persistence->combat->createOthersLaunch([
                 'public_id' => $missileId, 'launcher' => (string) $ship['public_id'], 'player_id' => (int) $ship['player_id'],
                 'action_id' => (int) $action['id'], 'item_id' => (int) $item['id'], 'target' => $target['id'], 'kind' => $target['kind'],
                 'x' => (int) $ship['sector_x'], 'y' => (int) $ship['sector_y'], 'z' => (int) $ship['sector_z'], 'launch_at' => $now,
                 'created_at' => $now, 'updated_at' => $now,
             ]);
-            $launchId = (int) $pdo->lastInsertId();
-            $reserved = $pdo->prepare('UPDATE others_inventory_items SET reserved_action_id=:action_id,updated_at=:now WHERE id=:id AND reserved_action_id IS NULL');
-            $reserved->execute(['action_id' => (int) $action['id'], 'now' => $now, 'id' => (int) $item['id']]);
-            if ($reserved->rowCount() !== 1) { throw new OthersActionException(409, 'action_conflict', 'The missile item was reserved concurrently.'); }
+            $launchId = (int) $insertedLaunchId;
+            $reserved = $this->persistence->combat->reserveItem(['action_id' => (int) $action['id'], 'now' => $now, 'id' => (int) $item['id']]);
+            if ($reserved !== 1) { throw new OthersActionException(409, 'action_conflict', 'The missile item was reserved concurrently.'); }
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $now, ['expectedStatus' => 'queued']);
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
-            $pdo->prepare('UPDATE missile_launches SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $event->id, 'id' => $launchId]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->combat->attachLaunchEvent(['event_id' => $event->id, 'id' => $launchId]);
             return ['missile' => $this->findMissileForPlayer($missileId, (int) $ship['player_id']) ?? [], 'action' => $this->others->findActionByPublicId((string) $action['public_id']) ?? $action];
         });
     }
@@ -160,26 +158,17 @@ final class OthersService
         if ($manny->currentTask !== null) { throw new OthersActionException(409, 'manny_busy', 'The Manny is already busy.'); }
         $target = $this->resolveMissileTarget($probe->currentSector->getX(), $probe->currentSector->getY(), $probe->currentSector->getZ(), $targetId);
         if ($target === null) { throw new OthersActionException(404, 'target_not_found', 'An admissible missile target was not found in this sector.'); }
-        return $this->others->transaction(function () use ($probe, $playerId, $manny, $itemId, $target): array {
+        return $this->persistence->transaction->run(function () use ($probe, $playerId, $manny, $itemId, $target): array {
             if ($target['kind'] === 'dormant_construct' && !$this->depotService()->canTarget($probe->id, $target['id'], $probe->currentSector)) {
                 throw new OthersActionException(422, 'invalid_missile_target', 'This target cannot be engaged.');
             }
-            $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $launchAt = $now->modify('+1 minute');
-            $lockSql = "SELECT pi.* FROM probe_items pi WHERE pi.probe_id=:probe_id AND pi.type='missile' AND pi.reserved_transfer_id IS NULL AND (pi.fabricator IS NULL OR pi.fabricator<>'others')";
-            $parameters = ['probe_id' => $probe->id];
-            if ($itemId !== null) {
-                $lockSql .= ' AND pi.uid=:item_uid';
-                $parameters['item_uid'] = $itemId;
-            } else {
-                $lockSql .= " AND NOT EXISTS (SELECT 1 FROM missile_launches ml WHERE ml.probe_item_id=pi.id AND ml.status IN ('preparing','queued')) ORDER BY pi.created_at ASC, pi.id ASC LIMIT 1";
-            }
-            if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) !== 'sqlite') { $lockSql .= ' FOR UPDATE'; }
-            $lock = $pdo->prepare($lockSql); $lock->execute($parameters); $item = $lock->fetch();
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $launchAt = $now->modify('+1 minute');
+            $item = $this->persistence->combat->findProbeMissileForUpdate($probe->id, $itemId);
             if (!$item) { throw new OthersActionException(404, 'missile_item_not_found', 'An available missile item was not found in this probe inventory.'); }
-            $check = $pdo->prepare("SELECT 1 FROM missile_launches WHERE probe_item_id=:item_id AND status IN ('preparing','queued') LIMIT 1"); $check->execute(['item_id' => (int) $item['id']]);
-            if ($check->fetchColumn() !== false) { throw new OthersActionException(409, 'action_conflict', 'The missile item is already reserved.'); }
+            $check = $this->persistence->combat->probeMissileReserved(['item_id' => (int) $item['id']]);
+            if ($check !== false) { throw new OthersActionException(409, 'action_conflict', 'The missile item is already reserved.'); }
             $missileId = OthersRepository::publicId('missile');
-            $pdo->prepare("INSERT INTO missile_launches (public_id,launcher_kind,launcher_public_id,player_id,probe_id,manny_id,probe_item_id,others_action_id,others_item_id,target_public_id,target_kind,sector_x,sector_y,sector_z,status,projectile_public_id,launch_at,impact_at,result,scheduled_event_id,created_at,updated_at) VALUES (:public_id,'probe',:launcher,:player_id,:probe_id,:manny_id,:item_id,NULL,NULL,:target,:kind,:x,:y,:z,'preparing',NULL,:launch_at,NULL,NULL,NULL,:created_at,:updated_at)")->execute([
+            $this->persistence->combat->createProbeLaunch([
                 'public_id' => $missileId, 'launcher' => (string) $probe->id, 'player_id' => $playerId, 'probe_id' => $probe->id, 'manny_id' => $manny->id, 'item_id' => (int) $item['id'],
                 'target' => $target['id'], 'kind' => $target['kind'], 'x' => $probe->currentSector->getX(), 'y' => $probe->currentSector->getY(), 'z' => $probe->currentSector->getZ(),
                 'launch_at' => $launchAt->format('c'), 'created_at' => $now->format('c'), 'updated_at' => $now->format('c'),
@@ -187,7 +176,7 @@ final class OthersService
             $manny->currentTask = Manny::TASK_PREPARING_MISSILE; $manny->taskStartedAt = $now->format('c'); $manny->taskEndsAt = $launchAt->format('c');
             $manny->taskPayload = ['missileLaunchId' => $missileId, 'targetObjectId' => $target['id']];
             $this->mannies->save($manny);
-            $pdo->prepare('UPDATE missile_launches SET scheduled_event_id=:event_id WHERE public_id=:public_id')->execute(['event_id' => $manny->taskScheduledEventId, 'public_id' => $missileId]);
+            $this->persistence->combat->attachProbeLaunchEvent(['event_id' => $manny->taskScheduledEventId, 'public_id' => $missileId]);
             $missile = $this->findMissileForPlayer($missileId, $playerId) ?? [];
             $missile['missileItemId'] = (string) $item['uid'];
             $missile['targetId'] = (string) $target['id'];
@@ -197,8 +186,7 @@ final class OthersService
 
     public function findMissileForPlayer(string $publicId, int $playerId): ?array
     {
-        $stmt = $this->others->pdo()->prepare('SELECT l.*,a.public_id AS action_public_id,p.status AS projectile_status,p.launched_at,p.impact_at AS projectile_impact_at,h.result AS history_result,h.details_json,h.resolved_at FROM missile_launches l LEFT JOIN others_actions a ON a.id=l.others_action_id LEFT JOIN others_projectiles p ON p.launch_id=l.id LEFT JOIN others_projectile_history h ON h.projectile_public_id=l.public_id WHERE l.public_id=:public_id AND l.player_id=:player_id');
-        $stmt->execute(['public_id' => $publicId, 'player_id' => $playerId]); return $stmt->fetch() ?: null;
+        $stmt = $this->persistence->combat->findMissileForPlayer(['public_id' => $publicId, 'player_id' => $playerId]); return $stmt ?: null;
     }
 
     public function moveShip(array $ship, array $payload, SectorCoordinates $homeSector): array
@@ -208,6 +196,16 @@ final class OthersService
     }
 
     private function moveShipToTarget(array $ship, SectorCoordinates $target, array $payload, SectorCoordinates $homeSector): array
+    {
+        return $this->persistence->transaction->run(function () use ($ship, $target, $payload, $homeSector): array {
+            $fresh = $this->persistence->locks->lock('ship', (int) $ship['id']);
+            if ($fresh === null || $fresh['destroyed_at'] !== null || $fresh['status'] === 'removed') { throw new OthersActionException(409, 'others_ship_unavailable', 'The carrier is unavailable.'); }
+            $ship = $fresh + $ship;
+            return $this->moveShipToTargetLocked($ship, $target, $payload, $homeSector);
+        });
+    }
+
+    private function moveShipToTargetLocked(array $ship, SectorCoordinates $target, array $payload, SectorCoordinates $homeSector): array
     {
         $origin = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
         $distance = $this->grid->getDistance($origin, $target);
@@ -229,14 +227,14 @@ final class OthersService
             throw new OthersActionException(400, 'bad_request', 'leaveAuxiliariesBehind must be a boolean.');
         }
 
-        return $this->others->transaction(function () use ($ship, $target, $origin, $distance, $fuelCost, $leaveBehind, $homeSector): array {
-            $pdo = $this->others->pdo();
-            $locked = $this->others->findShipByPublicId((string) $ship['public_id']);
+        return $this->persistence->transaction->run(function () use ($ship, $target, $origin, $distance, $fuelCost, $leaveBehind, $homeSector): array {
+            $locked = $ship;
             if ($locked === null || $locked['current_action_id'] !== null || (float) $locked['deuterium_stock'] < $fuelCost) {
                 throw new OthersActionException(409, 'action_conflict', 'The ship state changed while accepting the command.');
             }
             $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
             $this->interruptDepotConstructions((int) $locked['id'], $now->format('c'), 'carrier_departure');
+            $this->interruptInventoryTransfers($locked, $now->format('c'), 'carrier_departure');
             $cancelableUntil = $now->modify('+15 minutes');
             $timeline = $this->durations->timeline($cancelableUntil, $distance);
             $action = $this->others->createAction(
@@ -244,11 +242,7 @@ final class OthersService
                 ['target' => $target->subtract($homeSector), 'leaveAuxiliariesBehind' => $leaveBehind],
                 $timeline['arrivalAt']->format('c'), $cancelableUntil->format('c'),
             );
-            $stmt = $pdo->prepare(
-                "INSERT INTO others_movements (action_id, ship_id, source_x, source_y, source_z, target_x, target_y, target_z, fuel_cost, leave_auxiliaries_behind, phase, depart_at, arrive_at, created_at, updated_at)
-                 VALUES (:action_id, :ship_id, :source_x, :source_y, :source_z, :target_x, :target_y, :target_z, :fuel_cost, :leave_behind, 'waiting_to_depart', :depart_at, :arrive_at, :created_at, :updated_at)"
-            );
-            $stmt->execute([
+            $stmt = $this->persistence->movement->createMovement([
                 'action_id' => (int) $action['id'], 'ship_id' => (int) $locked['id'],
                 'source_x' => $origin->getX(), 'source_y' => $origin->getY(), 'source_z' => $origin->getZ(),
                 'target_x' => $target->getX(), 'target_y' => $target->getY(), 'target_z' => $target->getZ(),
@@ -257,31 +251,38 @@ final class OthersService
                 'created_at' => $now->format('c'), 'updated_at' => $now->format('c'),
             ]);
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $cancelableUntil->format('c'), ['expectedStatus' => 'queued']);
-            $update = $pdo->prepare("UPDATE others_ships SET deuterium_stock = deuterium_stock - :fuel, status = 'preparing', current_action_id = :action_id, departure_engaged = 1, updated_at = :updated_at WHERE id = :ship_id AND current_action_id IS NULL AND deuterium_stock >= :fuel");
-            $update->execute(['fuel' => $fuelCost, 'action_id' => (int) $action['id'], 'updated_at' => $now->format('c'), 'ship_id' => (int) $locked['id']]);
-            if ($update->rowCount() !== 1) {
+            $update = $this->persistence->movement->engageDeparture(['fuel' => $fuelCost, 'action_id' => (int) $action['id'], 'updated_at' => $now->format('c'), 'ship_id' => (int) $locked['id']]);
+            if ($update !== 1) {
                 throw new OthersActionException(409, 'action_conflict', 'The ship state changed while accepting the command.');
             }
-            $pdo->prepare("UPDATE others_actions SET status = 'canceled', completed_at = :now, updated_at = :now, error_json = :error WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed') AND status IN ('queued','running')")->execute(['now' => $now->format('c'), 'error' => json_encode(['code' => 'carrier_departure', 'message' => 'The carrier departure terminated the auxiliary task.'], JSON_THROW_ON_ERROR), 'ship_id' => (int) $locked['id']]);
-            $pdo->prepare("UPDATE scheduled_events SET status = 'cancelled', processed_at = :now, updated_at = :now WHERE entity_type = 'others_action' AND entity_id IN (SELECT id FROM others_actions WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed')) AND status = 'pending'")->execute(['now' => $now->format('c'), 'ship_id' => (int) $locked['id']]);
+            $this->persistence->action->cancelDeployedActions(['now' => $now->format('c'), 'error' => json_encode(['code' => 'carrier_departure', 'message' => 'The carrier departure terminated the auxiliary task.'], JSON_THROW_ON_ERROR), 'ship_id' => (int) $locked['id']]);
+            $this->persistence->action->cancelDeployedEvents(['now' => $now->format('c'), 'ship_id' => (int) $locked['id']]);
             if (!$leaveBehind) {
-                $pdo->prepare("UPDATE others_auxiliaries SET status = 'returning', spatial_state = 'returning_to_carrier', current_action_id = NULL, updated_at = :now WHERE ship_id = :ship_id AND location_type = 'deployed'")->execute(['now' => $now->format('c'), 'ship_id' => (int) $locked['id']]);
+                $this->persistence->movement->recallDeployedAuxiliaries(['now' => $now->format('c'), 'ship_id' => (int) $locked['id']]);
             }
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id = :event_id WHERE id = :id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
             return $this->others->findActionByPublicId((string) $action['public_id']) ?? $action;
         });
     }
 
     public function cancelMove(array $ship): array
     {
+        return $this->persistence->transaction->run(function () use ($ship): array {
+            $fresh = $this->persistence->locks->lock('ship', (int) $ship['id']);
+            if ($fresh === null || $fresh['destroyed_at'] !== null || $fresh['status'] === 'removed') { throw new OthersActionException(409, 'others_ship_unavailable', 'The carrier is unavailable.'); }
+            $ship = $fresh + $ship;
+            return $this->cancelMoveLocked($ship);
+        });
+    }
+
+    private function cancelMoveLocked(array $ship): array
+    {
         if ($ship['current_action_id'] === null) {
             throw new OthersActionException(404, 'active_movement_not_found', 'No active movement was found for this ship.');
         }
-        return $this->others->transaction(function () use ($ship): array {
-            $pdo = $this->others->pdo();
-            $stmt = $pdo->prepare('SELECT a.*, m.phase FROM others_actions a JOIN others_movements m ON m.action_id = a.id WHERE a.id = :id AND a.ship_id = :ship_id');
-            $stmt->execute(['id' => (int) $ship['current_action_id'], 'ship_id' => (int) $ship['id']]);
-            $action = $stmt->fetch();
+        return $this->persistence->transaction->run(function () use ($ship): array {
+            $stmt = $this->persistence->movement->findCancelableMovement(['id' => (int) $ship['current_action_id'], 'ship_id' => (int) $ship['id']]);
+            $action = $stmt;
             if (!$action || $action['status'] !== 'queued' || $action['phase'] !== 'waiting_to_depart') {
                 throw new OthersActionException(409, 'movement_cancellation_window_closed', 'The movement can no longer be canceled.');
             }
@@ -289,9 +290,9 @@ final class OthersService
                 throw new OthersActionException(409, 'movement_cancellation_window_closed', 'The movement can no longer be canceled.');
             }
             $now = gmdate('c');
-            $pdo->prepare("UPDATE others_actions SET status = 'cancel_requested', ends_at = :ends_at, updated_at = :updated_at WHERE id = :id AND status = 'queued'")->execute(['ends_at' => $now, 'updated_at' => $now, 'id' => (int) $action['id']]);
+            $this->persistence->action->requestMovementCancellation(['ends_at' => $now, 'updated_at' => $now, 'id' => (int) $action['id']]);
             if ($action['scheduled_event_id'] !== null) {
-                $pdo->prepare("UPDATE scheduled_events SET run_at = :run_at, payload_json = :payload, updated_at = :updated_at WHERE id = :id AND status = 'pending'")->execute(['run_at' => $now, 'payload' => json_encode(['expectedStatus' => 'cancel_requested'], JSON_THROW_ON_ERROR), 'updated_at' => $now, 'id' => (int) $action['scheduled_event_id']]);
+                $this->persistence->action->reschedulePendingEvent(['run_at' => $now, 'payload' => json_encode(['expectedStatus' => 'cancel_requested'], JSON_THROW_ON_ERROR), 'updated_at' => $now, 'id' => (int) $action['scheduled_event_id']]);
             }
             return $this->others->findActionByPublicId((string) $action['public_id']) ?? $action;
         });
@@ -309,7 +310,7 @@ final class OthersService
         $created = []; $ignored = []; $blocked = [];
         foreach ($ships as $ship) {
             try {
-                $created[] = ['shipId' => (string) $ship['public_id'], 'action' => $this->moveShipToTarget($ship, $absolute, $payload, $homeSector)];
+                $created[] = ['shipId' => (string) $ship['public_id'], 'action' => $this->persistence->transaction->isolated(fn(): array => $this->moveShipToTarget($ship, $absolute, $payload, $homeSector))];
             } catch (OthersActionException $error) {
                 if ($error->errorCode === 'same_destination') { $ignored[] = ['shipId' => (string) $ship['public_id'], 'reason' => 'already_at_destination']; }
                 else { $blocked[] = ['shipId' => (string) $ship['public_id'], 'reason' => $error->errorCode]; }
@@ -320,8 +321,8 @@ final class OthersService
 
     public function createInventoryTransfer(array $source, array $payload): array
     {
-        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        $locks = new StorageLockRepository($this->others->pdo());
+        $transaction = $this->persistence->transaction;
+        $locks = $this->persistence->locks;
         return $transaction->run(function () use ($locks, $source, $payload): array {
             $target = is_string($payload['targetShipId'] ?? null) ? $this->others->findShipByPublicId($payload['targetShipId']) : null;
             $ids = array_unique([(int) $source['id'], (int) ($target['id'] ?? $source['id'])]);
@@ -364,8 +365,8 @@ final class OthersService
             }
         }
 
-        $transaction = new StorageTransaction($this->others->pdo());
-        $locks = new StorageLockRepository($this->others->pdo());
+        $transaction = $this->persistence->transaction;
+        $locks = $this->persistence->locks;
         return $transaction->run(function () use ($locks, $ship, $kind, $resourceType, $amount, $itemId): array {
             $locks->lock('ship', (int) $ship['id']);
             $ship = $this->others->findShipByPublicId((string) $ship['public_id'])
@@ -373,11 +374,9 @@ final class OthersService
             if ($ship['destroyed_at'] !== null || $ship['status'] === 'transit') {
                 throw new OthersActionException(409, 'others_ship_busy', 'The ship is not in a sector.');
             }
-            $pdo = $this->others->pdo();
             if ($kind === 'resource') {
-                $update = $pdo->prepare('UPDATE others_inventory_resources SET amount = amount - CAST(:amount AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount - reserved_amount >= CAST(:available AS DECIMAL(20,4))');
-                $update->execute(['amount' => $amount, 'now' => gmdate('c'), 'ship_id' => (int) $ship['id'], 'resource_type' => $resourceType, 'available' => $amount]);
-                if ($update->rowCount() !== 1) {
+                $update = $this->persistence->inventory->jettisonResource(['amount' => $amount, 'now' => gmdate('c'), 'ship_id' => (int) $ship['id'], 'resource_type' => $resourceType, 'available' => $amount]);
+                if ($update !== 1) {
                     throw new OthersActionException(422, 'insufficient_resources', 'The unreserved inventory amount is unavailable.');
                 }
                 return ['kind' => 'resource', 'resourceType' => $resourceType, 'amount' => $amount];
@@ -389,10 +388,9 @@ final class OthersService
             if ($item['reserved_action_id'] !== null) { throw new OthersActionException(409, 'inventory_changed', 'The inventory item is reserved.'); }
             if ($item['type'] !== 'missile') { throw new OthersActionException(422, 'item_not_jettisonable', 'This inventory item cannot be jettisoned.'); }
             if ($this->sectors === null) { throw new \RuntimeException('Sector storage is unavailable for inventory jettison.'); }
-            $delete = $pdo->prepare('DELETE FROM others_inventory_items WHERE id = :id AND ship_id = :ship_id AND reserved_action_id IS NULL');
-            $delete->execute(['id' => (int) $item['id'], 'ship_id' => (int) $ship['id']]);
-            if ($delete->rowCount() !== 1) { throw new OthersActionException(409, 'inventory_changed', 'The inventory item changed concurrently.'); }
-            $drifting = $this->sectors->addDriftingItem(
+            $delete = $this->persistence->inventory->deleteAvailableItem(['id' => (int) $item['id'], 'ship_id' => (int) $ship['id']]);
+            if ($delete !== 1) { throw new OthersActionException(409, 'inventory_changed', 'The inventory item changed concurrently.'); }
+            $drifting = $this->sectorChanges->addDriftingItem(
                 new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']),
                 'others-inventory-jettison-' . $itemId,
                 ProbeItem::TYPE_MISSILE,
@@ -412,6 +410,7 @@ final class OthersService
         $auxiliary = $this->others->findAuxiliaryForShip($payload['actorAuxiliaryId'], (int) $source['id']);
         if ($target === null || (int) $target['player_id'] !== (int) $source['player_id']) { throw new OthersActionException(404, 'others_ship_not_found', 'Target Others ship not found.'); }
         if ($auxiliary === null) { throw new OthersActionException(404, 'others_auxiliary_not_found', 'Actor auxiliary not found.'); }
+        $auxiliary = $this->persistence->locks->lock('auxiliary', (int) $auxiliary['id']) ?? throw new OthersActionException(409, 'others_auxiliary_busy', 'The auxiliary became unavailable.');
         if ($auxiliary['current_action_id'] !== null || !in_array((string) $auxiliary['status'], ['inactive', 'available'], true) || $auxiliary['location_type'] !== 'embarked') { throw new OthersActionException(409, 'others_auxiliary_busy', 'The actor auxiliary is not available and embarked.'); }
         if (!$this->sameSector($source, $target)) { throw new OthersActionException(422, 'target_out_of_range', 'Both ships must be in the same sector.'); }
         $kind = (string) $payload['kind']; $resourceType = null; $amount = null; $items = []; $space = 0.0; $durationUnits = 0;
@@ -429,48 +428,74 @@ final class OthersService
         } else { throw new OthersActionException(400, 'bad_request', 'kind must be resource or item.'); }
         if ($this->others->inventoryUsage((int) $target['id']) + (float) $target['inventory_reserved'] + $space > (float) $target['inventory_capacity'] + 0.00001) { throw new OthersActionException(422, 'insufficient_resources', 'The target inventory has insufficient capacity.'); }
 
-        return $this->others->transaction(function () use ($source, $target, $auxiliary, $kind, $resourceType, $amount, $items, $space, $durationUnits): array {
-            $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $endsAt = $now->modify('+' . max(10, $durationUnits * 10) . ' seconds');
+        return $this->persistence->transaction->run(function () use ($source, $target, $auxiliary, $kind, $resourceType, $amount, $items, $space, $durationUnits): array {
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $endsAt = $now->modify('+' . max(10, $durationUnits * 10) . ' seconds');
             if ($kind === 'resource') {
-                $reserve = $pdo->prepare('UPDATE others_inventory_resources SET reserved_amount = reserved_amount + CAST(:amount AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount - reserved_amount >= CAST(:amount AS DECIMAL(20,4))');
-                $reserve->execute(['amount' => $amount, 'now' => $now->format('c'), 'ship_id' => (int) $source['id'], 'resource_type' => $resourceType]);
-                if ($reserve->rowCount() !== 1) { throw new OthersActionException(422, 'insufficient_resources', 'The source inventory amount is unavailable.'); }
+                $reserve = $this->persistence->inventory->reserveResource(['amount' => $amount, 'now' => $now->format('c'), 'ship_id' => (int) $source['id'], 'resource_type' => $resourceType]);
+                if ($reserve !== 1) { throw new OthersActionException(422, 'insufficient_resources', 'The source inventory amount is unavailable.'); }
             }
             $action = $this->others->createAction($source, 'inventory_transfer', 'others_auxiliary', (string) $auxiliary['public_id'], ['targetShipId' => $target['public_id'], 'kind' => $kind, 'resourceType' => $resourceType, 'amount' => $amount, 'itemIds' => array_column($items, 'public_id')], $endsAt->format('c'), auxiliaryId: (int) $auxiliary['id']);
             if ($kind === 'item') {
-                foreach ($items as $item) { $pdo->prepare('UPDATE others_inventory_items SET reserved_action_id = :action_id, updated_at = :now WHERE id = :id AND reserved_action_id IS NULL')->execute(['action_id' => (int) $action['id'], 'now' => $now->format('c'), 'id' => (int) $item['id']]); }
+                $this->persistence->inventory->reserveItems((int) $action['id'], array_column($items, 'id'), $now->format('c'));
             }
             $publicId = OthersRepository::publicId('transfer');
-            $pdo->prepare("INSERT INTO others_inventory_transfers (public_id, action_id, source_ship_id, target_ship_id, auxiliary_id, kind, resource_type, amount, item_ids_json, status, created_at, updated_at) VALUES (:public_id,:action_id,:source,:target,:aux,:kind,:resource_type,:amount,:items,'queued',:now,:now)")->execute(['public_id' => $publicId, 'action_id' => (int) $action['id'], 'source' => (int) $source['id'], 'target' => (int) $target['id'], 'aux' => (int) $auxiliary['id'], 'kind' => $kind, 'resource_type' => $resourceType, 'amount' => $amount, 'items' => json_encode(array_column($items, 'public_id'), JSON_THROW_ON_ERROR), 'now' => $now->format('c')]);
-            $pdo->prepare('UPDATE others_ships SET inventory_reserved = inventory_reserved + :space, updated_at = :now WHERE id = :id')->execute(['space' => $space, 'now' => $now->format('c'), 'id' => (int) $target['id']]);
-            $pdo->prepare("UPDATE others_auxiliaries SET status = 'busy', current_action_id = :action_id, updated_at = :now WHERE id = :id AND current_action_id IS NULL")->execute(['action_id' => (int) $action['id'], 'now' => $now->format('c'), 'id' => (int) $auxiliary['id']]);
+            $this->persistence->inventory->createTransfer(['public_id' => $publicId, 'action_id' => (int) $action['id'], 'source' => (int) $source['id'], 'target' => (int) $target['id'], 'aux' => (int) $auxiliary['id'], 'kind' => $kind, 'resource_type' => $resourceType, 'amount' => $amount, 'items' => json_encode(array_column($items, 'public_id'), JSON_THROW_ON_ERROR), 'now' => $now->format('c')]);
+            $this->persistence->inventory->reserveCapacity(['space' => $space, 'now' => $now->format('c'), 'id' => (int) $target['id']]);
+            $this->persistence->inventory->claimAuxiliary(['action_id' => (int) $action['id'], 'now' => $now->format('c'), 'id' => (int) $auxiliary['id']]);
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $endsAt->format('c'), ['expectedStatus' => 'queued']);
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id = :event_id WHERE id = :id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
             return ['transfer' => $this->others->findInventoryTransferForPlayer($publicId, (int) $source['player_id']), 'action' => $this->others->findActionByPublicId((string) $action['public_id'])];
         });
     }
 
     public function transferDeuterium(array $source, array $auxiliary, array $payload): array
     {
+        return $this->persistence->transaction->run(function () use ($source, $auxiliary, $payload): array {
+            $target = is_string($payload['targetShipId'] ?? null) ? $this->others->findShipByPublicId($payload['targetShipId']) : null;
+            $ids = [(int) $source['id']];
+            if ($target !== null) { $ids[] = (int) $target['id']; }
+            sort($ids, SORT_NUMERIC);
+            foreach (array_unique($ids) as $id) { $this->persistence->locks->lock('ship', $id); }
+            $source = ($this->persistence->actor->findShipById(['id' => (int) $source['id']]) ?: []) + $source;
+            $auxiliary = ($this->persistence->locks->lock('auxiliary', (int) $auxiliary['id']) ?? []) + $auxiliary;
+            return $this->transferDeuteriumLocked($source, $auxiliary, $payload);
+        });
+    }
+
+    private function transferDeuteriumLocked(array $source, array $auxiliary, array $payload): array
+    {
         $targetId = $payload['targetShipId'] ?? null; $amount = $payload['amount'] ?? null;
         if (!is_string($targetId) || !is_numeric($amount) || (float) $amount <= 0.0) { throw new OthersActionException(400, 'bad_request', 'targetShipId and a positive amount are required.'); }
         $target = $this->others->findShipByPublicId($targetId); $amount = round((float) $amount, 4);
         if ($target === null || (int) $target['player_id'] !== (int) $source['player_id']) { throw new OthersActionException(404, 'others_ship_not_found', 'Target Others ship not found.'); }
+        if ((int) $source['id'] === (int) $target['id']) { throw new OthersActionException(422, 'bad_request', 'A fuel transfer requires distinct ships.'); }
+        if ($source['destroyed_at'] !== null || $target['destroyed_at'] !== null || $source['departure_engaged'] || $target['departure_engaged']) { throw new OthersActionException(409, 'others_ship_busy', 'Both carriers must be available.'); }
         if (!$this->sameSector($source, $target)) { throw new OthersActionException(422, 'target_out_of_range', 'Both ships must be in the same sector.'); }
         if ($auxiliary['current_action_id'] !== null || $auxiliary['location_type'] !== 'embarked') { throw new OthersActionException(409, 'others_auxiliary_busy', 'The auxiliary is busy.'); }
         if ((float) $source['deuterium_stock'] - (float) $source['deuterium_reserved'] < $amount || (float) $target['deuterium_stock'] + (float) $target['deuterium_reserved'] + $amount > (float) $target['deuterium_capacity']) { throw new OthersActionException(422, 'insufficient_resources', 'Source stock or target tank capacity is insufficient.'); }
-        return $this->others->transaction(function () use ($source, $target, $auxiliary, $amount): array {
-            $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $ends = $now->modify('+5 minutes');
+        return $this->persistence->transaction->run(function () use ($source, $target, $auxiliary, $amount): array {
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $ends = $now->modify('+5 minutes');
             $action = $this->others->createAction($source, 'deuterium_transfer', 'others_auxiliary', (string) $auxiliary['public_id'], ['targetShipId' => $target['public_id'], 'amount' => $amount], $ends->format('c'), auxiliaryId: (int) $auxiliary['id']);
-            $pdo->prepare('UPDATE others_ships SET deuterium_reserved = deuterium_reserved + :amount, updated_at = :now WHERE id IN (:source, :target)')->execute(['amount' => $amount, 'now' => $now->format('c'), 'source' => (int) $source['id'], 'target' => (int) $target['id']]);
-            $pdo->prepare("UPDATE others_auxiliaries SET status = 'busy', current_action_id = :action_id, updated_at = :now WHERE id = :id AND current_action_id IS NULL")->execute(['action_id' => (int) $action['id'], 'now' => $now->format('c'), 'id' => (int) $auxiliary['id']]);
+            $this->persistence->inventory->reserveFuelTanks(['amount' => $amount, 'now' => $now->format('c'), 'source' => (int) $source['id'], 'target' => (int) $target['id']]);
+            $this->persistence->inventory->claimAuxiliary(['action_id' => (int) $action['id'], 'now' => $now->format('c'), 'id' => (int) $auxiliary['id']]);
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $ends->format('c'), ['expectedStatus' => 'queued']);
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id = :event_id WHERE id = :id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
             return $this->others->findActionByPublicId((string) $action['public_id']) ?? $action;
         });
     }
 
     public function startAuxiliaryTask(array $ship, array $auxiliary, string $task, array $payload): array
+    {
+        if ($task === 'transfer-deuterium') { return $this->transferDeuterium($ship, $auxiliary, $payload); }
+        return $this->persistence->transaction->run(function () use ($ship, $auxiliary, $task, $payload): array {
+            $fresh = $this->persistence->locks->lock('ship', (int) $ship['id']);
+            $actor = $this->persistence->locks->lock('auxiliary', (int) $auxiliary['id']);
+            if ($fresh === null || $fresh['destroyed_at'] !== null || $fresh['status'] === 'removed' || $actor === null || (int) $actor['ship_id'] !== (int) $ship['id']) { throw new OthersActionException(409, 'others_ship_unavailable', 'The carrier or auxiliary is unavailable.'); }
+            return $this->startAuxiliaryTaskLocked($fresh + $ship, $actor + $auxiliary, $task, $payload);
+        });
+    }
+
+    private function startAuxiliaryTaskLocked(array $ship, array $auxiliary, string $task, array $payload): array
     {
         return match ($task) {
             'repair' => $this->startAuxiliaryRepair($ship, $auxiliary, $payload),
@@ -487,8 +512,8 @@ final class OthersService
 
     public function startHarvest(array $ship, array $payload): array
     {
-        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        $locks = new StorageLockRepository($this->others->pdo());
+        $transaction = $this->persistence->transaction;
+        $locks = $this->persistence->locks;
         return $transaction->run(function () use ($locks, $ship, $payload): array {
             $locks->lock('ship', (int) $ship['id']);
             $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
@@ -503,56 +528,57 @@ final class OthersService
         if (!is_string($targetId) || !is_int($count) || $count <= 0) { throw new OthersActionException(400, 'bad_request', 'targetObjectId and a positive integer auxiliaryCount are required.'); }
         if ($ship['current_action_id'] !== null || in_array((string) $ship['status'], ['transit', 'destroyed', 'removed'], true)) { throw new OthersActionException(409, 'others_ship_busy', 'The ship is busy.'); }
         $coordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
-        $planet = $this->sectors->getOrCreateSector($coordinates)->findObjectById($targetId);
+        $planet = $this->sectorChanges->getOrCreateSector($coordinates)->findObjectById($targetId);
         if (!$planet instanceof Planet) { throw new OthersActionException(404, 'target_not_found', 'Harvest target planet not found.'); }
         $capacity = 2.0 * $count;
         if ($this->others->inventoryUsage((int) $ship['id']) + (float) $ship['inventory_reserved'] + $capacity > (float) $ship['inventory_capacity'] + 0.00001) { throw new OthersActionException(422, 'insufficient_resources', 'The coordinator inventory has insufficient capacity.'); }
-        return $this->others->transaction(function () use ($ship, $planet, $count, $capacity): array {
-            $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        return $this->persistence->transaction->run(function () use ($ship, $planet, $count, $capacity): array {
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
             $lifePhase = $planet->hasIntelligentLife();
             $duration = $lifePhase ? (int) ceil(86400 * 100 / $count) : 600;
             $ends = $now->modify('+' . $duration . ' seconds');
             $action = $this->others->createAction($ship, 'planet_harvest', 'others_ship', (string) $ship['public_id'], ['targetObjectId' => $planet->getId(), 'auxiliaryCount' => $count], $ends->format('c'));
             $auxiliaries = $this->others->claimAvailableAuxiliaries((int) $ship['id'], $count, (int) $action['id']);
             if ($auxiliaries === []) { throw new OthersActionException(422, 'insufficient_resources', 'Not enough available auxiliaries for this swarm.'); }
-            $participantValues = [];
-            $participantParameters = [];
-            foreach ($auxiliaries as $index => $auxiliary) {
-                $participantValues[] = "(:action_$index,:auxiliary_$index,:created_$index)";
-                $participantParameters["action_$index"] = (int) $action['id'];
-                $participantParameters["auxiliary_$index"] = (int) $auxiliary['id'];
-                $participantParameters["created_$index"] = $now->format('c');
-            }
-            $pdo->prepare('INSERT INTO others_swarm_participants (action_id, auxiliary_id, created_at) VALUES ' . implode(',', $participantValues))
-                ->execute($participantParameters);
-            $ids = array_map(static fn(array $auxiliary): int => (int) $auxiliary['id'], $auxiliaries); $in = implode(',', $ids);
-            $updated = $pdo->exec("UPDATE others_auxiliaries SET location_type='deployed', spatial_state='moving_to_sector_object', sector_x=" . (int) $ship['sector_x'] . ', sector_y=' . (int) $ship['sector_y'] . ', sector_z=' . (int) $ship['sector_z'] . ", object_id=" . $pdo->quote($planet->getId()) . ", updated_at=" . $pdo->quote($now->format('c')) . " WHERE id IN ($in) AND current_action_id=" . (int) $action['id']);
+            $ids = array_map('intval', array_column($auxiliaries, 'id'));
+            $this->persistence->production->recordSwarmParticipants((int) $action['id'], $ids, $now->format('c'));
+            $updated = $this->persistence->production->deploySwarm((int) $action['id'], $ids, $ship, $planet->getId(), $now->format('c'));
             if ($updated !== $count) { throw new OthersActionException(409, 'action_conflict', 'The swarm reservation collided with another command.'); }
             $biologicalCarbon = $planet->hasIntelligentLife() ? $planet->getHabitabilityScore() * $planet->getRadius() * 179.9592830250242 : 0.0;
-            $pdo->prepare("INSERT INTO others_harvests (action_id,ship_id,target_object_id,phase,phase_started_at,auxiliary_count,reserved_capacity,biological_carbon,pending_output_json,created_at,updated_at) VALUES (:action_id,:ship_id,:target,:phase,:started,:count,:capacity,:biomass,NULL,:created,:updated)")->execute(['action_id' => (int) $action['id'], 'ship_id' => (int) $ship['id'], 'target' => $planet->getId(), 'phase' => $lifePhase ? 'destroying_life' : 'mining', 'started' => $now->format('c'), 'count' => $count, 'capacity' => $capacity, 'biomass' => $biologicalCarbon, 'created' => $now->format('c'), 'updated' => $now->format('c')]);
-            $pdo->prepare("UPDATE others_ships SET status='low_orbit', current_action_id=:action_id, inventory_reserved=inventory_reserved+:capacity, updated_at=:now WHERE id=:id AND current_action_id IS NULL")->execute(['action_id' => (int) $action['id'], 'capacity' => $capacity, 'now' => $now->format('c'), 'id' => (int) $ship['id']]);
+            $this->persistence->production->createHarvest(['action_id' => (int) $action['id'], 'ship_id' => (int) $ship['id'], 'target' => $planet->getId(), 'phase' => $lifePhase ? 'destroying_life' : 'mining', 'started' => $now->format('c'), 'count' => $count, 'capacity' => $capacity, 'biomass' => $biologicalCarbon, 'created' => $now->format('c'), 'updated' => $now->format('c')]);
+            $this->persistence->production->engageHarvest(['action_id' => (int) $action['id'], 'capacity' => $capacity, 'now' => $now->format('c'), 'id' => (int) $ship['id']]);
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $ends->format('c'), ['expectedStatus' => 'queued']);
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
             return $this->others->findActionByPublicId((string) $action['public_id']) ?? $action;
         });
     }
 
     public function cancelHarvest(array $ship): array
     {
+        return $this->persistence->transaction->run(function () use ($ship): array {
+            $fresh = $this->persistence->locks->lock('ship', (int) $ship['id']);
+            if ($fresh === null || $fresh['destroyed_at'] !== null || $fresh['status'] === 'removed') { throw new OthersActionException(409, 'others_ship_unavailable', 'The carrier is unavailable.'); }
+            $ship = $fresh + $ship;
+            return $this->cancelHarvestLocked($ship);
+        });
+    }
+
+    private function cancelHarvestLocked(array $ship): array
+    {
         if ($ship['current_action_id'] === null) { throw new OthersActionException(404, 'active_harvest_not_found', 'No active harvest was found.'); }
-        return $this->others->transaction(function () use ($ship): array {
-            $pdo = $this->others->pdo(); $stmt = $pdo->prepare("SELECT a.* FROM others_actions a JOIN others_harvests h ON h.action_id=a.id WHERE a.id=:id AND a.status IN ('queued','running')"); $stmt->execute(['id' => (int) $ship['current_action_id']]); $action = $stmt->fetch();
+        return $this->persistence->transaction->run(function () use ($ship): array {
+            $stmt = $this->persistence->action->findCancelableHarvest(['id' => (int) $ship['current_action_id']]); $action = $stmt;
             if (!$action) { throw new OthersActionException(404, 'active_harvest_not_found', 'No active harvest was found.'); }
-            $now = gmdate('c'); $pdo->prepare("UPDATE others_actions SET status='cancel_requested',updated_at=:now WHERE id=:id")->execute(['now' => $now, 'id' => (int) $action['id']]);
-            if ($action['scheduled_event_id'] !== null) { $pdo->prepare("UPDATE scheduled_events SET run_at=:now,payload_json=:payload,updated_at=:now WHERE id=:id AND status='pending'")->execute(['now' => $now, 'payload' => json_encode(['expectedStatus' => 'cancel_requested'], JSON_THROW_ON_ERROR), 'id' => (int) $action['scheduled_event_id']]); }
+            $now = gmdate('c'); $this->persistence->action->requestHarvestCancellation(['now' => $now, 'id' => (int) $action['id']]);
+            if ($action['scheduled_event_id'] !== null) { $this->persistence->action->rescheduleHarvestCancellation(['now' => $now, 'payload' => json_encode(['expectedStatus' => 'cancel_requested'], JSON_THROW_ON_ERROR), 'id' => (int) $action['scheduled_event_id']]); }
             return $this->others->findActionByPublicId((string) $action['public_id']) ?? $action;
         });
     }
 
     public function startCraft(array $ship, array $payload): array
     {
-        $transaction = new \VonNeumannGame\Database\StorageTransaction($this->others->pdo());
-        $locks = new StorageLockRepository($this->others->pdo());
+        $transaction = $this->persistence->transaction;
+        $locks = $this->persistence->locks;
         return $transaction->run(function () use ($locks, $ship, $payload): array {
             $locks->lock('ship', (int) $ship['id']);
             $current = $this->others->findShipByPublicId($ship['public_id']) ?? throw new OthersActionException(404, 'others_ship_not_found', 'Ship not found.');
@@ -567,44 +593,54 @@ final class OthersService
         if (!is_string($recipeId) || !isset(self::RECIPES[$recipeId]) || !is_string($assistantId)) { throw new OthersActionException(400, 'bad_request', 'A canonical recipeId and assistantAuxiliaryId are required.'); }
         $assistant = $this->others->findAuxiliaryForShip($assistantId, (int) $ship['id']);
         if ($assistant === null) { throw new OthersActionException(404, 'others_auxiliary_not_found', 'Assistant auxiliary not found.'); }
+        $assistant = $this->persistence->locks->lock('auxiliary', (int) $assistant['id']) ?? throw new OthersActionException(409, 'others_auxiliary_busy', 'The assistant became unavailable.');
         if ($assistant['current_action_id'] !== null || $assistant['location_type'] !== 'embarked' || !in_array((string) $assistant['status'], ['inactive','available'], true)) { throw new OthersActionException(409, 'others_auxiliary_busy', 'The assistant auxiliary is busy.'); }
         $recipe = self::RECIPES[$recipeId];
         if ((float) $recipe['outputSpace'] > 0.0 && $this->others->inventoryUsage((int) $ship['id']) + (float) $ship['inventory_reserved'] + (float) $recipe['outputSpace'] > (float) $ship['inventory_capacity'] + 0.00001) { throw new OthersActionException(422, 'insufficient_resources', 'The workshop output has no reserved inventory capacity.'); }
-        return $this->others->transaction(function () use ($ship, $assistant, $recipeId, $recipe): array {
-            $pdo = $this->others->pdo(); $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $ends = $now->modify('+' . (int) $recipe['duration'] . ' seconds');
+        return $this->persistence->transaction->run(function () use ($ship, $assistant, $recipeId, $recipe): array {
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC')); $ends = $now->modify('+' . (int) $recipe['duration'] . ' seconds');
             foreach ($recipe['ingredients'] as $type => $amount) {
-                $consume = $pdo->prepare('UPDATE others_inventory_resources SET amount=amount-CAST(:amount AS DECIMAL(20,4)),updated_at=:now WHERE ship_id=:ship_id AND resource_type=:type AND amount-reserved_amount>=CAST(:amount AS DECIMAL(20,4))');
-                $consume->execute(['amount' => $amount, 'now' => $now->format('c'), 'ship_id' => (int) $ship['id'], 'type' => $type]);
-                if ($consume->rowCount() !== 1) { throw new OthersActionException(422, 'insufficient_resources', 'The mothership inventory lacks recipe ingredients.'); }
+                $consume = $this->persistence->production->consumeCraftIngredient(['amount' => $amount, 'now' => $now->format('c'), 'ship_id' => (int) $ship['id'], 'type' => $type]);
+                if ($consume !== 1) { throw new OthersActionException(422, 'insufficient_resources', 'The mothership inventory lacks recipe ingredients.'); }
             }
             $action = $this->others->createAction($ship, 'others_craft', 'others_ship', (string) $ship['public_id'], ['recipeId' => $recipeId, 'assistantAuxiliaryId' => $assistant['public_id']], $ends->format('c'), auxiliaryId: (int) $assistant['id']);
             $craftId = OthersRepository::publicId('craft');
-            $pdo->prepare("INSERT INTO others_crafts (public_id,action_id,ship_id,assistant_auxiliary_id,recipe_id,ingredients_json,output_space,status,created_at,updated_at) VALUES (:public_id,:action_id,:ship_id,:assistant,:recipe,:ingredients,:space,'queued',:now,:now)")->execute(['public_id' => $craftId, 'action_id' => (int) $action['id'], 'ship_id' => (int) $ship['id'], 'assistant' => (int) $assistant['id'], 'recipe' => $recipeId, 'ingredients' => json_encode($recipe['ingredients'], JSON_THROW_ON_ERROR), 'space' => (float) $recipe['outputSpace'], 'now' => $now->format('c')]);
-            $pdo->prepare("UPDATE others_auxiliaries SET status='busy',current_action_id=:action_id,updated_at=:now WHERE id=:id AND current_action_id IS NULL")->execute(['action_id' => (int) $action['id'], 'now' => $now->format('c'), 'id' => (int) $assistant['id']]);
-            if ((float) $recipe['outputSpace'] > 0.0) { $pdo->prepare('UPDATE others_ships SET inventory_reserved=inventory_reserved+:space,updated_at=:now WHERE id=:id')->execute(['space' => (float) $recipe['outputSpace'], 'now' => $now->format('c'), 'id' => (int) $ship['id']]); }
+            $this->persistence->production->createCraft(['public_id' => $craftId, 'action_id' => (int) $action['id'], 'ship_id' => (int) $ship['id'], 'assistant' => (int) $assistant['id'], 'recipe' => $recipeId, 'ingredients' => json_encode($recipe['ingredients'], JSON_THROW_ON_ERROR), 'space' => (float) $recipe['outputSpace'], 'now' => $now->format('c')]);
+            $this->persistence->production->claimCraftAssistant(['action_id' => (int) $action['id'], 'now' => $now->format('c'), 'id' => (int) $assistant['id']]);
+            if ((float) $recipe['outputSpace'] > 0.0) { $this->persistence->production->reserveCraftCapacity(['space' => (float) $recipe['outputSpace'], 'now' => $now->format('c'), 'id' => (int) $ship['id']]); }
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $ends->format('c'), ['expectedStatus' => 'queued']);
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
             return ['craft' => $this->others->findCraftForPlayer($craftId, (int) $ship['player_id']), 'action' => $this->others->findActionByPublicId((string) $action['public_id'])];
         });
     }
 
     public function startLaser(array $ship, array $payload): array
     {
+        return $this->persistence->transaction->run(function () use ($ship, $payload): array {
+            $fresh = $this->persistence->locks->lock('ship', (int) $ship['id']);
+            if ($fresh === null || $fresh['destroyed_at'] !== null || $fresh['status'] === 'removed') { throw new OthersActionException(409, 'others_ship_unavailable', 'The carrier is unavailable.'); }
+            $ship = $fresh + $ship;
+            return $this->startLaserLocked($ship, $payload);
+        });
+    }
+
+    private function startLaserLocked(array $ship, array $payload): array
+    {
         $targetId = $payload['targetId'] ?? null;
         if (!is_string($targetId) || $targetId === '') { throw new OthersActionException(400, 'bad_request', 'targetId is required.'); }
         if ($ship['status'] === 'transit' || $ship['destroyed_at'] !== null) { throw new OthersActionException(409, 'others_ship_busy', 'The firing ship is unavailable.'); }
         if ((float) $ship['deuterium_stock'] <= 0.0) { throw new OthersActionException(422, 'insufficient_resources', 'The laser requires a positive deuterium stock.'); }
         if ($ship['laser_next_target_at'] !== null && (string) $ship['laser_next_target_at'] > gmdate('c')) { throw new OthersActionException(409, 'action_conflict', 'The laser target-change cooldown is active.'); }
-        $active = $this->others->pdo()->prepare("SELECT COUNT(*) FROM others_laser_locks WHERE ship_id=:ship_id AND status IN ('queued','active')"); $active->execute(['ship_id' => (int) $ship['id']]);
-        if ((int) $active->fetchColumn() > 0) { throw new OthersActionException(409, 'action_conflict', 'This ship already maintains a laser lock.'); }
+        $active = $this->persistence->combat->countActiveLasers(['ship_id' => (int) $ship['id']]);
+        if ((int) $active > 0) { throw new OthersActionException(409, 'action_conflict', 'This ship already maintains a laser lock.'); }
         $target = $this->resolveLocalTarget($ship, $targetId, laserOnly: true);
         if ($target === null) { throw new OthersActionException(404, 'target_not_found', 'Admissible local laser target not found.'); }
-        return $this->others->transaction(function () use ($ship, $target): array {
-            $pdo = $this->others->pdo(); $now = gmdate('c');
+        return $this->persistence->transaction->run(function () use ($ship, $target): array {
+            $now = gmdate('c');
             $action = $this->others->createAction($ship, 'laser_lock', 'others_ship', (string) $ship['public_id'], ['targetId' => $target['id'], 'targetKind' => $target['kind']]);
-            $pdo->prepare("INSERT INTO others_laser_locks (action_id,ship_id,target_kind,target_public_id,sector_x,sector_y,sector_z,status,started_at,accounted_until,next_damage_at,exhausts_at,created_at,updated_at) VALUES (:action_id,:ship_id,:kind,:target,:x,:y,:z,'queued',NULL,NULL,NULL,NULL,:now,:now)")->execute(['action_id' => (int) $action['id'], 'ship_id' => (int) $ship['id'], 'kind' => $target['kind'], 'target' => $target['id'], 'x' => (int) $ship['sector_x'], 'y' => (int) $ship['sector_y'], 'z' => (int) $ship['sector_z'], 'now' => $now]);
+            $this->persistence->combat->createLaser(['action_id' => (int) $action['id'], 'ship_id' => (int) $ship['id'], 'kind' => $target['kind'], 'target' => $target['id'], 'x' => (int) $ship['sector_x'], 'y' => (int) $ship['sector_y'], 'z' => (int) $ship['sector_z'], 'now' => $now]);
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $now, ['expectedStatus' => 'queued']);
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id=:event_id WHERE id=:id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
             return $this->others->findActionByPublicId((string) $action['public_id']) ?? $action;
         });
     }
@@ -617,7 +653,7 @@ final class OthersService
         if ($auxiliary['current_action_id'] !== null || !in_array((string) $auxiliary['status'], ['inactive', 'available'], true) || $auxiliary['location_type'] !== 'embarked') { throw new OthersActionException(409, 'others_auxiliary_busy', 'The auxiliary is not available and embarked.'); }
         $selection = ResourceComposition::normalizeSelection($resources);
         $sectorCoordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
-        $sector = $this->sectors->getOrCreateSector($sectorCoordinates); $object = $sector->findObjectById($objectId);
+        $sector = $this->sectorChanges->getOrCreateSector($sectorCoordinates); $object = $sector->findObjectById($objectId);
         if (!$object instanceof Planet && !$object instanceof Asteroid && !($object instanceof DormantConstruct && $object->getSubtype() !== null)) { throw new OthersActionException(404, 'target_not_found', 'Mineable sector object not found.'); }
         $amounts = method_exists($object, 'getResourceAmounts') ? $object->getResourceAmounts() : [];
         $profile = ResourceComposition::profileForSelection($amounts, $selection);
@@ -635,8 +671,8 @@ final class OthersService
             || !is_finite((float) $percent) || (float) $percent <= 0 || floor((float) $percent) !== (float) $percent) {
             throw new OthersActionException(400, 'bad_request', 'integrityPercent must be a positive whole number of integrity points.');
         }
-        $transaction = new StorageTransaction($this->others->pdo());
-        $locks = new StorageLockRepository($this->others->pdo());
+        $transaction = $this->persistence->transaction;
+        $locks = $this->persistence->locks;
         return $transaction->run(function () use ($locks, $ship, $auxiliary, $percent): array {
             $current = $locks->lock('ship', (int) $ship['id']);
             if ($current === null || $current['destroyed_at'] !== null || $current['status'] === 'removed') {
@@ -661,9 +697,8 @@ final class OthersService
             $metalsCost = round($points * max(0.0, Config::float($this->gameplayConfig, 'manny.actions.repairMetalsPerIntegrityPercent', RepairTaskHandler::REPAIR_METALS_PER_INTEGRITY_PERCENT)), 4);
             $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
             if ($metalsCost > 0) {
-                $consume = $this->others->pdo()->prepare("UPDATE others_inventory_resources SET amount = amount - CAST(:cost AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = 'metals' AND amount - reserved_amount >= CAST(:cost AS DECIMAL(20,4))");
-                $consume->execute(['cost' => $metalsCost, 'now' => $now->format('c'), 'ship_id' => (int) $current['id']]);
-                if ($consume->rowCount() !== 1) {
+                $consume = $this->persistence->production->consumeRepairMetals(['cost' => $metalsCost, 'now' => $now->format('c'), 'ship_id' => (int) $current['id']]);
+                if ($consume !== 1) {
                     throw new OthersActionException(422, 'insufficient_metals', 'Insufficient available metals in ship inventory for this repair.');
                 }
             }
@@ -673,13 +708,11 @@ final class OthersService
 
     private function completeAuxiliaryRepair(int $actionId, string $runAt): void
     {
-        $pdo = $this->others->pdo();
-        $transaction = new StorageTransaction($pdo);
-        $locks = new StorageLockRepository($pdo);
-        $transaction->run(function () use ($locks, $pdo, $actionId, $runAt): void {
-            $query = $pdo->prepare('SELECT ship_id, auxiliary_id FROM others_actions WHERE id = ?');
-            $query->execute([$actionId]);
-            $ids = $query->fetch();
+        $transaction = $this->persistence->transaction;
+        $locks = $this->persistence->locks;
+        $transaction->run(function () use ($locks, $actionId, $runAt): void {
+            $query = $this->persistence->action->findActionActors([$actionId]);
+            $ids = $query;
             if (!$ids) { return; }
             $ship = $locks->lock('ship', (int) $ids['ship_id']);
             $actor = $ids['auxiliary_id'] === null ? null : $locks->lock('auxiliary', (int) $ids['auxiliary_id']);
@@ -693,9 +726,9 @@ final class OthersService
             $payload = json_decode($action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
             $restored = min((int) $payload['integrityPercent'], max(0, (int) $ship['max_integrity'] - (int) $ship['integrity']));
             $now = gmdate('c');
-            $pdo->prepare('UPDATE others_ships SET integrity = integrity + :restored, updated_at = :now WHERE id = :id')->execute(['restored' => $restored, 'now' => $now, 'id' => (int) $ship['id']]);
-            $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $actor['id'], 'action_id' => $actionId]);
-            $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id")->execute(['result' => json_encode(['outcome' => 'repaired', 'integrityPercent' => $restored, 'integrity' => (int) $ship['integrity'] + $restored], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => $actionId]);
+            $this->persistence->production->addIntegrity(['restored' => $restored, 'now' => $now, 'id' => (int) $ship['id']]);
+            $this->persistence->production->releaseRepairActor(['now' => $now, 'id' => (int) $actor['id'], 'action_id' => $actionId]);
+            $this->persistence->action->finishRepair(['result' => json_encode(['outcome' => 'repaired', 'integrityPercent' => $restored, 'integrity' => (int) $ship['integrity'] + $restored], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => $actionId]);
         });
     }
 
@@ -713,7 +746,7 @@ final class OthersService
         $objectId = $payload['objectId'] ?? null;
         if (!is_string($objectId) || $objectId === '') { throw new OthersActionException(400, 'bad_request', 'objectId is required.'); }
         if ($auxiliary['current_action_id'] !== null || $auxiliary['location_type'] !== 'embarked') { throw new OthersActionException(409, 'others_auxiliary_busy', 'The recovery auxiliary is not available and embarked.'); }
-        $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']));
+        $sector = $this->sectorChanges->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']));
         $object = $sector->findObjectById($objectId);
         if (!$object instanceof DormantConstruct || $object->getSubtype() !== 'others_auxiliary' || (float)($object->getResourceAmounts()['metals'] ?? 0.0) < 5.0 - 0.00001) { throw new OthersActionException(422, 'target_not_found', 'An intact dormant Others auxiliary is required.'); }
         $endsAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->modify('+5 minutes');
@@ -722,26 +755,23 @@ final class OthersService
 
     private function reserveAuxiliaryAction(array $ship, array $auxiliary, string $type, array $payload, \DateTimeImmutable $endsAt, bool $deployed = false, ?string $objectId = null): array
     {
-        return $this->others->transaction(function () use ($ship, $auxiliary, $type, $payload, $endsAt, $deployed, $objectId): array {
-            $pdo = $this->others->pdo(); $now = gmdate('c');
+        return $this->persistence->transaction->run(function () use ($ship, $auxiliary, $type, $payload, $endsAt, $deployed, $objectId): array {
+            $now = gmdate('c');
             $action = $this->others->createAction($ship, $type, 'others_auxiliary', (string) $auxiliary['public_id'], $payload, $endsAt->format('c'), auxiliaryId: (int) $auxiliary['id']);
-            $sql = "UPDATE others_auxiliaries SET status = 'busy', current_action_id = :action_id, updated_at = :now";
             $params = ['action_id' => (int) $action['id'], 'now' => $now, 'id' => (int) $auxiliary['id']];
-            if ($deployed) { $sql .= ", location_type = 'deployed', spatial_state = :spatial_state, sector_x = :x, sector_y = :y, sector_z = :z, object_id = :object_id"; $params += ['spatial_state' => $type === 'auxiliary_recall' ? 'returning_to_carrier' : 'moving_to_sector_object', 'x' => (int) $ship['sector_x'], 'y' => (int) $ship['sector_y'], 'z' => (int) $ship['sector_z'], 'object_id' => $objectId]; }
-            $sql .= ' WHERE id = :id AND current_action_id IS NULL';
-            $update = $pdo->prepare($sql); $update->execute($params);
-            if ($update->rowCount() !== 1) { throw new OthersActionException(409, 'action_conflict', 'The auxiliary state changed while accepting the task.'); }
+            if ($deployed) { $params += ['spatial_state' => $type === 'auxiliary_recall' ? 'returning_to_carrier' : 'moving_to_sector_object', 'x' => (int) $ship['sector_x'], 'y' => (int) $ship['sector_y'], 'z' => (int) $ship['sector_z'], 'object_id' => $objectId]; }
+            $update = $this->persistence->production->claimAuxiliaryTask($params, $deployed);
+            if ($update !== 1) { throw new OthersActionException(409, 'action_conflict', 'The auxiliary state changed while accepting the task.'); }
             $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $endsAt->format('c'), ['expectedStatus' => 'queued']);
-            $pdo->prepare('UPDATE others_actions SET scheduled_event_id = :event_id WHERE id = :id')->execute(['event_id' => $event->id, 'id' => (int) $action['id']]);
+            $this->persistence->action->attachActionEvent(['event_id' => $event->id, 'id' => (int) $action['id']]);
             return $this->others->findActionByPublicId((string) $action['public_id']) ?? $action;
         });
     }
 
     public function processScheduledAction(ScheduledEvent $event): void
     {
-        $check = $this->others->pdo()->prepare('SELECT type FROM others_actions WHERE id=?');
-        $check->execute([$event->entityId]);
-        $storageActionType = $check->fetchColumn();
+        $check = $this->persistence->action->findActionType([$event->entityId]);
+        $storageActionType = $check;
         if ($storageActionType === 'auxiliary_repair') {
             $this->completeAuxiliaryRepair($event->entityId, $event->runAt);
             return;
@@ -754,11 +784,15 @@ final class OthersService
             $this->depotService()->completeConstruction($event->entityId, $event->runAt);
             return;
         }
-        $this->others->transaction(function () use ($event): void {
-            $pdo = $this->others->pdo();
-            $stmt = $pdo->prepare('SELECT a.*, m.id AS movement_id, m.ship_id AS movement_ship_id, m.target_x, m.target_y, m.target_z, m.fuel_cost, m.phase, m.arrive_at, m.leave_auxiliaries_behind FROM others_actions a LEFT JOIN others_movements m ON m.action_id = a.id WHERE a.id = :id');
-            $stmt->execute(['id' => $event->entityId]);
-            $action = $stmt->fetch();
+        $this->persistence->transaction->run(function () use ($event): void {
+            $identity = $this->persistence->locks->actionIdentity($event->entityId);
+            if ($identity === null) { return; }
+            foreach ($this->persistence->locks->actionShipIds($identity) as $shipId) { $this->persistence->locks->lock('ship', $shipId); }
+            if ($identity['auxiliary_id'] !== null) { $this->persistence->locks->lock('auxiliary', (int) $identity['auxiliary_id']); }
+            $fresh = $this->persistence->locks->lock('action', $event->entityId);
+            if ($fresh === null || (int) ($fresh['scheduled_event_id'] ?? 0) !== $event->id) { return; }
+            $stmt = $this->persistence->movement->findActionWithMovement(['id' => $event->entityId]);
+            $action = $stmt;
             if (!$action || in_array((string) $action['status'], ['succeeded', 'failed', 'canceled'], true)) { return; }
             $now = gmdate('c');
             if ($action['type'] === 'inventory_transfer') {
@@ -801,28 +835,28 @@ final class OthersService
                 throw new \RuntimeException('Unsupported Others action type: ' . $action['type']);
             }
             if ($action['status'] === 'cancel_requested') {
-                $pdo->prepare("UPDATE others_actions SET status = 'canceled', completed_at = :now, updated_at = :now WHERE id = :id AND status = 'cancel_requested'")->execute(['now' => $now, 'id' => (int) $action['id']]);
-                $pdo->prepare("UPDATE others_movements SET phase = 'canceled', updated_at = :now WHERE action_id = :id")->execute(['now' => $now, 'id' => (int) $action['id']]);
-                $pdo->prepare("UPDATE others_ships SET status = 'inactive', current_action_id = NULL, departure_engaged = 0, deuterium_stock = deuterium_stock + :fuel, updated_at = :now WHERE id = :ship_id AND current_action_id = :action_id")->execute(['fuel' => (float) $action['fuel_cost'], 'now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
-                $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', location_type = 'embarked', spatial_state = 'drifting', sector_x = NULL, sector_y = NULL, sector_z = NULL, object_id = NULL, updated_at = :now WHERE ship_id = :ship_id AND status = 'returning'")->execute(['now' => $now, 'ship_id' => (int) $action['movement_ship_id']]);
+                $this->persistence->action->cancelAction(['now' => $now, 'id' => (int) $action['id']]);
+                $this->persistence->movement->cancelMovement(['now' => $now, 'id' => (int) $action['id']]);
+                $this->persistence->movement->refundDeparture(['fuel' => (float) $action['fuel_cost'], 'now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
+                $this->persistence->movement->embarkReturningAuxiliaries(['now' => $now, 'ship_id' => (int) $action['movement_ship_id']]);
                 return;
             }
             if ($action['status'] === 'queued' && $action['phase'] === 'waiting_to_depart') {
                 if ((int) $action['leave_auxiliaries_behind'] === 1) { $this->turnDeployedAuxiliariesDormant((int) $action['movement_ship_id'], $now); }
-                else { $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', location_type = 'embarked', spatial_state = 'drifting', sector_x = NULL, sector_y = NULL, sector_z = NULL, object_id = NULL, updated_at = :now WHERE ship_id = :ship_id AND status = 'returning'")->execute(['now' => $now, 'ship_id' => (int) $action['movement_ship_id']]); }
-                $pdo->prepare("UPDATE others_actions SET status = 'running', updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['now' => $now, 'id' => (int) $action['id']]);
-                $pdo->prepare("UPDATE others_movements SET phase = 'transit', updated_at = :now WHERE action_id = :id")->execute(['now' => $now, 'id' => (int) $action['id']]);
-                $pdo->prepare("UPDATE others_ships SET status = 'transit', updated_at = :now WHERE id = :ship_id AND current_action_id = :action_id")->execute(['now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
+                else { $this->persistence->movement->embarkReturningAuxiliaries(['now' => $now, 'ship_id' => (int) $action['movement_ship_id']]); }
+                $this->persistence->action->startAction(['now' => $now, 'id' => (int) $action['id']]);
+                $this->persistence->movement->startMovement(['now' => $now, 'id' => (int) $action['id']]);
+                $this->persistence->movement->departShip(['now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
                 $next = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], (string) $action['arrive_at'], ['expectedStatus' => 'running']);
-                $pdo->prepare('UPDATE others_actions SET scheduled_event_id = :event_id WHERE id = :id')->execute(['event_id' => $next->id, 'id' => (int) $action['id']]);
+                $this->persistence->action->attachActionEvent(['event_id' => $next->id, 'id' => (int) $action['id']]);
                 return;
             }
             if ($action['status'] === 'running' && $action['phase'] === 'transit') {
                 $result = ['outcome' => 'arrived'];
-                $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'running'")->execute(['result' => json_encode($result, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
-                $pdo->prepare("UPDATE others_movements SET phase = 'arrived', updated_at = :now WHERE action_id = :id")->execute(['now' => $now, 'id' => (int) $action['id']]);
+                $this->persistence->action->finishMovementAction(['result' => json_encode($result, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+                $this->persistence->movement->arriveMovement(['now' => $now, 'id' => (int) $action['id']]);
                 $target = new SectorCoordinates((int) $action['target_x'], (int) $action['target_y'], (int) $action['target_z']);
-                $pdo->prepare("UPDATE others_ships SET status = 'inactive', sector_x = :x, sector_y = :y, sector_z = :z, current_action_id = NULL, departure_engaged = 0, entered_sector_at = :now, updated_at = :now WHERE id = :ship_id AND current_action_id = :action_id")->execute(['x' => $target->getX(), 'y' => $target->getY(), 'z' => $target->getZ(), 'now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
+                $this->persistence->movement->arriveShip(['x' => $target->getX(), 'y' => $target->getY(), 'z' => $target->getZ(), 'now' => $now, 'ship_id' => (int) $action['movement_ship_id'], 'action_id' => (int) $action['id']]);
                 $this->others->markFleetSectorVisited((int) $action['fleet_id'], $target, $now);
                 $this->others->discoverFleetDepotsInSector((int) $action['fleet_id'], $target);
                 $this->createOthersArrivalAlerts($target, (string) $action['public_id']);
@@ -833,14 +867,11 @@ final class OthersService
 
     private function completeInventoryTransfer(array $action, string $now): void
     {
-        $pdo = $this->others->pdo();
-        $stmt = $pdo->prepare('SELECT * FROM others_inventory_transfers WHERE action_id = :action_id');
-        $stmt->execute(['action_id' => (int) $action['id']]);
-        $transfer = $stmt->fetch();
+        $stmt = $this->persistence->inventory->findTransfer(['action_id' => (int) $action['id']]);
+        $transfer = $stmt;
         if (!$transfer || $transfer['status'] !== 'queued') { return; }
-        $targetStmt = $pdo->prepare("SELECT * FROM others_ships WHERE id = :id AND destroyed_at IS NULL AND status <> 'removed'");
-        $targetStmt->execute(['id' => (int) $transfer['target_ship_id']]);
-        $target = $targetStmt->fetch();
+        $targetStmt = $this->persistence->inventory->findActiveTargetShip(['id' => (int) $transfer['target_ship_id']]);
+        $target = $targetStmt;
         $items = json_decode((string) $transfer['item_ids_json'], true, 512, JSON_THROW_ON_ERROR);
         $space = $transfer['kind'] === 'resource' ? (float) $transfer['amount'] : 0.0;
         if ($transfer['kind'] === 'item') {
@@ -850,64 +881,61 @@ final class OthersService
         if (!$target) {
             if ($transfer['kind'] === 'resource') {
                 $amount = (float) $transfer['amount'];
-                $pdo->prepare('UPDATE others_inventory_resources SET reserved_amount = CASE WHEN reserved_amount > :reserved_floor THEN reserved_amount - :reserved_decrease ELSE 0 END, updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type')->execute(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
+                $this->persistence->inventory->releaseResourceReservation(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
             } else {
-                $pdo->prepare('UPDATE others_inventory_items SET reserved_action_id = NULL, updated_at = :now WHERE reserved_action_id = :action_id')->execute(['now' => $now, 'action_id' => (int) $action['id']]);
+                $this->persistence->inventory->releaseItemReservations(['now' => $now, 'action_id' => (int) $action['id']]);
             }
             $this->finishTransfer($transfer, $action, $space, $now, false, 'target_unavailable');
             return;
         }
         if ($transfer['kind'] === 'resource') {
-            $source = $pdo->prepare('UPDATE others_inventory_resources SET amount = amount - CAST(:amount AS DECIMAL(20,4)), reserved_amount = reserved_amount - CAST(:amount AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount >= CAST(:amount AS DECIMAL(20,4)) AND reserved_amount >= CAST(:amount AS DECIMAL(20,4))');
-            $source->execute(['amount' => (float) $transfer['amount'], 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
-            if ($source->rowCount() !== 1) { throw new \RuntimeException('Reserved Others inventory resource is inconsistent.'); }
-            $pdo->prepare('UPDATE others_inventory_resources SET amount = amount + :amount, updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type')->execute(['amount' => (float) $transfer['amount'], 'now' => $now, 'ship_id' => (int) $transfer['target_ship_id'], 'resource_type' => $transfer['resource_type']]);
+            $source = $this->persistence->inventory->debitReservedResource(['amount' => (float) $transfer['amount'], 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
+            if ($source !== 1) { throw new \RuntimeException('Reserved Others inventory resource is inconsistent.'); }
+            $this->persistence->inventory->creditTransferredResource(['amount' => (float) $transfer['amount'], 'now' => $now, 'ship_id' => (int) $transfer['target_ship_id'], 'resource_type' => $transfer['resource_type']]);
         } else {
-            $move = $pdo->prepare('UPDATE others_inventory_items SET ship_id = :target_ship_id, reserved_action_id = NULL, updated_at = :now WHERE reserved_action_id = :action_id AND ship_id = :source_ship_id');
-            $move->execute(['target_ship_id' => (int) $transfer['target_ship_id'], 'now' => $now, 'action_id' => (int) $action['id'], 'source_ship_id' => (int) $transfer['source_ship_id']]);
-            if ($move->rowCount() !== count($items)) { throw new \RuntimeException('Reserved Others inventory items are inconsistent.'); }
+            $move = $this->persistence->inventory->moveReservedItems(['target_ship_id' => (int) $transfer['target_ship_id'], 'now' => $now, 'action_id' => (int) $action['id'], 'source_ship_id' => (int) $transfer['source_ship_id']]);
+            if ($move !== count($items)) { throw new \RuntimeException('Reserved Others inventory items are inconsistent.'); }
         }
         $this->finishTransfer($transfer, $action, $space, $now, true, null);
     }
 
     private function finishTransfer(array $transfer, array $action, float $space, string $now, bool $success, ?string $reason): void
     {
-        $pdo = $this->others->pdo();
         $status = $success ? 'succeeded' : 'failed';
         $result = $success ? ['outcome' => 'transferred'] : null;
         $error = $success ? null : ['code' => $reason, 'message' => 'The inventory transfer could not be completed.'];
-        $pdo->prepare('UPDATE others_inventory_transfers SET status = :status, updated_at = :now WHERE id = :id AND status = :expected')->execute(['status' => $status, 'now' => $now, 'id' => (int) $transfer['id'], 'expected' => 'queued']);
-        $pdo->prepare('UPDATE others_actions SET status = :status, result_json = :result, error_json = :error, completed_at = :now, updated_at = :now WHERE id = :id AND status = :expected')->execute(['status' => $status, 'result' => $result === null ? null : json_encode($result, JSON_THROW_ON_ERROR), 'error' => $error === null ? null : json_encode($error, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id'], 'expected' => 'queued']);
-        $pdo->prepare('UPDATE others_ships SET inventory_reserved = CASE WHEN inventory_reserved > :reserved_floor THEN inventory_reserved - :reserved_decrease ELSE 0 END, updated_at = :now WHERE id = :id')->execute(['reserved_floor' => $space, 'reserved_decrease' => $space, 'now' => $now, 'id' => (int) $transfer['target_ship_id']]);
-        $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $transfer['auxiliary_id'], 'action_id' => (int) $action['id']]);
+        $this->persistence->inventory->finishTransfer(['status' => $status, 'now' => $now, 'id' => (int) $transfer['id'], 'expected' => 'queued']);
+        $this->persistence->action->finishTransferAction(['status' => $status, 'result' => $result === null ? null : json_encode($result, JSON_THROW_ON_ERROR), 'error' => $error === null ? null : json_encode($error, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id'], 'expected' => 'queued']);
+        $this->persistence->inventory->releaseCapacity(['reserved_floor' => $space, 'reserved_decrease' => $space, 'now' => $now, 'id' => (int) $transfer['target_ship_id']]);
+        $this->persistence->inventory->releaseTransferActor(['now' => $now, 'id' => (int) $transfer['auxiliary_id'], 'action_id' => (int) $action['id']]);
     }
 
     private function completeDeuteriumTransfer(array $action, string $now): void
     {
-        $pdo = $this->others->pdo(); $payload = json_decode((string) $action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+        $payload = json_decode((string) $action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
         $target = $this->others->findShipByPublicId((string) $payload['targetShipId']); $amount = (float) $payload['amount'];
         if ($target === null || $target['destroyed_at'] !== null || $target['status'] === 'removed') {
-            $pdo->prepare('UPDATE others_ships SET deuterium_reserved = CASE WHEN deuterium_reserved > :reserved_floor THEN deuterium_reserved - :reserved_decrease ELSE 0 END, updated_at = :now WHERE id = :id')->execute(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => (int) $action['ship_id']]);
-            $pdo->prepare("UPDATE others_actions SET status = 'failed', error_json = :error, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['error' => json_encode(['code' => 'target_unavailable', 'message' => 'The target ship became unavailable.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+            $this->persistence->inventory->releaseFuelReservation(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => (int) $action['ship_id']]);
+            if ($target !== null) { $this->persistence->inventory->releaseFuelReservation(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => (int) $target['id']]); }
+            $this->persistence->action->failFuelTransfer(['error' => json_encode(['code' => 'target_unavailable', 'message' => 'The target ship became unavailable.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
         } else {
-            $sourceUpdate = $pdo->prepare('UPDATE others_ships SET deuterium_stock = deuterium_stock - :amount, deuterium_reserved = deuterium_reserved - :amount, updated_at = :now WHERE id = :id AND deuterium_stock >= :amount AND deuterium_reserved >= :amount');
-            $sourceUpdate->execute(['amount' => $amount, 'now' => $now, 'id' => (int) $action['ship_id']]);
-            if ($sourceUpdate->rowCount() !== 1) { throw new \RuntimeException('Reserved Others deuterium is inconsistent.'); }
-            $pdo->prepare('UPDATE others_ships SET deuterium_stock = deuterium_stock + :stock_increase, deuterium_reserved = CASE WHEN deuterium_reserved > :reserved_floor THEN deuterium_reserved - :reserved_decrease ELSE 0 END, updated_at = :now WHERE id = :id')->execute(['stock_increase' => $amount, 'reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => (int) $target['id']]);
-            $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['result' => json_encode(['outcome' => 'transferred', 'amount' => $amount], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+            $sourceUpdate = $this->persistence->inventory->debitReservedFuel(['amount' => $amount, 'now' => $now, 'id' => (int) $action['ship_id']]);
+            if ($sourceUpdate !== 1) { throw new \RuntimeException('Reserved Others deuterium is inconsistent.'); }
+            $this->persistence->inventory->creditReservedFuel(['stock_increase' => $amount, 'reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => (int) $target['id']]);
+            $this->persistence->action->finishFuelTransfer(['result' => json_encode(['outcome' => 'transferred', 'amount' => $amount], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
         }
-        if ($action['auxiliary_id'] !== null) { $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]); }
+        if ($action['auxiliary_id'] !== null) { $this->persistence->inventory->releaseTransferActor(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]); }
     }
 
     private function completeAuxiliaryMining(array $action, string $now): void
     {
         if ($this->sectors === null || $action['auxiliary_id'] === null) { throw new \RuntimeException('Others mining sector storage is unavailable.'); }
         $ship = $this->others->findShipByPublicId((string) $action['actor_public_id']);
-        $shipStmt = $this->others->pdo()->prepare('SELECT * FROM others_ships WHERE id = :id'); $shipStmt->execute(['id' => (int) $action['ship_id']]); $ship = $shipStmt->fetch();
+        $shipStmt = $this->persistence->actor->findShipById(['id' => (int) $action['ship_id']]); $ship = $shipStmt;
         if (!$ship) { $this->failAuxiliaryAction($action, $now, 'carrier_unavailable'); return; }
         $payload = json_decode((string) $action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
         $coordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
-        $sector = $this->sectors->getOrCreateSector($coordinates); $object = $sector->findObjectById((string) $payload['objectId']);
+        $sector = $this->sectorChanges->getOrCreateSector($coordinates); $object = $sector->findObjectById((string) $payload['objectId']);
         if (!$object instanceof Planet && !$object instanceof Asteroid && !$object instanceof DormantConstruct) { $this->failAuxiliaryAction($action, $now, 'target_unavailable'); return; }
         $remaining = $object->getResourceAmounts(); $profile = $payload['profile']; $requested = (float) $payload['amount']; $extracted = []; $total = 0.0;
         foreach (ResourceComposition::TYPES as $type) {
@@ -916,48 +944,44 @@ final class OthersService
         }
         if ($total <= 0.0) { $this->failAuxiliaryAction($action, $now, 'resources_exhausted'); return; }
         $replacement = $object instanceof Planet ? $object->withResourceAmounts($remaining) : $object->withResourceAmounts($remaining);
-        $sector->replaceObject($replacement); $this->sectors->saveSector($sector);
-        $pdo = $this->others->pdo();
-        $pdo->prepare("UPDATE others_auxiliaries SET cargo_deuterium = cargo_deuterium + :deuterium, cargo_metals = cargo_metals + :metals, cargo_ice = cargo_ice + :ice, cargo_carbon_compounds = cargo_carbon_compounds + :carbon, status = 'inactive', current_action_id = NULL, spatial_state = 'landed_on_sector_object', updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['deuterium' => $extracted['deuterium'], 'metals' => $extracted['metals'], 'ice' => $extracted['ice'], 'carbon' => $extracted['carbon_compounds'], 'now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
-        $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['result' => json_encode(['outcome' => 'mined', 'amounts' => $extracted], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        $sector->replaceObject($replacement); $this->sectorChanges->saveSector($sector);
+        $this->persistence->production->finishAuxiliaryMining(['deuterium' => $extracted['deuterium'], 'metals' => $extracted['metals'], 'ice' => $extracted['ice'], 'carbon' => $extracted['carbon_compounds'], 'now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
+        $this->persistence->action->finishFuelTransfer(['result' => json_encode(['outcome' => 'mined', 'amounts' => $extracted], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
     }
 
     private function completeAuxiliaryRecall(array $action, string $now): void
     {
         if ($action['auxiliary_id'] === null) { return; }
-        $pdo = $this->others->pdo();
-        $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', location_type = 'embarked', spatial_state = 'drifting', sector_x = NULL, sector_y = NULL, sector_z = NULL, object_id = NULL, current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
-        $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['result' => json_encode(['outcome' => 'embarked'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        $this->persistence->production->finishRecall(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
+        $this->persistence->action->finishFuelTransfer(['result' => json_encode(['outcome' => 'embarked'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
     }
 
     private function completeDormantRecovery(array $action, string $now): void
     {
         if ($this->sectors === null || $action['auxiliary_id'] === null) { throw new \RuntimeException('Dormant recovery storage is unavailable.'); }
-        $shipStmt = $this->others->pdo()->prepare('SELECT * FROM others_ships WHERE id = :id'); $shipStmt->execute(['id' => (int) $action['ship_id']]); $ship = $shipStmt->fetch();
+        $shipStmt = $this->persistence->actor->findShipById(['id' => (int) $action['ship_id']]); $ship = $shipStmt;
         if (!$ship) { $this->failAuxiliaryAction($action, $now, 'carrier_unavailable'); return; }
         $payload = json_decode((string) $action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
-        $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']));
+        $sector = $this->sectorChanges->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']));
         $object = $sector->findObjectById((string) $payload['objectId']);
         if (!$object instanceof DormantConstruct || $object->getSubtype() !== 'others_auxiliary' || array_sum($object->getResourceAmounts()) < 5.01 - 0.00001) { $this->failAuxiliaryAction($action, $now, 'target_unavailable'); return; }
-        $sector->removeObjectById($object->getId()); $this->sectors->saveSector($sector);
+        $sector->removeObjectById($object->getId()); $this->sectorChanges->saveSector($sector);
         $recoveredId = is_string($payload['originalAuxiliaryId'] ?? null) && $payload['originalAuxiliaryId'] !== '' ? $payload['originalAuxiliaryId'] : OthersRepository::publicId('aux');
         $this->others->reviveAuxiliary((int) $ship['id'], $recoveredId);
-        $pdo = $this->others->pdo();
-        $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
-        $pdo->prepare("UPDATE others_actions SET status = 'succeeded', result_json = :result, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['result' => json_encode(['outcome' => 'recovered', 'auxiliaryId' => $recoveredId], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        $this->persistence->production->releaseRepairActor(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
+        $this->persistence->action->finishFuelTransfer(['result' => json_encode(['outcome' => 'recovered', 'auxiliaryId' => $recoveredId], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
     }
 
     private function failAuxiliaryAction(array $action, string $now, string $reason): void
     {
-        $pdo = $this->others->pdo();
-        if ($action['auxiliary_id'] !== null) { $pdo->prepare("UPDATE others_auxiliaries SET status = 'inactive', current_action_id = NULL, updated_at = :now WHERE id = :id AND current_action_id = :action_id")->execute(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]); }
-        $pdo->prepare("UPDATE others_actions SET status = 'failed', error_json = :error, completed_at = :now, updated_at = :now WHERE id = :id AND status = 'queued'")->execute(['error' => json_encode(['code' => $reason, 'message' => 'The Others auxiliary task could not be completed.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        if ($action['auxiliary_id'] !== null) { $this->persistence->production->releaseRepairActor(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]); }
+        $this->persistence->action->failFuelTransfer(['error' => json_encode(['code' => $reason, 'message' => 'The Others auxiliary task could not be completed.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
     }
 
     private function processHarvest(array $action, string $now): void
     {
         if ($this->sectors === null) { throw new \RuntimeException('Harvest sector storage is unavailable.'); }
-        $pdo = $this->others->pdo(); $stmt = $pdo->prepare('SELECT * FROM others_harvests WHERE action_id=:action_id'); $stmt->execute(['action_id' => (int) $action['id']]); $harvest = $stmt->fetch();
+        $stmt = $this->persistence->production->findHarvest(['action_id' => (int) $action['id']]); $harvest = $stmt;
         if (!$harvest) { return; }
         $canceling = $action['status'] === 'cancel_requested';
         if ($canceling && in_array((string) $harvest['phase'], ['destroying_life', 'mining'], true)) {
@@ -967,12 +991,12 @@ final class OthersService
                 $fraction = max(0.0, min(1.0, ($elapsed - 300) / 300));
                 if ($fraction > 0.0) { $output = $this->extractHarvestResources($harvest, round((float) $harvest['reserved_capacity'] * $fraction, 4)); }
             }
-            $pdo->prepare("UPDATE others_harvests SET phase='recalling',phase_started_at=:now,pending_output_json=:output,updated_at=:now WHERE id=:id")->execute(['now' => $now, 'output' => json_encode($output, JSON_THROW_ON_ERROR), 'id' => (int) $harvest['id']]);
+            $this->persistence->production->beginHarvestRecall(['now' => $now, 'output' => json_encode($output, JSON_THROW_ON_ERROR), 'id' => (int) $harvest['id']]);
             $this->scheduleExistingAction($action, (new \DateTimeImmutable($now))->modify('+5 minutes')->format('c'), 'cancel_requested');
             return;
         }
         if ($harvest['phase'] === 'recalling') {
-            $pdo->prepare("UPDATE others_harvests SET phase='orbit_exit',phase_started_at=:now,updated_at=:now WHERE id=:id")->execute(['now' => $now, 'id' => (int) $harvest['id']]);
+            $this->persistence->production->beginOrbitExit(['now' => $now, 'id' => (int) $harvest['id']]);
             $this->scheduleExistingAction($action, (new \DateTimeImmutable($now))->modify('+10 minutes')->format('c'), 'cancel_requested');
             return;
         }
@@ -982,14 +1006,14 @@ final class OthersService
             return;
         }
         if ($harvest['phase'] === 'destroying_life') {
-            $shipStmt = $pdo->prepare('SELECT * FROM others_ships WHERE id=:id'); $shipStmt->execute(['id' => (int) $harvest['ship_id']]); $ship = $shipStmt->fetch();
+            $shipStmt = $this->persistence->actor->findShipById(['id' => (int) $harvest['ship_id']]); $ship = $shipStmt;
             if (!$ship) { $this->finishHarvest($action, $harvest, [], $now, canceled: false, failure: 'carrier_unavailable'); return; }
-            $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z'])); $planet = $sector->findObjectById((string) $harvest['target_object_id']);
+            $sector = $this->sectorChanges->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z'])); $planet = $sector->findObjectById((string) $harvest['target_object_id']);
             if (!$planet instanceof Planet) { $this->finishHarvest($action, $harvest, [], $now, canceled: false, failure: 'target_unavailable'); return; }
             $amounts = $planet->getResourceAmounts(); $amounts['carbon_compounds'] = round($amounts['carbon_compounds'] + (float) $harvest['biological_carbon'], 4);
-            $sector->replaceObject($planet->withResourceAmounts($amounts, intelligentLife: false)); $this->sectors->saveSector($sector);
-            $pdo->prepare("UPDATE others_harvests SET phase='mining',phase_started_at=:now,updated_at=:now WHERE id=:id")->execute(['now' => $now, 'id' => (int) $harvest['id']]);
-            $pdo->prepare("UPDATE others_actions SET status='running',ends_at=:ends,updated_at=:now WHERE id=:id")->execute(['ends' => (new \DateTimeImmutable($now))->modify('+10 minutes')->format('c'), 'now' => $now, 'id' => (int) $action['id']]);
+            $sector->replaceObject($planet->withResourceAmounts($amounts, intelligentLife: false)); $this->sectorChanges->saveSector($sector);
+            $this->persistence->production->beginHarvestMining(['now' => $now, 'id' => (int) $harvest['id']]);
+            $this->persistence->action->updateHarvestDeadline(['ends' => (new \DateTimeImmutable($now))->modify('+10 minutes')->format('c'), 'now' => $now, 'id' => (int) $action['id']]);
             $this->scheduleExistingAction($action, (new \DateTimeImmutable($now))->modify('+10 minutes')->format('c'), 'running');
             return;
         }
@@ -1001,9 +1025,9 @@ final class OthersService
 
     private function extractHarvestResources(array $harvest, float $grossCapacity): array
     {
-        $pdo = $this->others->pdo(); $shipStmt = $pdo->prepare('SELECT * FROM others_ships WHERE id=:id'); $shipStmt->execute(['id' => (int) $harvest['ship_id']]); $ship = $shipStmt->fetch();
+        $shipStmt = $this->persistence->actor->findShipById(['id' => (int) $harvest['ship_id']]); $ship = $shipStmt;
         if (!$ship || $grossCapacity <= 0.0) { return []; }
-        $sector = $this->sectors?->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z'])); $planet = $sector?->findObjectById((string) $harvest['target_object_id']);
+        $sector = $this->sectorChanges?->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z'])); $planet = $sector?->findObjectById((string) $harvest['target_object_id']);
         if (!$planet instanceof Planet) { return []; }
         $amounts = $planet->getResourceAmounts(); $total = array_sum($amounts); $grossTotal = round(min($grossCapacity, $total), 4);
         if ($grossTotal <= 0.0) { return []; }
@@ -1013,13 +1037,13 @@ final class OthersService
             $take = round(max(0.0, $take), 4); $gross[$type] = $take; $remainingGross = round(max(0.0, $remainingGross - $take), 4);
             $consumed[$type] = round($take * 0.10, 4); $stored[$type] = round($take - $consumed[$type], 4); $amounts[$type] = round($amounts[$type] - $take, 4);
         }
-        $sector->replaceObject($planet->withResourceAmounts($amounts, true, false)); $this->sectors?->saveSector($sector);
+        $sector->replaceObject($planet->withResourceAmounts($amounts, true, false)); $this->sectorChanges?->saveSector($sector);
         return ['gross' => $gross, 'consumed' => $consumed, 'stored' => $stored];
     }
 
     private function finishHarvest(array $action, array $harvest, array $output, string $now, bool $canceled, ?string $failure = null): void
     {
-        $pdo = $this->others->pdo(); $stored = is_array($output['stored'] ?? null) ? $output['stored'] : [];
+        $stored = is_array($output['stored'] ?? null) ? $output['stored'] : [];
         $inventoryStored = $stored;
         if ($failure === null) {
             $deuteriumAllocation = $this->allocateHarvestedDeuterium(
@@ -1032,30 +1056,23 @@ final class OthersService
         }
         foreach (ResourceComposition::TYPES as $type) {
             $amount = (float) ($inventoryStored[$type] ?? 0.0);
-            if ($amount > 0.0) { $pdo->prepare('UPDATE others_inventory_resources SET amount=amount+:amount,updated_at=:now WHERE ship_id=:ship_id AND resource_type=:type')->execute(['amount' => $amount, 'now' => $now, 'ship_id' => (int) $harvest['ship_id'], 'type' => $type]); }
+            if ($amount > 0.0) { $this->persistence->production->creditHarvestResource(['amount' => $amount, 'now' => $now, 'ship_id' => (int) $harvest['ship_id'], 'type' => $type]); }
         }
-        $pdo->prepare("UPDATE others_auxiliaries SET status='inactive',location_type='embarked',spatial_state='drifting',sector_x=NULL,sector_y=NULL,sector_z=NULL,object_id=NULL,current_action_id=NULL,updated_at=:now WHERE current_action_id=:action_id")->execute(['now' => $now, 'action_id' => (int) $action['id']]);
+        $this->persistence->production->embarkHarvestActors(['now' => $now, 'action_id' => (int) $action['id']]);
         $reservedCapacity = (float) $harvest['reserved_capacity'];
-        $pdo->prepare("UPDATE others_ships SET status='inactive',current_action_id=NULL,inventory_reserved=CASE WHEN inventory_reserved > :reserved_floor THEN inventory_reserved - :reserved_decrease ELSE 0 END,updated_at=:now WHERE id=:id AND current_action_id=:action_id")->execute(['reserved_floor' => $reservedCapacity, 'reserved_decrease' => $reservedCapacity, 'now' => $now, 'id' => (int) $harvest['ship_id'], 'action_id' => (int) $action['id']]);
+        $this->persistence->production->finishHarvestShip(['reserved_floor' => $reservedCapacity, 'reserved_decrease' => $reservedCapacity, 'now' => $now, 'id' => (int) $harvest['ship_id'], 'action_id' => (int) $action['id']]);
         $status = $failure !== null ? 'failed' : ($canceled ? 'canceled' : 'succeeded');
         $result = $failure === null ? ['outcome' => $canceled ? 'interrupted' : 'harvested', 'resources' => $output] : null;
         $error = $failure !== null ? ['code' => $failure, 'message' => 'The harvest could not be completed.'] : null;
-        $pdo->prepare("UPDATE others_harvests SET phase=:phase,pending_output_json=:output,updated_at=:now WHERE id=:id")->execute(['phase' => $status, 'output' => json_encode($output, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $harvest['id']]);
-        $pdo->prepare("UPDATE others_actions SET status=:status,result_json=:result,error_json=:error,completed_at=:now,updated_at=:now WHERE id=:id AND status IN ('queued','running','cancel_requested')")->execute(['status' => $status, 'result' => $result === null ? null : json_encode($result, JSON_THROW_ON_ERROR), 'error' => $error === null ? null : json_encode($error, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        $this->persistence->production->finishHarvest(['phase' => $status, 'output' => json_encode($output, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $harvest['id']]);
+        $this->persistence->action->finishHarvestAction(['status' => $status, 'result' => $result === null ? null : json_encode($result, JSON_THROW_ON_ERROR), 'error' => $error === null ? null : json_encode($error, JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
     }
 
     /** @return array{tankPoints:float,tankEquivalentEce:float,inventoryEce:float} */
     private function allocateHarvestedDeuterium(int $shipId, float $storedEce, string $now): array
     {
         $storedEce = round(max(0.0, $storedEce), 4);
-        $pdo = $this->others->pdo();
-        $sql = 'SELECT deuterium_stock,deuterium_capacity,deuterium_reserved FROM others_ships WHERE id=:id';
-        if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql') {
-            $sql .= ' FOR UPDATE';
-        }
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(['id' => $shipId]);
-        $ship = $stmt->fetch();
+        $ship = $this->persistence->actor->findTankForUpdate($shipId);
         if (!is_array($ship)) {
             throw new \RuntimeException('Others harvest carrier disappeared before deuterium allocation.');
         }
@@ -1073,11 +1090,7 @@ final class OthersService
         $inventoryEce = round($storedEce - $tankEquivalentEce, 4);
 
         if ($tankPoints > 0.0) {
-            $pdo->prepare(
-                'UPDATE others_ships
-                 SET deuterium_stock=deuterium_stock+:tank_points,updated_at=:now
-                 WHERE id=:id'
-            )->execute(['tank_points' => $tankPoints, 'now' => $now, 'id' => $shipId]);
+            $this->persistence->production->creditHarvestFuel(['tank_points' => $tankPoints, 'now' => $now, 'id' => $shipId]);
         }
 
         return [
@@ -1090,17 +1103,17 @@ final class OthersService
     private function scheduleExistingAction(array $action, string $runAt, string $expectedStatus): void
     {
         $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $runAt, ['expectedStatus' => $expectedStatus]);
-        $this->others->pdo()->prepare('UPDATE others_actions SET scheduled_event_id=:event_id,ends_at=:ends_at,updated_at=:now WHERE id=:id')->execute(['event_id' => $event->id, 'ends_at' => $runAt, 'now' => gmdate('c'), 'id' => (int) $action['id']]);
+        $this->persistence->action->rescheduleAction(['event_id' => $event->id, 'ends_at' => $runAt, 'now' => gmdate('c'), 'id' => (int) $action['id']]);
     }
 
     private function completeCraft(array $action, string $now): void
     {
-        $pdo = $this->others->pdo(); $stmt = $pdo->prepare('SELECT * FROM others_crafts WHERE action_id=:action_id'); $stmt->execute(['action_id' => (int) $action['id']]); $craft = $stmt->fetch();
+        $stmt = $this->persistence->production->findCraft(['action_id' => (int) $action['id']]); $craft = $stmt;
         if (!$craft || $craft['status'] !== 'queued') { return; }
-        $shipStmt = $pdo->prepare('SELECT s.*,f.player_id,f.public_id AS fleet_public_id FROM others_ships s JOIN others_fleets f ON f.id=s.fleet_id WHERE s.id=:id AND s.destroyed_at IS NULL'); $shipStmt->execute(['id' => (int) $craft['ship_id']]); $ship = $shipStmt->fetch();
+        $shipStmt = $this->persistence->production->findCraftCarrier(['id' => (int) $craft['ship_id']]); $ship = $shipStmt;
         if (!$ship) {
-            $pdo->prepare("UPDATE others_crafts SET status='failed',updated_at=:now WHERE id=:id")->execute(['now' => $now, 'id' => (int) $craft['id']]);
-            $pdo->prepare("UPDATE others_actions SET status='failed',error_json=:error,completed_at=:now,updated_at=:now WHERE id=:id AND status='queued'")->execute(['error' => json_encode(['code' => 'carrier_unavailable', 'message' => 'The crafting mothership is unavailable.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+            $this->persistence->production->failCraft(['now' => $now, 'id' => (int) $craft['id']]);
+            $this->persistence->action->failFuelTransfer(['error' => json_encode(['code' => 'carrier_unavailable', 'message' => 'The crafting mothership is unavailable.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
             return;
         }
         $output = match ($craft['recipe_id']) {
@@ -1109,30 +1122,30 @@ final class OthersService
             'missile' => $this->createCraftedMissileItem((int) $ship['id'], $now),
             default => throw new \RuntimeException('Unsupported frozen Others craft recipe.'),
         };
-        $pdo->prepare("UPDATE others_crafts SET status='succeeded',updated_at=:now WHERE id=:id AND status='queued'")->execute(['now' => $now, 'id' => (int) $craft['id']]);
-        $pdo->prepare("UPDATE others_actions SET status='succeeded',result_json=:result,completed_at=:now,updated_at=:now WHERE id=:id AND status='queued'")->execute(['result' => json_encode(['output' => $output], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
-        $pdo->prepare("UPDATE others_auxiliaries SET status='inactive',current_action_id=NULL,updated_at=:now WHERE id=:id AND current_action_id=:action_id")->execute(['now' => $now, 'id' => (int) $craft['assistant_auxiliary_id'], 'action_id' => (int) $action['id']]);
+        $this->persistence->production->finishCraft(['now' => $now, 'id' => (int) $craft['id']]);
+        $this->persistence->action->finishFuelTransfer(['result' => json_encode(['output' => $output], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        $this->persistence->production->releaseRepairActor(['now' => $now, 'id' => (int) $craft['assistant_auxiliary_id'], 'action_id' => (int) $action['id']]);
         $outputSpace = (float) $craft['output_space'];
-        if ($outputSpace > 0.0) { $pdo->prepare('UPDATE others_ships SET inventory_reserved=CASE WHEN inventory_reserved > :reserved_floor THEN inventory_reserved - :reserved_decrease ELSE 0 END,updated_at=:now WHERE id=:id')->execute(['reserved_floor' => $outputSpace, 'reserved_decrease' => $outputSpace, 'now' => $now, 'id' => (int) $ship['id']]); }
+        if ($outputSpace > 0.0) { $this->persistence->production->releaseCraftCapacity(['reserved_floor' => $outputSpace, 'reserved_decrease' => $outputSpace, 'now' => $now, 'id' => (int) $ship['id']]); }
     }
 
     private function createCraftedMissileItem(int $shipId, string $now): array
     {
         $publicId = OthersRepository::publicId('item');
-        $this->others->pdo()->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,name,metadata_json,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,'Missile Others',:metadata,NULL,:now,:now)")->execute(['public_id' => $publicId, 'ship_id' => $shipId, 'metadata' => json_encode(['technology' => 'others', 'recipe' => 'missile', 'fabricator' => 'others', 'craftedAt' => $now], JSON_THROW_ON_ERROR), 'now' => $now]);
+        $this->persistence->combat->createCraftedMissile(['public_id' => $publicId, 'ship_id' => $shipId, 'metadata' => json_encode(['technology' => 'others', 'recipe' => 'missile', 'fabricator' => 'others', 'craftedAt' => $now], JSON_THROW_ON_ERROR), 'now' => $now]);
         return ['kind' => 'missile', 'id' => $publicId, 'containerSpaceEce' => 2.0];
     }
 
     private function processLaser(array $action, string $now): void
     {
-        $pdo = $this->others->pdo(); $stmt = $pdo->prepare('SELECT l.*,s.public_id AS ship_public_id,s.status AS ship_status,s.destroyed_at,s.deuterium_stock FROM others_laser_locks l JOIN others_ships s ON s.id=l.ship_id WHERE l.action_id=:action_id'); $stmt->execute(['action_id' => (int) $action['id']]); $lock = $stmt->fetch();
+        $stmt = $this->persistence->combat->findLaser(['action_id' => (int) $action['id']]); $lock = $stmt;
         if (!$lock || in_array((string) $lock['status'], ['stopped','failed'], true)) { return; }
         if ($lock['status'] === 'queued') {
             $target = $this->resolveLocalTarget(['sector_x' => $lock['sector_x'], 'sector_y' => $lock['sector_y'], 'sector_z' => $lock['sector_z'], 'status' => $lock['ship_status'], 'destroyed_at' => $lock['destroyed_at']], (string) $lock['target_public_id'], laserOnly: true);
             if ($target === null) { $this->stopLaser($action, $lock, $now, 'target_unavailable'); return; }
             $start = new \DateTimeImmutable($now); $exhausts = $start->modify('+' . max(1, (int) round((float) $lock['deuterium_stock'] * 60)) . ' seconds'); $damage = $start->modify('+10 minutes'); $next = $damage < $exhausts ? $damage : $exhausts;
-            $pdo->prepare("UPDATE others_laser_locks SET status='active',started_at=:now,accounted_until=:now,next_damage_at=:damage,exhausts_at=:exhausts,updated_at=:now WHERE id=:id AND status='queued'")->execute(['now' => $now, 'damage' => $damage->format('c'), 'exhausts' => $exhausts->format('c'), 'id' => (int) $lock['id']]);
-            $pdo->prepare("UPDATE others_actions SET status='running',ends_at=:ends,updated_at=:now WHERE id=:id AND status='queued'")->execute(['ends' => $next->format('c'), 'now' => $now, 'id' => (int) $action['id']]);
+            $this->persistence->combat->startLaser(['now' => $now, 'damage' => $damage->format('c'), 'exhausts' => $exhausts->format('c'), 'id' => (int) $lock['id']]);
+            $this->persistence->action->startLaserAction(['ends' => $next->format('c'), 'now' => $now, 'id' => (int) $action['id']]);
             $lockSector = new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z']);
             $message = $target['kind'] === 'manny'
                 ? 'Laser lock: the exposed Manny ' . $target['name'] . ' will be destroyed in ten minutes unless it is embarked.'
@@ -1148,13 +1161,12 @@ final class OthersService
         $target = $this->resolveLocalTarget($ship, (string) $lock['target_public_id'], laserOnly: true);
         if ($target === null || $target['kind'] !== $lock['target_kind']) { $this->stopLaser($action, $lock, $now, 'target_lost'); return; }
         $accounted = new \DateTimeImmutable((string) $lock['accounted_until']); $current = new \DateTimeImmutable($now); $elapsed = max(0, $current->getTimestamp() - $accounted->getTimestamp()); $cost = round($elapsed / 60, 4); $available = (float) $ship['deuterium_stock']; $charged = min($available, $cost);
-        if ($charged > 0.0) { $pdo->prepare('UPDATE others_ships SET deuterium_stock=CASE WHEN deuterium_stock > :stock_floor THEN deuterium_stock - :stock_decrease ELSE 0 END,updated_at=:now WHERE id=:id')->execute(['stock_floor' => $charged, 'stock_decrease' => $charged, 'now' => $now, 'id' => (int) $ship['id']]); }
-        $pdo->prepare('UPDATE others_laser_locks SET accounted_until=:now,updated_at=:now WHERE id=:id')->execute(['now' => $now, 'id' => (int) $lock['id']]);
+        if ($charged > 0.0) { $this->persistence->combat->debitLaserFuel(['stock_floor' => $charged, 'stock_decrease' => $charged, 'now' => $now, 'id' => (int) $ship['id']]); }
+        $this->persistence->combat->accountLaserDamage(['now' => $now, 'id' => (int) $lock['id']]);
         if ($available <= $cost + 0.00001 || $current >= new \DateTimeImmutable((string) $lock['exhausts_at'])) { $this->stopLaser($action, $lock, $now, 'deuterium_exhausted'); return; }
         if ($current >= new \DateTimeImmutable((string) $lock['next_damage_at'])) {
             $damageKey = 'laser:' . $action['public_id'] . ':' . $lock['next_damage_at'];
-            try {
-                $pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key' => $damageKey, 'kind' => $target['kind'], 'target' => $target['id'], 'damage' => $target['kind'] === 'probe' ? 5 : ($target['kind'] === 'manny' ? 1 : 0), 'now' => $now]);
+            if ($this->persistence->combat->recordDamage(['key' => $damageKey, 'kind' => $target['kind'], 'target' => $target['id'], 'damage' => $target['kind'] === 'probe' ? 5 : ($target['kind'] === 'manny' ? 1 : 0), 'now' => $now])) {
                 if ($target['kind'] === 'probe' && $this->probes !== null) {
                     $probe = $this->probes->findById((int) $target['id']);
                     if ($probe !== null) {
@@ -1170,10 +1182,10 @@ final class OthersService
                         }
                     }
                 }
-                elseif ($target['kind'] === 'manny') { $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,(string)$lock['next_damage_at']);} $pdo->prepare('DELETE FROM mannies WHERE uid=:uid AND location_type=\'sector\'')->execute(['uid' => $target['id']]); if ($this->sectors !== null) { $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z'])); if ($sector->removeObjectById('manny-' . $target['id'])) { $this->sectors->saveSector($sector); } } $this->stopLaser($action, $lock, $now, 'target_destroyed'); return; }
-            } catch (\PDOException $error) { if (!str_contains(strtolower($error->getMessage()), 'unique')) { throw $error; } }
+                elseif ($target['kind'] === 'manny') { $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,(string)$lock['next_damage_at']);} $this->persistence->combat->deleteSectorManny(['uid' => $target['id']]); if ($this->sectors !== null) { $sector = $this->sectorChanges->getOrCreateSector(new SectorCoordinates((int) $lock['sector_x'], (int) $lock['sector_y'], (int) $lock['sector_z'])); if ($sector->removeObjectById('manny-' . $target['id'])) { $this->sectorChanges->saveSector($sector); } } $this->stopLaser($action, $lock, $now, 'target_destroyed'); return; }
+            }
             $nextDamage = (new \DateTimeImmutable((string) $lock['next_damage_at']))->modify('+10 minutes');
-            $pdo->prepare('UPDATE others_laser_locks SET next_damage_at=:next,updated_at=:now WHERE id=:id')->execute(['next' => $nextDamage->format('c'), 'now' => $now, 'id' => (int) $lock['id']]);
+            $this->persistence->combat->scheduleLaserDamage(['next' => $nextDamage->format('c'), 'now' => $now, 'id' => (int) $lock['id']]);
             $next = $nextDamage < new \DateTimeImmutable((string) $lock['exhausts_at']) ? $nextDamage : new \DateTimeImmutable((string) $lock['exhausts_at']);
             $this->scheduleExistingAction($action, $next->format('c'), 'running');
         }
@@ -1181,10 +1193,9 @@ final class OthersService
 
     private function stopLaser(array $action, array $lock, string $now, string $reason): void
     {
-        $nextTarget = (new \DateTimeImmutable($now))->modify('+1 minute')->format('c'); $pdo = $this->others->pdo();
-        $pdo->prepare("UPDATE others_laser_locks SET status='stopped',updated_at=:now WHERE id=:id AND status IN ('queued','active')")->execute(['now' => $now, 'id' => (int) $lock['id']]);
-        $pdo->prepare('UPDATE others_ships SET laser_next_target_at=:next,updated_at=:now WHERE id=:id')->execute(['next' => $nextTarget, 'now' => $now, 'id' => (int) $lock['ship_id']]);
-        $pdo->prepare("UPDATE others_actions SET status='succeeded',result_json=:result,completed_at=:now,updated_at=:now WHERE id=:id AND status IN ('queued','running')")->execute(['result' => json_encode(['outcome' => 'stopped', 'reason' => $reason, 'nextTargetAt' => $nextTarget], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        $nextTarget = (new \DateTimeImmutable($now))->modify('+1 minute')->format('c'); $this->persistence->combat->stopLaser(['now' => $now, 'id' => (int) $lock['id']]);
+        $this->persistence->combat->setLaserCooldown(['next' => $nextTarget, 'now' => $now, 'id' => (int) $lock['ship_id']]);
+        $this->persistence->action->finishLaserAction(['result' => json_encode(['outcome' => 'stopped', 'reason' => $reason, 'nextTargetAt' => $nextTarget], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
     }
 
     public function processScheduledMannyMissile(ScheduledEvent $event): bool
@@ -1194,24 +1205,28 @@ final class OthersService
         if ($manny === null || $manny->currentTask !== Manny::TASK_PREPARING_MISSILE || $manny->taskScheduledEventId !== $event->id) { return false; }
         $missileId = $manny->taskPayload['missileLaunchId'] ?? null;
         if (!is_string($missileId) || $missileId === '') { throw new \RuntimeException('Missile preparation has no launch identity.'); }
-        $this->others->transaction(function () use ($manny, $missileId): void {
-            $pdo = $this->others->pdo(); $stmt = $pdo->prepare("SELECT * FROM missile_launches WHERE public_id=:public_id AND status='preparing'"); $stmt->execute(['public_id' => $missileId]); $launch = $stmt->fetch();
+        $this->persistence->transaction->run(function () use ($manny, $missileId, $event): void {
+            if ($manny->probeId !== null) { $this->persistence->locks->lock('probe', $manny->probeId); }
+            $this->persistence->locks->lock('manny', $manny->id);
+            $manny = $this->mannies?->findById($manny->id);
+            if ($manny === null || $manny->currentTask !== Manny::TASK_PREPARING_MISSILE || $manny->taskScheduledEventId !== $event->id) { return; }
+            $stmt = $this->persistence->combat->findPreparingProbeLaunch(['public_id' => $missileId]); $launch = $stmt;
             if (!$launch) { $this->clearMissileMannyTask($manny); return; }
             $probe = $this->probes?->findById((int) $launch['probe_id']);
-            $validCarrier = $probe !== null && $manny->isOnProbe() && $manny->probeId === $probe->id
+            $validCarrier = $probe !== null && !in_array($probe->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true) && $manny->isOnProbe() && $manny->probeId === $probe->id
                 && [$probe->currentSector->getX(),$probe->currentSector->getY(),$probe->currentSector->getZ()] === [(int)$launch['sector_x'],(int)$launch['sector_y'],(int)$launch['sector_z']];
             $target = $validCarrier ? $this->resolveMissileTarget((int)$launch['sector_x'],(int)$launch['sector_y'],(int)$launch['sector_z'],(string)$launch['target_public_id']) : null;
             if (!$validCarrier || $target === null || $target['kind'] !== $launch['target_kind']) {
-                $pdo->prepare("UPDATE missile_launches SET status='failed',result='launch_preconditions_lost',updated_at=:now WHERE id=:id AND status='preparing'")->execute(['now' => gmdate('c'), 'id' => (int)$launch['id']]);
+                $this->persistence->combat->failPreparingProbeLaunch(['now' => gmdate('c'), 'id' => (int)$launch['id']]);
                 $this->clearMissileMannyTask($manny); return;
             }
-            $itemStmt = $pdo->prepare("SELECT * FROM probe_items WHERE id=:id AND probe_id=:probe_id AND type='missile'"); $itemStmt->execute(['id' => (int)$launch['probe_item_id'], 'probe_id' => (int)$launch['probe_id']]);
-            if (!$itemStmt->fetch()) {
-                $pdo->prepare("UPDATE missile_launches SET status='failed',result='missile_item_lost',updated_at=:now WHERE id=:id")->execute(['now' => gmdate('c'), 'id' => (int)$launch['id']]);
+            $itemStmt = $this->persistence->combat->findProbeMissile(['id' => (int)$launch['probe_item_id'], 'probe_id' => (int)$launch['probe_id']]);
+            if (!$itemStmt) {
+                $this->persistence->combat->failMissingMissile(['now' => gmdate('c'), 'id' => (int)$launch['id']]);
                 $this->clearMissileMannyTask($manny); return;
             }
-            $now = gmdate('c'); $pdo->prepare('UPDATE missile_launches SET probe_item_id=NULL,updated_at=:now WHERE id=:id')->execute(['now' => $now, 'id' => (int)$launch['id']]);
-            $pdo->prepare('DELETE FROM probe_items WHERE id=:id')->execute(['id' => (int)$launch['probe_item_id']]);
+            $now = gmdate('c'); $this->persistence->combat->detachProbeMissile(['now' => $now, 'id' => (int)$launch['id']]);
+            $this->persistence->combat->deleteProbeMissile(['id' => (int)$launch['probe_item_id']]);
             $this->createProjectile($launch, null, $target, $now);
             $this->clearMissileMannyTask($manny);
         });
@@ -1228,30 +1243,30 @@ final class OthersService
 
     private function launchOthersProjectile(array $action, string $now): void
     {
-        $pdo = $this->others->pdo(); $stmt = $pdo->prepare("SELECT * FROM missile_launches WHERE others_action_id=:action_id AND status='queued'"); $stmt->execute(['action_id' => (int)$action['id']]); $launch = $stmt->fetch();
+        $stmt = $this->persistence->combat->findQueuedOthersLaunch(['action_id' => (int)$action['id']]); $launch = $stmt;
         if (!$launch) { return; }
         $ship = $this->others->findShipByPublicId((string)$launch['launcher_public_id']);
         $target = $this->resolveMissileTarget((int)$launch['sector_x'],(int)$launch['sector_y'],(int)$launch['sector_z'],(string)$launch['target_public_id']);
         if ($ship === null || $ship['destroyed_at'] !== null || $ship['status'] === 'transit' || !$this->sameCoordinates($ship, $launch) || $target === null || $target['kind'] !== $launch['target_kind']) {
-            $pdo->prepare('UPDATE others_inventory_items SET reserved_action_id=NULL,updated_at=:now WHERE id=:id AND reserved_action_id=:action_id')->execute(['now'=>$now,'id'=>(int)$launch['others_item_id'],'action_id'=>(int)$action['id']]);
-            $pdo->prepare("UPDATE missile_launches SET status='failed',result='launch_preconditions_lost',updated_at=:now WHERE id=:id")->execute(['now'=>$now,'id'=>(int)$launch['id']]);
-            $pdo->prepare("UPDATE others_actions SET status='failed',error_json=:error,completed_at=:now,updated_at=:now WHERE id=:id AND status='queued'")->execute(['error'=>json_encode(['code'=>'target_not_found','message'=>'The missile target is no longer admissible.'],JSON_THROW_ON_ERROR),'now'=>$now,'id'=>(int)$action['id']]); return;
+            $this->persistence->combat->releaseLaunchMissile(['now'=>$now,'id'=>(int)$launch['others_item_id'],'action_id'=>(int)$action['id']]);
+            $this->persistence->combat->failOthersLaunch(['now'=>$now,'id'=>(int)$launch['id']]);
+            $this->persistence->action->failFuelTransfer(['error'=>json_encode(['code'=>'target_not_found','message'=>'The missile target is no longer admissible.'],JSON_THROW_ON_ERROR),'now'=>$now,'id'=>(int)$action['id']]); return;
         }
-        $pdo->prepare('UPDATE missile_launches SET others_item_id=NULL,updated_at=:now WHERE id=:id')->execute(['now'=>$now,'id'=>(int)$launch['id']]);
-        $deleted = $pdo->prepare("DELETE FROM others_inventory_items WHERE id=:id AND reserved_action_id=:action_id AND type='missile'"); $deleted->execute(['id'=>(int)$launch['others_item_id'],'action_id'=>(int)$action['id']]);
-        if ($deleted->rowCount() !== 1) { throw new \RuntimeException('Reserved Others missile item is inconsistent.'); }
+        $this->persistence->combat->detachOthersMissile(['now'=>$now,'id'=>(int)$launch['id']]);
+        $deleted = $this->persistence->combat->consumeLaunchMissile(['id'=>(int)$launch['others_item_id'],'action_id'=>(int)$action['id']]);
+        if ($deleted !== 1) { throw new \RuntimeException('Reserved Others missile item is inconsistent.'); }
         $this->createProjectile($launch, $action, $target, $now);
     }
 
     private function createProjectile(array $launch, ?array $action, array $target, string $now): void
     {
-        $pdo = $this->others->pdo(); $interception = $target['kind'] === 'missile'; $impactAt = (new \DateTimeImmutable($now))->modify($interception ? '+15 minutes' : '+30 minutes')->format('c');
-        $pdo->prepare("INSERT INTO others_projectiles (public_id,launch_id,action_id,launcher_kind,launcher_public_id,target_public_id,target_kind,sector_x,sector_y,sector_z,status,launched_at,impact_at,created_at,updated_at) VALUES (:public_id,:launch_id,:action_id,:launcher_kind,:launcher_public_id,:target_public_id,:target_kind,:x,:y,:z,'moving',:launched_at,:impact_at,:created_at,:updated_at)")->execute([
+        $interception = $target['kind'] === 'missile'; $impactAt = (new \DateTimeImmutable($now))->modify($interception ? '+15 minutes' : '+30 minutes')->format('c');
+        $insertedProjectileId = $this->persistence->combat->createProjectile([
             'public_id'=>(string)$launch['public_id'],'launch_id'=>(int)$launch['id'],'action_id'=>$action !== null ? (int)$action['id'] : null,'launcher_kind'=>(string)$launch['launcher_kind'],'launcher_public_id'=>(string)$launch['launcher_public_id'],'target_public_id'=>(string)$launch['target_public_id'],'target_kind'=>(string)$launch['target_kind'],'x'=>(int)$launch['sector_x'],'y'=>(int)$launch['sector_y'],'z'=>(int)$launch['sector_z'],'launched_at'=>$now,'impact_at'=>$impactAt,'created_at'=>$now,'updated_at'=>$now,
         ]);
-        $projectileId = (int)$pdo->lastInsertId(); $event = $this->events->schedule(SchedulerService::MISSILE_PROJECTILE,'missile_projectile',$projectileId,$impactAt,['projectileId'=>(string)$launch['public_id']]);
-        $pdo->prepare("UPDATE missile_launches SET status='launched',projectile_public_id=:projectile,impact_at=:impact_at,scheduled_event_id=:event_id,updated_at=:now WHERE id=:id")->execute(['projectile'=>(string)$launch['public_id'],'impact_at'=>$impactAt,'event_id'=>$event->id,'now'=>$now,'id'=>(int)$launch['id']]);
-        if ($action !== null) { $pdo->prepare("UPDATE others_actions SET status='running',ends_at=:impact_at,scheduled_event_id=:event_id,updated_at=:now WHERE id=:id AND status='queued'")->execute(['impact_at'=>$impactAt,'event_id'=>$event->id,'now'=>$now,'id'=>(int)$action['id']]); }
+        $projectileId = (int)$insertedProjectileId; $event = $this->events->schedule(SchedulerService::MISSILE_PROJECTILE,'missile_projectile',$projectileId,$impactAt,['projectileId'=>(string)$launch['public_id']]);
+        $this->persistence->combat->launchMissile(['projectile'=>(string)$launch['public_id'],'impact_at'=>$impactAt,'event_id'=>$event->id,'now'=>$now,'id'=>(int)$launch['id']]);
+        if ($action !== null) { $this->persistence->action->startMissileAction(['impact_at'=>$impactAt,'event_id'=>$event->id,'now'=>$now,'id'=>(int)$action['id']]); }
         $this->createWeaponAlerts(
             new SectorCoordinates((int) $launch['sector_x'], (int) $launch['sector_y'], (int) $launch['sector_z']),
             (string) $launch['public_id'],
@@ -1263,8 +1278,9 @@ final class OthersService
 
     public function processScheduledProjectile(ScheduledEvent $event): void
     {
-        $this->others->transaction(function () use ($event): void {
-            $pdo=$this->others->pdo(); $stmt=$pdo->prepare("SELECT p.*,l.player_id,l.id AS launch_sql_id,a.public_id AS action_public_id FROM others_projectiles p JOIN missile_launches l ON l.id=p.launch_id LEFT JOIN others_actions a ON a.id=p.action_id WHERE p.id=:id AND p.status='moving'"); $stmt->execute(['id'=>$event->entityId]); $projectile=$stmt->fetch(); if(!$projectile){return;}
+        $this->persistence->transaction->run(function () use ($event): void {
+            $this->persistence->locks->lock('projectile', $event->entityId);
+            $stmt = $this->persistence->combat->findMovingProjectile(['id'=>$event->entityId]); $projectile=$stmt; if(!$projectile){return;}
             $target=$this->resolveMissileTarget((int)$projectile['sector_x'],(int)$projectile['sector_y'],(int)$projectile['sector_z'],(string)$projectile['target_public_id']);
             $targetIdentity = $target ?? ['kind' => (string) $projectile['target_kind'], 'id' => (string) $projectile['target_public_id']];
             if($target===null || $target['kind']!==$projectile['target_kind']) { $this->finishProjectile($projectile,'lost',['reason'=>'target_lost'],$targetIdentity); return; }
@@ -1278,12 +1294,12 @@ final class OthersService
     /** @param array<string, mixed> $target */
     private function finishProjectile(array $projectile,string $result,array $details,array $target): void
     {
-        $pdo=$this->others->pdo(); $now=gmdate('c'); $actionPublicId=(string)($projectile['action_public_id']??'');
-        $pdo->prepare('INSERT INTO others_projectile_history (projectile_public_id,action_public_id,result,details_json,resolved_at) VALUES (:projectile,:action,:result,:details,:resolved_at)')->execute(['projectile'=>(string)$projectile['public_id'],'action'=>$actionPublicId,'result'=>$result,'details'=>json_encode($details,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),'resolved_at'=>$now]);
-        $pdo->prepare("UPDATE missile_launches SET status='resolved',result=:result,updated_at=:now WHERE id=:id")->execute(['result'=>$result,'now'=>$now,'id'=>(int)$projectile['launch_sql_id']]);
-        if($projectile['action_id']!==null){$pdo->prepare("UPDATE others_actions SET status='succeeded',result_json=:details,completed_at=:now,updated_at=:now WHERE id=:id AND status='running'")->execute(['details'=>json_encode(['outcome'=>$result]+$details,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),'now'=>$now,'id'=>(int)$projectile['action_id']]);}
+        $now=gmdate('c'); $actionPublicId=(string)($projectile['action_public_id']??'');
+        $this->persistence->combat->recordProjectileHistory(['projectile'=>(string)$projectile['public_id'],'action'=>$actionPublicId,'result'=>$result,'details'=>json_encode($details,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),'resolved_at'=>$now]);
+        $this->persistence->combat->resolveLaunch(['result'=>$result,'now'=>$now,'id'=>(int)$projectile['launch_sql_id']]);
+        if($projectile['action_id']!==null){$this->persistence->action->finishProjectileAction(['details'=>json_encode(['outcome'=>$result]+$details,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),'now'=>$now,'id'=>(int)$projectile['action_id']]);}
         $this->createProjectileResolutionAlerts($projectile, $target, $result, $details, $now);
-        $pdo->prepare('DELETE FROM others_projectiles WHERE id=:id')->execute(['id'=>(int)$projectile['id']]);
+        $this->persistence->combat->deleteProjectile(['id'=>(int)$projectile['id']]);
         if ($target['kind'] === 'probe' && ($details['destroyed'] ?? false)) {
             $probe = $this->probes?->findById((int) $target['id']);
             if ($probe !== null) {
@@ -1294,7 +1310,7 @@ final class OthersService
 
     private function interceptProjectile(array $target,array $interceptor): void
     {
-        $pdo=$this->others->pdo(); $stmt=$pdo->prepare("SELECT p.*,l.player_id,l.id AS launch_sql_id,a.public_id AS action_public_id FROM others_projectiles p JOIN missile_launches l ON l.id=p.launch_id LEFT JOIN others_actions a ON a.id=p.action_id WHERE p.public_id=:id AND p.status='moving'"); $stmt->execute(['id'=>$target['id']]); $projectile=$stmt->fetch();
+        $stmt = $this->persistence->combat->findProjectileByPublicId(['id'=>$target['id']]); $projectile=$stmt;
         if($projectile){$this->finishProjectile($projectile,'intercepted',['interceptorId'=>$interceptor['public_id']],['kind'=>(string)$projectile['target_kind'],'id'=>(string)$projectile['target_public_id']]);}
     }
 
@@ -1306,32 +1322,29 @@ final class OthersService
             return ['damage'=>0,'destroyed'=>false,'message'=>'La structure a résisté. Vous pouvez envoyer une Manny pour une nouvelle inspection.'];
         }
 
-        $pdo=$this->others->pdo(); $key='missile:'.$projectile['public_id'].':'.$target['kind'].':'.$target['id']; $damage=match($target['kind']){'probe'=>(12+(int)floor($this->stableFraction($key.'|damage')*7)),'others_ship'=>10,default=>1};
+        $key='missile:'.$projectile['public_id'].':'.$target['kind'].':'.$target['id']; $damage=match($target['kind']){'probe'=>(12+(int)floor($this->stableFraction($key.'|damage')*7)),'others_ship'=>10,default=>1};
         if($target['kind']==='others_ship'){$before=$this->others->findShipByPublicId((string)$target['id']);$responsiblePlayerId=($projectile['launcher_kind']??null)==='probe'?(int)$projectile['player_id']:null;$ship=$this->damageShip((string)$target['id'],$damage,$key,['type'=>'missile','missileId'=>(string)$projectile['public_id'],'occurredAt'=>$projectile['impact_at']],responsiblePlayerId:$responsiblePlayerId);$applied=max(0,(int)($before['integrity']??0)-(int)($ship['integrity']??0));$maximum=max(1,(int)($before['max_integrity']??1));return ['damage'=>$applied,'damagePercent'=>round(100*$applied/$maximum,2),'destroyed'=>$ship===null||$ship['destroyed_at']!==null];}
-        try{$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,:kind,:target,:damage,:now)')->execute(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')]);}catch(\PDOException $e){if(str_contains(strtolower($e->getMessage()),'unique')){return ['damage'=>0,'replayed'=>true];}throw $e;}
-        if($target['kind']==='manny'){ $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,$projectile['impact_at']);} $pdo->prepare("DELETE FROM mannies WHERE uid=:uid AND location_type='sector'")->execute(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
+        if (!$this->persistence->combat->recordDamage(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')])) { return ['damage'=>0,'replayed'=>true]; }
+        if($target['kind']==='manny'){ $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,$projectile['impact_at']);} $this->persistence->combat->deleteImpactedManny(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
         if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target,$projectile['impact_at']);return ['damage'=>1,'destroyed'=>true];}
         if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$applied=$probe->subtractIntegrityPercent($damage);if($probe->status===ProbeStatus::Dead){$this->interruptProbeStorageTransfers($probe->id,$projectile['impact_at']);}$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->status===ProbeStatus::Dead];}
         if ($target['kind'] === 'motorized_asteroid') {
             $trajectoryId = (int) $target['trajectory_id'];
             $now = gmdate('c');
-            $stmt = $pdo->prepare("UPDATE asteroid_trajectories SET missile_hits=missile_hits+1,updated_at=:now WHERE id=:id AND status IN ('accelerating','coasting','crossing_sector','orbiting_black_hole')");
-            $stmt->execute(['now' => $now, 'id' => $trajectoryId]);
-            $hitsStmt = $pdo->prepare('SELECT missile_hits FROM asteroid_trajectories WHERE id=:id');
-            $hitsStmt->execute(['id' => $trajectoryId]);
-            $hits = (int) $hitsStmt->fetchColumn();
+            $stmt = $this->persistence->combat->incrementAsteroidHits(['now' => $now, 'id' => $trajectoryId]);
+            $hitsStmt = $this->persistence->combat->findAsteroidHits(['id' => $trajectoryId]);
+            $hits = (int) $hitsStmt;
             if ($hits >= 3) {
-                $pdo->prepare("UPDATE asteroid_trajectories SET status='destroyed',result='destroyed_by_missiles',updated_at=:now WHERE id=:id")
-                    ->execute(['now' => $now, 'id' => $trajectoryId]);
+                $this->persistence->combat->destroyAsteroid(['now' => $now, 'id' => $trajectoryId]);
                 $this->events->cancelPending(SchedulerService::ASTEROID_TRAJECTORY_PHASE, 'asteroid_trajectory', $trajectoryId);
                 if ($this->sectors !== null) {
-                    $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $projectile['sector_x'], (int) $projectile['sector_y'], (int) $projectile['sector_z']));
+                    $sector = $this->sectorChanges->getOrCreateSector(new SectorCoordinates((int) $projectile['sector_x'], (int) $projectile['sector_y'], (int) $projectile['sector_z']));
                     $changed = $sector->removeObjectById((string) $target['id']);
                     $hadContainers = $sector->containersForObject((string) $target['id']) !== [];
                     $sector->removeContainersForObject((string) $target['id']);
                     $changed = $hadContainers || $changed;
                     if ($changed) {
-                        $this->sectors->saveSector($sector);
+                        $this->sectorChanges->saveSector($sector);
                     }
                 }
             }
@@ -1342,12 +1355,11 @@ final class OthersService
 
     private function destroyAuxiliary(array $target,string $causalTime): void
     {
-        $query = $this->others->pdo()->prepare("SELECT id,type FROM others_actions WHERE auxiliary_id=? AND type IN ('build_germination_depot','depot_deposit','depot_withdrawal') AND status IN ('queued','running')");
-        $query->execute([(int) $target['sql_id']]);
-        foreach ($query->fetchAll(\PDO::FETCH_ASSOC) as $action) { $this->settleStorageAction($action, $causalTime, 'auxiliary_destroyed'); }
-        $pdo=$this->others->pdo();$now=gmdate('c');$pdo->prepare("UPDATE others_actions SET auxiliary_id=NULL,status=CASE WHEN status IN ('queued','running') THEN 'failed' ELSE status END,completed_at=CASE WHEN status IN ('queued','running') THEN :now ELSE completed_at END,updated_at=:now WHERE auxiliary_id=:id")->execute(['now'=>$now,'id'=>(int)$target['sql_id']]);
-        $pdo->prepare("UPDATE others_auxiliaries SET status='destroyed',current_action_id=NULL,destroyed_at=:now,updated_at=:now WHERE id=:id AND destroyed_at IS NULL")->execute(['now'=>$now,'id'=>(int)$target['sql_id']]);
-        if($this->sectors!==null){$sector=$this->sectors->getOrCreateSector(new SectorCoordinates((int)$target['sector_x'],(int)$target['sector_y'],(int)$target['sector_z']));$wreck=DormantConstruct::fromOthersAuxiliary((string)$target['id'],true);if($sector->findObjectById($wreck->getId())===null){$sector->addObject($wreck);$this->sectors->saveSector($sector);}}
+        $query = $this->persistence->destruction->findAuxiliaryStorageActions([(int) $target['sql_id']]);
+        foreach ($query as $action) { $this->settleStorageAction($action, $causalTime, 'auxiliary_destroyed'); }
+        $now=gmdate('c');$this->persistence->destruction->detachAuxiliaryActions(['now'=>$now,'id'=>(int)$target['sql_id']]);
+        $this->persistence->destruction->destroyAuxiliary(['now'=>$now,'id'=>(int)$target['sql_id']]);
+        if($this->sectors!==null){$sector=$this->sectorChanges->getOrCreateSector(new SectorCoordinates((int)$target['sector_x'],(int)$target['sector_y'],(int)$target['sector_z']));$wreck=DormantConstruct::fromOthersAuxiliary((string)$target['id'],true);if($sector->findObjectById($wreck->getId())===null){$sector->addObject($wreck);$this->sectorChanges->saveSector($sector);}}
     }
 
     /** Applies one idempotent damage event and returns the remaining ship row when it still exists. */
@@ -1358,59 +1370,91 @@ final class OthersService
 
     public function damageShip(string $shipPublicId,int $damage,string $eventKey,array $cause,bool $relativistic=false,?int $responsiblePlayerId=null): ?array
     {
-        return $this->others->transaction(function()use($shipPublicId,$damage,$eventKey,$cause,$relativistic,$responsiblePlayerId):?array{$pdo=$this->others->pdo();$ship=$this->others->findShipByPublicId($shipPublicId);if($ship===null||$ship['destroyed_at']!==null){return $ship;}
-            $exists=$pdo->prepare('SELECT 1 FROM others_damage_events WHERE event_key=:key');$exists->execute(['key'=>$eventKey]);if($exists->fetchColumn()!==false){return $ship;}
-            $applied=$relativistic?(int)$ship['integrity']:min(max(0,$damage),(int)$ship['integrity']);$pdo->prepare('INSERT INTO others_damage_events (event_key,target_kind,target_public_id,damage,created_at) VALUES (:key,\'others_ship\',:target,:damage,:now)')->execute(['key'=>$eventKey,'target'=>$shipPublicId,'damage'=>$applied,'now'=>gmdate('c')]);
-            $remaining=$relativistic?0:max(0,(int)$ship['integrity']-$applied);$pdo->prepare('UPDATE others_ships SET integrity=:integrity,updated_at=:now WHERE id=:id')->execute(['integrity'=>$remaining,'now'=>gmdate('c'),'id'=>(int)$ship['id']]);if($remaining===0){$this->destroyShip($ship,$responsiblePlayerId,$cause);return $this->others->findShipByPublicId($shipPublicId);}return $this->others->findShipByPublicId($shipPublicId);});
+        return $this->persistence->transaction->run(function()use($shipPublicId,$damage,$eventKey,$cause,$relativistic,$responsiblePlayerId):?array{$ship=$this->others->findShipByPublicId($shipPublicId);
+            if ($ship === null) { return null; }
+            $roots = $ship['type'] === 'mothership' ? $this->others->findActiveShipsByFleetId((int) $ship['fleet_id']) : [$ship];
+            usort($roots, static fn(array $a, array $b): int => (int) $a['id'] <=> (int) $b['id']);
+            foreach ($roots as $root) { $this->persistence->locks->lock('ship', (int) $root['id']); }
+            $ship = $this->others->findShipByPublicId($shipPublicId);
+            if ($ship === null || $ship['destroyed_at'] !== null || $ship['status'] === 'removed') { return $ship; }
+            $exists = $this->persistence->destruction->damageAlreadyRecorded(['key'=>$eventKey]);if($exists!==false){return $ship;}
+            $applied=$relativistic?(int)$ship['integrity']:min(max(0,$damage),(int)$ship['integrity']);$this->persistence->destruction->recordShipDamage(['key'=>$eventKey,'target'=>$shipPublicId,'damage'=>$applied,'now'=>gmdate('c')]);
+            $remaining=$relativistic?0:max(0,(int)$ship['integrity']-$applied);$this->persistence->destruction->updateShipIntegrity(['integrity'=>$remaining,'now'=>gmdate('c'),'id'=>(int)$ship['id']]);if($remaining===0){$this->destroyShip($ship,$responsiblePlayerId,$cause);return $this->others->findShipByPublicId($shipPublicId);}return $this->others->findShipByPublicId($shipPublicId);});
+    }
+
+    private function interruptInventoryTransfers(array $ship, string $now, string $reason): void
+    {
+        foreach ($this->persistence->destruction->activeTransfersTouchingShip((int) $ship['id'], $ship['public_id']) as $identity) {
+            foreach ($this->persistence->locks->actionShipIds($identity) as $id) { $this->persistence->locks->lock('ship', $id); }
+            if ($identity['auxiliary_id'] !== null) { $this->persistence->locks->lock('auxiliary', (int) $identity['auxiliary_id']); }
+            $action = $this->persistence->locks->lock('action', (int) $identity['id']);
+            if ($action === null || !in_array($action['status'], ['queued','running','cancel_requested'], true)) { continue; }
+            if ($action['type'] === 'inventory_transfer') {
+                $transfer = $this->persistence->inventory->findTransfer(['action_id' => (int) $action['id']]);
+                if (!$transfer || $transfer['status'] !== 'queued') { continue; }
+                $space = 0.0;
+                if ($transfer['kind'] === 'resource') {
+                    $space = (float) $transfer['amount'];
+                    $this->persistence->inventory->releaseResourceReservation(['reserved_floor' => $space, 'reserved_decrease' => $space, 'now' => $now, 'ship_id' => (int) $transfer['source_ship_id'], 'resource_type' => $transfer['resource_type']]);
+                } else {
+                    foreach ($this->others->inventoryItemsByPublicIds((int) $transfer['source_ship_id'], json_decode($transfer['item_ids_json'], true, 512, JSON_THROW_ON_ERROR)) as $item) { $space += (float) $item['container_space']; }
+                    $this->persistence->inventory->releaseItemReservations(['now' => $now, 'action_id' => (int) $action['id']]);
+                }
+                $this->finishTransfer($transfer, $action, $space, $now, false, $reason);
+            } else {
+                $payload = json_decode($action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+                $amount = (float) $payload['amount'];
+                foreach ($this->persistence->locks->actionShipIds($action) as $id) {
+                    $this->persistence->inventory->releaseFuelReservation(['reserved_floor' => $amount, 'reserved_decrease' => $amount, 'now' => $now, 'id' => $id]);
+                }
+                $this->persistence->action->failFuelTransfer(['error' => json_encode(['code' => $reason, 'message' => 'The carrier became unavailable.'], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+                if ($action['auxiliary_id'] !== null) { $this->persistence->inventory->releaseTransferActor(['now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]); }
+            }
+            $this->events->cancelPending(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id']);
+        }
     }
 
     private function destroyShip(array $ship, ?int $responsiblePlayerId, array $cause): void
     {
-        $pdo = $this->others->pdo();
         $now = $cause['occurredAt'] ?? gmdate('c');
         $constructionCarriers = $ship['type'] === 'mothership' ? $this->others->findActiveShipsByFleetId((int) $ship['fleet_id']) : [$ship];
-        foreach ($constructionCarriers as $carrier) { $this->interruptDepotConstructions((int) $carrier['id'], $now, 'carrier_destroyed'); }
-        $wreckOperationId = $ship['type'] === 'mothership'
-            ? $this->createMothershipWreck($ship, $cause, $now)
-            : null;
+        foreach ($constructionCarriers as $carrier) {
+            $this->interruptDepotConstructions((int) $carrier['id'], $now, 'carrier_destroyed');
+            $this->interruptInventoryTransfers($carrier, $now, 'carrier_destroyed');
+            $this->persistence->destruction->terminateCarrierWork((int) $carrier['id'], $now);
+        }
+        if ($ship['type'] === 'mothership') { $this->createMothershipWreck($ship, $cause, $now); }
         $ships = $ship['type'] === 'mothership'
             ? $this->others->findActiveShipsByFleetId((int) $ship['fleet_id'])
             : [$ship];
         $destroyedTarget = false;
         foreach ($ships as $victim) {
             $this->turnDeployedAuxiliariesDormant((int) $victim['id'], $now);
-            $pdo->prepare('UPDATE others_actions SET auxiliary_id=NULL WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
-            $pdo->prepare("UPDATE missile_launches SET status='failed',result='carrier_destroyed',others_item_id=NULL,updated_at=:now WHERE others_action_id IN (SELECT id FROM others_actions WHERE ship_id=:ship_id) AND status='queued'")
-                ->execute(['now' => $now, 'ship_id' => (int) $victim['id']]);
-            $pdo->prepare("UPDATE others_actions SET status='failed',error_json=:error,completed_at=:now,updated_at=:now WHERE ship_id=:ship_id AND status IN ('queued','running','cancel_requested')")
-                ->execute(['error' => json_encode(['code' => 'carrier_destroyed', 'message' => 'The carrier was destroyed.'], JSON_THROW_ON_ERROR), 'now' => $now, 'ship_id' => (int) $victim['id']]);
+            $this->persistence->destruction->detachShipActions(['ship_id' => (int) $victim['id']]);
+            $this->persistence->destruction->failShipLaunches(['now' => $now, 'ship_id' => (int) $victim['id']]);
+            $this->persistence->destruction->failShipActions(['error' => json_encode(['code' => 'carrier_destroyed', 'message' => 'The carrier was destroyed.'], JSON_THROW_ON_ERROR), 'now' => $now, 'ship_id' => (int) $victim['id']]);
             // Completed harvests still reference their participants; keep the actions, not links to deleted auxiliaries.
-            $pdo->prepare('DELETE FROM others_swarm_participants WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id=:ship_id)')->execute(['ship_id' => (int) $victim['id']]);
-            $pdo->prepare('DELETE FROM others_auxiliaries WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
-            $pdo->prepare('DELETE FROM others_inventory_items WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
-            $pdo->prepare('DELETE FROM others_inventory_resources WHERE ship_id=:ship_id')->execute(['ship_id' => (int) $victim['id']]);
+            $this->persistence->destruction->deleteShipParticipants(['ship_id' => (int) $victim['id']]);
+            $this->persistence->destruction->deleteShipAuxiliaries(['ship_id' => (int) $victim['id']]);
+            $this->persistence->destruction->deleteShipItems(['ship_id' => (int) $victim['id']]);
+            $this->persistence->destruction->deleteShipResources(['ship_id' => (int) $victim['id']]);
             $status = (int) $victim['id'] === (int) $ship['id'] ? 'destroyed' : 'removed';
-            $destroy = $pdo->prepare('UPDATE others_ships SET integrity=0,status=:status,current_action_id=NULL,destroyed_at=:now,updated_at=:now WHERE id=:id AND destroyed_at IS NULL');
-            $destroy->execute(['status' => $status, 'now' => $now, 'id' => (int) $victim['id']]);
-            if ((int) $victim['id'] === (int) $ship['id'] && $destroy->rowCount() === 1) {
+            $destroy = $this->persistence->destruction->destroyShip(['status' => $status, 'now' => $now, 'id' => (int) $victim['id']]);
+            if ((int) $victim['id'] === (int) $ship['id'] && $destroy === 1) {
                 $destroyedTarget = true;
             }
         }
         if ($ship['type'] === 'mothership') {
-            $pdo->prepare("UPDATE others_fleets SET status='dissolved',dissolved_at=:now,updated_at=:now WHERE id=:id AND status='active'")
-                ->execute(['now' => $now, 'id' => (int) $ship['fleet_id']]);
+            $this->persistence->destruction->dissolveFleet(['now' => $now, 'id' => (int) $ship['fleet_id']]);
         }
         if ($destroyedTarget && $responsiblePlayerId !== null && $this->players !== null) {
             $this->players->recordOthersShipDestroyed($responsiblePlayerId, $ship['type'] === 'mothership');
         }
-        if ($wreckOperationId !== null) {
-            $pdo->prepare("UPDATE others_cross_store_operations SET sql_applied=1,status='succeeded',updated_at=:now WHERE public_id=:id")
-                ->execute(['now' => $now, 'id' => $wreckOperationId]);
-        }
+
     }
 
     /** @param array<string, mixed> $ship @param array<string, mixed> $cause */
-    private function createMothershipWreck(array $ship, array $cause, string $now): string
+    private function createMothershipWreck(array $ship, array $cause, string $now): void
     {
         if ($this->sectors === null) {
             throw new \RuntimeException('Sector storage is unavailable for an Others mothership wreck.');
@@ -1428,112 +1472,70 @@ final class OthersService
             default => throw new \InvalidArgumentException('Unknown Others mothership destruction cause.'),
         };
 
-        $pdo = $this->others->pdo();
-        $operationId = 'xstore-mothership-wreck-' . substr(hash('sha256', (string) $ship['public_id']), 0, 20);
-        $operationStmt = $pdo->prepare('SELECT * FROM others_cross_store_operations WHERE public_id=:id');
-        $operationStmt->execute(['id' => $operationId]);
-        $operation = $operationStmt->fetch();
-
-        if ($operation === false) {
-            $resourceAmounts = [
-                ResourceComposition::DEUTERIUM => 0.0,
-                ResourceComposition::METALS => 0.0,
-                ResourceComposition::ICE => 0.0,
-                ResourceComposition::CARBON_COMPOUNDS => 0.0,
-            ];
-            $resourceStmt = $pdo->prepare('SELECT resource_type,amount FROM others_inventory_resources WHERE ship_id=:ship_id AND amount>0');
-            $resourceStmt->execute(['ship_id' => (int) $ship['id']]);
-            foreach ($resourceStmt->fetchAll() as $resource) {
-                $type = (string) $resource['resource_type'];
-                if (array_key_exists($type, $resourceAmounts)) {
-                    $resourceAmounts[$type] = round((float) $resource['amount'], 4);
-                }
+        $resourceAmounts = [
+            ResourceComposition::DEUTERIUM => 0.0,
+            ResourceComposition::METALS => 0.0,
+            ResourceComposition::ICE => 0.0,
+            ResourceComposition::CARBON_COMPOUNDS => 0.0,
+        ];
+        $resourceStmt = $this->persistence->destruction->wreckResources(['ship_id' => (int) $ship['id']]);
+        foreach ($resourceStmt as $resource) {
+            $type = (string) $resource['resource_type'];
+            if (array_key_exists($type, $resourceAmounts)) {
+                $resourceAmounts[$type] = round((float) $resource['amount'], 4);
             }
-
-            $itemStmt = $pdo->prepare('SELECT type,COUNT(*) AS quantity FROM others_inventory_items WHERE ship_id=:ship_id GROUP BY type');
-            $itemStmt->execute(['ship_id' => (int) $ship['id']]);
-            $driftingItems = [];
-            foreach ($itemStmt->fetchAll() as $item) {
-                switch ((string) $item['type']) {
-                    case 'missile':
-                        $driftingItems[] = [
-                            'type' => ProbeItem::TYPE_MISSILE,
-                            'quantity' => (int) $item['quantity'],
-                            'containerSpace' => Config::float(
-                                $this->gameplayConfig,
-                                'crafting.missile.containerSpace',
-                                CraftingRecipeCatalog::MISSILE_CONTAINER_SPACE,
-                            ),
-                        ];
-                        break;
-                }
-            }
-
-            $wreck = DormantConstruct::fromOthersMothership(
-                (string) $ship['public_id'],
-                $resourceAmounts,
-                Config::float($this->gameplayConfig, 'others.mothershipWreck.massKg', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_MASS_KG),
-                Config::float($this->gameplayConfig, 'others.mothershipWreck.radiusMeters', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS),
-            );
-            $payload = [
-                'shipId' => (string) $ship['public_id'],
-                'objectId' => $wreck->getId(),
-                'sector' => ['x' => (int) $ship['sector_x'], 'y' => (int) $ship['sector_y'], 'z' => (int) $ship['sector_z']],
-                'cause' => $cause,
-                'resourceAmounts' => $resourceAmounts,
-                'driftingItems' => $driftingItems,
-            ];
-            $pdo->prepare("INSERT INTO others_cross_store_operations (public_id,action_id,operation_type,payload_json,sql_applied,sector_applied,status,created_at,updated_at) VALUES (:id,NULL,'mothership_wreck',:payload,0,0,'pending',:now,:now)")
-                ->execute(['id' => $operationId, 'payload' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), 'now' => $now]);
-            $sectorApplied = false;
-        } else {
-            $payload = json_decode((string) $operation['payload_json'], true, 512, JSON_THROW_ON_ERROR);
-            if (!is_array($payload)) {
-                throw new \RuntimeException('Invalid mothership wreck operation payload.');
-            }
-            $resourceAmounts = is_array($payload['resourceAmounts'] ?? null) ? $payload['resourceAmounts'] : [];
-            $driftingItems = is_array($payload['driftingItems'] ?? null) ? $payload['driftingItems'] : [];
-            $wreck = DormantConstruct::fromOthersMothership(
-                (string) $ship['public_id'],
-                $resourceAmounts,
-                Config::float($this->gameplayConfig, 'others.mothershipWreck.massKg', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_MASS_KG),
-                Config::float($this->gameplayConfig, 'others.mothershipWreck.radiusMeters', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS),
-            );
-            $sectorApplied = (bool) $operation['sector_applied'];
         }
 
-        $sectorCoordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
-        if (!$sectorApplied) {
-            $sector = $this->sectors->getOrCreateSector($sectorCoordinates);
-            if ($sector->findObjectById($wreck->getId()) === null) {
-                $sector->addObject($wreck);
-                foreach ($driftingItems as $item) {
-                    if (!is_array($item) || ($item['type'] ?? null) !== ProbeItem::TYPE_MISSILE || (int) ($item['quantity'] ?? 0) <= 0) {
-                        continue;
-                    }
-                    $objectId = SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE);
-                    $existing = $sector->findObjectById($objectId);
-                    if ($existing instanceof SectorDriftingItem) {
-                        $sector->replaceObject($existing->withQuantity($existing->getQuantity() + (int) $item['quantity']));
-                    } else {
-                        $sector->addObject(new SectorDriftingItem(
-                            $objectId,
-                            ProbeItem::MISSILE_NAME,
-                            ProbeItem::TYPE_MISSILE,
-                            (int) $item['quantity'],
-                            (float) $item['containerSpace'],
-                        ));
-                    }
-                }
-                $this->sectors->saveSector($sector);
+        $itemStmt = $this->persistence->destruction->wreckItems(['ship_id' => (int) $ship['id']]);
+        $driftingItems = [];
+        foreach ($itemStmt as $item) {
+            switch ((string) $item['type']) {
+                case 'missile':
+                    $driftingItems[] = [
+                        'type' => ProbeItem::TYPE_MISSILE,
+                        'quantity' => (int) $item['quantity'],
+                        'containerSpace' => Config::float(
+                            $this->gameplayConfig,
+                            'crafting.missile.containerSpace',
+                            CraftingRecipeCatalog::MISSILE_CONTAINER_SPACE,
+                        ),
+                    ];
+                    break;
             }
-            $pdo->prepare('UPDATE others_cross_store_operations SET sector_applied=1,updated_at=:now WHERE public_id=:id')
-                ->execute(['now' => $now, 'id' => $operationId]);
+        }
+
+        $wreck = DormantConstruct::fromOthersMothership(
+            (string) $ship['public_id'],
+            $resourceAmounts,
+            Config::float($this->gameplayConfig, 'others.mothershipWreck.massKg', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_MASS_KG),
+            Config::float($this->gameplayConfig, 'others.mothershipWreck.radiusMeters', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS),
+        );
+        $sectorCoordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
+        $sector = $this->sectorChanges->getOrCreateSector($sectorCoordinates);
+        if ($sector->findObjectById($wreck->getId()) === null) {
+            $sector->addObject($wreck);
+            foreach ($driftingItems as $item) {
+                if (!is_array($item) || ($item['type'] ?? null) !== ProbeItem::TYPE_MISSILE || (int) ($item['quantity'] ?? 0) <= 0) {
+                    continue;
+                }
+                $objectId = SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE);
+                $existing = $sector->findObjectById($objectId);
+                if ($existing instanceof SectorDriftingItem) {
+                    $sector->replaceObject($existing->withQuantity($existing->getQuantity() + (int) $item['quantity']));
+                } else {
+                    $sector->addObject(new SectorDriftingItem(
+                        $objectId,
+                        ProbeItem::MISSILE_NAME,
+                        ProbeItem::TYPE_MISSILE,
+                        (int) $item['quantity'],
+                        (float) $item['containerSpace'],
+                    ));
+                }
+            }
+            $this->sectorChanges->saveSector($sector);
         }
 
         $this->createMothershipWreckAlerts($sectorCoordinates, $wreck, $cause);
-
-        return $operationId;
     }
 
     /** @param array<string, mixed> $cause */
@@ -1573,29 +1575,72 @@ final class OthersService
     private function stableFraction(string $seed): float { return hexdec(substr(hash('sha256',$seed),0,8))/4294967296; }
 
     /** @return array<string,mixed>|null */
+    private function lockCombatTarget(array $target): void
+    {
+        switch ($target['kind']) {
+            case 'probe': $this->persistence->locks->lock('probe', (int) $target['id']); break;
+            case 'manny':
+                $manny = $this->mannies?->findByUid($target['id']);
+                if ($manny !== null) { $this->persistence->locks->lock('manny', $manny->id); }
+                break;
+            case 'others_ship':
+                $ship = $this->others->findShipByPublicId($target['id']);
+                $ships = $ship !== null && $ship['type'] === 'mothership' ? $this->others->findActiveShipsByFleetId((int) $ship['fleet_id']) : ($ship === null ? [] : [$ship]);
+                usort($ships, static fn(array $a, array $b): int => (int) $a['id'] <=> (int) $b['id']);
+                foreach ($ships as $ship) { $this->persistence->locks->lock('ship', (int) $ship['id']); }
+                break;
+            case 'others_auxiliary': $this->persistence->locks->lock('auxiliary', (int) $target['sql_id']); break;
+            case 'motorized_asteroid': $this->persistence->locks->lock('trajectory', (int) $target['trajectory_id']); break;
+            case 'missile':
+                $projectile = $this->persistence->combat->findProjectileByPublicId(['id' => $target['id']]);
+                if ($projectile) { $this->persistence->locks->lock('projectile', (int) $projectile['id']); }
+                break;
+        }
+    }
+
     private function resolveMissileTarget(int $x,int $y,int $z,string $targetId): ?array
     {
-        $depot = (new \VonNeumannGame\Repository\GerminationDepotRepository($this->others->pdo()))->find($targetId);
+        $target = $this->resolveMissileTargetSnapshot($x, $y, $z, $targetId);
+        if ($target !== null && $this->persistence->transaction->isActive()) {
+            $this->lockCombatTarget($target);
+            return $this->resolveMissileTargetSnapshot($x, $y, $z, $targetId);
+        }
+        return $target;
+    }
+
+    private function resolveMissileTargetSnapshot(int $x,int $y,int $z,string $targetId): ?array
+    {
+        $depot = $this->persistence->depots->find($targetId);
         if ($depot !== null && [(int)$depot['sector_x'],(int)$depot['sector_y'],(int)$depot['sector_z']] === [$x,$y,$z]) {
             return ['kind'=>'dormant_construct','id'=>$targetId];
         }
 
-        $pdo=$this->others->pdo();$key="$x:$y:$z";
-        $stmt=$pdo->prepare("SELECT id,public_id,departure_engaged FROM others_ships WHERE public_id=:id AND sector_x=:x AND sector_y=:y AND sector_z=:z AND destroyed_at IS NULL AND status<>'transit' AND status<>'removed'");$stmt->execute(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt->fetch()){return ['kind'=>'others_ship','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'departure_engaged'=>(bool)$row['departure_engaged']];}
-        $stmt=$pdo->prepare("SELECT id,public_id,sector_x,sector_y,sector_z FROM others_auxiliaries WHERE public_id=:id AND sector_x=:x AND sector_y=:y AND sector_z=:z AND location_type='deployed' AND destroyed_at IS NULL AND status<>'dormant'");$stmt->execute(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt->fetch()){return ['kind'=>'others_auxiliary','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'sector_x'=>$x,'sector_y'=>$y,'sector_z'=>$z];}
+        $key="$x:$y:$z";
+        $stmt = $this->persistence->target->findShipTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt){return ['kind'=>'others_ship','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'departure_engaged'=>(bool)$row['departure_engaged']];}
+        $stmt = $this->persistence->target->findAuxiliaryTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt){return ['kind'=>'others_auxiliary','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'sector_x'=>$x,'sector_y'=>$y,'sector_z'=>$z];}
         if(ctype_digit($targetId)&&$this->probes!==null){$probe=$this->probes->findById((int)$targetId);if($probe!==null&&$probe->currentSector->toKey()===$key&&!in_array($probe->status,[ProbeStatus::Dead,ProbeStatus::Accelerating,ProbeStatus::Cruising,ProbeStatus::Decelerating],true)){return ['kind'=>'probe','id'=>$targetId,'departure_engaged'=>$probe->status===ProbeStatus::Preparing];}}
         if($this->mannies!==null){$manny=$this->mannies->findByUid($targetId);if($manny!==null&&$manny->locationType===Manny::LOCATION_SECTOR&&$manny->sector?->toKey()===$key){return ['kind'=>'manny','id'=>$targetId];}}
-        $stmt=$pdo->prepare("SELECT public_id FROM others_projectiles WHERE public_id=:id AND sector_x=:x AND sector_y=:y AND sector_z=:z AND status='moving'");$stmt->execute(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($stmt->fetch()){return ['kind'=>'missile','id'=>$targetId];}
-        $stmt=$pdo->prepare("SELECT * FROM asteroid_trajectories WHERE (asteroid_id=:id OR uid=:id) AND current_sector_x=:x AND current_sector_y=:y AND current_sector_z=:z AND status IN ('accelerating','coasting','crossing_sector','orbiting_black_hole') ORDER BY id DESC LIMIT 1");$stmt->execute(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt->fetch()){$ratio=0.0;if((float)$row['target_speed_c']>0&&is_string($row['acceleration_started_at'])&&is_string($row['acceleration_ends_at'])){$start=strtotime($row['acceleration_started_at']);$end=strtotime($row['acceleration_ends_at']);$ratio=$end>$start?max(0.0,min(1.0,(time()-$start)/($end-$start))):1.0;}return ['kind'=>'motorized_asteroid','id'=>(string)$row['asteroid_id'],'trajectory_id'=>(int)$row['id'],'hit_probability'=>1.0-(2.0/3.0)*$ratio];}
+        $stmt = $this->persistence->target->findProjectileTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($stmt){return ['kind'=>'missile','id'=>$targetId];}
+        $stmt = $this->persistence->target->findAsteroidTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt){$ratio=0.0;if((float)$row['target_speed_c']>0&&is_string($row['acceleration_started_at'])&&is_string($row['acceleration_ends_at'])){$start=strtotime($row['acceleration_started_at']);$end=strtotime($row['acceleration_ends_at']);$ratio=$end>$start?max(0.0,min(1.0,(time()-$start)/($end-$start))):1.0;}return ['kind'=>'motorized_asteroid','id'=>(string)$row['asteroid_id'],'trajectory_id'=>(int)$row['id'],'hit_probability'=>1.0-(2.0/3.0)*$ratio];}
         return null;
     }
 
     private function resolveLocalTarget(array $ship, string $targetId, bool $laserOnly = false): ?array
     {
+        $target = $this->resolveLocalTargetSnapshot($ship, $targetId, $laserOnly);
+        if ($target !== null && $this->persistence->transaction->isActive()) {
+            $this->lockCombatTarget($target);
+            return $this->resolveLocalTargetSnapshot($ship, $targetId, $laserOnly);
+        }
+        return $target;
+    }
+
+    private function resolveLocalTargetSnapshot(array $ship, string $targetId, bool $laserOnly = false): ?array
+    {
         $x = (int) $ship['sector_x']; $y = (int) $ship['sector_y']; $z = (int) $ship['sector_z'];
         if (ctype_digit($targetId) && $this->probes !== null) { $probe = $this->probes->findById((int) $targetId); if ($probe !== null && $probe->currentSector->toKey() === "$x:$y:$z" && !in_array($probe->status->value, ['dead','accelerating','cruising','decelerating'], true)) { return ['kind' => 'probe', 'id' => $targetId]; } }
         if ($this->mannies !== null) { $manny = $this->mannies->findByUid($targetId); if ($manny !== null && $manny->locationType === 'sector' && $manny->sector?->toKey() === "$x:$y:$z") { return ['kind' => 'manny', 'id' => $targetId, 'name' => $manny->name]; } }
-        if ($this->sectors !== null) { $object = $this->sectors->getOrCreateSector(new SectorCoordinates($x, $y, $z))->findObjectById($targetId); if ($object instanceof Planet) { return ['kind' => 'planet', 'id' => $targetId]; } if ($object instanceof Asteroid) { return ['kind' => 'asteroid', 'id' => $targetId]; } }
+        if ($this->sectors !== null) { $object = $this->sectorChanges->getOrCreateSector(new SectorCoordinates($x, $y, $z))->findObjectById($targetId); if ($object instanceof Planet) { return ['kind' => 'planet', 'id' => $targetId]; } if ($object instanceof Asteroid) { return ['kind' => 'asteroid', 'id' => $targetId]; } }
         return null;
     }
 
@@ -1787,29 +1832,24 @@ final class OthersService
 
     private function interruptDepotConstructions(int $shipId, string $now, string $reason): void
     {
-        $query = $this->others->pdo()->prepare("SELECT id,type FROM others_actions WHERE ship_id=? AND type IN ('build_germination_depot','depot_deposit','depot_withdrawal') AND status IN ('queued','running') ORDER BY id");
-        $query->execute([$shipId]);
-        foreach ($query->fetchAll(\PDO::FETCH_ASSOC) as $action) { $this->settleStorageAction($action, $now, $reason); }
+        $query = $this->persistence->action->findShipStorageActions([$shipId]);
+        foreach ($query as $action) { $this->settleStorageAction($action, $now, $reason); }
     }
 
     private function turnDeployedAuxiliariesDormant(int $shipId, string $now): void
     {
         if ($this->sectors === null) { throw new \RuntimeException('Sector storage is unavailable for dormant auxiliaries.'); }
-        $pdo = $this->others->pdo();
-        $shipStmt = $pdo->prepare('SELECT * FROM others_ships WHERE id = :id'); $shipStmt->execute(['id' => $shipId]); $ship = $shipStmt->fetch();
+        $shipStmt = $this->persistence->actor->findShipById(['id' => $shipId]); $ship = $shipStmt;
         if (!$ship) { return; }
-        $auxStmt = $pdo->prepare("SELECT * FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed' AND destroyed_at IS NULL ORDER BY id"); $auxStmt->execute(['ship_id' => $shipId]); $auxiliaries = $auxStmt->fetchAll();
+        $auxStmt = $this->persistence->destruction->findDeployedAuxiliaries(['ship_id' => $shipId]); $auxiliaries = $auxStmt;
         if ($auxiliaries === []) { return; }
-        $operationId = OthersRepository::publicId('xstore');
-        $pdo->prepare("INSERT INTO others_cross_store_operations (public_id, action_id, operation_type, payload_json, sql_applied, sector_applied, status, created_at, updated_at) VALUES (:public_id,NULL,'dormant_auxiliaries',:payload,0,0,'pending',:now,:now)")->execute(['public_id' => $operationId, 'payload' => json_encode(['shipId' => $ship['public_id'], 'auxiliaryIds' => array_column($auxiliaries, 'public_id')], JSON_THROW_ON_ERROR), 'now' => $now]);
-        $sector = $this->sectors->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']));
-        foreach ($auxiliaries as $auxiliary) { if ($sector->findObjectById('dormant-others-auxiliary-' . $auxiliary['public_id']) === null) { $sector->addObject(DormantConstruct::fromOthersAuxiliary((string) $auxiliary['public_id'])); } }
-        $this->sectors->saveSector($sector);
-        $pdo->prepare('UPDATE others_cross_store_operations SET sector_applied = 1, updated_at = :now WHERE public_id = :id')->execute(['now' => $now, 'id' => $operationId]);
-        $pdo->prepare("UPDATE others_actions SET auxiliary_id = NULL WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed')")->execute(['ship_id' => $shipId]);
-        $pdo->prepare("DELETE FROM others_swarm_participants WHERE auxiliary_id IN (SELECT id FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed')")->execute(['ship_id' => $shipId]);
-        $pdo->prepare("DELETE FROM others_auxiliaries WHERE ship_id = :ship_id AND location_type = 'deployed'")->execute(['ship_id' => $shipId]);
-        $pdo->prepare("UPDATE others_cross_store_operations SET sql_applied = 1, status = 'succeeded', updated_at = :now WHERE public_id = :id")->execute(['now' => $now, 'id' => $operationId]);
+        $sector = $this->sectorChanges->getOrCreateSector(new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']));
+        $existing = array_fill_keys(array_map(static fn($object): string => $object->getId(), $sector->getObjects()), true);
+        foreach ($auxiliaries as $auxiliary) { if (!isset($existing['dormant-others-auxiliary-' . $auxiliary['public_id']])) { $sector->addObject(DormantConstruct::fromOthersAuxiliary((string) $auxiliary['public_id'])); } }
+        $this->sectorChanges->saveSector($sector);
+        $this->persistence->destruction->detachDeployedActions(['ship_id' => $shipId]);
+        $this->persistence->destruction->deleteDeployedParticipants(['ship_id' => $shipId]);
+        $this->persistence->destruction->deleteDeployedAuxiliaries(['ship_id' => $shipId]);
     }
 
     private function createOthersArrivalAlerts(SectorCoordinates $sector, string $eventKey): void

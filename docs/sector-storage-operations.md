@@ -30,7 +30,7 @@ La branche `removesqlonmetier` intègre les commits de `main` jusqu’à `7e442a
 
 Validation de cette intégration : 4 062 assertions API (dont les budgets du stockage), 196 assertions secteur et 245 tests des contrôleurs Others réussis. Les 25 contrôles de concurrence et de migration passent sur SQLite 3.46.1 et sur MariaDB 10.11.18, cette dernière en isolation `READ-COMMITTED`, avec les tables préfixées du lanceur. La syntaxe des sept fichiers PHP apportés ou modifiés par la fusion est valide.
 
-Le parcours `OthersService::jettisonInventory()` doit être inclus dans O0/O1 (inventaire et persistance) et O4 (effets SQL/JSON). Comme dans main, son largage de missile publie le JSON avant le commit SQL ; le marqueur d’effet évite un ajout répété dans le même secteur, mais ne garantit pas l’absence d’objet publié si SQL est ensuite annulé. Les garanties S4 décrites ici portent sur les intentions durables des transferts de stockage et ne valent pas encore pour ce parcours Others. Sa convergence vers ces intentions et ses scénarios de panne restent à traiter explicitement dans les lots Others.
+Les lots O0–F0 prolongent désormais ce protocole aux parcours Others : largage, épaves, auxiliaires dormants, récoltes et minage. Ils enregistrent des intentions `sector_effects` dans la transaction SQL, puis projettent uniquement après commit. La reprise après publication du fichier utilise le même identifiant d’opération. Voir [les opérations et la migration Others](others-persistence-operations.md).
 
 ## Bascule d’une installation existante
 

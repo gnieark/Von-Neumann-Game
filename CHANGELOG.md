@@ -4,6 +4,17 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-24
 
+### Changed
+
+- Persistance Others O0–F0 : SQL réparti entre repositories d’actions, inventaires, production, mouvements, combat et destructions ; service transactionnel d’idempotence HTTP et suppression de `OthersRepository::pdo()`. Aucun changement de schéma de réponse ni de version API (v139).
+- Épaves, unités dormantes, largages, extractions et abandons de Mannies : intentions SQL durables, publication après commit et reprise idempotente des fichiers de secteur. Migration explicite `scripts/one-shot-scripts/migrate-others-persistence.php` à exécuter avec les commandes et workers arrêtés ; procédure dans `docs/others-persistence-operations.md`.
+- Contrôle d’architecture par tokens PHP, budgets des collections et tests de panne/concurrence sur SQLite et MariaDB.
+
+### Fixed
+
+- Achèvements Others concurrents : verrous et relecture des acteurs/actions/cibles, rejet des événements d’une ancienne étape, unicité des sorties de fabrication, débits, projectiles, dégâts et compteurs de destruction.
+- Les interruptions de transferts d’inventaire et de carburant libèrent les réservations des porteurs survivants. Les refus individuels d’un mouvement de flotte disposent d’un point de sauvegarde transactionnel.
+
 ### Added
 
 - API **v139** : `POST /api/others/ships/{shipId}/inventory/jettisons` permet de larguer une quantité non réservée de ressource (en ECE, y compris le deutérium d’inventaire) ou un missile non réservé. Les ressources sont abandonnées ; le missile devient un objet dérivant récupérable dans le secteur courant. La commande renvoie l’inventaire actualisé, accepte `Idempotency-Key` et refuse les vaisseaux en transit. Le réservoir de propulsion n’est pas concerné.

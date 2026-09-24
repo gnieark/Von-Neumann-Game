@@ -38,7 +38,7 @@ use VonNeumannGame\Service\SectorEffectService;
         $files = new SectorFileRepository($directory);
         try {
             $files->save(new SectorContent($coordinates, [new Planet('harvest-planet', 'Harvest planet', 'rocky', 1.0, 1.0, true, 0.0, ['metals'], resourceAmounts: ['deuterium' => 0.0, 'metals' => 100.0, 'ice' => 0.0, 'carbon_compounds' => 0.0])]));
-            $sectors = new SectorService($files, new SectorContentGenerator(), 'destruction-test');
+            $sectors = new SectorService($files, new SectorContentGenerator(), 'destruction-test', effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db));
             $transaction = new \VonNeumannGame\Database\StorageTransaction($db);
             $locks = new \VonNeumannGame\Repository\Storage\StorageLockRepository($db);
             $depotRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($db);
@@ -46,7 +46,7 @@ use VonNeumannGame\Service\SectorEffectService;
             $effects = new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db), $events, $sectors);
             $waves = new AnomalyBroadcastService(new \VonNeumannGame\Repository\Storage\AnomalyBroadcastRepository($db), $transaction, $locks, $events, new \VonNeumannGame\Repository\OthersAuditRepository($db));
             $depots = new GerminationDepotService($others, $events, $sectors, $effects, $waves, $transaction, $locks, new \VonNeumannGame\Repository\Storage\StorageActorRepository($db), $depotRepository, $detached);
-            $service = new OthersService($others, $events, $reinstantiation, sectors: $sectors, players: $players, germinationDepots: $depots);
+            $service = new OthersService($others, $events, $reinstantiation, new \VonNeumannGame\Repository\Others\OthersPersistence($db), sectors: $sectors, players: $players, germinationDepots: $depots);
             $scheduler = new SchedulerService($events, $probes, $movements, $movementService, othersService: $service, sectorEffects: $effects);
             $harvests = [];
             foreach ([$mother, $escort] as $ship) {
@@ -111,7 +111,7 @@ use VonNeumannGame\Service\SectorEffectService;
             }
             if ($construction !== null) {
                 $test->assertEquals('canceled', $others->findActionByPublicId($construction['public_id'])['status'], 'construction: destruction interrupts the depot and removes its former harvester');
-                $test->assertEquals(1, (int) $db->query('SELECT COUNT(*) FROM sector_effects')->fetchColumn(), 'construction: builder becomes dormant through a durable sector effect');
+                $test->assertEquals(1, (int) $db->query("SELECT COUNT(*) FROM sector_effects WHERE effect_type='add_object'")->fetchColumn(), 'construction: builder becomes dormant through a durable sector effect');
             }
 
             // Requeue the same event to exercise scheduler retry without applying the kill twice.

@@ -18,6 +18,7 @@ final class SectorService
         ?SectorGrid $grid = null,
         private readonly ?DetachedStorageContainerRepository $detachedContainers = null,
         private readonly ?\VonNeumannGame\Repository\GerminationDepotRepository $germinationDepots = null,
+        private readonly ?\VonNeumannGame\Repository\Storage\SectorEffectRepository $effects = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
     }
@@ -38,6 +39,29 @@ final class SectorService
 
     public function saveSector(SectorContent $sector): void
     {
+        if ($this->effects !== null) {
+            $this->effects->withSectorLock($sector->getCoordinates(), function () use ($sector): void {
+                foreach ($this->effects->pendingInSector($sector->getCoordinates()) as $effect) {
+                    if (!$sector->hasAppliedEffect($effect['operation_id'])) {
+                        throw new SectorStorageException('Sector has newer committed intentions; reload before saving.');
+                    }
+                }
+                $this->saveSectorLocked($sector);
+            });
+            return;
+        }
+        $this->saveSectorLocked($sector);
+    }
+
+    private function saveSectorLocked(SectorContent $sector): void
+    {
+        $this->saveDetachedContainerChanges($sector);
+        $this->repository->save($sector);
+        $sector->markDetachedContainerChangesPersisted();
+    }
+
+    public function saveDetachedContainerChanges(SectorContent $sector): void
+    {
         if ($this->detachedContainers !== null) {
             foreach ($sector->getDetachedContainerChanges() as $objectId => $container) {
                 if ($container instanceof SectorDetachedContainer) {
@@ -47,7 +71,6 @@ final class SectorService
                 }
             }
         }
-        $this->repository->save($sector);
         $sector->markDetachedContainerChangesPersisted();
     }
 
@@ -58,15 +81,9 @@ final class SectorService
 
     public function applySectorEffect(SectorCoordinates $coordinates, string $operationId, string $type, string $objectId, array $payload): void
     {
-        $this->getOrCreateSector($coordinates);
+        if (!$this->repository->exists($coordinates)) { $this->createSector($coordinates, true); }
         $this->repository->mutate($coordinates, static function (SectorContent $sector) use ($operationId, $type, $objectId, $payload): void {
-            if ($sector->hasAppliedEffect($operationId)) { return; }
-            if ($type === 'add_object') {
-                if ($sector->findObjectById($objectId) === null) { $sector->addObject(UniverseObject::fromArray($payload)); }
-            } elseif ($type === 'consume_object') {
-                $sector->removeObjectById($objectId);
-            } else { throw new \LogicException('Unsupported sector effect.'); }
-            $sector->markEffectApplied($operationId);
+            SectorEffect::apply($sector, $operationId, $type, $objectId, $payload);
         });
     }
 
@@ -145,6 +162,7 @@ final class SectorService
 
     private function withSqlDetachedContainers(SectorContent $sector): SectorContent
     {
+        $this->effects?->project($sector);
         if ($this->germinationDepots !== null) {
             $sector->hydrateGerminationDepots($this->germinationDepots->projections($sector->getCoordinates()));
             foreach ($this->germinationDepots->pendingConsumedObjects($sector->getCoordinates()) as $id) { $sector->removeObjectById($id); }

@@ -170,6 +170,23 @@ try{
     $engineVersion=$config->driver==='mysql'?$db->query('SELECT VERSION()')->fetchColumn():$db->query('SELECT sqlite_version()')->fetchColumn();
     $isolation=$config->driver==='mysql'?$db->query('SELECT @@tx_isolation')->fetchColumn():'SERIALIZABLE write transactions';
     echo 'ENGINE '.$config->driver.' '.$engineVersion.' ISOLATION '.$isolation.PHP_EOL;
+    $db=null;
+    require __DIR__ . '/Support/OthersConcurrencyTests.php';
+    $db=$connect();
+    if ($config->driver === 'mysql') {
+        $db->exec('DELETE FROM sector_effects');
+        $db->exec('ALTER TABLE sector_effects MODIFY COLUMN effect_type VARCHAR(255) NOT NULL');
+        $checks=$db->query("SELECT CONSTRAINT_NAME,CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='sector_effects'")->fetchAll(PDO::FETCH_ASSOC);
+        foreach($checks as $check){if(str_contains($check['CHECK_CLAUSE'],'effect_type')){$db->exec('ALTER TABLE sector_effects DROP CONSTRAINT `'.$check['CONSTRAINT_NAME'].'`');}}
+        $db->exec("ALTER TABLE sector_effects ADD CONSTRAINT old_sector_effect_type CHECK(effect_type IN ('add_object','consume_object'))");
+        $upgrade=new \VonNeumannGame\Database\Migration\OthersPersistenceMigration($db,new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'migration'));
+        $assert($upgrade->run(true)['migratedOperations']===0,'Others migration upgrades the real MariaDB CHECK constraint');
+        $db->beginTransaction();
+        $newEffects=new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db);
+        $newEffects->create('mariadb-migration-proof',new SectorCoordinates(3,4,5),'patch_objects','',['changes'=>[]],gmdate('c'));
+        $db->rollBack();
+        $assert($upgrade->run(true)['migratedOperations']===0,'Others migration replay preserves the MariaDB canonical schema');
+    }
     // Rehearse the explicit upgrade on this isolated inventory snapshot, then replay it.
     $initializer=new SchemaInitializer($config->driver);
     $columnSnapshot=static function(PDO $pdo,string $table)use($config):array{
