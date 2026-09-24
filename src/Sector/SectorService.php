@@ -70,6 +70,29 @@ final class SectorService
         });
     }
 
+    public function addDriftingItem(SectorCoordinates $coordinates, string $operationId, string $itemType, string $name, float $containerSpace): SectorDriftingItem
+    {
+        $this->getOrCreateSector($coordinates);
+        $objectId = SectorDriftingItem::objectIdForItemType($itemType);
+        $result = null;
+        $this->repository->mutate($coordinates, static function (SectorContent $sector) use ($operationId, $objectId, $itemType, $name, $containerSpace, &$result): void {
+            $existing = $sector->findObjectById($objectId);
+            if ($sector->hasAppliedEffect($operationId)) {
+                if (!$existing instanceof SectorDriftingItem) { throw new \LogicException('Applied drifting item effect has no sector object.'); }
+                $result = $existing;
+                return;
+            }
+            if ($existing !== null && !$existing instanceof SectorDriftingItem) { throw new \LogicException('Drifting item identifier is already occupied.'); }
+            $result = $existing instanceof SectorDriftingItem
+                ? $existing->withQuantity($existing->getQuantity() + 1)
+                : new SectorDriftingItem($objectId, $name, $itemType, 1, $containerSpace);
+            if ($existing instanceof SectorDriftingItem) { $sector->replaceObject($result); }
+            else { $sector->addObject($result); }
+            $sector->markEffectApplied($operationId);
+        });
+        return $result ?? throw new \LogicException('Drifting item was not created.');
+    }
+
     public function reserveDetachedContainer(string $objectId, int $mannyId): bool
     {
         return $this->detachedContainers?->reserve($objectId, $mannyId) ?? false;

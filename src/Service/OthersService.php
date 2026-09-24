@@ -329,6 +329,76 @@ final class OthersService
         });
     }
 
+    /** @return array<string, mixed> */
+    public function jettisonInventory(array $ship, array $payload): array
+    {
+        $kind = $payload['kind'] ?? null;
+        $allowed = match ($kind) {
+            'resource' => ['kind', 'resourceType', 'amount'],
+            'item' => ['kind', 'itemId'],
+            default => throw new OthersActionException(400, 'bad_request', 'kind must be resource or item.'),
+        };
+        if (array_diff(array_keys($payload), $allowed) !== [] || count($payload) !== count($allowed)) {
+            throw new OthersActionException(400, 'bad_request', 'The jettison request must contain exactly the fields for its kind.');
+        }
+        $resourceType = null;
+        $amount = null;
+        $itemId = null;
+        if ($kind === 'resource') {
+            $resourceType = $payload['resourceType'];
+            $rawAmount = $payload['amount'];
+            if (!is_string($resourceType) || !in_array($resourceType, OthersRepository::RESOURCE_TYPES, true)
+                || (!is_int($rawAmount) && !is_float($rawAmount)) || !is_finite((float) $rawAmount)
+                || (float) $rawAmount <= 0 || round((float) $rawAmount, 4) < 0.0001
+                || (float) $rawAmount !== round((float) $rawAmount, 4)) {
+                throw new OthersActionException(400, 'bad_request', 'A canonical resourceType and a positive amount with at most four decimal places are required.');
+            }
+            $amount = round((float) $rawAmount, 4);
+        } else {
+            $itemId = $payload['itemId'];
+            if (!is_string($itemId) || $itemId === '') {
+                throw new OthersActionException(400, 'bad_request', 'A non-empty itemId is required.');
+            }
+        }
+
+        $transaction = new StorageTransaction($this->others->pdo());
+        return $transaction->run(function () use ($transaction, $ship, $kind, $resourceType, $amount, $itemId): array {
+            $transaction->lock('ship', (int) $ship['id']);
+            $ship = $this->others->findShipByPublicId((string) $ship['public_id'])
+                ?? throw new OthersActionException(404, 'others_ship_not_found', 'Others ship not found.');
+            if ($ship['destroyed_at'] !== null || $ship['status'] === 'transit') {
+                throw new OthersActionException(409, 'others_ship_busy', 'The ship is not in a sector.');
+            }
+            $pdo = $this->others->pdo();
+            if ($kind === 'resource') {
+                $update = $pdo->prepare('UPDATE others_inventory_resources SET amount = amount - CAST(:amount AS DECIMAL(20,4)), updated_at = :now WHERE ship_id = :ship_id AND resource_type = :resource_type AND amount - reserved_amount >= CAST(:available AS DECIMAL(20,4))');
+                $update->execute(['amount' => $amount, 'now' => gmdate('c'), 'ship_id' => (int) $ship['id'], 'resource_type' => $resourceType, 'available' => $amount]);
+                if ($update->rowCount() !== 1) {
+                    throw new OthersActionException(422, 'insufficient_resources', 'The unreserved inventory amount is unavailable.');
+                }
+                return ['kind' => 'resource', 'resourceType' => $resourceType, 'amount' => $amount];
+            }
+
+            $items = $this->others->inventoryItemsByPublicIds((int) $ship['id'], [$itemId]);
+            $item = $items[0] ?? null;
+            if ($item === null) { throw new OthersActionException(404, 'others_inventory_item_not_found', 'Inventory item not found on this ship.'); }
+            if ($item['reserved_action_id'] !== null) { throw new OthersActionException(409, 'inventory_changed', 'The inventory item is reserved.'); }
+            if ($item['type'] !== 'missile') { throw new OthersActionException(422, 'item_not_jettisonable', 'This inventory item cannot be jettisoned.'); }
+            if ($this->sectors === null) { throw new \RuntimeException('Sector storage is unavailable for inventory jettison.'); }
+            $delete = $pdo->prepare('DELETE FROM others_inventory_items WHERE id = :id AND ship_id = :ship_id AND reserved_action_id IS NULL');
+            $delete->execute(['id' => (int) $item['id'], 'ship_id' => (int) $ship['id']]);
+            if ($delete->rowCount() !== 1) { throw new OthersActionException(409, 'inventory_changed', 'The inventory item changed concurrently.'); }
+            $drifting = $this->sectors->addDriftingItem(
+                new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']),
+                'others-inventory-jettison-' . $itemId,
+                ProbeItem::TYPE_MISSILE,
+                ProbeItem::MISSILE_NAME,
+                Config::float($this->gameplayConfig, 'crafting.missile.containerSpace', CraftingRecipeCatalog::MISSILE_CONTAINER_SPACE),
+            );
+            return ['kind' => 'item', 'itemId' => $itemId, 'type' => 'missile', 'objectId' => $drifting->getId(), 'driftingQuantity' => $drifting->getQuantity(), 'containerSpaceEce' => $drifting->getContainerSpace()];
+        });
+    }
+
     private function createInventoryTransferLocked(array $source, array $payload): array
     {
         foreach (['actorAuxiliaryId', 'targetShipId', 'kind'] as $field) {

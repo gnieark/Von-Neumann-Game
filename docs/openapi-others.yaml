@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '138'
+  version: '139'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -947,6 +947,64 @@ paths:
       responses:
         '200':
           description: Resources, objects and reservations
+  "/api/others/ships/{shipId}/inventory/jettisons":
+    parameters:
+    - "$ref": "#/components/parameters/ShipId"
+    post:
+      tags: [Others]
+      summary: Jettison one inventory resource amount or item
+      description: >-
+        Immediately removes unreserved cargo from an owned ship located in a
+        sector. Resource amounts are in ECE, including inventory deuterium;
+        propulsion-tank deuterium is never used. Resources are discarded. A
+        missile item becomes one recoverable drifting missile in the ship's
+        current sector. Other item types are not jettisonable. A ship in transit
+        cannot jettison cargo. The Idempotency-Key prevents duplicate effects
+        when retrying the same request.
+      parameters:
+      - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/OthersInventoryJettisonRequest"
+            examples:
+              resource:
+                value: {kind: resource, resourceType: metals, amount: 0.25}
+              item:
+                value: {kind: item, itemId: item_0123456789abcdef0123}
+      responses:
+        '200':
+          description: Cargo jettisoned; current inventory returned
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OthersInventoryJettisonResponse"
+        '400':
+          description: bad_request — invalid variant, amount or extra field
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/OthersErrorResponse"}
+        '401': {"$ref": "#/components/responses/Unauthorized"}
+        '403': {"$ref": "#/components/responses/Forbidden"}
+        '404':
+          description: others_ship_not_found or others_inventory_item_not_found
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/OthersErrorResponse"}
+        '409':
+          description: others_ship_busy, inventory_changed or idempotency_key_conflict
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/OthersErrorResponse"}
+        '422':
+          description: insufficient_resources or item_not_jettisonable
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/OthersErrorResponse"}
+        '429': {"$ref": "#/components/responses/RateLimited"}
+        '503': {"$ref": "#/components/responses/OthersUnavailable"}
   "/api/others/ships/{shipId}/inventory-transfers":
     parameters:
     - "$ref": "#/components/parameters/ShipId"
@@ -1846,6 +1904,91 @@ components:
       properties:
         error:
           "$ref": "#/components/schemas/OthersError"
+    OthersInventoryJettisonRequest:
+      oneOf:
+      - "$ref": "#/components/schemas/OthersInventoryResourceJettisonRequest"
+      - "$ref": "#/components/schemas/OthersInventoryItemJettisonRequest"
+      discriminator:
+        propertyName: kind
+        mapping:
+          resource: "#/components/schemas/OthersInventoryResourceJettisonRequest"
+          item: "#/components/schemas/OthersInventoryItemJettisonRequest"
+    OthersInventoryResourceJettisonRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, resourceType, amount]
+      properties:
+        kind: {type: string, enum: [resource]}
+        resourceType: {type: string, enum: [deuterium, metals, ice, carbon_compounds]}
+        amount:
+          type: number
+          minimum: 0.0001
+          multipleOf: 0.0001
+          description: Positive quantity in ECE, with at most four decimal places.
+    OthersInventoryItemJettisonRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, itemId]
+      properties:
+        kind: {type: string, enum: [item]}
+        itemId:
+          type: string
+          minLength: 1
+          description: Public id of an unreserved item in this ship's inventory.
+    OthersShipInventory:
+      type: object
+      required: [shipId, capacityEce, usedEce, reservedEce, resources, items]
+      properties:
+        shipId: {type: string}
+        capacityEce: {type: number}
+        usedEce: {type: number}
+        reservedEce: {type: number}
+        resources:
+          type: object
+          additionalProperties:
+            type: object
+            required: [amount, reserved]
+            properties:
+              amount: {type: number}
+              reserved: {type: number}
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, type, containerSpaceEce]
+            properties:
+              id: {type: string}
+              type: {type: string}
+              containerSpaceEce: {type: number}
+    OthersInventoryJettisonResponse:
+      type: object
+      required: [jettisoned, inventory]
+      properties:
+        jettisoned:
+          oneOf:
+          - "$ref": "#/components/schemas/OthersInventoryResourceJettisonResult"
+          - "$ref": "#/components/schemas/OthersInventoryItemJettisonResult"
+          discriminator:
+            propertyName: kind
+        inventory:
+          "$ref": "#/components/schemas/OthersShipInventory"
+    OthersInventoryResourceJettisonResult:
+      type: object
+      required: [kind, resourceType, amount]
+      properties:
+        kind: {type: string, enum: [resource]}
+        resourceType: {type: string, enum: [deuterium, metals, ice, carbon_compounds]}
+        amount: {type: number}
+    OthersInventoryItemJettisonResult:
+      type: object
+      required: [kind, itemId, type, objectId, driftingQuantity, containerSpaceEce]
+      properties:
+        kind: {type: string, enum: [item]}
+        itemId: {type: string}
+        type: {type: string, enum: [missile]}
+        objectId: {type: string}
+        driftingQuantity: {type: integer, minimum: 1}
+        containerSpaceEce: {type: number}
     OthersInventoryTransferRequest:
       oneOf:
       - "$ref": "#/components/schemas/OthersInventoryResourceTransferRequest"
