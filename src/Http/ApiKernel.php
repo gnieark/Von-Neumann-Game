@@ -26,8 +26,6 @@ use VonNeumannGame\Http\Controller\ForumApiController;
 use VonNeumannGame\Http\Controller\ProbeManniesApiController;
 use VonNeumannGame\Http\Controller\ProbeManniesApiPresenter;
 use VonNeumannGame\Repository\NeumannProbeRepository;
-use VonNeumannGame\Repository\OthersAuditRepository;
-use VonNeumannGame\Repository\OthersIdempotencyRepository;
 use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
@@ -89,8 +87,7 @@ final class ApiKernel
         private readonly ?TokenRateLimiter $rateLimiter = null,
         private readonly ?AsteroidTrajectoryService $asteroidTrajectories = null,
         private readonly ?OthersRepository $others = null,
-        private readonly ?OthersIdempotencyRepository $othersIdempotency = null,
-        private readonly ?OthersAuditRepository $othersAudit = null,
+        private readonly ?\VonNeumannGame\Service\OthersCommandService $othersCommands = null,
         private readonly ?OthersService $othersService = null,
         private readonly ?AutonomousUnitObservationService $autonomousUnits = null,
         private readonly ?\VonNeumannGame\Service\MannyStorageTransferService $sectorStorageTransfers = null,
@@ -991,48 +988,15 @@ final class ApiKernel
 
     private function othersCommand(ApiRouteContext $ctx, Player $player, callable $command): ApiResponse
     {
-        $key = $this->headerValue($ctx->headers, 'Idempotency-Key');
-        if ($key === null) {
-            if ($this->others === null) { return $command(); }
-            return (new \VonNeumannGame\Database\StorageTransaction($this->others->pdo()))->run(function () use ($command, $player, $ctx): ApiResponse {
-                $response = $command();
-                $this->othersAudit?->record($player->id, 'http', $ctx->method . ' ' . $ctx->path, $response->status < 400 ? 'accepted' : 'refused');
-                return $response;
-            });
+        if ($this->othersCommands === null) {
+            return ApiResponse::error(503, 'others_unavailable', 'Others command storage is unavailable.');
         }
-        if (!preg_match('/^[\x21-\x7E]{1,128}$/', $key)) {
+        $key = $this->headerValue($ctx->headers, 'Idempotency-Key');
+        if ($key !== null && !preg_match('/^[\x21-\x7E]{1,128}$/', $key)) {
             return ApiResponse::error(400, 'bad_request', 'Idempotency-Key must contain 1 to 128 visible ASCII characters.');
         }
-        if ($this->othersIdempotency === null || $this->others === null) {
-            return ApiResponse::error(503, 'others_unavailable', 'Others idempotency storage is unavailable.');
-        }
-        $hash = hash('sha256', $this->canonicalJsonBody($ctx->body));
-        return (new \VonNeumannGame\Database\StorageTransaction($this->others->pdo()))->run(function () use ($ctx, $player, $command, $key, $hash): ApiResponse {
-            // Commands sharing an account also share the idempotency namespace.
-            // Lock that account so the first lookup and insert are serialized.
-            $pdo = $this->others?->pdo() ?? throw new \RuntimeException('Others storage is unavailable.');
-            if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { $pdo->prepare('UPDATE players SET updated_at=updated_at WHERE id=?')->execute([$player->id]); }
-            $lockSql = 'SELECT id FROM players WHERE id = :player_id';
-            if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
-                $lockSql .= ' FOR UPDATE';
-            }
-            $lock = $pdo->prepare($lockSql);
-            $lock->execute(['player_id' => $player->id]);
-            if ($lock->fetchColumn() === false) {
-                throw new \RuntimeException('Unable to lock the idempotency account.');
-            }
-            $existing = $this->othersIdempotency?->find($player->id, $key);
-            if ($existing !== null) {
-                if ($existing['request_method'] !== $ctx->method || $existing['request_path'] !== $ctx->path || !hash_equals((string) $existing['request_body_hash'], $hash)) {
-                    return ApiResponse::error(409, 'idempotency_key_conflict', 'This idempotency key is already bound to another command.');
-                }
-                return $this->othersIdempotency?->responseFrom($existing) ?? throw new \RuntimeException('Stored idempotent response is unavailable.');
-            }
-            $response = $command();
-            $this->othersIdempotency?->store($player->id, $key, $ctx->method, $ctx->path, $hash, $response);
-            $this->othersAudit?->record($player->id, 'http', $ctx->method . ' ' . $ctx->path, $response->status < 400 ? 'accepted' : 'refused', details: ['idempotencyKeyHash' => hash('sha256', $key)]);
-            return $response;
-        });
+        return $this->othersCommands->execute($player, $ctx->method, $ctx->path,
+            $key, $key === null ? '' : hash('sha256', $this->canonicalJsonBody($ctx->body)), $command);
     }
 
     private function headerValue(array $headers, string $wanted): ?string

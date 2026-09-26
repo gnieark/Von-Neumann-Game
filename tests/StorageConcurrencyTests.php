@@ -45,10 +45,11 @@ $connect=static function()use($factory,$tables):PDO{
 };
 $services=static function(PDO $db)use($directory):array{
     $others=new OthersRepository($db);$events=new ScheduledEventRepository($db);$depots=new GerminationDepotRepository($db);
-    $sectors=new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture',germinationDepots:$depots);
-    $effects=new SectorEffectService($db,$events,$sectors);$waves=new AnomalyBroadcastService($db,$events);
-    $construction=new GerminationDepotService($others,$events,$sectors,$effects,$waves);
-    return [$others,$construction,new SectorStorageTransferService($db,$construction)];
+    $detached=new \VonNeumannGame\Repository\DetachedStorageContainerRepository($db);$sectors=new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture',detachedContainers:$detached,germinationDepots:$depots);
+    $transaction=new \VonNeumannGame\Database\StorageTransaction($db);$locks=new \VonNeumannGame\Repository\Storage\StorageLockRepository($db);$transfers=new \VonNeumannGame\Repository\Storage\SectorStorageTransferRepository($db);$inventories=new \VonNeumannGame\Repository\Storage\InventoryTransferRepositoryFactory($db);
+    $effects=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db),$events,$sectors);$waves=new AnomalyBroadcastService(new \VonNeumannGame\Repository\Storage\AnomalyBroadcastRepository($db),$transaction,$locks,$events,new \VonNeumannGame\Repository\OthersAuditRepository($db));
+    $construction=new GerminationDepotService($others,$events,$sectors,$effects,$waves,$transaction,$locks,new \VonNeumannGame\Repository\Storage\StorageActorRepository($db),$depots,$detached);
+    return [$others,$construction,new SectorStorageTransferService($transaction,$locks,$transfers,$inventories,$depots,$construction)];
 };
 $assert=static function(bool $condition,string $message):void{if(!$condition){throw new RuntimeException($message);}echo 'PASS '.$message.PHP_EOL;};
 // Each child owns a distinct connection and waits on a pipe barrier after connecting.
@@ -106,8 +107,9 @@ try{
     $mannyServices=static function(PDO $pdo):array{
         $probes=new \VonNeumannGame\Repository\NeumannProbeRepository($pdo);
         $mannies=new \VonNeumannGame\Repository\MannyRepository($pdo);
-        $storage=new \VonNeumannGame\Service\ProbeStorageService(new \VonNeumannGame\Repository\StorageContainerRepository($pdo),new \VonNeumannGame\Repository\ProbeItemRepository($pdo),$mannies,$probes);
-        return [$probes,$mannies,$storage,new \VonNeumannGame\Service\MannyStorageTransferService($pdo,$mannies,$probes,$storage)];
+        $containers=new \VonNeumannGame\Repository\StorageContainerRepository($pdo);$storage=new \VonNeumannGame\Service\ProbeStorageService($containers,new \VonNeumannGame\Repository\ProbeItemRepository($pdo),$mannies,$probes);
+        $transaction=new \VonNeumannGame\Database\StorageTransaction($pdo);$locks=new \VonNeumannGame\Repository\Storage\StorageLockRepository($pdo);
+        return [$probes,$mannies,$storage,new \VonNeumannGame\Service\MannyStorageTransferService($transaction,$locks,new \VonNeumannGame\Repository\Storage\SectorStorageTransferRepository($pdo),new \VonNeumannGame\Repository\Storage\StorageReservationRepository($pdo),new \VonNeumannGame\Repository\Storage\InventoryTransferRepositoryFactory($pdo),new GerminationDepotRepository($pdo),new \VonNeumannGame\Repository\DetachedStorageContainerRepository($pdo),$containers,$mannies,$probes,$storage)];
     };
     $fixture=static function(PDO $pdo)use($mannyServices,$services,$depot,$now):array{
         [$probes,$mannies,$storage]=$mannyServices($pdo);
@@ -140,6 +142,13 @@ try{
     $db=$connect();$settle($db);
     $copies=(int)$db->query("SELECT (SELECT COUNT(*) FROM others_inventory_items WHERE public_id='race-cross-item')+(SELECT COUNT(*) FROM probe_items WHERE uid='race-cross-item')+(SELECT COUNT(*) FROM germination_depot_items WHERE public_id='race-cross-item')")->fetchColumn();
     $assert($copies===1,'cross-system settlement preserves exactly one identity');$db=null;
+    $db=$connect();$coreId=(int)$db->query("SELECT id FROM storage_containers WHERE probe_id=".$probe->id." AND uid='probe-core'")->fetchColumn();
+    $db->prepare("INSERT INTO storage_container_resources(container_id,resource_type,amount,reserved_amount,updated_at) VALUES(?,'metals',0.1,0,?)")->execute([$coreId,$now]);$db=null;
+    $consume=static function(PDO $pdo)use($mannyServices,$probe):float{[,,$storage]=$mannyServices($pdo);return $storage->consumeResource($probe,'metals',0.1);};
+    $results=$race([$consume,$consume]);$consumed=array_sum(array_map(static fn(array $result):float=>(float)($result['result']??0),$results));
+    $assert($results[0]['ok']&&$results[1]['ok']&&abs($consumed-0.1)<0.00001,'two consumers debit one insufficient stock exactly once: '.json_encode($results));
+    $db=$connect();$remaining=(float)$db->query("SELECT COALESCE(SUM(amount),0) FROM storage_container_resources WHERE container_id=".$coreId." AND resource_type='metals'")->fetchColumn();
+    $assert(abs($remaining)<0.00001,'concurrent consumption leaves no negative or duplicated stock');$db=null;
     $operations=[];
     foreach([$probe,$secondProbe] as $visitor){$operations[]=static function(PDO $pdo)use($services,$visitor,$nextDepot,$now):bool{
         [,$construction]=$services($pdo);$construction->inspect($visitor,$nextDepot['public_id'],$now);return true;
@@ -147,9 +156,37 @@ try{
     $results=$race($operations);$assert($results[0]['ok']&&$results[1]['ok'],'two concurrent inspections both complete');
     $db=$connect();
     $assert((int)$db->query('SELECT COUNT(*) FROM anomaly_broadcasts WHERE depot_id='.(int)$nextDepot['id'])->fetchColumn()===1,'concurrent opening creates exactly one durable broadcast');
+    $effectObject=\VonNeumannGame\Sector\DormantConstruct::fromOthersAuxiliary('effect-race-actor');
+    $db->beginTransaction();$effectService=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db),new ScheduledEventRepository($db),new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture'));
+    $effectService->enqueue('effect-race',new SectorCoordinates(3,4,5),'add_object',$effectObject->getId(),$effectObject->toArray(),$now);$db->commit();
+    $effectId=(int)$db->query("SELECT id FROM sector_effects WHERE operation_id='effect-race'")->fetchColumn();$db=null;
+    $applyEffect=static function(PDO $pdo)use($directory,$effectId):bool{$service=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo),new ScheduledEventRepository($pdo),new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture'));$service->apply($effectId);return true;};
+    $results=$race([$applyEffect,$applyEffect]);$assert($results[0]['ok']&&$results[1]['ok'],'two workers can replay one committed sector effect');
+    $db=$connect();$sector=(new SectorFileRepository($directory))->load(new SectorCoordinates(3,4,5));
+    $effectCopies=count(array_filter($sector->getObjects(),static fn($object):bool=>$object->getId()===$effectObject->getId()));
+    $assert($effectCopies===1,'concurrent sector-effect replay publishes one object consequence');
     $explain=$db->query(($config->driver==='mysql'?'EXPLAIN ':'EXPLAIN QUERY PLAN ')."SELECT id FROM germination_depots WHERE sector_x=3 AND sector_y=4 AND sector_z=5 ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
     $assert(str_contains(json_encode($explain,JSON_THROW_ON_ERROR),'idx_germination_depots_sector'),'sector projection uses its index');
-    echo 'ENGINE '.$config->driver.' '.($config->driver==='mysql'?$db->query('SELECT VERSION()')->fetchColumn():$db->query('SELECT sqlite_version()')->fetchColumn()).PHP_EOL;
+    $engineVersion=$config->driver==='mysql'?$db->query('SELECT VERSION()')->fetchColumn():$db->query('SELECT sqlite_version()')->fetchColumn();
+    $isolation=$config->driver==='mysql'?$db->query('SELECT @@tx_isolation')->fetchColumn():'SERIALIZABLE write transactions';
+    echo 'ENGINE '.$config->driver.' '.$engineVersion.' ISOLATION '.$isolation.PHP_EOL;
+    $db=null;
+    require __DIR__ . '/Support/OthersConcurrencyTests.php';
+    $db=$connect();
+    if ($config->driver === 'mysql') {
+        $db->exec('DELETE FROM sector_effects');
+        $db->exec('ALTER TABLE sector_effects MODIFY COLUMN effect_type VARCHAR(255) NOT NULL');
+        $checks=$db->query("SELECT CONSTRAINT_NAME,CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='sector_effects'")->fetchAll(PDO::FETCH_ASSOC);
+        foreach($checks as $check){if(str_contains($check['CHECK_CLAUSE'],'effect_type')){$db->exec('ALTER TABLE sector_effects DROP CONSTRAINT `'.$check['CONSTRAINT_NAME'].'`');}}
+        $db->exec("ALTER TABLE sector_effects ADD CONSTRAINT old_sector_effect_type CHECK(effect_type IN ('add_object','consume_object'))");
+        $upgrade=new \VonNeumannGame\Database\Migration\OthersPersistenceMigration($db,new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'migration'));
+        $assert($upgrade->run(true)['migratedOperations']===0,'Others migration upgrades the real MariaDB CHECK constraint');
+        $db->beginTransaction();
+        $newEffects=new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db);
+        $newEffects->create('mariadb-migration-proof',new SectorCoordinates(3,4,5),'patch_objects','',['changes'=>[]],gmdate('c'));
+        $db->rollBack();
+        $assert($upgrade->run(true)['migratedOperations']===0,'Others migration replay preserves the MariaDB canonical schema');
+    }
     // Rehearse the explicit upgrade on this isolated inventory snapshot, then replay it.
     $initializer=new SchemaInitializer($config->driver);
     $columnSnapshot=static function(PDO $pdo,string $table)use($config):array{

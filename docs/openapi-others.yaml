@@ -960,7 +960,9 @@ paths:
         missile item becomes one recoverable drifting missile in the ship's
         current sector. Other item types are not jettisonable. A ship in transit
         cannot jettison cargo. The Idempotency-Key prevents duplicate effects
-        when retrying the same request.
+        when retrying the same request. The inventory debit and recoverable
+        sector effect are recorded together; interrupted sector publication is
+        retried without creating another drifting missile.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       requestBody:

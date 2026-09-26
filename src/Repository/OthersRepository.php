@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace VonNeumannGame\Repository;
 
 use PDO;
-use Throwable;
 use VonNeumannGame\Sector\SectorCoordinates;
 
 final class OthersRepository
@@ -16,22 +15,7 @@ final class OthersRepository
 
     public function transaction(callable $operation): mixed
     {
-        $owns = !$this->pdo->inTransaction();
-        if ($owns) {
-            $this->pdo->beginTransaction();
-        }
-        try {
-            $result = $operation();
-            if ($owns) {
-                $this->pdo->commit();
-            }
-            return $result;
-        } catch (Throwable $error) {
-            if ($owns && $this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $error;
-        }
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo))->run($operation);
     }
 
     /** @return array<string, mixed> */
@@ -269,13 +253,11 @@ final class OthersRepository
         if (($mothership['type'] ?? null) !== 'mothership') {
             throw new \InvalidArgumentException('A mothership is required.');
         }
-        return $this->transaction(fn(): array => $this->createShip(
-            (int) $mothership['fleet_id'],
-            'standard',
-            (int) $mothership['sector_x'],
-            (int) $mothership['sector_y'],
-            (int) $mothership['sector_z'],
-        ));
+        return $this->transaction(function () use ($mothership): array {
+            $fresh = (new \VonNeumannGame\Repository\Storage\StorageLockRepository($this->pdo))->lock('ship', (int) $mothership['id']);
+            if ($fresh === null || $fresh['destroyed_at'] !== null || $fresh['status'] === 'removed') { throw new \RuntimeException('The mothership is unavailable.'); }
+            return $this->createShip((int) $fresh['fleet_id'], 'standard', (int) $fresh['sector_x'], (int) $fresh['sector_y'], (int) $fresh['sector_z']);
+        });
     }
 
     /** @return array<string, mixed> */
@@ -536,6 +518,15 @@ final class OthersRepository
 
     public function createAuxiliary(int $shipId): array
     {
+        return $this->transaction(function () use ($shipId): array {
+            $ship = (new \VonNeumannGame\Repository\Storage\StorageLockRepository($this->pdo))->lock('ship', $shipId);
+            if ($ship === null || $ship['destroyed_at'] !== null || $ship['status'] === 'removed') { throw new \RuntimeException('The auxiliary carrier is unavailable.'); }
+            return $this->createAuxiliaryLocked($shipId);
+        });
+    }
+
+    private function createAuxiliaryLocked(int $shipId): array
+    {
         $now = gmdate('c');
         $publicId = self::publicId('aux');
         $stmt = $this->pdo->prepare(
@@ -785,20 +776,11 @@ final class OthersRepository
                 return [];
             }
 
-            $parameters = ['action_id' => $actionId, 'now' => gmdate('c')];
-            $placeholders = [];
-            foreach ($auxiliaries as $index => $auxiliary) {
-                $name = 'auxiliary_' . $index;
-                $placeholders[] = ':' . $name;
-                $parameters[$name] = (int) $auxiliary['id'];
-            }
-            $reserve = $this->pdo->prepare(
-                "UPDATE others_auxiliaries SET status='busy',current_action_id=:action_id,updated_at=:now
-                 WHERE current_action_id IS NULL AND id IN (" . implode(',', $placeholders) . ')'
-            );
-            $reserve->execute($parameters);
-            if ($reserve->rowCount() !== $count) {
-                throw new \RuntimeException('The auxiliary swarm reservation changed concurrently.');
+            foreach (array_chunk(array_column($auxiliaries, 'id'), 200) as $ids) {
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $reserve = $this->pdo->prepare("UPDATE others_auxiliaries SET status='busy',current_action_id=?,updated_at=? WHERE current_action_id IS NULL AND id IN ($placeholders)");
+                $reserve->execute([$actionId, gmdate('c'), ...$ids]);
+                if ($reserve->rowCount() !== count($ids)) { throw new \RuntimeException('The auxiliary swarm reservation changed concurrently.'); }
             }
 
             return $auxiliaries;
@@ -833,10 +815,15 @@ final class OthersRepository
     public function inventoryItemsByPublicIds(int $shipId, array $publicIds): array
     {
         if ($publicIds === []) { return []; }
-        $placeholders = implode(',', array_fill(0, count($publicIds), '?'));
-        $stmt = $this->pdo->prepare("SELECT * FROM others_inventory_items WHERE ship_id = ? AND public_id IN ($placeholders) ORDER BY public_id");
-        $stmt->execute(array_merge([$shipId], array_values($publicIds)));
-        return $stmt->fetchAll();
+        $rows = [];
+        foreach (array_chunk(array_values(array_unique($publicIds)), 200) as $ids) {
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $statement = $this->pdo->prepare("SELECT * FROM others_inventory_items WHERE ship_id=? AND public_id IN ($placeholders)");
+            $statement->execute([$shipId, ...$ids]);
+            array_push($rows, ...$statement->fetchAll());
+        }
+        usort($rows, static fn(array $a, array $b): int => strcmp($a['public_id'], $b['public_id']));
+        return $rows;
     }
 
     public function createAction(array $ship, string $type, string $actorKind, string $actorPublicId, array $payload, ?string $endsAt = null, ?string $cancelableUntil = null, ?int $auxiliaryId = null): array
@@ -888,8 +875,6 @@ final class OthersRepository
         $stmt = $this->pdo->prepare('SELECT c.*, a.public_id AS action_public_id, a.status AS action_status, a.ends_at, a.result_json, a.error_json FROM others_crafts c JOIN others_actions a ON a.id=c.action_id JOIN others_fleets f ON f.id=a.fleet_id WHERE c.ship_id=:ship_id AND f.player_id=:player_id ORDER BY c.public_id');
         $stmt->execute(['ship_id' => $shipId, 'player_id' => $playerId]); return $stmt->fetchAll();
     }
-
-    public function pdo(): PDO { return $this->pdo; }
 
     public static function publicId(string $prefix): string
     {

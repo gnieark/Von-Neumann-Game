@@ -1126,15 +1126,20 @@ final class SchemaInitializer
                 FOREIGN KEY(transfer_id) REFERENCES sector_storage_transfers(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_sector_item_claims_transfer ON sector_storage_item_claims(transfer_id)",
+            "CREATE TABLE IF NOT EXISTS sector_effect_locks (
+                sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL,
+                PRIMARY KEY(sector_x,sector_y,sector_z)
+            )",
             "CREATE TABLE IF NOT EXISTS sector_effects (
                 id $id, operation_id $text NOT NULL UNIQUE,
                 sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL,
-                effect_type $text NOT NULL CHECK(effect_type IN ('add_object','consume_object')),
+                effect_type $text NOT NULL CHECK(effect_type IN ('add_object','consume_object','patch_objects')),
                 object_id $text NOT NULL, payload_json TEXT NOT NULL,
                 status $text NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT NULL, created_at $text NOT NULL, updated_at $text NOT NULL
             )",
             "CREATE INDEX IF NOT EXISTS idx_sector_effects_pending ON sector_effects(status,id)",
+            "CREATE INDEX IF NOT EXISTS idx_sector_effects_delivery ON sector_effects(sector_x,sector_y,sector_z,status,id)",
             "CREATE INDEX IF NOT EXISTS idx_sector_effects_object ON sector_effects(object_id,status)",
             "CREATE INDEX IF NOT EXISTS idx_sector_effects_sector ON sector_effects(sector_x,sector_y,sector_z,status,effect_type)",
             "CREATE TABLE IF NOT EXISTS anomaly_broadcasts (

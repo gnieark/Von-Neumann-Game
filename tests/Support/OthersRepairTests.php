@@ -96,7 +96,7 @@ declare(strict_types=1);
     $standardRepair = $kernel->handle('POST', $standardPath, $headers, '{"integrityPercent":1}');
     $complete($standardRepair->body);
     $test->assertEquals(19, (int) $others->findShipByPublicId($standard['public_id'])['integrity'], 'Standard ship repair restores one whole point, not one percent of twenty');
-    $customService = new \VonNeumannGame\Service\OthersService($others, $scheduledEvents, $reinstantiation, ['manny' => ['actions' => ['repairSecondsPerIntegrityPercent' => 7, 'repairMetalsPerIntegrityPercent' => 0.2]]]);
+    $customService = new \VonNeumannGame\Service\OthersService($others, $scheduledEvents, $reinstantiation, new \VonNeumannGame\Repository\Others\OthersPersistence($pdo), ['manny' => ['actions' => ['repairSecondsPerIntegrityPercent' => 7, 'repairMetalsPerIntegrityPercent' => 0.2]]]);
     $customAction = $customService->startAuxiliaryTask($standard, $standardAux, 'repair', ['integrityPercent' => '1']);
     $test->assertEquals(7, strtotime($customAction['ends_at']) - strtotime($customAction['created_at']), 'Others repair reads the configured Manny duration');
     $test->assertEquals(0.2, json_decode($customAction['payload_json'], true)['metalsCost'], 'Others repair reads the configured Manny metal cost');

@@ -479,21 +479,7 @@ final class ProbeStorageService
         }
 
         $this->ensureProbeStorage($probe);
-        $remaining = $amount;
-        foreach ($this->containers->findByProbeId($probe->id) as $container) {
-            $resources = $this->containers->resourceAmounts($container->id, true);
-            $available = round(max(0.0, (float) ($resources[$type] ?? 0.0)), 4);
-            if ($available <= 0.0) {
-                continue;
-            }
-            $taken = min($available, $remaining);
-            $this->containers->setResourceAmount($container->id, $type, round((float) ($this->containers->resourceAmounts($container->id)[$type] ?? 0.0) - $taken, 4));
-            $remaining = round($remaining - $taken, 4);
-            if ($remaining <= self::EPSILON) {
-                break;
-            }
-        }
-        return round($amount - max(0.0, $remaining), 4);
+        return $this->containers->consumeAvailableResource($probe->id, $type, $amount);
     }
 
     public function consumeResourceFromContainer(NeumannProbe $probe, string $type, float $amount, string $containerUid): float
@@ -509,16 +495,7 @@ final class ProbeStorageService
 
         $this->ensureProbeStorage($probe);
         $container = $this->requiredContainer($probe, $containerUid);
-        $resources = $this->containers->resourceAmounts($container->id, true);
-        $available = round(max(0.0, (float) ($resources[$type] ?? 0.0)), 4);
-        $consumed = min($amount, $available);
-        if ($consumed <= 0.0) {
-            return 0.0;
-        }
-
-        $this->containers->setResourceAmount($container->id, $type, round((float) ($this->containers->resourceAmounts($container->id)[$type] ?? 0.0) - $consumed, 4));
-
-        return round($consumed, 4);
+        return $this->containers->consumeAvailableResource($probe->id, $type, $amount, $container->id);
     }
 
     public function resourceStock(NeumannProbe $probe, string $type): float

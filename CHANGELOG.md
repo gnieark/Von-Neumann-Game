@@ -4,6 +4,17 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-24
 
+### Changed
+
+- Persistance Others O0–F0 : SQL réparti entre repositories d’actions, inventaires, production, mouvements, combat et destructions ; service transactionnel d’idempotence HTTP et suppression de `OthersRepository::pdo()`. Aucun changement de schéma de réponse ni de version API (v139).
+- Épaves, unités dormantes, largages, extractions et abandons de Mannies : intentions SQL durables, publication après commit et reprise idempotente des fichiers de secteur. Migration explicite `scripts/one-shot-scripts/migrate-others-persistence.php` à exécuter avec les commandes et workers arrêtés ; procédure dans `docs/others-persistence-operations.md`.
+- Contrôle d’architecture par tokens PHP, budgets des collections et tests de panne/concurrence sur SQLite et MariaDB.
+
+### Fixed
+
+- Achèvements Others concurrents : verrous et relecture des acteurs/actions/cibles, rejet des événements d’une ancienne étape, unicité des sorties de fabrication, débits, projectiles, dégâts et compteurs de destruction.
+- Les interruptions de transferts d’inventaire et de carburant libèrent les réservations des porteurs survivants. Les refus individuels d’un mouvement de flotte disposent d’un point de sauvegarde transactionnel.
+
 ### Added
 
 - API **v139** : `POST /api/others/ships/{shipId}/inventory/jettisons` permet de larguer une quantité non réservée de ressource (en ECE, y compris le deutérium d’inventaire) ou un missile non réservé. Les ressources sont abandonnées ; le missile devient un objet dérivant récupérable dans le secteur courant. La commande renvoie l’inventaire actualisé, accepte `Idempotency-Key` et refuse les vaisseaux en transit. Le réservoir de propulsion n’est pas concerné.
@@ -15,6 +26,17 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 - Largage d’un conteneur contenant une archive biologique dans le secteur d’origine d’une mission Oracle : la planète et le conteneur sont enregistrés ensemble, sans conflit de révision qui laisse le Manny bloqué à 100 %. Aucun changement du contrat API.
 - Script `scripts/one-shot-scripts/requeue-failed-oracle-container-drop.php` pour remettre en file, après déploiement du correctif, un largage Oracle resté en échec avec ce conflit ; simulation par défaut et vérifications de l’événement, de la mission et de l’absence de conteneur livré.
 - API **v138** : documentation du corps JSON obligatoire de `POST /api/others/ships/{shipId}/harvest`, avec les champs requis `targetObjectId` et `auxiliaryCount` (entier supérieur ou égal à 1), leurs descriptions et un exemple. Le comportement de l’endpoint reste inchangé.
+
+## 2026-09-22
+
+### Changed
+
+- Stockages de secteur : extraction de la persistance des transferts, réservations, inventaires, effets et diffusions dans des repositories dédiés. Le gestionnaire de transaction ne connaît plus les tables métier ; l’ordre des verrous, les transitions conditionnelles et les unités atomiques restent communs aux commandes, workers et interruptions. Aucun changement du contrat API.
+- Consommation des ressources d’une sonde : chargement groupé des stocks disponibles et débits conditionnels par lots de 200 conteneurs. Le parcours complet supprime les lectures par conteneur et borne désormais son coût SQLite à `3 + 3 × ceil(N / 200)` requêtes.
+
+### Fixed
+
+- Reprises des effets et diffusions de stockage : la persistance des tentatives, curseurs, livraisons et acquittements est isolée des services, avec conservation des intentions avant publication JSON et du rejeu idempotent après une coupure.
 
 ## 2026-09-21
 

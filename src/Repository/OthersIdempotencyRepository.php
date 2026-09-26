@@ -5,11 +5,22 @@ declare(strict_types=1);
 namespace VonNeumannGame\Repository;
 
 use PDO;
-use VonNeumannGame\Http\ApiResponse;
 
 final class OthersIdempotencyRepository
 {
     public function __construct(private readonly PDO $pdo) {}
+
+    public function lockAccount(int $playerId): void
+    {
+        if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            $this->pdo->prepare('UPDATE players SET updated_at=updated_at WHERE id=?')->execute([$playerId]);
+        }
+        $sql = 'SELECT id FROM players WHERE id=?';
+        if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') { $sql .= ' FOR UPDATE'; }
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute([$playerId]);
+        if ($statement->fetchColumn() === false) { throw new \RuntimeException('Unable to lock the idempotency account.'); }
+    }
 
     public function find(int $playerId, string $key): ?array
     {
@@ -20,9 +31,9 @@ final class OthersIdempotencyRepository
         return $row ?: null;
     }
 
-    public function store(int $playerId, string $key, string $method, string $path, string $bodyHash, ApiResponse $response): void
+    public function store(int $playerId, string $key, string $method, string $path, string $bodyHash, int $status, array $body): void
     {
-        $actionId = $response->body['action']['id'] ?? null;
+        $actionId = $body['action']['id'] ?? null;
         $stmt = $this->pdo->prepare(
             'INSERT INTO others_idempotency_keys
              (player_id, idempotency_key, request_method, request_path, request_body_hash, response_status, response_body_json, action_public_id, created_at)
@@ -34,19 +45,11 @@ final class OthersIdempotencyRepository
             'method' => $method,
             'path' => $path,
             'body_hash' => $bodyHash,
-            'status' => $response->status,
-            'response' => json_encode($response->body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'status' => $status,
+            'response' => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'action_id' => is_string($actionId) ? $actionId : null,
             'created_at' => gmdate('c'),
         ]);
     }
 
-    public function responseFrom(array $row): ApiResponse
-    {
-        $body=json_decode((string) $row['response_body_json'], true, 512, JSON_THROW_ON_ERROR);
-        if(in_array($body['action']['type']??null,['build_germination_depot','depot_deposit','depot_withdrawal'],true)){
-            $body=\VonNeumannGame\Service\Storage\StoragePublicData::normalize($body);
-        }
-        return new ApiResponse((int) $row['response_status'],$body);
-    }
 }

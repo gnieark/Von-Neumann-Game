@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
-use PDO;
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
@@ -34,7 +33,7 @@ final class ProbeReinstantiationService
     private readonly SectorGrid $grid;
 
     public function __construct(
-        private readonly PDO $pdo,
+        private readonly \VonNeumannGame\Repository\ProbeReinstantiationRepository $persistence,
         private readonly PlayerRepository $players,
         private readonly NeumannProbeRepository $probes,
         private readonly MannyRepository $mannies,
@@ -45,6 +44,7 @@ final class ProbeReinstantiationService
         ?SectorGrid $grid = null,
         private readonly array $gameplayConfig = [],
         private readonly array $universeConfig = [],
+        private readonly ?OthersSectorService $sectorChanges = null,
     ) {
         $this->grid = $grid ?? new SectorGrid();
     }
@@ -72,14 +72,14 @@ final class ProbeReinstantiationService
             static fn(Manny $manny): bool => !$manny->isOnProbe() && $manny->sector !== null,
         ));
 
-        $this->pdo->beginTransaction();
-        try {
+        return $this->persistence->transaction(function () use ($player, $terminalProbe, $newHome, $detachedMannies): array {
+            $player = clone $player;
             $this->abandonDetachedMannies($detachedMannies, 'Manny abandoned after its probe was destroyed.');
-            $this->deleteProbeData($terminalProbe->id);
+            $this->persistence->deleteProbeData($terminalProbe->id);
 
             $player->homeSector = $newHome;
             $this->players->save($player);
-            $this->deleteVisitedSectors($player->id);
+            $this->persistence->deleteVisitedSectors($player->id);
 
             $newProbe = $this->probes->createForPlayer($player->id, 'Probe of ' . $player->username, $newHome);
             $this->mannies->ensureDefaultsForProbe($newProbe);
@@ -87,19 +87,12 @@ final class ProbeReinstantiationService
             $this->visitedSectors->markVisited($player, $newProbe, $newHome);
 
             $updatedPlayer = $this->players->findById($player->id) ?? $player;
-            $this->pdo->commit();
-        } catch (\Throwable $error) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $error;
-        }
-
-        return [
-            'previousProbeId' => $terminalProbe->id,
-            'player' => $updatedPlayer,
-            'probe' => $newProbe,
-        ];
+            return [
+                'previousProbeId' => $terminalProbe->id,
+                'player' => $updatedPlayer,
+                'probe' => $newProbe,
+            ];
+        });
     }
 
     public function switchDefaultProbeAfterTerminalLoss(NeumannProbe $terminalProbe, string $reason): ?NeumannProbe
@@ -128,12 +121,7 @@ final class ProbeReinstantiationService
         $alertProbe = $terminalWasDefault ? $replacement : $this->currentDefaultProbe($player, $terminalProbe, $survivors);
         $detachedMannies = $this->detachedManniesForProbe($terminalProbe->id);
 
-        $ownsTransaction = !$this->pdo->inTransaction();
-        if ($ownsTransaction) {
-            $this->pdo->beginTransaction();
-        }
-
-        try {
+        return $this->persistence->transaction(function () use ($terminalWasDefault, $player, $alertProbe, $terminalProbe, $reason, $detachedMannies): ?NeumannProbe {
             if ($terminalWasDefault || $player->defaultProbeId === null || $alertProbe->id !== $player->defaultProbeId) {
                 $player->defaultProbeId = $alertProbe->id;
                 $this->players->save($player);
@@ -158,19 +146,10 @@ final class ProbeReinstantiationService
             }
 
             $this->abandonDetachedMannies($detachedMannies, 'Manny abandoned after its probe was destroyed.');
-            $this->deleteProbeData($terminalProbe->id);
+            $this->persistence->deleteProbeData($terminalProbe->id);
 
-            if ($ownsTransaction) {
-                $this->pdo->commit();
-            }
-        } catch (\Throwable $error) {
-            if ($ownsTransaction && $this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $error;
-        }
-
-        return $this->probes->findById($alertProbe->id) ?? $alertProbe;
+            return $this->probes->findById($alertProbe->id) ?? $alertProbe;
+        });
     }
 
     /**
@@ -265,15 +244,7 @@ final class ProbeReinstantiationService
      */
     private function latestMovementAttemptForProbe(int $probeId): ?array
     {
-        $stmt = $this->pdo->prepare(
-            'SELECT origin_x, origin_y, origin_z, target_x, target_y, target_z
-             FROM probe_movements
-             WHERE probe_id = :probe_id
-             ORDER BY id DESC
-             LIMIT 1'
-        );
-        $stmt->execute(['probe_id' => $probeId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = $this->persistence->latestMovementAttemptForProbe($probeId);
         if (!is_array($row)) {
             return null;
         }
@@ -289,59 +260,6 @@ final class ProbeReinstantiationService
         $relative = $sector->subtract($player->homeSector);
 
         return $relative['x'] . ':' . $relative['y'] . ':' . $relative['z'];
-    }
-
-    private function deleteProbeData(int $probeId): void
-    {
-        $this->execute(
-            "UPDATE missile_launches
-             SET status = 'failed', result = 'carrier_destroyed', scheduled_event_id = NULL, updated_at = :now
-             WHERE probe_id = :probe_id AND status IN ('preparing', 'queued')",
-            ['probe_id' => $probeId, 'now' => gmdate('c')],
-        );
-        // Preserve missile history and projectiles already in flight after their carrier is gone.
-        $this->execute(
-            'UPDATE missile_launches SET probe_id = NULL, manny_id = NULL, probe_item_id = NULL WHERE probe_id = :probe_id',
-            ['probe_id' => $probeId],
-        );
-        $this->execute('DELETE FROM probe_logbook_pages WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('DELETE FROM visited_sectors WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute(
-            'DELETE FROM scheduled_events
-             WHERE entity_type = :entity_type
-             AND entity_id IN (SELECT id FROM probe_movements WHERE probe_id = :probe_id)',
-            ['entity_type' => 'probe_movement', 'probe_id' => $probeId],
-        );
-        $this->execute(
-            'DELETE FROM scheduled_events WHERE entity_type = :entity_type AND entity_id = :probe_id',
-            ['entity_type' => 'probe', 'probe_id' => $probeId],
-        );
-        $this->execute(
-            'DELETE FROM scheduled_events
-             WHERE entity_type = :entity_type
-             AND entity_id IN (SELECT id FROM probe_damage_warnings WHERE probe_id = :probe_id)',
-            ['entity_type' => 'probe_damage_warning', 'probe_id' => $probeId],
-        );
-        $this->execute(
-            'DELETE FROM scheduled_events
-             WHERE entity_type = :entity_type
-             AND entity_id IN (SELECT id FROM mannies WHERE probe_id = :probe_id)',
-            ['entity_type' => 'manny', 'probe_id' => $probeId],
-        );
-        $this->execute('DELETE FROM probe_damage_warnings WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('DELETE FROM probe_movements WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('DELETE FROM mannies WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('UPDATE probe_messages SET sender_probe_id = NULL WHERE sender_probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('UPDATE probe_messages SET recipient_probe_id = NULL WHERE recipient_probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('DELETE FROM probe_items WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute(
-            'DELETE FROM storage_container_resources
-             WHERE container_id IN (SELECT id FROM storage_containers WHERE probe_id = :probe_id)',
-            ['probe_id' => $probeId],
-        );
-        $this->execute('DELETE FROM storage_containers WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('DELETE FROM probe_improvement_installations WHERE probe_id = :probe_id', ['probe_id' => $probeId]);
-        $this->execute('DELETE FROM neumann_probes WHERE id = :probe_id', ['probe_id' => $probeId]);
     }
 
     /**
@@ -362,7 +280,7 @@ final class ProbeReinstantiationService
     {
         foreach ($mannies as $manny) {
             $this->registerAbandonedManny($manny, $description);
-            $this->detachManny($manny);
+            $this->persistence->detachManny($manny);
         }
     }
 
@@ -372,7 +290,8 @@ final class ProbeReinstantiationService
             return;
         }
 
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
+        $changes = $this->sectorChanges ?? throw new \LogicException('Probe cleanup requires durable sector effects.');
+        $sector = $changes->getOrCreateSector($manny->sector);
         $object = new SectorManny(
             SectorManny::objectIdForUid($manny->uid),
             $manny->name,
@@ -385,37 +304,7 @@ final class ProbeReinstantiationService
         if (!$sector->replaceObject($object)) {
             $sector->addObject($object);
         }
-        $this->sectors->saveSector($sector);
-    }
-
-    private function detachManny(Manny $manny): void
-    {
-        $this->execute(
-            'DELETE FROM scheduled_events WHERE entity_type = :entity_type AND entity_id = :manny_id',
-            ['entity_type' => 'manny', 'manny_id' => $manny->id],
-        );
-        $this->execute(
-            'UPDATE mannies
-             SET probe_id = NULL,
-                 storage_container_id = NULL,
-                 location_type = :location_type,
-                 current_task = NULL,
-                 task_started_at = NULL,
-                 task_ends_at = NULL,
-                 task_scheduled_event_id = NULL,
-                 updated_at = :updated_at
-             WHERE id = :id',
-            [
-                'id' => $manny->id,
-                'location_type' => Manny::LOCATION_SECTOR,
-                'updated_at' => gmdate('c'),
-            ],
-        );
-    }
-
-    private function deleteVisitedSectors(int $playerId): void
-    {
-        $this->execute('DELETE FROM visited_sectors WHERE player_id = :player_id', ['player_id' => $playerId]);
+        $changes->saveSector($sector);
     }
 
     private function preparedHomeSector(): SectorCoordinates
@@ -518,9 +407,5 @@ final class ProbeReinstantiationService
     /**
      * @param array<string, mixed> $params
      */
-    private function execute(string $sql, array $params): void
-    {
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-    }
+
 }

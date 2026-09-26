@@ -72,7 +72,7 @@ function deleteProbeRun(array $argv): int
         (string) ($appConfig['worldSeed'] ?? 'default-world'),
     );
     $reinstantiation = new ProbeReinstantiationService(
-        $pdo,
+        new \VonNeumannGame\Repository\ProbeReinstantiationRepository($pdo),
         $players,
         $probes,
         $mannies,
@@ -82,6 +82,7 @@ function deleteProbeRun(array $argv): int
         $damageWarnings,
         gameplayConfig: $gameplayConfig,
         universeConfig: $universeConfig,
+        sectorChanges: new \VonNeumannGame\Service\OthersSectorService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), new \VonNeumannGame\Service\SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), new \VonNeumannGame\Repository\ScheduledEventRepository($pdo), $sectorService), $sectorService),
     );
 
     $probe = $probes->findById($options['probeId']);

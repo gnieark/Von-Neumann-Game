@@ -2,6 +2,36 @@
 
 Les dépôts, leurs stocks, la connaissance de chaque sonde, les transferts et leurs réservations sont canoniques en SQL. Les fichiers de secteur ne contiennent ni projection ni copie des stocks d’un dépôt. Les containers détachés restent dans leurs tables SQL existantes.
 
+## Cartographie des opérations
+
+| Entrée | Tables lues et écrites | Transaction et ordre des verrous | Événements / fichiers |
+| --- | --- | --- | --- |
+| Construction d’un dépôt Others | `others_ships`, `others_auxiliaries`, `others_inventory_resources`, `others_actions`, puis `germination_depots` | commande : vaisseau, auxiliaire ; worker : vaisseau, auxiliaire, action | événement `others.action`; aucune écriture de secteur |
+| Dépôt/retrait Others | `germination_depots*`, `others_inventory_*`, `sector_storage_transfers`, `sector_storage_*reservations`, `sector_storage_item_claims` | vaisseau, auxiliaire, dépôt, puis action/transfert au règlement | un événement `others.action`; aucun fichier JSON |
+| Dépôt/retrait Manny | `neumann_probes`, `mannies`, `storage_container*`, `germination_depot*` ou `detached_storage_container*`, transferts et réservations | sonde, Manny, conteneur embarqué, stockage externe, transfert | échéance portée par la tâche Manny; aucun fichier JSON direct |
+| Ravitaillement brut de la sonde | mêmes tables, plus `sector_storage_capacity_reservations` et le réservoir de `neumann_probes` | sonde, Manny, stockage externe, transfert | même tâche Manny; crédit conditionnel du réservoir au règlement |
+| Consommation d’une ressource de sonde | `storage_containers`, `storage_container_resources` | `StorageContainerRepository` ouvre/rejoint la transaction, verrouille les lignes ordonnées et applique les débits conditionnels | aucun événement ni fichier |
+| Lecture paginée d’un stockage | tables d’objets et ressources du dépôt ou conteneur détaché | lecture seule; le curseur transporte la version du stockage et refuse une page devenue incohérente | aucun événement ni fichier |
+| Inspection / impact d’un dépôt | `germination_depots`, `germination_depot_knowledge`, `anomaly_broadcasts` et compteurs de destinataires | dépôt, après le verrou de l’observateur pris par la commande appelante | ouverture et événement `anomaly.broadcast` inscrits ensemble |
+| Interruption / destruction | racines de l’acteur, `sector_storage_transfers`, réservations et résultat terminal | même ordre que le règlement normal; les identifiants multiples sont triés | `sector_effects` et événement `sector.effect` pour un auxiliaire dormant |
+| Application d’un effet de secteur | lecture/acquittement de `sector_effects` | hors transaction métier; verrou exclusif du fichier et relecture de sa dernière révision | fichier du secteur écrit de façon idempotente par `operation_id` |
+| Diffusion d’une anomalie | `anomaly_broadcasts`, destinataires, livraisons, alertes et `others_operator_audit` | diffusion, puis une page de sondes et une page de vaisseaux | curseur, livraisons et alertes validés avec chaque page; aucun fichier |
+| Ajout administratif d’un objet Others | `others_ships`, `others_inventory_items` | `scripts/add-inventory-item.php` ouvre la transaction et verrouille le vaisseau avant le contrôle de capacité | aucune échéance ni fichier |
+
+`StorageTransaction` ne contient que le mécanisme de transaction et de reprise des interblocages. `StorageLockRepository` possède la connaissance des racines SQL. Les transferts, réservations, inventaires, effets et diffusions sont persistés par les repositories de `src/Repository/Storage/`. Les services conservent les validations, le calcul des trajets, les décisions d’interruption et la présentation publique.
+
+Une lecture sans verrou sert seulement à trouver une racine. Tout état mutable utilisé pour décider est relu après verrouillage. L’ordre commun est acteurs (vaisseau/sonde, puis auxiliaire/Manny), actions ou transferts, puis inventaires. Les identifiants d’une même famille sont triés. Les écritures de réservation et de terminaison sont conditionnelles ; une erreur annule l’unité de travail complète.
+
+La référence S0 exécutait les suites fonctionnelles et de concurrence existantes sans échec. Elle a isolé une anomalie de coût dans la consommation de ressources : le parcours historique effectuait deux lectures initiales puis cinq requêtes par conteneur effectivement débité (`2 + 5N`). Cette anomalie préexistante est corrigée en S3 par le chargement ordonné unique et les écritures conditionnelles groupées décrits plus bas; les autres budgets de référence sont conservés.
+
+## Intégration de main du 24 septembre 2026
+
+La branche `removesqlonmetier` intègre les commits de `main` jusqu’à `7e442a3` : documentation de la récolte Others (v138), correction du largage Oracle et largage d’inventaire Others (v139). Les extractions S0–S4 sont conservées. Le nouveau largage emploie `StorageLockRepository` pour verrouiller le vaisseau ; `StorageTransaction` conserve uniquement son rôle transactionnel. Cette intégration n’ajoute ni format de données ni contrat API à la version 139 de main.
+
+Validation de cette intégration : 4 062 assertions API (dont les budgets du stockage), 196 assertions secteur et 245 tests des contrôleurs Others réussis. Les 25 contrôles de concurrence et de migration passent sur SQLite 3.46.1 et sur MariaDB 10.11.18, cette dernière en isolation `READ-COMMITTED`, avec les tables préfixées du lanceur. La syntaxe des sept fichiers PHP apportés ou modifiés par la fusion est valide.
+
+Les lots O0–F0 prolongent désormais ce protocole aux parcours Others : largage, épaves, auxiliaires dormants, récoltes et minage. Ils enregistrent des intentions `sector_effects` dans la transaction SQL, puis projettent uniquement après commit. La reprise après publication du fichier utilise le même identifiant d’opération. Voir [les opérations et la migration Others](others-persistence-operations.md).
+
 ## Bascule d’une installation existante
 
 1. Suspendre les commandes de logistique et arrêter les workers. Sauvegarder la base SQL complète et le répertoire `universePath` du fichier `config/app.json`, ainsi que la version du code.
@@ -46,8 +76,8 @@ php tests/StorageConcurrencyTests.php
 php tests/StorageConcurrencyTests.php --mysql-config=config/database.json
 ```
 
-Les deux premières suites exécutent leurs fixtures isolées et les tests spécialisés. La dernière commande utilise de vraies connexions MariaDB/InnoDB et des tables portant un préfixe aléatoire dans la base configurée : les tables du jeu ne sont jamais modifiées. Cela fonctionne avec un compte autorisé à créer des tables mais pas à créer une base. Le nettoyage supprime uniquement les tables du test. `pcntl` et les sockets locaux sont nécessaires aux barrières entre processus. La campagne répète aussi la migration d’un inventaire isolé et compare les colonnes migrées à celles d’une installation neuve.
+Les deux premières suites exécutent leurs fixtures isolées et les tests spécialisés. La dernière commande utilise de vraies connexions MariaDB/InnoDB et des tables portant un préfixe aléatoire dans la base configurée : les tables du jeu ne sont jamais modifiées. Cela fonctionne avec un compte autorisé à créer des tables mais pas à créer une base. Le nettoyage supprime uniquement les tables du test. `pcntl` et les sockets locaux sont nécessaires aux barrières entre processus. La campagne validée le 22 septembre 2026 utilise MariaDB 10.11.18 avec l’isolation `READ-COMMITTED`; le test affiche moteur, version et isolation pour rendre cette référence vérifiable. Elle répète aussi la migration d’un inventaire isolé et compare les colonnes migrées à celles d’une installation neuve.
 
-Les tests de budget comptent les exécutions, lignes lues et paramètres. Pour 1/10/100 dépôts, présence et connaissance utilisent deux requêtes. Une page fixe d’inventaire garde deux lectures avec 1/50/500 objets. Les identités utilisent cinq lectures par bloc de 100 IDs. La diffusion de 1/100/1 000 sondes utilise respectivement 10/10/91 requêtes sur SQLite, avec au plus 800 paramètres par insertion. Tout dépassement des budgets fait échouer la suite.
+Les tests de budget comptent les exécutions, lignes lues et paramètres. Pour 1/10/100 dépôts, présence et connaissance utilisent deux requêtes. Une page fixe d’inventaire garde deux lectures avec 0/99/100/101/500 objets. Les identités utilisent cinq lectures par bloc de 100 IDs et aucun accès pour une liste vide. La consommation de ressources d’une sonde suit `K0 + 3 × ceil(N / 200)` avec `K0 = 3` lectures/prise de transaction : 6 requêtes pour 199 ou 200 lignes débitées et 9 pour 201, avec au plus 802 paramètres. Son plan SQLite emploie l’index des conteneurs par sonde et l’index unique des ressources par conteneur et type. La diffusion de 1/100/1 000 sondes utilise respectivement 10/10/91 requêtes sur SQLite, avec au plus 800 paramètres par insertion. Tout dépassement des budgets fait échouer la suite.
 
 Les injections de panne couvrent le débit avant crédit, la page d’alertes avant progression du curseur et le rejeu d’une projection déjà écrite. Les rejeux de règlement et les conflits de versions vérifient également qu’aucune quantité ni identité n’est dupliquée.

@@ -95,28 +95,12 @@ final class NeumannProbeRepository
      */
     public function withProbeLock(int $probeId, callable $callback): mixed
     {
-        $ownsTransaction = !$this->pdo->inTransaction();
-        if ($ownsTransaction) {
-            $this->pdo->beginTransaction();
-        }
-
-        try {
-            $lock = $this->pdo->prepare('UPDATE neumann_probes SET updated_at = updated_at WHERE id = :id');
-            $lock->execute(['id' => $probeId]);
-            $result = $callback();
-
-            if ($ownsTransaction) {
-                $this->pdo->commit();
-            }
-
-            return $result;
-        } catch (\Throwable $e) {
-            if ($ownsTransaction && $this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-
-            throw $e;
-        }
+        // The callback can still contain non-migrated file writes: do not retry it here.
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1, sqliteWriteIntent: false))->run(function () use ($probeId, $callback): mixed {
+            $lock = $this->pdo->prepare('UPDATE neumann_probes SET updated_at=updated_at WHERE id=?');
+            $lock->execute([$probeId]);
+            return $callback();
+        });
     }
 
     /**
