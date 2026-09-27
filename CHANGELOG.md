@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-27
+
+### Fixed
+
+- Préparations de missiles échouées : les historiques de tir libèrent leur référence au missile d’inventaire, côté sondes comme côté Others. Un missile conservé après la disparition d’une cible peut ainsi être réutilisé sans erreur de clé étrangère ni Manny bloqué à 100 %. Aucun changement du contrat API ; les données historiques déjà affectées nécessitent une réparation séparée.
+
 ## 2026-09-24
 
 ### Changed

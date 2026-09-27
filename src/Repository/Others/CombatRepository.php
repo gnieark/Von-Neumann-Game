@@ -176,7 +176,7 @@ final class CombatRepository
     /** @param array<string|int, mixed> $parameters */
     public function failPreparingProbeLaunch(array $parameters): int
     {
-        $statement = $this->pdo->prepare("UPDATE missile_launches SET status='failed',result='launch_preconditions_lost',updated_at=:now WHERE id=:id AND status='preparing'");
+        $statement = $this->pdo->prepare("UPDATE missile_launches SET status='failed',result='launch_preconditions_lost',probe_item_id=NULL,updated_at=:now WHERE id=:id AND status='preparing'");
         $statement->execute($parameters);
         return $statement->rowCount();
     }
@@ -192,7 +192,7 @@ final class CombatRepository
     /** @param array<string|int, mixed> $parameters */
     public function failMissingMissile(array $parameters): int
     {
-        $statement = $this->pdo->prepare("UPDATE missile_launches SET status='failed',result='missile_item_lost',updated_at=:now WHERE id=:id");
+        $statement = $this->pdo->prepare("UPDATE missile_launches SET status='failed',result='missile_item_lost',probe_item_id=NULL,updated_at=:now WHERE id=:id");
         $statement->execute($parameters);
         return $statement->rowCount();
     }
@@ -232,7 +232,7 @@ final class CombatRepository
     /** @param array<string|int, mixed> $parameters */
     public function failOthersLaunch(array $parameters): int
     {
-        $statement = $this->pdo->prepare("UPDATE missile_launches SET status='failed',result='launch_preconditions_lost',updated_at=:now WHERE id=:id");
+        $statement = $this->pdo->prepare("UPDATE missile_launches SET status='failed',result='launch_preconditions_lost',others_item_id=NULL,updated_at=:now WHERE id=:id");
         $statement->execute($parameters);
         return $statement->rowCount();
     }

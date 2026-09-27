@@ -4007,6 +4007,7 @@ $othersMissileItemId = OthersRepository::publicId('item');
 $pdo->prepare("INSERT INTO others_inventory_items (public_id,ship_id,type,container_space,reserved_action_id,created_at,updated_at) VALUES (:public_id,:ship_id,'missile',2,NULL,:now,:now)")
     ->execute(['public_id' => $othersMissileItemId, 'ship_id' => (int) $othersVictimShip['id'], 'now' => gmdate('c')]);
 $othersLauncherShip = $others->findShipByPublicId((string) $othersVictimShip['public_id']) ?? throw new RuntimeException('Others missile launcher not found.');
+require __DIR__ . '/Support/MissilePreparationRetryTests.php';
 $othersToProbeMissile = $othersService->launchOthersMissile($othersLauncherShip, ['missileItemId' => $othersMissileItemId, 'targetId' => (string) $sameSectorProbe->id]);
 $processOthersActionNow($othersToProbeMissile['action']);
 $othersLauncherImpactHistory = $resolveMissileHitNow((string) $othersToProbeMissile['missile']['public_id']);
