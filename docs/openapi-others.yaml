@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '139'
+  version: '140'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -597,6 +597,18 @@ paths:
       tags:
       - Others
       summary: Schedule independent moves for eligible fleet ships
+      description: >-
+        Each surviving fleet ship is evaluated independently against the same
+        destination, relative to the owning player's home sector. The response
+        always contains actions, ignored and blocked arrays, including empty
+        arrays. A per-ship refusal does not cancel moves accepted for other ships.
+        HTTP 202 may therefore contain no accepted actions, even when every ship
+        is ignored or blocked. Destroyed ships are omitted.
+
+        Accepted actions are queued for asynchronous execution. Use action.id
+        with GET /api/others/actions/{actionId} to follow a move, or cancel it
+        through DELETE /api/others/ships/{shipId}/move before cancelableUntil.
+        endsAt is the planned arrival time, not the departure time.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -604,8 +616,73 @@ paths:
       responses:
         '202':
           description: Moves accepted, ignored or blocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersFleetMoveResponse'
+              examples:
+                partialAcceptance:
+                  summary: One accepted move, one ship already at destination and one blocked ship
+                  value:
+                    actions:
+                    - shipId: mother_example
+                      action:
+                        id: action_move_example
+                        type: ship_move
+                        status: queued
+                        actor:
+                          kind: others_ship
+                          id: mother_example
+                        createdAt: '2026-09-27T12:00:00+00:00'
+                        updatedAt: '2026-09-27T12:00:00+00:00'
+                        endsAt: '2026-09-27T18:15:00+00:00'
+                        cancelableUntil: '2026-09-27T12:15:00+00:00'
+                    ignored:
+                    - shipId: ship_already_there
+                      reason: already_at_destination
+                    blocked:
+                    - shipId: ship_low_fuel
+                      reason: insufficient_resources
+                noAcceptedMoves:
+                  summary: HTTP 202 does not guarantee any move was accepted
+                  value:
+                    actions: []
+                    ignored: []
+                    blocked:
+                    - shipId: mother_example
+                      reason: others_ship_busy
+        '400':
+          description: bad_request — invalid JSON body or missing/malformed target coordinates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: others_fleet_not_found — the fleet does not exist or is not owned by this player.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
         '409':
-          "$ref": "#/components/responses/Conflict"
+          description: others_mothership_required — the fleet has no active mothership; or idempotency_key_conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '422':
+          description: invalid_destination — the home-relative destination cannot be resolved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/OthersUnavailable'
   "/api/others/ships/{shipId}":
     parameters:
     - "$ref": "#/components/parameters/ShipId"
@@ -1384,6 +1461,94 @@ components:
               targetId:
                 type: string
   schemas:
+    OthersFleetMoveResponse:
+      type: object
+      required: [actions, ignored, blocked]
+      properties:
+        actions:
+          type: array
+          description: Successfully scheduled moves; empty when no ship can start a move.
+          items:
+            type: object
+            required: [shipId, action]
+            properties:
+              shipId:
+                type: string
+                description: Public identifier of the ship, including the mothership.
+              action:
+                $ref: '#/components/schemas/OthersFleetMoveAcceptedAction'
+        ignored:
+          type: array
+          description: Ships already in the requested sector; no action is created for them.
+          items:
+            type: object
+            required: [shipId, reason]
+            properties:
+              shipId:
+                type: string
+              reason:
+                type: string
+                enum: [already_at_destination]
+        blocked:
+          type: array
+          description: >-
+            Ships whose individual move was refused. No action is created for
+            these entries. Each entry contains a reason code, not an error object
+            or a human-readable message.
+          items:
+            type: object
+            required: [shipId, reason]
+            properties:
+              shipId:
+                type: string
+              reason:
+                type: string
+                description: >-
+                  Per-ship error code: target_out_of_range (more than ten sectors
+                  from that ship), others_ship_busy (busy or in transit),
+                  insufficient_resources (insufficient propulsion deuterium),
+                  others_ship_unavailable (carrier no longer available),
+                  action_conflict (state changed while accepting the move), or
+                  bad_request (leaveAuxiliariesBehind is not a boolean).
+                example: insufficient_resources
+    OthersFleetMoveAcceptedAction:
+      type: object
+      description: Immediate action snapshot returned when a fleet member's move is accepted.
+      required: [id, type, status, actor, createdAt, updatedAt, endsAt, cancelableUntil]
+      properties:
+        id:
+          type: string
+          description: Public action identifier for GET /api/others/actions/{actionId}.
+        type:
+          type: string
+          enum: [ship_move]
+        status:
+          type: string
+          enum: [queued]
+        actor:
+          type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [others_ship]
+            id:
+              type: string
+              description: Same public ship identifier as the enclosing shipId.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+          description: Scheduled arrival time, including the departure preparation period.
+        cancelableUntil:
+          type: string
+          format: date-time
+          description: End of the fifteen-minute cancellation window; scheduled departure time.
     OthersAction:
       description: >-
         Current action returned by the shared action lookup. Repair, depot and deuterium
