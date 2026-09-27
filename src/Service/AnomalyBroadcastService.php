@@ -27,12 +27,12 @@ final class AnomalyBroadcastService
         $v = [];
         foreach (['x', 'y', 'z'] as $axis) { $v[$axis] = (float) $source['sector_' . $axis] - (float) $recipient['sector_' . $axis]; }
         $maximum = max(array_map('abs', $v));
-        if ($maximum == 0) { $origin = 'de votre secteur'; }
+        if ($maximum == 0) { $origin = 'your sector'; }
         else {
             $direction = array_map(static fn(float $value): int => (int) round(50 * $value / $maximum), $v);
-            $origin = 'de la direction approximative (' . implode(', ', $direction) . ')';
+            $origin = 'the approximate direction (' . implode(', ', $direction) . ')';
         }
-        return 'Vos capteurs ont détecté une onde provenant ' . $origin . ". Son signal n'a pas pu être interprété.";
+        return 'Your sensors have detected a wave coming from ' . $origin . '. Its signal could not be interpreted.';
     }
 
     public function enqueue(array $depot, string $now): void

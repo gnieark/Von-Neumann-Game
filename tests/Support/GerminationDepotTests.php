@@ -95,7 +95,7 @@ use VonNeumannGame\Service\Storage\TransferLoadPlanner;
     $origin = ['sector_x'=>120,'sector_y'=>-41,'sector_z'=>7];
     $recipient = ['sector_x'=>0,'sector_y'=>0,'sector_z'=>0];
     $test->assert(str_contains(AnomalyBroadcastService::message($origin,$recipient),'(50, -17, 3)'),'anomaly direction uses the specified normalization');
-    $test->assert(str_contains(AnomalyBroadcastService::message($origin,$origin),'de votre secteur'),'local anomaly has the specified message');
+    $test->assert(str_contains(AnomalyBroadcastService::message($origin,$origin),'from your sector'),'local anomaly has the specified message');
     $probes=new \VonNeumannGame\Repository\NeumannProbeRepository($db);
     $probe=$probes->createForPlayer(1,'Depot visitor',$coordinates);
     $otherProbe=$probes->createForPlayer(1,'Other visitor',$coordinates);

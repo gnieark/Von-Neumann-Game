@@ -6,7 +6,9 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Les rapports d’inspection des dépôts Others, avant et après ouverture, ainsi que les alertes d’onde émises à leur ouverture sont désormais rédigés en anglais. Aucun changement du contrat API ; les alertes déjà enregistrées restent inchangées.
 - Préparations de missiles échouées : les historiques de tir libèrent leur référence au missile d’inventaire, côté sondes comme côté Others. Un missile conservé après la disparition d’une cible peut ainsi être réutilisé sans erreur de clé étrangère ni Manny bloqué à 100 %. Aucun changement du contrat API ; les données historiques déjà affectées nécessitent une réparation séparée.
+- Script ciblé `scripts/one-shot-scripts/requeue-bonsi-missile-preparations.php` : nettoyage des trois anciennes références et remise en file des trois préparations bloquées de Bonsi, avec simulation par défaut, vérifications d’identité et sauvegarde obligatoire avant application.
 
 ## 2026-09-24
 

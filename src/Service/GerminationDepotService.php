@@ -138,8 +138,8 @@ final class GerminationDepotService
             $access = $depot['state'] === 'open' ? $now : null;
             $this->depots->recordInspection((int) $depot['id'], $probe->id, $now, $access);
             return ['message' => $access !== null
-                ? 'Votre Manny a trouvé un accès au stockage. Vous pouvez maintenant en consulter et transférer le contenu.'
-                : "Votre Manny décrit une enveloppe parfaitement lisse, impossible à percer avec son outillage. Un impact pourrait permettre d'en savoir plus."];
+                ? 'Your Manny has found a way into the storage facility. You can now view and transfer its contents.'
+                : 'Your Manny reports a perfectly smooth shell that its tools cannot penetrate. An impact might reveal more.'];
         });
     }
 
