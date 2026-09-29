@@ -786,7 +786,7 @@
             if (!object) {
                 return [];
             }
-            const direct = !["manny", "probe", "drifting_item"].includes(object.type) ? [{
+            const direct = !["manny", "probe", "drifting_item", "scut_relay"].includes(object.type) ? [{
                 "id": object.id,
                 "type": object.type || "object",
                 "name": object.name || object.id || "",

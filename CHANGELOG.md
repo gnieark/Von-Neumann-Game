@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-29
+
+### Fixed
+
+- WebUI : les relais SCUT ne sont plus proposés comme supports de waypoints, leur installation sur ces relais n’étant pas prise en charge. Version des fichiers statiques renouvelée pour actualiser le menu après déploiement.
+
 ## 2026-09-27
 
 ### Fixed
