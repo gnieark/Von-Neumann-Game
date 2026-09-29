@@ -8587,8 +8587,13 @@ components:
           description: >
             Optional detached storage container object id in the task sector.
             When omitted, mined resources are delivered to the probe, which is
-            allowed only for a Manny operating in the probe sector. Remote
-            same-SCUT mining requires this field and the referenced container
+            allowed only for a Manny operating in the probe sector.
+            If the probe leaves before delivery, an existing probe-bound order
+            remains pending until it returns to the Manny sector and has no
+            intersector movement in progress; no resources
+            are extracted or credited while it is away, even over SCUT.
+            Mining into a detached container continues without the probe or SCUT.
+            Starting a new remote same-SCUT mining order requires this field and the referenced container
             must be detached in the Manny sector. When it targets a visible
             drifting container or a hidden container on
             another object, normal mining travel time still applies. When it

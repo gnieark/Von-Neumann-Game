@@ -12177,6 +12177,7 @@ $test->assertEquals(null, $requeuedReservationEvent['last_error'] ?? null, 'fail
 $reservationRepairCheckPdo = null;
 
 require __DIR__ . '/Support/DetachedContainerMannyTests.php';
+require __DIR__ . '/Support/MiningDeliveryRangeTests.php';
 require __DIR__ . '/Support/DormantContainerTests.php';
 require __DIR__ . '/Support/TransferLoadPlannerTests.php';
 require_once __DIR__ . '/Support/PersistenceArchitecture.php';

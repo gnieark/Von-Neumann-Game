@@ -12,6 +12,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Minage Manny : un ordre destiné à la sonde attend désormais son retour dans le secteur et la fin de son déplacement avant de prélever et livrer les ressources, même avec une liaison SCUT. Le minage vers un conteneur détaché continue à distance sans faire embarquer la Manny sur une sonde en transit. Correction du comportement, sans nouveau champ API ni migration.
 - WebUI : les relais SCUT ne sont plus proposés comme supports de waypoints, leur installation sur ces relais n’étant pas prise en charge. Version des fichiers statiques renouvelée pour actualiser le menu après déploiement.
 
 ## 2026-09-27

@@ -6,6 +6,7 @@ namespace VonNeumannGame\Service\Manny;
 
 use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
+use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ResourceComposition;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\DormantConstruct;
@@ -227,6 +228,14 @@ final class MiningTaskHandler implements TaskHandlerInterface
         $targetAmount = (float) ($manny->taskPayload['targetAmount'] ?? 0);
         $resourceProfile = ($this->miningResourceProfile)($manny);
         $targetContainerId = ($this->miningTaskTargetContainerId)($manny);
+        $carrierInSector = $manny->isInSameSectorAs($probe) && !in_array($probe->status, [
+            ProbeStatus::Preparing, ProbeStatus::Accelerating, ProbeStatus::Cruising, ProbeStatus::Decelerating,
+        ], true);
+        // SCUT carries orders and telemetry, not resources. Keep the scheduled
+        // order pending until its carrier returns, before depleting the source.
+        if ($targetContainerId === null && !$carrierInSector) {
+            return $manny;
+        }
         $completionAmount = $targetAmount;
         if ($targetContainerId !== null) {
             $sector = ($this->getOrCreateSector)($manny->sector ?? $probe->currentSector);
@@ -262,7 +271,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
         $manny->taskPayload['depositedResources'] = ($this->resourceAmountsForTotal)($delivered, $resourceProfile);
 
         ($this->clearMannyCargo)($manny);
-        if (!$manny->isInSameSectorAs($probe)) {
+        if (!$carrierInSector) {
             ($this->clearTask)($manny, []);
             ($this->registerMannyInSector)($manny, SectorManny::STATE_FORGOTTEN);
             ($this->saveManny)($manny);
