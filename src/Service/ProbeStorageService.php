@@ -383,6 +383,32 @@ final class ProbeStorageService
         return count($this->additionalContainerCandidates($probe));
     }
 
+    /** The last occupied attached container is protected, including when other Mannies are outside. */
+    public function canLoseContainerAccidentally(NeumannProbe $probe, string $containerUid): bool
+    {
+        $containers = $this->containers->findByProbeId($probe->id);
+        $target = $this->containerByUid($containers, $containerUid);
+        if ($target === null || $target->kind !== StorageContainer::KIND_CONTAINER) { return false; }
+        $attachedIds = array_fill_keys(array_map(static fn(StorageContainer $c): int => $c->id, $containers), true);
+        $hasOccupants = false;
+        foreach ($this->mannies->findInventoryProjectionsByProbeId($probe->id) as $manny) {
+            if (!$manny->isOnProbe() || !isset($attachedIds[$manny->storageContainerId])) { continue; }
+            if ($manny->storageContainerId !== $target->id) { return true; }
+            $hasOccupants = true;
+        }
+        return !$hasOccupants;
+    }
+
+    /** @return list<Manny> */
+    public function containerMannies(NeumannProbe $probe, string $containerUid): array
+    {
+        $container = $this->containers->findByUidForProbe($probe->id, $containerUid);
+        return $container === null ? [] : array_values(array_filter(
+            $this->mannies->findByProbeId($probe->id),
+            static fn(Manny $manny): bool => $manny->isOnProbe() && $manny->storageContainerId === $container->id,
+        ));
+    }
+
     public function updateContainerRules(NeumannProbe $probe, string $containerUid, array $priority, array $exclusion, array $strictExclusion): array
     {
         $this->ensureProbeStorage($probe);
@@ -868,7 +894,7 @@ final class ProbeStorageService
     /**
      * @param array<string, mixed> $snapshot
      */
-    public function restoreDetachedContainerSnapshot(NeumannProbe $probe, array $snapshot): void
+    public function restoreDetachedContainerSnapshot(NeumannProbe $probe, array $snapshot): ?StorageContainer
     {
         $this->ensureProbeStorage($probe);
         $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
@@ -879,7 +905,7 @@ final class ProbeStorageService
             throw new MannyActionException(422, 'detached_container_not_recoverable', 'Detached container data is incomplete.');
         }
         if ($this->detachedContainerSnapshotAlreadyRestored($probe, $sourceContainerUid, $containerData)) {
-            return;
+            return null;
         }
         $itemUid = null;
         if (
@@ -944,6 +970,7 @@ final class ProbeStorageService
             );
         }
 
+        return $restoredContainer;
     }
 
     /**

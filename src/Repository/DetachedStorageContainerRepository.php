@@ -157,8 +157,8 @@ final class DetachedStorageContainerRepository
 
     public function occupiedSpace(string $objectId): float
     {
-        $query = $this->pdo->prepare("SELECT (SELECT COALESCE(SUM(amount),0) FROM detached_storage_container_resources WHERE container_object_id=?) +(SELECT COALESCE(SUM(container_space),0) FROM detached_storage_container_items WHERE container_object_id=? AND is_backing_item=0)+(SELECT COALESCE(SUM(amount),0) FROM sector_storage_capacity_reservations WHERE inventory_kind='detached' AND inventory_id=?)");
-        $query->execute([$objectId, $objectId, $objectId]);
+        $query = $this->pdo->prepare("SELECT (SELECT COALESCE(SUM(amount),0) FROM detached_storage_container_resources WHERE container_object_id=?) +(SELECT COALESCE(SUM(container_space),0) FROM detached_storage_container_items WHERE container_object_id=? AND is_backing_item=0)+(SELECT COALESCE(SUM(amount),0) FROM sector_storage_capacity_reservations WHERE inventory_kind='detached' AND inventory_id=?)+(SELECT COALESCE(SUM(container_space),0) FROM detached_storage_container_mannies WHERE container_object_id=?)");
+        $query->execute([$objectId, $objectId, $objectId, $objectId]);
         return (float) $query->fetchColumn();
     }
 

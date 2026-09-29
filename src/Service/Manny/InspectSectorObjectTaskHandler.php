@@ -33,7 +33,7 @@ final class InspectSectorObjectTaskHandler implements TaskHandlerInterface
      * @param \Closure(Manny): void $releaseMannyFromStorage
      * @param \Closure(Manny): void $removeMannyFromSector
      * @param \Closure(Manny): void $saveManny
-     * @param \Closure(SectorDetachedContainer): array<string, mixed> $detachedContainerInspectionReport
+     * @param \Closure(SectorDetachedContainer, int): array<string, mixed> $detachedContainerInspectionReport
      * @param \Closure(NeumannProbe, SectorContent, DormantConstruct): array<string, string> $dormantConstructInspectionReport
      * @param \Closure(int, SectorCoordinates, string, string, string, string, ?string, ?string): void $createMannyReportAlert
      * @param \Closure(Manny, array<string, mixed>): void $clearTask
@@ -143,7 +143,7 @@ final class InspectSectorObjectTaskHandler implements TaskHandlerInterface
             $result['result'] = 'failed';
             $result['failureReason'] = 'target_unavailable';
         } elseif ($target instanceof SectorDetachedContainer) {
-            $report = ($this->detachedContainerInspectionReport)($target);
+            $report = ($this->detachedContainerInspectionReport)($target, $probe->playerId);
             $result['containerReport'] = $report;
             ($this->createMannyReportAlert)(
                 $probe->id,

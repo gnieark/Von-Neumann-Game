@@ -13,6 +13,7 @@ final class Manny
 
     public const LOCATION_PROBE = 'probe';
     public const LOCATION_SECTOR = 'sector';
+    public const LOCATION_DETACHED_CONTAINER = 'detached_container';
 
     public const TASK_REPAIR = 'repair';
     public const TASK_MINING = 'mining';

@@ -389,6 +389,9 @@ final class SectorObservationService
             if ($activeTrajectory !== null && $this->asteroidTrajectoryService !== null) {
                 $public['trajectory'] = $this->asteroidTrajectoryService->publicArray($activeTrajectory);
             }
+            if ($isCurrentSector && $object instanceof SectorDetachedContainer && $this->mannies?->hasInspectedContainer($object->getId(), $playerId)) {
+                $public['abandonedMannies'] = $this->mannies->detachedContainerOccupants($object->getId());
+            }
             $objects[] = $public;
         }
         foreach ($content->getHiddenDetachedContainers() as $container) {

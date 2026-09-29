@@ -387,7 +387,10 @@ final class ProbeManniesApiController
                 return ApiResponse::error(400, 'bad_request', 'JSON body must contain objectId.');
             }
 
-            $manny = $this->mannies->startRecoverDetachedContainer($probe, $uid, $data['objectId']);
+            if (array_key_exists('mannyId', $data) && (!is_string($data['mannyId']) || trim($data['mannyId']) === '')) {
+                return ApiResponse::error(400, 'bad_request', 'mannyId must be a nonempty string.');
+            }
+            $manny = $this->mannies->startRecoverDetachedContainer($probe, $uid, $data['objectId'], $data['mannyId'] ?? null);
             $probe = $this->freshProbe($probe);
 
             return new ApiResponse(202, ['manny' => $this->presenter->manny($player, $probe, $manny)]);

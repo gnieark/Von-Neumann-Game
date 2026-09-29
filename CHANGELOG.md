@@ -4,6 +4,12 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-09-29
 
+### Added
+
+- API **v141** : les Mannies d’un conteneur perdu accidentellement deviennent abandonnées à l’intérieur, sans duplication ni perte d’identité ou de cargaison. Elles quittent le pool de la sonde et leurs tâches sont annulées avec les restitutions prévues pour ces tâches. Le dernier conteneur hébergeant des Mannies à bord reste protégé ; un Manny dans un autre conteneur attaché, y compris le stockage interne, autorise la perte. La protection est revérifiée lors de la rupture. Le détachement volontaire d’un conteneur occupé reste interdit.
+- Inspection : `containerReport.mannies` révèle les occupants et les scans locaux du joueur exposent ensuite `abandonedMannies`. Ils n’apparaissent pas comme objets dérivants séparés. Rattacher le conteneur recrute tous ses occupants ; `mannyId` sur `recover-storage-container` permet d’en récupérer un seul. Réservation exclusive du conteneur, attente de place et résolution des noms en doublon. Formulaire WebUI de récupération individuelle après inspection.
+- Migration explicite : `php scripts/one-shot-scripts/migrate-detached-container-mannies.php --database-config=PATH --apply`, API et workers arrêtés. Simulation par défaut ; création des relations SQL d’occupation et d’inspection, sans déplacement des Mannies existantes. À appliquer avant le déploiement du code.
+
 ### Fixed
 
 - WebUI : les relais SCUT ne sont plus proposés comme supports de waypoints, leur installation sur ces relais n’étant pas prise en charge. Version des fichiers statiques renouvelée pour actualiser le menu après déploiement.

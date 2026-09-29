@@ -1001,7 +1001,7 @@ final class SchemaInitializer
             "CREATE INDEX IF NOT EXISTS idx_forum_messages_post_recent ON forum_messages(post_id, created_at, id)",
         ];
 
-        $statements = [...$statements, $this->othersKnownDepotsStatement(), ...$this->sectorStorageStatements()];
+        $statements = [...$statements, ...$this->detachedMannyStatements(), $this->othersKnownDepotsStatement(), ...$this->sectorStorageStatements()];
 
         $statements = array_values(array_filter($statements, static fn(string $statement): bool => $statement !== ''));
 
@@ -1025,6 +1025,33 @@ final class SchemaInitializer
         )';
 
         return $this->driver === 'mysql' ? $this->withMysqlEngine($statement) : $statement;
+    }
+
+    /** Canonical container occupant schema, also used by the explicit migration. */
+    public function detachedMannyStatements(): array
+    {
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $decimal = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
+        $statements = [
+            "CREATE TABLE IF NOT EXISTS detached_storage_container_mannies (
+                manny_id INTEGER PRIMARY KEY,
+                container_object_id $text NOT NULL,
+                container_space $decimal NOT NULL,
+                FOREIGN KEY(manny_id) REFERENCES mannies(id) ON DELETE CASCADE,
+                FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE RESTRICT
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_detached_mannies_container ON detached_storage_container_mannies(container_object_id)",
+            "CREATE TABLE IF NOT EXISTS detached_storage_container_inspections (
+                container_object_id $text NOT NULL,
+                player_id INTEGER NOT NULL,
+                PRIMARY KEY(container_object_id, player_id),
+                FOREIGN KEY(container_object_id) REFERENCES detached_storage_containers(object_id) ON DELETE CASCADE,
+                FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+            )",
+        ];
+        return $this->driver === 'mysql'
+            ? array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements)
+            : $statements;
     }
 
     /** Additive canonical columns for the explicit upgrade of existing inventories. */

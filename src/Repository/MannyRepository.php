@@ -99,6 +99,58 @@ final class MannyRepository
         return array_map(fn(array $row): Manny => $this->hydrate($row), $stmt->fetchAll());
     }
 
+    /** @return list<Manny> */
+    public function findInDetachedContainer(string $objectId, bool $lock = false): array
+    {
+        $stmt = $this->pdo->prepare($this->taskJoinSql('m.id IN (SELECT manny_id FROM detached_storage_container_mannies WHERE container_object_id = :object_id)') . ' ORDER BY m.id' . ($lock && $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite' ? ' FOR UPDATE' : ''));
+        $stmt->execute(['object_id' => $objectId]);
+        return array_map(fn(array $row): Manny => $this->hydrate($row), $stmt->fetchAll());
+    }
+
+    public function putInDetachedContainer(Manny $manny, string $objectId, float $space): void
+    {
+        if ($manny->probeId !== null || $manny->locationType !== Manny::LOCATION_DETACHED_CONTAINER || $manny->currentTask !== null) {
+            throw new \LogicException('Only abandoned inactive Mannies can occupy detached storage.');
+        }
+        $this->pdo->prepare('INSERT INTO detached_storage_container_mannies (manny_id,container_object_id,container_space) VALUES (?,?,?)')->execute([$manny->id, $objectId, $space]);
+    }
+
+    public function removeFromDetachedContainer(Manny $manny, string $objectId): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM detached_storage_container_mannies WHERE manny_id=? AND container_object_id=?');
+        $stmt->execute([$manny->id, $objectId]);
+        if ($stmt->rowCount() !== 1) { throw new \RuntimeException('Detached Manny has already been recovered.'); }
+        $this->pdo->prepare('UPDATE detached_storage_containers SET storage_version=storage_version+1 WHERE object_id=?')->execute([$objectId]);
+    }
+
+    public function recordContainerInspection(string $objectId, int $playerId): void
+    {
+        $prefix = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'INSERT IGNORE' : 'INSERT OR IGNORE';
+        $this->pdo->prepare($prefix . ' INTO detached_storage_container_inspections (container_object_id,player_id) VALUES (?,?)')->execute([$objectId, $playerId]);
+    }
+
+    public function hasInspectedContainer(string $objectId, int $playerId): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT 1 FROM detached_storage_container_inspections WHERE container_object_id=? AND player_id=?');
+        $stmt->execute([$objectId, $playerId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function detachedContainerOccupants(string $objectId): array
+    {
+        return array_map(static fn(Manny $manny): array => [
+            'id' => $manny->uid, 'name' => $manny->name, 'state' => 'abandoned', 'cargo' => $manny->cargoArray(),
+        ], $this->findInDetachedContainer($objectId));
+    }
+
+    public function detachedContainerOccupiedSpace(string $objectId): float
+    {
+        $stmt = $this->pdo->prepare('SELECT COALESCE(SUM(container_space),0) FROM detached_storage_container_mannies WHERE container_object_id=?');
+        $stmt->execute([$objectId]);
+        return (float) $stmt->fetchColumn();
+    }
+
     /**
      * Inventory-only projection. It deliberately excludes task columns and
      * therefore never loads scheduled-event payloads.

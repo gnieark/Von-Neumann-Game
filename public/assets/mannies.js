@@ -302,6 +302,7 @@
                 "inactiveScutRelays": inactiveScutRelayTargets().map((relay) => relay.id).join(","),
                 "scutTransitBeaconTargets": scutTransitBeaconRelayTargets().map((relay) => relay.id).join(","),
                 "scutTransitBeaconStock": scutTransitBeaconItems().length,
+                "containerMannies": abandonedContainerMannyTargets(),
                 "missileLaunch": [
                     missileItems().map((item) => item.id).join(","),
                     missileTargets().map((target) => target.type + ":" + target.id).join(","),
@@ -2977,6 +2978,23 @@
             + "</form>";
     }
 
+    function abandonedContainerMannyTargets() {
+        return state.currentSectorObjects.filter((object) => object.type === "detached_container")
+            .flatMap((container) => (container.abandonedMannies || []).map((manny) => ({
+                objectId: container.id, mannyId: manny.id, name: manny.name, containerName: container.name || container.id,
+            })));
+    }
+
+    function renderRecoverContainerMannyForm() {
+        const targets = abandonedContainerMannyTargets();
+        const options = targets.map((target) => "<option value=\"" + escaped(JSON.stringify([target.objectId, target.mannyId])) + "\">"
+            + escaped(target.name + " — " + target.containerName) + "</option>").join("");
+        return "<form class=\"manny-recover-container-manny-form manny-form\">"
+            + "<label>" + escaped(tr("mannyObject", "Manny")) + "<select name=\"target\" required>" + options + "</select></label>"
+            + "<button type=\"submit\"" + (targets.length ? "" : " disabled") + ">" + escaped(tr("recoverContainerManny", "Recover a Manny from a container")) + "</button>"
+            + "<p>" + escaped(tr("recoverContainerMannyHint", "Inspect a detached container to discover its abandoned Mannies. Recovery leaves the container in place.")) + "</p></form>";
+    }
+
     function renderCraftForm() {
         return "<form class=\"manny-craft-form manny-form\" data-fabricator=\"manny\">"
             + "<div class=\"manny-craft-picker\">"
@@ -3456,6 +3474,7 @@
             {"id": "detach-storage", "title": tr("detachStorageActionTitle", "Detach a container"), "render": renderDetachStorageContainerForm},
             {"id": "drop-storage", "title": tr("dropStorageActionTitle", "Drop a container on a planet"), "render": renderDropStorageContainerForm},
             {"id": "recover-storage", "title": tr("recoverStorageContainerActionTitle", "Recover a detached container"), "render": renderRecoverStorageContainerForm},
+            {"id": "recover-container-manny", "title": tr("recoverContainerManny", "Recover a Manny from a container"), "render": renderRecoverContainerMannyForm},
         ];
         const craftActions = [
             {"id": "assemble-probe", "title": tr("assembleProbeActionTitle", "Assemble a new probe"), "render": renderAssembleProbeForm},
@@ -4701,6 +4720,14 @@
             return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/drop-storage-container"), {
                 "method": "POST",
                 "body": JSON.stringify({containerId, planetId}),
+            });
+        }
+        if (form.classList.contains("manny-recover-container-manny-form")) {
+            const value = formData.get("target");
+            if (!value) return null;
+            const [objectId, targetMannyId] = JSON.parse(value);
+            return window.VNG.apiJson(window.VNG.probeApiPath("/mannies/" + encodeURIComponent(mannyId) + "/recover-storage-container"), {
+                method: "POST", body: JSON.stringify({objectId, mannyId: targetMannyId}),
             });
         }
         if (form.classList.contains("manny-recover-storage-container-form")) {

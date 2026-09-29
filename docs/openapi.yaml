@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '140'
+  version: '141'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 140
+                apiVersion: 141
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -1898,6 +1898,11 @@ paths:
         tanker. Risk starts at 10%, then adds 10 percentage points per extra
         container up to 100%. The warning exposes its effective threshold in
         `risk.ruleStartsAtAdditionalContainers`.
+        A container containing all remaining onboard Mannies is protected.
+        A Manny in another attached container (including core storage) removes
+        that protection; Mannies outside the probe do not count. Protection is
+        rechecked at the actual break. Lost occupants become abandoned inside
+        the detached container, with their active tasks cancelled.
       parameters:
         - $ref: '#/components/parameters/ProbeId'
       responses:
@@ -3257,6 +3262,13 @@ paths:
         interrupted across all probes, have their current mining cargo dropped,
         and switch to a returning task with reason
         `target_container_recovered`.
+        Reattaching the container recruits all abandoned Mannies inside it,
+        preserving their identities and cargo and keeping them in this storage.
+        Set `mannyId` to recover one occupant instead, after inspecting the
+        container. This leaves the container and its other occupants in place.
+        Both modes reserve the entire container until completion or cancellation;
+        competing recoveries and content transfers are rejected. Individual
+        recovery waits for enough onboard space for the rescuer and the occupant.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -4407,6 +4419,11 @@ paths:
         tanker. Risk starts at 10%, then adds 10 percentage points per extra
         container up to 100%. The warning exposes its effective threshold in
         `risk.ruleStartsAtAdditionalContainers`.
+        A container containing all remaining onboard Mannies is protected.
+        A Manny in another attached container (including core storage) removes
+        that protection; Mannies outside the probe do not count. Protection is
+        rechecked at the actual break. Lost occupants become abandoned inside
+        the detached container, with their active tasks cancelled.
       responses:
         '200':
           description: Current and past damage warnings for the authenticated probe
@@ -5511,6 +5528,13 @@ paths:
         interrupted across all probes, have their current mining cargo dropped,
         and switch to a returning task with reason
         `target_container_recovered`.
+        Reattaching the container recruits all abandoned Mannies inside it,
+        preserving their identities and cargo and keeping them in this storage.
+        Set `mannyId` to recover one occupant instead, after inspecting the
+        container. This leaves the container and its other occupants in place.
+        Both modes reserve the entire container until completion or cancellation;
+        competing recoveries and content transfers are rejected. Individual
+        recovery waits for enough onboard space for the rescuer and the occupant.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -8677,10 +8701,29 @@ components:
         objectId:
           type: string
           description: Detached container object id returned by observation or hidden-object detection.
+        mannyId:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          description: Optional abandoned occupant id revealed by a completed inspection. Recover only this Manny; omit to recover the whole container. Null and empty values are rejected.
         source:
           type: string
           enum: [drifting, asteroid, dormant_construct]
           description: Optional hint for clients; recovery is resolved by objectId.
+    AbandonedContainerManny:
+      type: object
+      required: [id, name, state, cargo]
+      properties:
+        id:
+          type: string
+          description: Stable Manny uid, preserved when recovered.
+        name:
+          type: string
+        state:
+          type: string
+          enum: [abandoned]
+        cargo:
+          $ref: '#/components/schemas/MannyCargo'
     ArtificialObjectDetection:
       type: object
       required: [type, detection]
@@ -8861,7 +8904,10 @@ components:
           description: Estimated ISO-8601 completion time for the current task, or null when idle.
         task:
           description: >
-            Current task payload. When currentTask is mining, this payload has
+            Current task payload. Completed detached-container inspections expose
+            `containerReport.mannies`, an array of AbandonedContainerManny entries.
+            Recovery tasks may carry `reservedDetachedContainer.mannyId` when
+            recovering an individual occupant. When currentTask is mining, this payload has
             the MannyMiningTask shape, including target.resourceAmounts for
             asteroids and resourceProfile for the selected split. Crafting
             tasks include consumedItems with the inventory items committed
@@ -9233,6 +9279,12 @@ components:
       type: object
       required: [type, name, summary]
       properties:
+        abandonedMannies:
+          type: array
+          description: Present only for a detached container in a local detailed scan after this player has completed its inspection. Occupants remain unowned and are not separate drifting sector objects. Reserved containers are absent from scans during recovery.
+          items:
+            $ref: '#/components/schemas/AbandonedContainerManny'
+
         inspectable:
           type: boolean
           description: Whether a Manny can inspect this object.

@@ -321,7 +321,7 @@ final class MannyService implements MannyTaskRuntime
             function (Manny $manny): void {
                 $this->mannies->save($manny);
             },
-            fn(SectorDetachedContainer $container): array => $this->detachedContainerInspectionReport($container),
+            fn(SectorDetachedContainer $container, int $playerId): array => $this->detachedContainerInspectionReport($container, $playerId),
             fn(NeumannProbe $probe, SectorContent $sector, DormantConstruct|\VonNeumannGame\Sector\SectorGerminationDepot $construct): array => $construct instanceof \VonNeumannGame\Sector\SectorGerminationDepot
                 ? ($this->germinationDepots ?? throw new \RuntimeException('Depot inspection service required.'))->inspect($probe, $construct->getId(), gmdate('c'))
                 : $this->dormantConstructInspectionReport($probe, $sector, $construct),
@@ -1223,15 +1223,15 @@ final class MannyService implements MannyTaskRuntime
         return $this->inspectSectorObjectTaskHandler->start($probe, $uid, $objectId);
     }
 
-    public function startRecoverDetachedContainer(NeumannProbe $probe, string $uid, string $objectId): Manny
+    public function startRecoverDetachedContainer(NeumannProbe $probe, string $uid, string $objectId, ?string $mannyId = null): Manny
     {
         return $this->withProbeLock(
             $probe,
-            fn(NeumannProbe $lockedProbe): Manny => $this->startRecoverDetachedContainerLocked($lockedProbe, $uid, $objectId),
+            fn(NeumannProbe $lockedProbe): Manny => $this->startRecoverDetachedContainerLocked($lockedProbe, $uid, $objectId, $mannyId),
         );
     }
 
-    private function startRecoverDetachedContainerLocked(NeumannProbe $probe, string $uid, string $objectId): Manny
+    private function startRecoverDetachedContainerLocked(NeumannProbe $probe, string $uid, string $objectId, ?string $mannyId): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
         $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
@@ -1248,7 +1248,17 @@ final class MannyService implements MannyTaskRuntime
             throw new MannyActionException(404, 'detached_container_not_found', 'Detached storage container not found.');
         }
 
+        if ($mannyId !== null && !$this->mannies->hasInspectedContainer($objectId, $probe->playerId)) {
+            throw new MannyActionException(404, 'manny_not_found', 'Inspect the container to select an abandoned Manny inside it.');
+        }
         $reservedDetachedContainer = $this->cargo->reserveDetachedContainerForSalvage($probe, $manny, $target);
+        if ($mannyId !== null) {
+            $occupants = $this->mannies->findInDetachedContainer($objectId, lock: true);
+            if (!array_filter($occupants, static fn(Manny $occupant): bool => $occupant->uid === $mannyId)) {
+                throw new MannyActionException(404, 'manny_not_found', 'The Manny is no longer inside this container.');
+            }
+            $reservedDetachedContainer['mannyId'] = $mannyId;
+        }
         $this->recallMiningManniesTargetingDetachedContainers([$objectId], 'target_container_recovered', $manny->id);
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $salvageSeconds = $this->salvageSeconds();
@@ -1594,9 +1604,22 @@ final class MannyService implements MannyTaskRuntime
         return $this->requiredManny($probe, $uid);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
+    /** Cancel commitments before the movement service snapshots the lost container. */
+    public function abandonMannyForContainerLoss(NeumannProbe $probe, Manny $manny, SectorCoordinates $sector): void
+    {
+        $lastTask = $manny->currentTask;
+        $this->cancelMannyTaskForProbeTransfer($probe, $manny);
+        if ($lastTask === Manny::TASK_INSTALLING_WAYPOINT_BOOKMARK && is_array($manny->taskPayload['reservedItem'] ?? null)) {
+            $this->crafting->restoreConsumedItem($probe, $manny->taskPayload['reservedItem']);
+        }
+        $this->clearTask($manny, ['lastTask' => $lastTask, 'result' => 'cancelled', 'reason' => 'container_lost']);
+        $manny->probeId = null;
+        $manny->storageContainerId = null;
+        $manny->locationType = Manny::LOCATION_DETACHED_CONTAINER;
+        $manny->sector = $sector;
+        $this->mannies->save($manny);
+    }
+
     private function cancelMannyTaskForProbeTransfer(NeumannProbe $probe, Manny $manny): array
     {
         $lastTask = $manny->currentTask;
@@ -2391,7 +2414,7 @@ final class MannyService implements MannyTaskRuntime
     /**
      * @return array<string, mixed>
      */
-    private function detachedContainerInspectionReport(SectorDetachedContainer $container): array
+    private function detachedContainerInspectionReport(SectorDetachedContainer $container, int $playerId): array
     {
         $payload = $container->getPayload();
         $resources = [];
@@ -2424,8 +2447,13 @@ final class MannyService implements MannyTaskRuntime
         }
         $items = array_values($items);
 
+        $this->mannies->recordContainerInspection($container->getId(), $playerId);
+        $occupants = $this->mannies->detachedContainerOccupants($container->getId());
         $label = (string) ($container->getName() ?? $container->getId());
         $messageParts = [];
+        if ($occupants !== []) {
+            $messageParts[] = 'abandoned Mannies: ' . implode(', ', array_map(static fn(array $m): string => $m['name'] . ' [' . $m['id'] . ']', $occupants));
+        }
         if ($resources !== []) {
             $messageParts[] = 'resources: ' . implode(', ', array_map(
                 fn(string $type, float $amount): string => $this->resourceReportLabel($type) . ' ' . $this->amountReportLabel($amount),
@@ -2452,6 +2480,7 @@ final class MannyService implements MannyTaskRuntime
             'targetObjectId' => $container->getTargetObjectId(),
             'resources' => $resources,
             'items' => $items,
+            'mannies' => $occupants,
             'message' => $message,
         ];
     }
@@ -2703,7 +2732,7 @@ final class MannyService implements MannyTaskRuntime
     private function detachedContainerUsedCapacity(SectorDetachedContainer $container): float
     {
         $payload = $container->getPayload();
-        $used = 0.0;
+        $used = $this->mannies->detachedContainerOccupiedSpace($container->getId());
         $resources = is_array($payload['resources'] ?? null) ? $payload['resources'] : [];
         foreach ($resources as $amount) {
             if (is_numeric($amount)) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Config\Config;
+use VonNeumannGame\Domain\Manny;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\Player;
 use VonNeumannGame\Domain\ProbeInventory;
@@ -742,6 +743,9 @@ final class ProbeMovementService
             return;
         }
 
+        $containers = array_values(array_filter($containers, fn(array $container): bool => $this->storage->canLoseContainerAccidentally($probe, $container['id'])));
+        if ($containers === []) { return; }
+
         $containerIndex = min(
             count($containers) - 1,
             (int) floor($this->deterministicFloat('fragile-container-loss-container', $movement) * count($containers)),
@@ -798,7 +802,21 @@ final class ProbeMovementService
     /**
      * @param array<string, mixed> $payload
      */
-    public function breakStorageContainerFromScheduledWarning(array $payload): void
+    public function breakStorageContainerFromScheduledWarning(array $payload, ?MannyService $mannyService = null, ?OthersService $othersService = null): void
+    {
+        $probeId = (int) ($payload['probeId'] ?? 0);
+        if ($probeId <= 0) { return; }
+        try {
+            $this->probes->withProbeLock($probeId, fn() => $this->breakStorageContainerLocked($payload, $mannyService, $othersService));
+        } catch (MannyActionException) {
+            // The contents or protection may have changed since the warning.
+            if ((int) ($payload['warningId'] ?? 0) > 0) {
+                $this->damageWarnings?->markResolved((int) $payload['warningId']);
+            }
+        }
+    }
+
+    private function breakStorageContainerLocked(array $payload, ?MannyService $mannyService, ?OthersService $othersService): void
     {
         if ($this->storage === null || $this->sectors === null) {
             return;
@@ -816,11 +834,20 @@ final class ProbeMovementService
             return;
         }
 
-        try {
-            $snapshot = $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, (int) ($payload['playerId'] ?? $probe->playerId));
-        } catch (MannyActionException) {
+        if (!$this->storage->canLoseContainerAccidentally($probe, $containerId)) {
+            if ((int) ($payload['warningId'] ?? 0) > 0) { $this->damageWarnings?->markResolved((int) $payload['warningId']); }
             return;
         }
+        $occupants = $this->storage->containerMannies($probe, $containerId);
+        foreach ($occupants as $manny) {
+            if ($manny->currentTask === Manny::TASK_PREPARING_MISSILE) {
+                ($othersService ?? throw new \LogicException('Missile cancellation requires the Others service.'))
+                    ->cancelMannyMissilePreparation($manny);
+            }
+            ($mannyService ?? throw new \LogicException('Container loss requires the Manny service.'))
+                ->abandonMannyForContainerLoss($probe, $manny, $sector);
+        }
+        $snapshot = $this->storage->detachAdditionalContainerSnapshot($probe, $containerId, (int) ($payload['playerId'] ?? $probe->playerId));
 
         $containerData = is_array($snapshot['container'] ?? null) ? $snapshot['container'] : [];
         $object = new SectorDetachedContainer(
@@ -848,7 +875,12 @@ final class ProbeMovementService
         if (!$sectorContent->replaceObject($object)) {
             $sectorContent->addObject($object);
         }
-        $this->sectors->saveSector($sectorContent);
+        $this->sectors->saveDetachedContainerChanges($sectorContent);
+        foreach ($occupants as $manny) {
+            ($this->mannies ?? throw new \LogicException('Manny repository required.'))->putInDetachedContainer(
+                $manny, $object->getId(), Config::float($this->gameplayConfig, 'manny.containerSpace', Manny::CONTAINER_SPACE),
+            );
+        }
         if ($this->damageWarnings !== null && (int) ($payload['warningId'] ?? 0) > 0) {
             $this->damageWarnings->markResolved((int) $payload['warningId']);
         }

@@ -1507,7 +1507,7 @@ $test->assert(is_string($translatorSource) && str_contains($translatorSource, "'
 $test->assert(is_string($appCss) && str_contains($appCss, '.sector-manny-report-alert:not(.acknowledged)'), 'alerts CSS highlights Manny reports with a dedicated style');
 $test->assert(is_string($appCss) && str_contains($appCss, '#swagger-ui input:not([type="checkbox"]):not([type="radio"])'), 'API docs override global input colors inside Swagger UI');
 $test->assert(is_string($appCss) && str_contains($appCss, 'color: #182026;'), 'Swagger UI inputs use high-contrast entered text');
-$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260921-dormant-container"), 'asset version is bumped for dormant container controls');
+$test->assert(is_string($frontIndex) && str_contains($frontIndex, "20260929-container-mannies"), 'asset version is bumped for detached-container Manny recovery controls');
 $test->assert(is_string($alertIllustrationMigrationScript) && str_contains($alertIllustrationMigrationScript, 'illustration_image_url'), 'alert illustration migration installs its dedicated nullable column');
 $test->assert(is_string($asteroidImpactAlertsMigrationScript) && str_contains($asteroidImpactAlertsMigrationScript, 'launcher_probe_id'), 'asteroid impact alert migration installs the launcher reference');
 $test->assert(is_string($othersAlertsMigrationScript) && str_contains($othersAlertsMigrationScript, 'CREATE TABLE others_alerts'), 'Others alerts migration installs its dedicated persistent alert table');
@@ -4623,7 +4623,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(140, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(141, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -12176,6 +12176,7 @@ $test->assertEquals(0, (int) ($requeuedReservationEvent['attempts'] ?? -1), 'fai
 $test->assertEquals(null, $requeuedReservationEvent['last_error'] ?? null, 'failed Others reservation-event repair clears its obsolete SQL error');
 $reservationRepairCheckPdo = null;
 
+require __DIR__ . '/Support/DetachedContainerMannyTests.php';
 require __DIR__ . '/Support/DormantContainerTests.php';
 require __DIR__ . '/Support/TransferLoadPlannerTests.php';
 require_once __DIR__ . '/Support/PersistenceArchitecture.php';

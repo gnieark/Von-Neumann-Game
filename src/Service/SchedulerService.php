@@ -156,7 +156,7 @@ final class SchedulerService
             throw new \RuntimeException('Invalid entity type for storage break event: ' . $event->entityType);
         }
 
-        $this->movementService->breakStorageContainerFromScheduledWarning($event->payload);
+        $this->movementService->breakStorageContainerFromScheduledWarning($event->payload, $this->mannyService, $this->othersService);
 
         return true;
     }

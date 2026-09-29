@@ -151,8 +151,8 @@ final class SalvageTaskHandler implements TaskHandlerInterface
             $result['result'] = 'success';
             $result['reservedDetachedContainer'] = $reservedDetachedContainer;
             $result['salvaged'] = [
-                'type' => 'detached_storage_container',
-                'id' => $reservedDetachedContainer['objectId'],
+                'type' => isset($reservedDetachedContainer['mannyId']) ? 'manny' : 'detached_storage_container',
+                'id' => $reservedDetachedContainer['mannyId'] ?? $reservedDetachedContainer['objectId'],
                 'mode' => $reservedDetachedContainer['mode'],
                 'capacity' => $reservedDetachedContainer['capacity'],
                 'capacityUnit' => $reservedDetachedContainer['capacityUnit'],

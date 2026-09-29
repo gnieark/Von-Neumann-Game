@@ -1165,10 +1165,12 @@
             return "<p>" + window.VNG.escapeHtml(tr("quantity", "Quantity") + " " + String(object.quantity || 0)) + "</p>";
         }
         if (object.type === "detached_container") {
+            const occupants = (object.abandonedMannies || []).map((manny) => "<li>"
+                + window.VNG.escapeHtml(manny.name + " — " + mannyStateLabel(manny.state)) + "</li>").join("");
             return "<p>" + window.VNG.escapeHtml([
                 tr("detachStorageMode", "Mode") + " " + (object.mode === "hidden_on_dormant_construct" ? tr("hiddenOnDormantConstruct", "hidden on dormant construct") : object.mode === "hidden_on_asteroid" ? tr("hiddenOnAsteroid", "hidden on asteroid") : tr("detachModeDrifting", "Leave drifting")),
                 tr("storageCapacity", "Storage capacity") + " " + window.VNG.numberValue(object.capacity || 0),
-            ].filter(Boolean).join(" - ")) + "</p>";
+            ].filter(Boolean).join(" - ")) + "</p>" + (occupants ? "<ul>" + occupants + "</ul>" : "");
         }
         if (object.type === "waypoint_bookmark") {
             const details = Array.isArray(object.bookmarkDetails) ? object.bookmarkDetails : [];

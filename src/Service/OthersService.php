@@ -1233,6 +1233,19 @@ final class OthersService
         return true;
     }
 
+    /** Called under the carrier lock before cancelling a lost occupant's task. */
+    public function cancelMannyMissilePreparation(Manny $manny): void
+    {
+        $missileId = $manny->taskPayload['missileLaunchId'] ?? null;
+        if ($manny->currentTask !== Manny::TASK_PREPARING_MISSILE || !is_string($missileId)) {
+            return;
+        }
+        $launch = $this->persistence->combat->findPreparingProbeLaunch(['public_id' => $missileId]);
+        if ($launch !== false && (int) $launch['manny_id'] === $manny->id) {
+            $this->persistence->combat->failPreparingProbeLaunch(['now' => gmdate('c'), 'id' => (int) $launch['id']]);
+        }
+    }
+
     private function clearMissileMannyTask(Manny $manny): void
     {
         if ($this->mannies === null) { return; }

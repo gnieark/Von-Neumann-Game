@@ -210,6 +210,7 @@ try{
     foreach($expected as $table=>$columns){$assert($columnSnapshot($db,$table)===$columns,'migrated columns equal fresh installation: '.$table);}
     $assert((int)$db->query("SELECT COUNT(*) FROM others_inventory_items WHERE public_id='race-last-item'")->fetchColumn()===1,'migration preserves referenced item identities');
     $db=null;
+    require __DIR__ . '/Support/DetachedContainerMannyConcurrencyTests.php';
 }finally{
     // Remove only tables bearing this run's unpredictable prefix.
     if($tables!==[]){

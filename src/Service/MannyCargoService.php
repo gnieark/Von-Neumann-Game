@@ -434,9 +434,42 @@ final class MannyCargoService
         if (!$object instanceof SectorDetachedContainer) {
             return;
         }
+        $occupants = $this->mannies->findInDetachedContainer($object->getId(), lock: true);
+        if (isset($reserved['mannyId'])) {
+            foreach ($occupants as $occupant) {
+                if ($occupant->uid !== $reserved['mannyId']) { continue; }
+                $this->adoptContainerManny($probe, $occupant, $object->getId());
+                if (!$this->storage->placeMannyOnProbe($probe, $occupant)) {
+                    throw new MannyActionException(422, 'insufficient_cargo_capacity', 'No room for the recovered Manny.');
+                }
+                $this->mannies->save($occupant);
+                $this->sectors->releaseDetachedContainerReservation($object->getId(), $manny->id);
+                return;
+            }
+            throw new MannyActionException(404, 'manny_not_found', 'The reserved Manny is no longer inside the container.');
+        }
         $snapshot = $object->getPayload();
-        $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+        $attached = $this->storage->restoreDetachedContainerSnapshot($probe, $snapshot);
+        if ($attached === null && $occupants !== []) { throw new \LogicException('Occupied container restoration must produce attached storage.'); }
+        foreach ($occupants as $occupant) {
+            $this->adoptContainerManny($probe, $occupant, $object->getId());
+            $occupant->storageContainerId = $attached->id;
+            $this->mannies->save($occupant);
+        }
         $this->sectors->deleteDetachedContainer($object->getId());
+    }
+
+    private function adoptContainerManny(NeumannProbe $probe, Manny $manny, string $objectId): void
+    {
+        if ($manny->probeId !== null || $manny->locationType !== Manny::LOCATION_DETACHED_CONTAINER) {
+            throw new \LogicException('Container occupant is not abandoned.');
+        }
+        $this->mannies->removeFromDetachedContainer($manny, $objectId);
+        $manny->name = $this->uniqueMannyNameForProbe($probe, $manny->name, $manny->id);
+        $manny->probeId = $probe->id;
+        $manny->locationType = Manny::LOCATION_PROBE;
+        $manny->sector = null;
+        $this->clearTask($manny);
     }
 
     public function reservedSalvageItemPayload(Manny $manny): ?array
@@ -549,7 +582,7 @@ final class MannyCargoService
         }
 
         $recovered = $this->mannies->findByUid($salvaged['id']);
-        if ($recovered === null || $recovered->id === $manny->id || $recovered->sector === null || !$recovered->sector->equals($manny->sector)) {
+        if ($recovered === null || $recovered->locationType !== Manny::LOCATION_SECTOR || $recovered->id === $manny->id || $recovered->sector === null || !$recovered->sector->equals($manny->sector)) {
             return null;
         }
 
@@ -622,6 +655,7 @@ final class MannyCargoService
         }
 
         return [
+            ... (isset($reserved['mannyId']) ? ['mannyId' => (string) $reserved['mannyId']] : []),
             'objectId' => (string) $reserved['objectId'],
             'mode' => (string) ($reserved['mode'] ?? SectorDetachedContainer::MODE_DRIFTING),
             'capacity' => round(max(0.0, (float) ($reserved['capacity'] ?? 0.0)), 4),
@@ -650,6 +684,10 @@ final class MannyCargoService
      */
     private function reservedSalvageItemUnits(array $payload): array
     {
+        $container = $this->reservedDetachedContainerPayloadFrom($payload);
+        if (isset($container['mannyId'])) {
+            return [['type' => 'manny', 'space' => $this->mannyContainerSpace()]];
+        }
         $reservedItem = $this->reservedSalvageItemPayloadFrom($payload);
         if ($reservedItem === null) {
             return [];
