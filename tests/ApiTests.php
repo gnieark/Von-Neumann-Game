@@ -597,6 +597,29 @@ $test->assert(
         && str_contains($othersHarvestDescription, 'deuteriumAllocation'),
     'Others OpenAPI documents harvested deuterium tank priority and allocation results',
 );
+$othersHarvestOperations = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/harvest'];
+$othersHarvestActionSchema = $openApiOthersDocument['components']['schemas']['OthersHarvestAction'] ?? [];
+$test->assertEquals('#/components/schemas/OthersHarvestResponse', $othersHarvestOperations['post']['responses']['202']['content']['application/json']['schema']['$ref'] ?? null, 'Others harvest creation documents its typed response');
+$test->assertEquals('#/components/schemas/OthersHarvestAction', $openApiOthersDocument['components']['schemas']['OthersHarvestResponse']['properties']['action']['$ref'] ?? null, 'Others harvest response references its dedicated action');
+$test->assertEquals(['planet_harvest'], $othersHarvestActionSchema['properties']['type']['enum'] ?? null, 'Others harvest action has an exact type');
+$test->assertEquals(['queued', 'running', 'cancel_requested', 'succeeded', 'failed', 'canceled'], $othersHarvestActionSchema['properties']['status']['enum'] ?? null, 'Others harvest action documents its complete lifecycle');
+$test->assertEquals('#/components/schemas/OthersHarvestResult', $othersHarvestActionSchema['properties']['result']['$ref'] ?? null, 'Others harvest action references its resource result');
+$othersHarvestResourcesSchema = $openApiOthersDocument['components']['schemas']['OthersHarvestResult']['properties']['resources'] ?? [];
+$test->assertEquals(['deuteriumAllocation'], $othersHarvestResourcesSchema['required'] ?? null, 'Others harvest permits a terminal result without extraction maps');
+foreach (['gross', 'consumed', 'stored'] as $harvestResourceMap) {
+    $test->assertEquals('#/components/schemas/OthersHarvestResourceAmounts', $othersHarvestResourcesSchema['properties'][$harvestResourceMap]['allOf'][0]['$ref'] ?? null, 'Others harvest documents the ' . $harvestResourceMap . ' resource map');
+}
+$othersActionVariants = $openApiOthersDocument['components']['schemas']['OthersAction']['oneOf'] ?? [];
+$test->assert(in_array('#/components/schemas/OthersHarvestAction', array_column($othersActionVariants, '$ref'), true), 'Others action lookup includes the harvest schema');
+$genericOthersAction = end($othersActionVariants);
+$test->assert(in_array('planet_harvest', $genericOthersAction['properties']['type']['not']['enum'] ?? [], true), 'Others harvest matches only its dedicated action variant');
+foreach (['post' => [400, 404, 409, 422, 503], 'delete' => [400, 404, 409]] as $harvestMethod => $harvestErrorStatuses) {
+    foreach ($harvestErrorStatuses as $harvestErrorStatus) {
+        $test->assertEquals('#/components/schemas/OthersErrorResponse', $othersHarvestOperations[$harvestMethod]['responses'][(string) $harvestErrorStatus]['content']['application/json']['schema']['$ref'] ?? null, 'Others harvest ' . $harvestMethod . ' documents HTTP ' . $harvestErrorStatus . ' errors');
+    }
+}
+$test->assertEquals('queued', $othersHarvestOperations['post']['responses']['202']['content']['application/json']['example']['action']['status'] ?? null, 'Others harvest creation example uses the initial queued state');
+$test->assertEquals('cancel_requested', $othersHarvestOperations['delete']['responses']['202']['content']['application/json']['example']['action']['status'] ?? null, 'Others harvest cancellation example uses its persisted cancellation state');
 $othersInventoryTransferCreateOperation = is_array($openApiOthersDocument)
     ? ($openApiOthersDocument['paths']['/api/others/ships/{shipId}/inventory-transfers']['post'] ?? null)
     : null;
@@ -2830,12 +2853,26 @@ $portableReservationFleet = $others->createFleet(
     $portableReservationSector->getZ(),
 );
 $portableReservationShipId = (int) $portableReservationFleet['ship']['id'];
-$portableHarvestAction = $othersService->startHarvest(
-    $portableReservationFleet['ship'],
-    ['targetObjectId' => 'portable-reservation-planet', 'auxiliaryCount' => 1],
+$players->setOthersControl($portableReservationPlayer->id, true);
+$portableReservationPlayer = $players->findById($portableReservationPlayer->id) ?? throw new RuntimeException('Harvest owner not found.');
+$portableReservationHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($portableReservationPlayer)['token']];
+$portableHarvestResponse = $kernel->handle(
+    'POST', '/api/others/ships/' . $portableReservationFleet['ship']['public_id'] . '/harvest', $portableReservationHeaders,
+    json_encode(['targetObjectId' => 'portable-reservation-planet', 'auxiliaryCount' => 1], JSON_THROW_ON_ERROR),
 );
+$test->assertEquals(202, $portableHarvestResponse->status, 'Others harvest creation returns the documented accepted response');
+$test->assertEquals('planet_harvest', $portableHarvestResponse->body['action']['type'] ?? null, 'Others harvest creation returns the documented action type');
+$test->assertEquals('queued', $portableHarvestResponse->body['action']['status'] ?? null, 'Others harvest begins with the documented queued state');
+$test->assertEquals([], array_diff($othersHarvestActionSchema['required'], array_keys($portableHarvestResponse->body['action'] ?? [])), 'Others harvest creation exposes every required action field');
+$test->assert(!isset($portableHarvestResponse->body['action']['result'], $portableHarvestResponse->body['action']['completedAt']), 'Others harvest creation has no terminal result');
+$portableHarvestAction = $others->findActionByPublicId($portableHarvestResponse->body['action']['id']) ?? throw new RuntimeException('Created harvest action not found.');
 $processOthersActionNow($portableHarvestAction);
 $completedPortableHarvest = $others->findActionByPublicId((string) $portableHarvestAction['public_id']);
+$portableHarvestLookup = $kernel->handle('GET', '/api/others/actions/' . $portableHarvestAction['public_id'], $portableReservationHeaders);
+$test->assertEquals('harvested', $portableHarvestLookup->body['action']['result']['outcome'] ?? null, 'Others harvest lookup exposes the documented successful outcome');
+foreach (['gross', 'consumed', 'stored'] as $harvestResourceMap) {
+    $test->assertEquals(ResourceComposition::TYPES, array_keys($portableHarvestLookup->body['action']['result']['resources'][$harvestResourceMap] ?? []), 'Others harvest result exposes all resource types in ' . $harvestResourceMap);
+}
 $portableShipAfterHarvest = $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id']);
 $test->assertEquals('succeeded', $completedPortableHarvest['status'] ?? null, 'Others harvest completion uses portable reservation clamping SQL');
 $test->assertEquals(0.0, (float) ($portableShipAfterHarvest['inventory_reserved'] ?? -1), 'Others harvest completion releases all reserved inventory capacity');
@@ -2897,9 +2934,6 @@ $canceledHarvest = $othersService->startHarvest(
 );
 $pdo->prepare('UPDATE others_harvests SET phase_started_at=:started WHERE action_id=:action_id')
     ->execute(['started' => gmdate('c', time() - 601), 'action_id' => (int) $canceledHarvest['id']]);
-$players->setOthersControl($portableReservationPlayer->id, true);
-$portableReservationPlayer = $players->findById($portableReservationPlayer->id) ?? throw new RuntimeException('Harvest owner not found.');
-$portableReservationHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($portableReservationPlayer)['token']];
 $harvestCancellation = $kernel->handle('DELETE', '/api/others/ships/' . $canceledHarvestShip['public_id'] . '/harvest', $portableReservationHeaders);
 $test->assertEquals(202, $harvestCancellation->status, 'Others harvest cancellation is accepted asynchronously');
 $test->assertEquals('cancel_requested', $harvestCancellation->body['action']['status'] ?? null, 'Others harvest cancellation exposes its persisted cancellation request');
@@ -4650,7 +4684,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(142, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(143, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');

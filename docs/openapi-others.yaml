@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '142'
+  version: '143'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -1164,14 +1164,44 @@ paths:
       - Others
       summary: Schedule a planetary swarm harvest
       description: >-
-        Reserves 2 ECE of inventory capacity per participating auxiliary. After
+        The coordinator must be an owned, available ship with no current ship
+        action and must not be in transit. The target must be a planet in its
+        current sector. Both standard ships and motherships can coordinate a
+        harvest. Exactly auxiliaryCount surviving, idle, embarked auxiliaries
+        are claimed; the request is rejected rather than reduced if too few
+        are available. Acceptance deploys the swarm, occupies the coordinator
+        and reserves 2 ECE of inventory capacity per participating auxiliary.
+
+        The returned action has type planet_harvest and status queued. This
+        status does not mean the swarm is idle. Without intelligent life, the
+        mining phase lasts 600 seconds and the action goes directly from queued
+        to succeeded when processed. With intelligent life, an initial
+        destruction phase lasts ceil(86400 * 100 / auxiliaryCount) seconds;
+        its completion removes intelligent life, adds biological carbon to the
+        planet and starts 600 seconds of mining with status running. endsAt is
+        the scheduled end of the current phase, not necessarily the end of the
+        whole harvest. Deadlines depend on scheduler processing; subsequent
+        phases are timed from actual processing. Internal phase names are not
+        exposed in the action.
+
+        Extraction takes at most the reserved capacity, capped by remaining
+        planetary resources, distributed proportionally among resource types.
+        There is no additional recall delay on normal completion. After
         the harvest consumes ten percent of every extracted resource, retained
         deuterium fills the coordinator ship tank first at the canonical rate
         of 100 tank points per ECE. Tank capacity already occupied or reserved
         by in-flight transfers is unavailable; any deuterium overflow is stored
         as an inventory resource. A terminal action result exposes the split in
         result.resources.deuteriumAllocation as tankPoints, tankEquivalentEce
-        and inventoryEce.
+        and inventoryEce. Resource quantities are ECE rounded to four decimals;
+        tankPoints uses propulsion-tank points. On completion the remaining
+        resources are credited, auxiliaries reembark and the coordinator and
+        reserved capacity are released.
+
+        Poll GET /api/others/actions/{actionId} using action.id for the current
+        OthersHarvestAction. Retain targetObjectId and auxiliaryCount locally:
+        the action does not echo these request fields. Replaying an idempotent
+        POST returns the original response, not the current action state.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1197,14 +1227,87 @@ paths:
               auxiliaryCount: 10
       responses:
         '202':
-          "$ref": "#/components/responses/Accepted"
+          description: Swarm deployed and capacity reserved; phase completion is asynchronous.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersHarvestResponse'
+              example:
+                action:
+                  id: action_0123456789abcdef0123
+                  type: planet_harvest
+                  status: queued
+                  actor:
+                    kind: others_ship
+                    id: ship_0123456789abcdef0123
+                  createdAt: '2026-09-30T12:00:00+00:00'
+                  updatedAt: '2026-09-30T12:00:00+00:00'
+                  endsAt: '2026-09-30T12:10:00+00:00'
+        '400':
+          description: bad_request — invalid JSON body, missing/non-string targetObjectId, missing/non-integer/non-positive auxiliaryCount, or invalid Idempotency-Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: others_ship_not_found — ship not accessible to this player; target_not_found — target is not a planet in the coordinator's current sector.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '409':
+          description: others_ship_busy — ship occupied or in transit; action_conflict — concurrent swarm reservation; idempotency_key_conflict — key already bound to a different command.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '422':
+          description: insufficient_resources — not enough unreserved inventory capacity or available embarked auxiliaries for the entire requested swarm.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          description: others_unavailable — Others storage unavailable; others_sector_unavailable — sector storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
     delete:
       tags:
       - Others
       summary: Interrupt and recall the harvest swarm
       description: >-
         Returns the harvest action with status cancel_requested. The scheduler
-        processes the interruption and swarm recall asynchronously. Poll
+        processes the interruption and swarm recall asynchronously. Unlike
+        movement cancellation, there is no fifteen-minute cancellation window:
+        the harvest can be interrupted while its action is queued or running.
+        The immediate response retains the previous endsAt; it is not the
+        cancellation completion time.
+
+        Interruption during destruction of intelligent life yields no resources.
+        During mining, the extracted fraction of reserved capacity is
+        min(1, max(0, (elapsedSeconds - 300) / 300)), capped by remaining planetary
+        resources. elapsedSeconds is measured from mining start to scheduler
+        processing of the cancellation, not the DELETE request. No resources
+        are extracted in the first 300 seconds; the next 300 seconds increase
+        the fraction linearly to the full capacity.
+
+        The scheduler then starts five minutes of swarm recall followed by ten
+        minutes of orbit exit, keeping status cancel_requested and updating
+        endsAt at each step. The coordinator remains occupied and capacity
+        stays reserved until settlement. Final status is canceled, with
+        result.outcome interrupted; retained resources are credited using the
+        same consumption and deuterium allocation rules as normal completion.
+        A fresh DELETE during recall or after completion returns
+        active_harvest_not_found; replaying the same Idempotency-Key returns
+        the original accepted response. Poll
         GET /api/others/actions/{actionId} using action.id for the current state.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
@@ -1215,6 +1318,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OthersCancellationResponse'
+              example:
+                action:
+                  id: action_0123456789abcdef0123
+                  type: planet_harvest
+                  status: cancel_requested
+                  actor:
+                    kind: others_ship
+                    id: ship_0123456789abcdef0123
+                  createdAt: '2026-09-30T12:00:00+00:00'
+                  updatedAt: '2026-09-30T12:02:00+00:00'
+                  endsAt: '2026-09-30T12:10:00+00:00'
+        '400':
+          description: bad_request — invalid Idempotency-Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: others_ship_not_found — ship not accessible to this player; active_harvest_not_found — no harvest in queued or running state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '409':
+          description: others_ship_unavailable — carrier became unavailable; idempotency_key_conflict — key already bound to a different command.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/OthersUnavailable'
   "/api/others/crafting/recipes":
     get:
       tags:
@@ -1314,6 +1454,9 @@ paths:
         depot_deposit and depot_withdrawal follow OthersDepotTransferAction, including
         the reserved transfer manifest and terminal delivered/lost/released content.
         result and completedAt are omitted until settlement; error is optional.
+        planet_harvest follows OthersHarvestAction, including its phase deadline
+        endsAt and terminal resource accounting. Its internal phase and request
+        parameters are not exposed. Failed harvests expose error instead of result.
         Movement and harvest cancellation requests expose cancel_requested
         while awaiting scheduler processing, rather than queued.
         Read this endpoint to track progress; replaying an
@@ -1607,15 +1750,184 @@ components:
                 type: string
                 format: date-time
                 description: For movement cancellation, the time requested for scheduler processing, not the former arrival time.
+    OthersHarvestResponse:
+      type: object
+      required: [action]
+      properties:
+        action:
+          $ref: '#/components/schemas/OthersHarvestAction'
+    OthersHarvestAction:
+      type: object
+      description: >-
+        Public planet_harvest action returned at acceptance and by the shared
+        action lookup. targetObjectId, auxiliaryCount and the internal phase
+        are not returned. result and completedAt are omitted until settlement.
+        Successful and canceled harvests expose result; failures expose error.
+      required: [id, type, status, actor, createdAt, updatedAt, endsAt]
+      properties:
+        id:
+          type: string
+          description: Opaque action identifier for GET /api/others/actions/{actionId}.
+        type:
+          type: string
+          enum: [planet_harvest]
+        status:
+          type: string
+          enum: [queued, running, cancel_requested, succeeded, failed, canceled]
+          description: >-
+            queued at acceptance and throughout the first phase, even though
+            auxiliaries are deployed. running during mining after destruction
+            of intelligent life. cancel_requested throughout interruption,
+            recall and orbit exit. succeeded after normal completion, canceled
+            after interruption settlement, failed when the action cannot finish.
+        actor:
+          type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [others_ship]
+            id:
+              type: string
+              description: Public identifier of the coordinator ship.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+          description: >-
+            Scheduled end of the current phase. Updated when mining, recall or
+            orbit exit is scheduled. Immediately after DELETE it still contains
+            the previous phase deadline. It is not a guaranteed completion time;
+            terminal actions retain the last scheduled deadline.
+        completedAt:
+          type: string
+          format: date-time
+          description: Actual settlement time; only present in a terminal state.
+        result:
+          $ref: '#/components/schemas/OthersHarvestResult'
+        error:
+          type: object
+          description: >-
+            Terminal failure, returned with HTTP 200 by the action lookup.
+            carrier_destroyed indicates destruction of the coordinator.
+            carrier_unavailable and target_unavailable indicate a missing
+            coordinator or planet when resolving the destruction-of-life phase.
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [carrier_destroyed, carrier_unavailable, target_unavailable]
+            message:
+              type: string
+          example:
+            code: carrier_destroyed
+            message: The carrier was destroyed.
+      example:
+        id: action_0123456789abcdef0123
+        type: planet_harvest
+        status: succeeded
+        actor:
+          kind: others_ship
+          id: ship_0123456789abcdef0123
+        createdAt: '2026-09-30T12:00:00+00:00'
+        updatedAt: '2026-09-30T12:10:02+00:00'
+        endsAt: '2026-09-30T12:10:00+00:00'
+        completedAt: '2026-09-30T12:10:02+00:00'
+        result:
+          outcome: harvested
+          resources:
+            gross: {deuterium: 1, metals: 1, ice: 0, carbon_compounds: 0}
+            consumed: {deuterium: 0.1, metals: 0.1, ice: 0, carbon_compounds: 0}
+            stored: {deuterium: 0.9, metals: 0.9, ice: 0, carbon_compounds: 0}
+            deuteriumAllocation: {tankPoints: 50, tankEquivalentEce: 0.5, inventoryEce: 0.4}
+    OthersHarvestResult:
+      type: object
+      required: [outcome, resources]
+      properties:
+        outcome:
+          type: string
+          enum: [harvested, interrupted]
+          description: harvested for succeeded; interrupted for canceled, even when no resources were extracted.
+        resources:
+          type: object
+          required: [deuteriumAllocation]
+          description: >-
+            Extraction accounting in ECE, rounded to four decimals. gross,
+            consumed and stored are present together only when extraction
+            occurred. They are omitted for an early interruption, an empty
+            planet or a missing planet at mining resolution. Such an empty
+            result does not by itself indicate failure.
+          properties:
+            gross:
+              allOf:
+              - $ref: '#/components/schemas/OthersHarvestResourceAmounts'
+              description: Resources removed from the planet before swarm consumption.
+            consumed:
+              allOf:
+              - $ref: '#/components/schemas/OthersHarvestResourceAmounts'
+              description: Ten percent of each gross resource, rounded to four decimals, consumed by the swarm.
+            stored:
+              allOf:
+              - $ref: '#/components/schemas/OthersHarvestResourceAmounts'
+              description: >-
+                Retained resources (gross minus consumed). Deuterium includes
+                both the tank allocation and inventory overflow, so this is
+                not an inventory-only delta. Other resources go to inventory.
+            deuteriumAllocation:
+              type: object
+              required: [tankPoints, tankEquivalentEce, inventoryEce]
+              description: Retained deuterium allocation at settlement; all three values are zero when none was extracted.
+              properties:
+                tankPoints:
+                  type: number
+                  minimum: 0
+                  description: Propulsion-tank points credited, at 100 points per ECE.
+                tankEquivalentEce:
+                  type: number
+                  minimum: 0
+                  description: ECE equivalent of tankPoints; tankPoints divided by 100.
+                inventoryEce:
+                  type: number
+                  minimum: 0
+                  description: Retained deuterium that did not fit in unreserved tank capacity and was credited to inventory.
+      example:
+        outcome: interrupted
+        resources:
+          deuteriumAllocation: {tankPoints: 0, tankEquivalentEce: 0, inventoryEce: 0}
+    OthersHarvestResourceAmounts:
+      type: object
+      description: Quantities in ECE, rounded to four decimals; zero quantities are included.
+      required: [deuterium, metals, ice, carbon_compounds]
+      additionalProperties: false
+      properties:
+        deuterium:
+          type: number
+          minimum: 0
+        metals:
+          type: number
+          minimum: 0
+        ice:
+          type: number
+          minimum: 0
+        carbon_compounds:
+          type: number
+          minimum: 0
     OthersAction:
       description: >-
-        Current action returned by the shared action lookup. Repair, depot and deuterium
-        actions have typed contracts; other action families keep their own fields.
+        Current action returned by the shared action lookup. Harvest, repair,
+        depot and deuterium actions have typed contracts; other action families
+        keep their own fields.
       oneOf:
       - $ref: '#/components/schemas/OthersDepotConstructionAction'
       - $ref: '#/components/schemas/OthersDepotTransferAction'
       - $ref: '#/components/schemas/OthersDeuteriumTransferAction'
       - $ref: '#/components/schemas/OthersRepairAction'
+      - $ref: '#/components/schemas/OthersHarvestAction'
       - type: object
         required: [id, type, status, actor, createdAt, updatedAt]
         properties:
@@ -1626,7 +1938,7 @@ components:
           type:
             type: string
             not:
-              enum: [build_germination_depot, depot_deposit, depot_withdrawal, deuterium_transfer, auxiliary_repair]
+              enum: [build_germination_depot, depot_deposit, depot_withdrawal, deuterium_transfer, auxiliary_repair, planet_harvest]
         additionalProperties: true
     OthersRepairResponse:
       type: object
