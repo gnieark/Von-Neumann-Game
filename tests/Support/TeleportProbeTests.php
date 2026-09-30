@@ -41,6 +41,7 @@ declare(strict_types=1);
         $after = $probes->findById($probe->id);
         $test->assertEquals($destination->toKey(), $after?->currentSector->toKey(), 'teleport CLI reaches the destination');
         $test->assertEquals($installed ? 'idle' : 'dead', $after?->status->value, 'teleport CLI honors installed dust immunity, not blueprint availability alone');
+        $test->assertEquals('- status: ' . ($installed ? 'idle' : 'dead'), end($output), 'teleport CLI reports the actual final probe status');
         $test->assertEquals($installed ? 0.01 : 0.0, $after?->integrityPercent, 'teleport CLI preserves hull integrity only with installed path clearing');
         $test->assertEquals($installed ? 'arrived' : 'destroyed', $movements->findLatestByProbeId($probe->id)?->status, 'teleport CLI records the correct movement outcome');
     }

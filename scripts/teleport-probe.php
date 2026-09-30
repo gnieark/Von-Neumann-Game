@@ -21,6 +21,7 @@ use VonNeumannGame\Repository\MissionRepository;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\PlayerRepository;
 use VonNeumannGame\Repository\ProbeDamageWarningRepository;
+use VonNeumannGame\Repository\ProbeImprovementRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Repository\ProbeMessageRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
@@ -67,6 +68,7 @@ try {
     $messages = new ProbeMessageRepository($pdo);
     $missions = new MissionRepository($pdo);
     $damageWarnings = new ProbeDamageWarningRepository($pdo);
+    $improvements = new ProbeImprovementRepository($pdo);
     $sectorService = buildSectorService($factory, $root);
     $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
     $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
@@ -89,6 +91,7 @@ try {
         storage: $storage,
         damageWarnings: $damageWarnings,
         missions: $missionService,
+        improvements: $improvements,
         durations: $durations,
         worldSeed: (string) ($appConfig['worldSeed'] ?? 'default-world'),
         gameplayConfig: $gameplayConfig,
@@ -163,7 +166,7 @@ try {
     echo "- pending movement events cancelled: {$cancelledMovementEvents}\n";
     echo "- pending black-hole trap events cancelled: {$cancelledTrapEvents}\n";
     echo "- forgotten Mannys registered in old sector: {$forgottenMannies}\n";
-    echo "- status: idle\n";
+    echo '- status: ' . $probe->status->value . "\n";
 } catch (InvalidArgumentException | InvalidSectorCoordinatesException | RuntimeException $e) {
     fwrite(STDERR, $e->getMessage() . "\n\n" . usage());
     exit(1);

@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Téléportation de debug : `scripts/teleport-probe.php` transmet désormais les améliorations installées au service de déplacement, afin de respecter la protection contre les poussières intersectorielles. Le script affiche également l’état réel de la sonde après l’arrivée, y compris sa destruction. Aucun changement du contrat API.
 - API **v143** : documentation complète de l’action Others `planet_harvest` : réponse de création, schémas d’action et de résultat, étapes et durées, échéances `endsAt`, annulation avec récolte partielle, répartition des ressources et erreurs. Exemples d’acceptation, d’annulation et de résultat, schéma dédié intégré au suivi des actions ; aucun changement du fonctionnement de la récolte.
 - API **v142** : les demandes d’annulation de déplacement et de récolte Others exposent désormais le statut réel `cancel_requested`, auparavant présenté comme `queued`. Le scheduler conserve la responsabilité de finaliser l’annulation. Documentation des réponses `202` des deux endpoints `DELETE` et du suivi des actions mise à jour ; versions OpenAPI synchronisées.
 
