@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-09-30
+
+### Fixed
+
+- API **v142** : les demandes d’annulation de déplacement et de récolte Others exposent désormais le statut réel `cancel_requested`, auparavant présenté comme `queued`. Le scheduler conserve la responsabilité de finaliser l’annulation. Documentation des réponses `202` des deux endpoints `DELETE` et du suivi des actions mise à jour ; versions OpenAPI synchronisées.
+
 ## 2026-09-29
 
 ### Added

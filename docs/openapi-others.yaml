@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '141'
+  version: '142'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -717,11 +717,40 @@ paths:
       tags:
       - Others
       summary: Request cancellation during the fifteen-minute window
+      description: >-
+        Returns the movement action with status cancel_requested once the
+        cancellation request is persisted. The scheduler later finalizes the
+        cancellation, refunds departure fuel and releases the ship; the action
+        then has status canceled. Poll GET /api/others/actions/{actionId} using
+        action.id to follow completion. Replaying an idempotent DELETE returns
+        the originally stored response.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       responses:
         '202':
-          "$ref": "#/components/responses/Accepted"
+          description: Cancellation requested; the movement is awaiting scheduler processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersCancellationResponse'
+              example:
+                action:
+                  id: action_0123456789abcdef0123
+                  type: ship_move
+                  status: cancel_requested
+                  actor:
+                    kind: others_ship
+                    id: ship_0123456789abcdef0123
+                  createdAt: '2026-09-30T12:00:00+00:00'
+                  updatedAt: '2026-09-30T12:01:00+00:00'
+                  endsAt: '2026-09-30T12:01:00+00:00'
+                  cancelableUntil: '2026-09-30T12:15:00+00:00'
+        '404':
+          description: others_ship_not_found or active_movement_not_found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersErrorResponse'
         '409':
           "$ref": "#/components/responses/Conflict"
   "/api/others/ships/{shipId}/auxiliaries":
@@ -1173,11 +1202,19 @@ paths:
       tags:
       - Others
       summary: Interrupt and recall the harvest swarm
+      description: >-
+        Returns the harvest action with status cancel_requested. The scheduler
+        processes the interruption and swarm recall asynchronously. Poll
+        GET /api/others/actions/{actionId} using action.id for the current state.
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       responses:
         '202':
-          "$ref": "#/components/responses/Accepted"
+          description: Harvest interruption requested; awaiting scheduler processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OthersCancellationResponse'
   "/api/others/crafting/recipes":
     get:
       tags:
@@ -1277,6 +1314,8 @@ paths:
         depot_deposit and depot_withdrawal follow OthersDepotTransferAction, including
         the reserved transfer manifest and terminal delivered/lost/released content.
         result and completedAt are omitted until settlement; error is optional.
+        Movement and harvest cancellation requests expose cancel_requested
+        while awaiting scheduler processing, rather than queued.
         Read this endpoint to track progress; replaying an
         idempotent POST returns the originally stored response.
       responses:
@@ -1549,6 +1588,25 @@ components:
           type: string
           format: date-time
           description: End of the fifteen-minute cancellation window; scheduled departure time.
+    OthersCancellationResponse:
+      type: object
+      required: [action]
+      properties:
+        action:
+          allOf:
+          - $ref: '#/components/schemas/OthersAction'
+          - type: object
+            properties:
+              type:
+                type: string
+                enum: [ship_move, planet_harvest]
+              status:
+                type: string
+                enum: [cancel_requested]
+              endsAt:
+                type: string
+                format: date-time
+                description: For movement cancellation, the time requested for scheduler processing, not the former arrival time.
     OthersAction:
       description: >-
         Current action returned by the shared action lookup. Repair, depot and deuterium
@@ -1561,6 +1619,10 @@ components:
       - type: object
         required: [id, type, status, actor, createdAt, updatedAt]
         properties:
+          status:
+            type: string
+            enum: [queued, running, cancel_requested, succeeded, failed, canceled]
+            description: cancel_requested means cancellation is persisted and awaiting scheduler processing; it is not a terminal state.
           type:
             type: string
             not:

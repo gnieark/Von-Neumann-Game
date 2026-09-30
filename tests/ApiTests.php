@@ -951,6 +951,18 @@ $test->assertEquals(
     'Others depot result requires all three terminal accounting categories',
 );
 $test->assert(!is_file($root . '/docs/openapi-others.json'), 'legacy Others JSON OpenAPI document is removed');
+foreach (['move', 'harvest'] as $cancelableTask) {
+    $test->assertEquals(
+        '#/components/schemas/OthersCancellationResponse',
+        $openApiOthersDocument['paths']['/api/others/ships/{shipId}/' . $cancelableTask]['delete']['responses']['202']['content']['application/json']['schema']['$ref'] ?? null,
+        'Others ' . $cancelableTask . ' cancellation documents its action response',
+    );
+}
+$test->assertEquals(
+    ['cancel_requested'],
+    $openApiOthersDocument['components']['schemas']['OthersCancellationResponse']['properties']['action']['allOf'][1]['properties']['status']['enum'] ?? null,
+    'Others cancellation response documents its nonterminal status',
+);
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
 $othersServiceSource = implode('\n', array_map('file_get_contents', glob($root . '/src/Repository/Others/*Repository.php')));
 $mannyTaskRefresherSource = file_get_contents($root . '/src/Service/Manny/MannyTaskRefresher.php');
@@ -2885,10 +2897,16 @@ $canceledHarvest = $othersService->startHarvest(
 );
 $pdo->prepare('UPDATE others_harvests SET phase_started_at=:started WHERE action_id=:action_id')
     ->execute(['started' => gmdate('c', time() - 601), 'action_id' => (int) $canceledHarvest['id']]);
-$cancelRequestedHarvest = $othersService->cancelHarvest(
-    $others->findShipByPublicId((string) $portableReservationFleet['ship']['public_id'])
-        ?? throw new RuntimeException('Active canceled-harvest Others ship not found.'),
-);
+$players->setOthersControl($portableReservationPlayer->id, true);
+$portableReservationPlayer = $players->findById($portableReservationPlayer->id) ?? throw new RuntimeException('Harvest owner not found.');
+$portableReservationHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($portableReservationPlayer)['token']];
+$harvestCancellation = $kernel->handle('DELETE', '/api/others/ships/' . $canceledHarvestShip['public_id'] . '/harvest', $portableReservationHeaders);
+$test->assertEquals(202, $harvestCancellation->status, 'Others harvest cancellation is accepted asynchronously');
+$test->assertEquals('cancel_requested', $harvestCancellation->body['action']['status'] ?? null, 'Others harvest cancellation exposes its persisted cancellation request');
+$harvestCancellationLookup = $kernel->handle('GET', '/api/others/actions/' . $canceledHarvest['public_id'], $portableReservationHeaders);
+$test->assertEquals('cancel_requested', $harvestCancellationLookup->body['action']['status'] ?? null, 'Others harvest lookup exposes pending cancellation');
+$cancelRequestedHarvest = $others->findActionByPublicId((string) $canceledHarvest['public_id'])
+    ?? throw new RuntimeException('Active canceled-harvest Others action not found.');
 $processOthersActionNow($cancelRequestedHarvest);
 for ($canceledHarvestPhase = 0; $canceledHarvestPhase < 2; $canceledHarvestPhase++) {
     $cancelRequestedHarvest = $others->findActionByPublicId((string) $canceledHarvest['public_id'])
@@ -3813,8 +3831,17 @@ foreach (($othersFleetMove->body['actions'] ?? []) as $fleetMoveEntry) {
     }
     $fleetMoveCancel = $kernel->handle('DELETE', '/api/others/ships/' . rawurlencode((string) ($fleetMoveEntry['shipId'] ?? '')) . '/move', $othersAlertHeaders);
     $test->assertEquals(202, $fleetMoveCancel->status, 'a scheduled fleet member movement remains individually cancelable');
+    $test->assertEquals($fleetMoveActionId, $fleetMoveCancel->body['action']['id'] ?? null, 'movement cancellation returns the affected action');
+    $test->assertEquals('cancel_requested', $fleetMoveCancel->body['action']['status'] ?? null, 'movement cancellation exposes the pending cancellation instead of queued');
+    $test->assert(!isset($fleetMoveCancel->body['action']['completedAt']), 'movement cancellation is not complete before scheduler processing');
+    $pendingMoveCancellation = $kernel->handle('GET', '/api/others/actions/' . $fleetMoveActionId, $othersAlertHeaders);
+    $test->assertEquals(200, $pendingMoveCancellation->status, 'pending movement cancellation remains readable');
+    $test->assertEquals('cancel_requested', $pendingMoveCancellation->body['action']['status'] ?? null, 'movement lookup exposes pending cancellation');
     $canceledFleetMoveAction = $others->findActionByPublicId($fleetMoveActionId) ?? throw new RuntimeException('Canceled Others fleet movement action not found.');
     $processOthersActionNow($canceledFleetMoveAction);
+    $completedMoveCancellation = $kernel->handle('GET', '/api/others/actions/' . $fleetMoveActionId, $othersAlertHeaders);
+    $test->assertEquals('canceled', $completedMoveCancellation->body['action']['status'] ?? null, 'scheduler finalizes the movement cancellation');
+    $test->assert(isset($completedMoveCancellation->body['action']['completedAt']), 'finalized movement cancellation exposes completion time');
 }
 $probeToOthersMissileItem = $items->create($secondaryProbe->id, ProbeItem::TYPE_MISSILE, ProbeItem::MISSILE_NAME, 0.05, uid: 'probe-to-others-alert-test-item');
 $probeToOthersMissile = $othersService->prepareProbeMissile($secondaryProbe, $multiProbePlayer->id, [
@@ -4623,7 +4650,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(141, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(142, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');

@@ -59,7 +59,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 141;
+    public const API_VERSION = 142;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1136,7 +1136,7 @@ final class ApiKernel
     private function presentOthersAction(array $action): array
     {
         $result = [
-            'id' => (string) $action['public_id'], 'type' => (string) $action['type'], 'status' => $action['status'] === 'cancel_requested' ? 'queued' : (string) $action['status'],
+            'id' => (string) $action['public_id'], 'type' => (string) $action['type'], 'status' => (string) $action['status'],
             'createdAt' => (string) $action['created_at'], 'updatedAt' => (string) $action['updated_at'],
             'actor' => ['kind' => (string) $action['actor_kind'], 'id' => (string) $action['actor_public_id']],
         ];
