@@ -59,7 +59,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 143;
+    public const API_VERSION = 144;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -1601,7 +1601,12 @@ final class ApiKernel
             ];
 
             return new ApiResponse(200, [
-                'sector' => $this->withObservedProbePresence($observation, $probe, $observableSector),
+                'sector' => $this->withScutSectorData(
+                    $player,
+                    $this->withObservedProbePresence($observation, $probe, $observableSector),
+                    $observableSector,
+                    includeRelays: false,
+                ),
                 'inventory' => $this->lightweightInventoryForProbe($probe)->toArray(),
             ]);
         }
@@ -2627,7 +2632,7 @@ final class ApiKernel
             }
 
             $distance = $grid->getDistance($candidate->currentSector, $target);
-            if ($distance >= $defaultDistance) {
+            if ($distance > $defaultDistance) {
                 continue;
             }
 
@@ -2638,10 +2643,23 @@ final class ApiKernel
             ];
         }
 
+        foreach ($candidates as &$candidate) {
+            $sensorMode = $this->movements->sensorModeFor(
+                $this->movements->activeMovementForProbe($candidate['probe']),
+                $candidate['probe']->status,
+            );
+            $candidate['sensorPriority'] = match ($sensorMode) {
+                'normal' => 0,
+                'degraded' => 1,
+                'blind' => 2,
+            };
+        }
+        unset($candidate);
+
         usort(
             $candidates,
-            static fn(array $a, array $b): int => [$a['distance'], $a['default'] ? 1 : 0, $a['probe']->id]
-                <=> [$b['distance'], $b['default'] ? 1 : 0, $b['probe']->id],
+            static fn(array $a, array $b): int => [$a['sensorPriority'], $a['distance'], $a['default'] ? 1 : 0, $a['probe']->id]
+                <=> [$b['sensorPriority'], $b['distance'], $b['default'] ? 1 : 0, $b['probe']->id],
         );
 
         $insufficientScanData = null;
@@ -2712,7 +2730,7 @@ final class ApiKernel
             $observable = $this->movements->observableSectorFor($probe, $movement) ?? $probe->currentSector;
             $frame = new PlayerReferenceFrame($player->homeSector);
 
-            return [
+            $observation = [
                 'relativeCoordinates' => $frame->globalToRelative($target),
                 'distance' => (new SectorGrid())->getDistance($observable, $target),
                 'knowledgeLevel' => 'long_range_estimation',
@@ -2726,6 +2744,8 @@ final class ApiKernel
                     'scanQuality' => 0.12,
                 ],
             ];
+
+            return $this->withScutSectorData($player, $observation, $target, includeRelays: false);
         }
 
         if ($target->equals($probe->currentSector)) {

@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-04
+
+### Fixed
+
+- API **v144** : les scans de secteur privilégient les capteurs normaux parmi les sondes joignables aussi proches ou plus proches que la sonde par défaut, avant de départager par distance. Une sonde en accélération ne masque plus le scan d’une sonde stationnaire à distance égale. Les scans dégradés, y compris ceux du secteur courant, renseignent systématiquement `scutCoverageStatus` et les réseaux connus, afin d’éviter un faux affichage « SCUT coverage: no ». Les règles de confidentialité des réseaux inconnus restent appliquées. Versions OpenAPI synchronisées ; aucune migration de données nécessaire.
+
 ## 2026-09-30
 
 ### Fixed

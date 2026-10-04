@@ -4684,7 +4684,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(143, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(144, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -4807,6 +4807,106 @@ if ($multiScanDefaultProbe !== null) {
     );
     $test->assertEquals('uncovered', $visitedUncoveredResponse->body['sector']['scutCoverageStatus'] ?? null, 'GET /api/sector confirms absent SCUT coverage for a visited sector');
     $test->assertEquals([], $visitedUncoveredResponse->body['sector']['scutNetworks'] ?? null, 'GET /api/sector exposes an empty network list for known absent coverage');
+
+    // A lower-ID accelerating scanner and a stationary scanner both neighbor the target.
+    // This reproduces the redundant SCUT relay deployments reported by Chris.
+    $multiScanTooEarlyProbe->currentSector = $multiScanTarget->add(1, -1, 0);
+    $multiScanBetterProbe->currentSector = $multiScanTarget->add(-1, 0, -1);
+    $multiScanBetterProbe->enteredCurrentSectorAt = gmdate('c', time() - 8 * 3600);
+    $multiScanProbes->save($multiScanTooEarlyProbe);
+    $multiScanProbes->save($multiScanBetterProbe);
+    $multiScanStorage->initializeProbeStorage($multiScanTooEarlyProbe);
+    $multiScanMoving = $multiScanMovements->create(
+        $multiScanTooEarlyProbe->id,
+        $multiScanTooEarlyProbe->currentSector,
+        $multiScanTooEarlyProbe->currentSector->add(4, 0, 0),
+        4,
+        [
+            'startedAt' => new DateTimeImmutable('-20 minutes'),
+            'preparationEndsAt' => new DateTimeImmutable('-10 minutes'),
+            'accelerationEndsAt' => new DateTimeImmutable('+1 hour'),
+            'cruiseEndsAt' => new DateTimeImmutable('+2 hours'),
+            'decelerationEndsAt' => new DateTimeImmutable('+3 hours'),
+            'arrivalAt' => new DateTimeImmutable('+3 hours'),
+        ],
+        2.0,
+    );
+    $multiScanPath = '/api/sector?x=' . $multiScanRelative['x'] . '&y=' . $multiScanRelative['y'] . '&z=' . $multiScanRelative['z'];
+    $normalScan = $multiScanKernel->handle('GET', $multiScanPath, $multiScanHeaders);
+    $test->assertEquals(200, $normalScan->status, 'equidistant stationary and accelerating scanners produce a successful scan');
+    $test->assertEquals('normal', $normalScan->body['sector']['sensorMode'] ?? null, 'stationary scanner takes priority over lower-ID accelerating scanner');
+    $test->assertEquals('neighbor_scan', $normalScan->body['sector']['knowledgeLevel'] ?? null, 'equidistant stationary scanner preserves neighbor scan precision');
+    $test->assertEquals('covered', $normalScan->body['sector']['scutCoverageStatus'] ?? null, 'neighbor scan reports actual SCUT coverage');
+    $test->assertEquals(4, $normalScan->body['sector']['distance'] ?? null, 'sensor selection preserves the default probe distance');
+    $normalScanSources = array_values(array_filter($normalScan->body['sector']['distances'] ?? [], static fn(array $entry): bool => $entry['usedForScan']));
+    $test->assertEquals($multiScanBetterProbe->id, $normalScanSources[0]['probeId'] ?? null, 'scan source identifies the stationary probe');
+
+    $multiScanPlayer->defaultProbeId = $multiScanTooEarlyProbe->id;
+    $multiScanPlayers->save($multiScanPlayer);
+    $movingDefaultScan = $multiScanKernel->handle('GET', $multiScanPath, $multiScanHeaders);
+    $test->assertEquals('normal', $movingDefaultScan->body['sector']['sensorMode'] ?? null, 'stationary scanner at the same distance as the moving default probe is eligible');
+    $movingDefaultSources = array_values(array_filter($movingDefaultScan->body['sector']['distances'] ?? [], static fn(array $entry): bool => $entry['usedForScan']));
+    $test->assertEquals($multiScanBetterProbe->id, $movingDefaultSources[0]['probeId'] ?? null, 'equidistant stationary scanner replaces the moving default probe');
+    $multiScanPlayer->defaultProbeId = $multiScanDefaultProbe->id;
+    $multiScanPlayers->save($multiScanPlayer);
+
+    // If normal scanners have not collected enough data, retain the degraded scan
+    // with SCUT knowledge rather than interpreting missing fields as no coverage.
+    $multiScanDefaultProbe->enteredCurrentSectorAt = gmdate('c', time() - 60);
+    $multiScanBetterProbe->enteredCurrentSectorAt = gmdate('c', time() - 60);
+    $multiScanProbes->save($multiScanDefaultProbe);
+    $multiScanProbes->save($multiScanBetterProbe);
+    $degradedScan = $multiScanKernel->handle('GET', $multiScanPath, $multiScanHeaders);
+    $test->assertEquals(200, $degradedScan->status, 'degraded scan remains available when normal scanners lack data');
+    $test->assertEquals('degraded', $degradedScan->body['sector']['sensorMode'] ?? null, 'scan uses the accelerating probe when normal scanners lack data');
+    $test->assertEquals('covered', $degradedScan->body['sector']['scutCoverageStatus'] ?? null, 'degraded remote scan retains known SCUT coverage');
+    $test->assertEquals($multiScanScut->relayById($multiScanRelay->id)?->networkId, $degradedScan->body['sector']['scutNetworks'][0]['id'] ?? null, 'degraded remote scan identifies the known covering network');
+    $test->assert(!array_key_exists('objects', $degradedScan->body['sector'] ?? []), 'SCUT knowledge does not reveal local objects through degraded sensors');
+
+    $hiddenScutSector = $multiScanDefaultProbe->currentSector->add(60, 0, 0);
+    $hiddenScutRelay = $multiScanRelays->create(null, $hiddenScutSector);
+    $multiScanScut->turnOnRelay($hiddenScutRelay->id, 'Hidden from degraded sensors');
+    $hiddenScutRelative = $hiddenScutSector->subtract($multiScanPlayer->homeSector);
+    $hiddenScutScan = $multiScanKernel->handle('GET', '/api/sector?x=' . $hiddenScutRelative['x'] . '&y=' . $hiddenScutRelative['y'] . '&z=' . $hiddenScutRelative['z'], $multiScanHeaders);
+    $test->assertEquals(200, $hiddenScutScan->status, 'degraded scan can report unknown network coverage');
+    $test->assertEquals('degraded', $hiddenScutScan->body['sector']['sensorMode'] ?? null, 'unknown network regression uses degraded sensors');
+    $test->assertEquals('unknown', $hiddenScutScan->body['sector']['scutCoverageStatus'] ?? null, 'degraded sensors do not discover an unknown SCUT network');
+    $test->assert(!array_key_exists('scutNetworks', $hiddenScutScan->body['sector'] ?? []), 'degraded scan omits unknown network identities');
+
+    $acceleratingSectorScan = $multiScanKernel->handle('GET', '/api/probe/' . $multiScanTooEarlyProbe->id . '/sector', $multiScanHeaders);
+    $test->assertEquals(200, $acceleratingSectorScan->status, 'accelerating current-sector scan succeeds');
+    $test->assertEquals('degraded', $acceleratingSectorScan->body['sector']['sensorMode'] ?? null, 'current-sector regression uses degraded sensors');
+    $test->assertEquals('covered', $acceleratingSectorScan->body['sector']['scutCoverageStatus'] ?? null, 'accelerating current-sector scan includes SCUT coverage');
+    $test->assert(!array_key_exists('objects', $acceleratingSectorScan->body['sector'] ?? []), 'degraded current-sector scan does not reveal relay objects');
+
+    $multiScanPdo->prepare('UPDATE probe_movements SET acceleration_ends_at = ?, cruise_ends_at = ? WHERE id = ?')->execute([
+        gmdate('c', time() - 8 * 60),
+        gmdate('c', time() - 5 * 60),
+        $multiScanMoving->id,
+    ]);
+    $deceleratingSectorScan = $multiScanKernel->handle('GET', '/api/probe/' . $multiScanTooEarlyProbe->id . '/sector', $multiScanHeaders);
+    $test->assertEquals('degraded', $deceleratingSectorScan->body['sector']['sensorMode'] ?? null, 'decelerating current-sector scan uses degraded sensors');
+    $test->assertEquals($multiScanMoving->target->subtract($multiScanPlayer->homeSector), $deceleratingSectorScan->body['sector']['relativeCoordinates'] ?? null, 'decelerating scan describes the destination sector');
+    $test->assertEquals('covered', $deceleratingSectorScan->body['sector']['scutCoverageStatus'] ?? null, 'decelerating destination-sector scan includes known SCUT coverage');
+
+    // With no other operational probe, blind sensors still expose only visited cartography.
+    $multiScanDefaultProbe->status = ProbeStatus::Dead;
+    $multiScanBetterProbe->status = ProbeStatus::Dead;
+    $multiScanProbes->save($multiScanDefaultProbe);
+    $multiScanProbes->save($multiScanBetterProbe);
+    $multiScanPlayer->defaultProbeId = $multiScanTooEarlyProbe->id;
+    $multiScanPlayers->save($multiScanPlayer);
+    $multiScanPdo->prepare('UPDATE probe_movements SET cruise_ends_at = ?, destruction_checked_at = ? WHERE id = ?')->execute([
+        gmdate('c', time() + 3600),
+        gmdate('c'),
+        $multiScanMoving->id,
+    ]);
+    $blindHistoricalScan = $multiScanKernel->handle('GET', '/api/sector?x=0&y=0&z=0', $multiScanHeaders);
+    $test->assertEquals(200, $blindHistoricalScan->status, 'a lone blind scanner can consult a visited sector');
+    $test->assertEquals('historical', $blindHistoricalScan->body['sector']['dataFreshness'] ?? null, 'visited cartography remains historical when no normal scanner is available');
+    $test->assertEquals('covered', $blindHistoricalScan->body['sector']['scutCoverageStatus'] ?? null, 'blind historical scan retains known SCUT coverage');
+    $blindUnvisitedScan = $multiScanKernel->handle('GET', $multiScanPath, $multiScanHeaders);
+    $test->assertEquals('sensors_unavailable', $blindUnvisitedScan->body['error']['code'] ?? null, 'a lone blind scanner cannot reveal an unvisited sector');
 }
 
 $privacyHome = new SectorCoordinates(1000, 1000, 0);
@@ -11541,9 +11641,10 @@ if ($moveProbe !== null) {
         $test->assertEquals(400, $blindSector->status, 'GET /api/probe/sector is unavailable while blind');
         $test->assertEquals('sensors_unavailable', $blindSector->body['error']['code'] ?? null, 'blind probe sector error code is explicit');
 
-        $historicalSector = $kernel->handle('GET', '/api/sector?x=0&y=0&z=0', $moveHeaders);
-        $test->assertEquals(200, $historicalSector->status, 'GET /api/sector returns historical data for visited sectors while blind');
-        $test->assertEquals('historical', $historicalSector->body['sector']['dataFreshness'] ?? null, 'blind visited sector response is marked historical');
+        $sharedSectorScan = $kernel->handle('GET', '/api/sector?x=0&y=0&z=0', $moveHeaders);
+        $test->assertEquals(200, $sharedSectorScan->status, 'GET /api/sector can use another owned probe while the default probe is blind');
+        $test->assertEquals('live', $sharedSectorScan->body['sector']['dataFreshness'] ?? null, 'normal sensors on a reachable probe provide a live scan instead of blind historical cartography');
+        $test->assertEquals('normal', $sharedSectorScan->body['sector']['sensorMode'] ?? null, 'scan selects normal sensors instead of the blind default probe');
 
         $pdo->prepare("UPDATE probe_movements SET status = 'cruising', cruise_ends_at = :cruise, deceleration_ends_at = :decel, arrival_at = :arrival WHERE id = :id")->execute([
             'id' => $movement->id,

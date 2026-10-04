@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game API
-  version: '143'
+  version: '144'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Successful responses expose X-RateLimit-Limit,
@@ -348,7 +348,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 143
+                apiVersion: 144
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -4524,7 +4524,11 @@ paths:
     get:
       tags: [default probe]
       summary: Get observable probe sector and onboard inventory
-      description: Moving missiles in the default probe current sector are returned as detailed `missile` objects. `targetsCurrentProbe` identifies missiles whose declared target is that probe.
+      description: >
+        Moving missiles in the default probe current sector are returned as
+        detailed `missile` objects. `targetsCurrentProbe` identifies missiles
+        whose declared target is that probe. Degraded scans retain known SCUT
+        coverage and always include `scutCoverageStatus`.
       responses:
         '200':
           description: Current sector summary and probe inventory
@@ -4544,6 +4548,8 @@ paths:
                   distance: 0
                   knowledgeLevel: detailed
                   confidence: 1
+                  scutCoverageStatus: uncovered
+                  scutNetworks: []
                   objects:
                     - type: solar_system
                       name: System abc123
@@ -5955,9 +5961,14 @@ paths:
         Coordinates are relative to the authenticated player's home sector.
         Absolute sector coordinates are never exposed. Detail depends on whether
         the sector is current, visited, or only passively scanned from a reachable
-        probe. When another owned probe is reachable from the default probe and
-        is closer to the requested sector, its scan is used if it has enough
-        sensor data. `sector.distance` is measured from the default probe;
+        probe. Scan candidates include the default probe and owned probes
+        reachable from it that are no farther from the requested sector.
+        Normal sensors are preferred over degraded sensors, then blind sensors;
+        within each sensor mode, closer probes are tried first. Probes without
+        enough sensor data are skipped. Equal distances prefer a non-default
+        probe, then the lowest probe ID. Degraded scans retain the player's
+        known SCUT coverage, independently of optical sensor quality.
+        `sector.distance` is measured from the default probe;
         `sector.distances` lists the distance
         from every owned probe and marks the probe whose sensors produced the
         scan. During blind cruise, only already visited sectors can be consulted
@@ -9137,7 +9148,7 @@ components:
           $ref: '#/components/schemas/ScutNetwork'
     SectorObservation:
       type: object
-      required: [relativeCoordinates, distance, knowledgeLevel, confidence, scan]
+      required: [relativeCoordinates, distance, knowledgeLevel, confidence, scan, scutCoverageStatus]
       properties:
         relativeCoordinates:
           $ref: '#/components/schemas/Vector'
@@ -9184,7 +9195,8 @@ components:
             Whether SCUT coverage is known. A non-visited sector reports
             `covered` only for networks having at least one covered sector in
             the player's visited-sector history; otherwise it reports `unknown`.
-            A visited sector can report `uncovered`.
+            A visited sector can report `uncovered`. Present even when sensors
+            are degraded, including on probe-scoped current-sector scans.
         estimatedObjects:
           type: object
           additionalProperties: true
