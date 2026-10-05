@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '144'
+  version: '145'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -603,7 +603,8 @@ paths:
         always contains actions, ignored and blocked arrays, including empty
         arrays. A per-ship refusal does not cancel moves accepted for other ships.
         HTTP 202 may therefore contain no accepted actions, even when every ship
-        is ignored or blocked. Destroyed ships are omitted.
+        is ignored or blocked. Destroyed ships are omitted. There is no maximum
+        travel distance; travel duration depends on each ship's distance to the target.
 
         Accepted actions are queued for asynchronous execution. Use action.id
         with GET /api/others/actions/{actionId} to follow a move, or cancel it
@@ -1620,6 +1621,7 @@ components:
         The target is a destination relative to the owning player's home sector,
         whose public coordinates are always (0, 0, 0). For a fleet move, every
         eligible ship converges independently on this same home-relative sector.
+        Fleet and individual ship moves have no maximum travel distance.
       content:
         application/json:
           schema:
@@ -1686,8 +1688,7 @@ components:
               reason:
                 type: string
                 description: >-
-                  Per-ship error code: target_out_of_range (more than ten sectors
-                  from that ship), others_ship_busy (busy or in transit),
+                  Per-ship error code: others_ship_busy (busy or in transit),
                   insufficient_resources (insufficient propulsion deuterium),
                   others_ship_unavailable (carrier no longer available),
                   action_conflict (state changed while accepting the move), or

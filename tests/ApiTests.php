@@ -3660,6 +3660,34 @@ $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $othersFleetShipsById[$other
 $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $othersFleetShipsById[$othersStandardShip['public_id']]['sector']['relative'] ?? null, 'fleet detail exposes every ship in the same player-relative frame');
 $test->assertEquals($othersAlertFleet['public_id'], $othersFleetShipsById[$othersStandardShip['public_id']]['fleetId'] ?? null, 'fleet detail preserves each ship public fleet id');
 
+$longRangeTarget = ['x' => 639, 'y' => -777, 'z' => 132];
+$longRangeFleetMove = $kernel->handle(
+    'POST',
+    '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/move',
+    $othersAlertHeaders,
+    json_encode(['target' => $longRangeTarget, 'leaveAuxiliariesBehind' => true], JSON_THROW_ON_ERROR),
+);
+$test->assertEquals(202, $longRangeFleetMove->status, 'Others fleet accepts a destination hundreds of sectors away');
+$test->assertEquals(2, count($longRangeFleetMove->body['actions'] ?? []), 'long-range fleet move schedules both the mothership and its dispersed escort');
+$test->assertEquals([], $longRangeFleetMove->body['blocked'] ?? null, 'long-range fleet move does not block ships on range');
+$test->assertEquals([], $longRangeFleetMove->body['ignored'] ?? null, 'long-range fleet move has no ships already at destination');
+foreach (($longRangeFleetMove->body['actions'] ?? []) as $longRangeEntry) {
+    $longRangeShipPath = '/api/others/ships/' . rawurlencode($longRangeEntry['shipId']);
+    $longRangeShip = $kernel->handle('GET', $longRangeShipPath, $othersAlertHeaders);
+    $test->assertEquals($longRangeTarget, $longRangeShip->body['ship']['movement']['target'] ?? null, 'long-range movement preserves the home-relative destination');
+    $longRangeAction = $others->findActionByPublicId($longRangeEntry['action']['id']) ?? throw new RuntimeException('Long-range movement action not found.');
+    $longRangePayload = json_decode($longRangeAction['payload_json'], true, 512, JSON_THROW_ON_ERROR);
+    $test->assertEquals(true, $longRangePayload['leaveAuxiliariesBehind'] ?? null, 'long-range move preserves the auxiliary departure option');
+    $test->assert(
+        new DateTimeImmutable($longRangeEntry['action']['endsAt']) > (new DateTimeImmutable($longRangeEntry['action']['cancelableUntil']))->modify('+1 day'),
+        'long-range travel duration is not capped to a ten-sector journey',
+    );
+    $longRangeCancel = $kernel->handle('DELETE', $longRangeShipPath . '/move', $othersAlertHeaders);
+    $test->assertEquals(202, $longRangeCancel->status, 'long-range fleet member movement remains cancelable');
+    $processOthersActionNow($others->findActionByPublicId($longRangeEntry['action']['id']) ?? throw new RuntimeException('Long-range cancellation not found.'));
+    $test->assertEquals('canceled', $others->findActionByPublicId($longRangeEntry['action']['id'])['status'] ?? null, 'scheduler finalizes long-range movement cancellation');
+}
+
 $othersAuxiliaryPage = $others->findAuxiliariesPageByShipId((int) $othersVictimShip['id'], null, 10);
 $othersDetachedAuxiliary = $othersAuxiliaryPage['rows'][0] ?? throw new RuntimeException('Others auxiliary fixture not found.');
 $othersEmbarkedAuxiliaryResponse = $kernel->handle('GET', '/api/others/ships/' . rawurlencode((string) $othersVictimShip['public_id']) . '/auxiliaries/' . rawurlencode((string) $othersDetachedAuxiliary['public_id']), $othersAlertHeaders);
@@ -4706,7 +4734,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(144, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(145, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');

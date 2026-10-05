@@ -4,6 +4,10 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-10-05
 
+### Changed
+
+- API **v145** : suppression de la limite de 10 secteurs par déplacement des flottes et vaisseaux Others. Les trajets directs de longue distance sont acceptés ; leur durée reste calculée selon la distance de chaque vaisseau. Le motif `target_out_of_range` ne s’applique plus aux déplacements Others. Documentation OpenAPI et version publique synchronisées ; aucune migration nécessaire.
+
 ### Fixed
 
 - Alertes Others d’onde d’anomalie : génération des identifiants canoniques `oalert_` suivis de 20 caractères hexadécimaux, comme les autres alertes, pour éviter le rejet HTTP 400 de l’acquittement par le journal spectateur de `defense_etoile`. Contrat API inchangé (v144).

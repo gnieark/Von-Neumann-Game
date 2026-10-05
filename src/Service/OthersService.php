@@ -212,9 +212,6 @@ final class OthersService
         if ($distance === 0) {
             throw new OthersActionException(409, 'same_destination', 'The ship is already in the target sector.');
         }
-        if ($distance > 10) {
-            throw new OthersActionException(422, 'target_out_of_range', 'An Others ship cannot move more than ten sectors.');
-        }
         if ($ship['current_action_id'] !== null || in_array((string) $ship['status'], ['transit', 'destroyed', 'removed'], true)) {
             throw new OthersActionException(409, 'others_ship_busy', 'The Others ship is busy.');
         }
