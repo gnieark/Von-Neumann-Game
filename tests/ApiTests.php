@@ -3920,6 +3920,7 @@ foreach ([
     '{"alertIds":"' . $batchAlertIds[0] . '"}',
     json_encode(['alertIds' => [$batchAlertIds[0], 12]], JSON_THROW_ON_ERROR),
     json_encode(['alertIds' => [$batchAlertIds[0], 'oalert_invalid']], JSON_THROW_ON_ERROR),
+    json_encode(['alertIds' => [$batchAlertIds[0], 'oalert_' . str_repeat('a', 24)]], JSON_THROW_ON_ERROR),
     json_encode(['alertIds' => [$batchAlertIds[0], $batchAlertIds[0]]], JSON_THROW_ON_ERROR),
     json_encode(['alertIds' => array_map(static fn(int $i): string => 'oalert_' . sprintf('%020x', $i), range(1, 501))], JSON_THROW_ON_ERROR),
 ] as $invalidBatchBody) {
@@ -3960,6 +3961,27 @@ $others->transaction(function () use ($others, $othersAlertPlayer, $othersVictim
 $maximumBatchRead = $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, json_encode(['alertIds' => $maximumBatchIds], JSON_THROW_ON_ERROR));
 $test->assertEquals(200, $maximumBatchRead->status, 'the maximum batch of 500 alerts is accepted');
 $test->assertEquals(array_fill(0, 500, 'read'), array_column($maximumBatchRead->body['alerts'] ?? [], 'status'), 'the maximum batch marks every requested alert read');
+
+// Exercise the actual broadcast producer through the same batch endpoint as the spectator.
+$pdo->beginTransaction();
+try {
+    $waveAction = $others->createAction($othersVictimShip, 'others_craft', 'others_ship', $othersVictimShip['public_id'], []);
+    $waveDepot = $depotRepository->create((int) $waveAction['id'], new SectorCoordinates(0, 0, 0), gmdate('c'));
+    $anomalyBroadcasts->enqueue($waveDepot, gmdate('c'));
+    $wave = $pdo->query('SELECT id,public_id FROM anomaly_broadcasts WHERE depot_id=' . (int) $waveDepot['id'])->fetch(PDO::FETCH_ASSOC);
+    do {
+        $anomalyBroadcasts->deliverPage((int) $wave['id']);
+    } while ($pdo->query('SELECT status FROM anomaly_broadcasts WHERE id=' . (int) $wave['id'])->fetchColumn() !== 'done');
+    $waveAlerts = $pdo->prepare('SELECT public_id FROM others_alerts WHERE player_id=? AND event_key LIKE ? ORDER BY id');
+    $waveAlerts->execute([$othersAlertPlayer->id, $wave['public_id'] . ':%']);
+    $waveAlertIds = $waveAlerts->fetchAll(PDO::FETCH_COLUMN);
+    $test->assert($waveAlertIds !== [], 'broadcast creates alerts for the spectator account');
+    $waveRead = $kernel->handle('POST', $batchAlertPath, $othersAlertHeaders, json_encode(['alertIds' => $waveAlertIds], JSON_THROW_ON_ERROR));
+    $test->assertEquals(200, $waveRead->status, 'spectator batch acknowledgement accepts actual anomaly broadcast identifiers');
+    $test->assertEquals(array_fill(0, count($waveAlertIds), 'read'), array_column($waveRead->body['alerts'] ?? [], 'status'), 'all broadcast alerts are acknowledged');
+} finally {
+    $pdo->rollBack();
+}
 
 $probeMissileVictim = $others->createStandardShip($othersVictimShip);
 $pdo->prepare('UPDATE others_ships SET integrity=10 WHERE id=:id')->execute(['id' => (int) $probeMissileVictim['id']]);
@@ -12349,6 +12371,7 @@ $test->assert(PersistenceArchitecture::violations('<?php class R { public functi
 $test->assertEquals([], PersistenceArchitecture::violations('<?php // $pdo->query("SELECT * FROM x");', false), 'architecture guard ignores SQL mentioned in comments');
 require __DIR__ . '/Support/StorageBudgetTests.php';
 require __DIR__ . '/Support/GerminationDepotTests.php';
+require __DIR__ . '/Support/OthersAnomalyAlertMigrationTests.php';
 require __DIR__ . '/Support/SectorStorageHttpTests.php';
 require __DIR__ . '/Support/OthersRepairTests.php';
 require __DIR__ . '/Support/OthersDestructionTests.php';

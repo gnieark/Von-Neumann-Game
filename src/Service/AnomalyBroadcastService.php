@@ -6,6 +6,7 @@ namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Database\StorageTransaction;
 use VonNeumannGame\Repository\OthersAuditRepository;
+use VonNeumannGame\Repository\OthersRepository;
 use VonNeumannGame\Repository\ScheduledEventRepository;
 use VonNeumannGame\Repository\Storage\AnomalyBroadcastRepository;
 use VonNeumannGame\Repository\Storage\StorageLockRepository;
@@ -59,7 +60,7 @@ final class AnomalyBroadcastService
                     // Public alert location is the recipient's own sector, never the emission's sector.
                     $alerts[] = $kind === 'probe'
                         ? [$row['id'], $broadcast['opened_at'], $row['sector_x'], $row['sector_y'], $row['sector_z'], $message, $broadcast['opened_at'], $broadcast['opened_at']]
-                        : ['oalert_' . bin2hex(random_bytes(12)), $row['player_id'], $row['public_id'], $broadcast['public_id'] . ':' . $row['id'], $message, $broadcast['opened_at'], $broadcast['opened_at']];
+                        : [OthersRepository::publicId('oalert'), $row['player_id'], $row['public_id'], $broadcast['public_id'] . ':' . $row['id'], $message, $broadcast['opened_at'], $broadcast['opened_at']];
                 }
                 $this->broadcasts->deliver($id, $kind, $deliveries, $alerts);
                 $next = count($rows) < self::BATCH_SIZE ? $maximum : (int) end($rows)['id'];

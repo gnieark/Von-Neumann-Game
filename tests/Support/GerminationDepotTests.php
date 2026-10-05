@@ -216,6 +216,9 @@ use VonNeumannGame\Service\Storage\TransferLoadPlanner;
     $waves->deliverPage($waveId); $waves->deliverPage($waveId);
     $test->assertEquals(count($ships),(int)$db->query("SELECT COUNT(*) FROM anomaly_broadcast_deliveries WHERE recipient_kind='ship'")->fetchColumn(),'broadcast replay produces one delivery per ship');
     $test->assertEquals(count($ships),(int)$db->query('SELECT COUNT(*) FROM others_alerts')->fetchColumn(),'broadcast replay produces one alert per ship');
+    foreach ($db->query('SELECT public_id FROM others_alerts')->fetchAll(PDO::FETCH_COLUMN) as $alertId) {
+        $test->assertEquals(1, preg_match('/^oalert_[a-f0-9]{20}$/D', $alertId), 'broadcast alerts use canonical identifiers accepted by batch acknowledgement');
+    }
     $stale = $files->load($coordinates);
     $files->mutate($coordinates,static fn(SectorContent $sector)=>$sector->markEffectApplied('parallel-writer'));
     $rejected = false;

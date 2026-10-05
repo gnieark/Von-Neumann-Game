@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-05
+
+### Fixed
+
+- Alertes Others d’onde d’anomalie : génération des identifiants canoniques `oalert_` suivis de 20 caractères hexadécimaux, comme les autres alertes, pour éviter le rejet HTTP 400 de l’acquittement par le journal spectateur de `defense_etoile`. Contrat API inchangé (v144).
+- Migration explicite `scripts/one-shot-scripts/migrate-others-anomaly-alert-ids.php` pour les identifiants erronés existants : simulation par défaut, filtre facultatif `--fleet-id`, sauvegarde obligatoire avec `--apply --backup=NEW_FILE`, contrôle des collisions et conservation de tous les autres champs, dont le statut de lecture. Déployer le générateur corrigé avant application. Les alertes déjà journalisées sous leur ancien identifiant pourront être journalisées une nouvelle fois avant acquittement.
+
 ## 2026-10-04
 
 ### Fixed
