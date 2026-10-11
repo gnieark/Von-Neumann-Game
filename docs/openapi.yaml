@@ -179,7 +179,7 @@ paths:
           description: Temporary storage contention; retry with the same Idempotency-Key
   /api/probe/{probeId}/mannies/{mannyId}/storage-transfers:
     post:
-      tags: [mannies]
+      tags: [mannies, inventories]
       summary: Transfer contents between an onboard container and sector storage
       parameters:
       - name: probeId
