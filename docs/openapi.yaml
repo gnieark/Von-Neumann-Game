@@ -8,6 +8,11 @@ info:
     X-RateLimit-Remaining and X-RateLimit-Reset. A token over its limit
     receives HTTP 429 with Retry-After. Authentication and API-version
     endpoints are not rate-limited.
+    Successful (2xx) bearer-authenticated POST, PATCH, PUT and DELETE requests
+    record an internal last-action timestamp for the authenticated player,
+    including writes with no effective change. GET requests, errors, session
+    creation and scheduler events do not refresh it. This timestamp is not
+    exposed in API responses; no inactivity or looting restriction is enabled.
 servers:
   - url: /
     description: Current host

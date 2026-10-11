@@ -448,12 +448,12 @@ final class ApiKernel
 
         $token = $this->bearerToken($authorization);
         if ($this->rateLimiter === null || $token === null) {
-            return $handler($player);
+            return $this->handleAuthenticatedRequest($method, $player, $handler);
         }
 
         $decision = $this->rateLimiter->check($token);
         if (!$decision->available) {
-            return $handler($player);
+            return $this->handleAuthenticatedRequest($method, $player, $handler);
         }
 
         $headers = [
@@ -469,9 +469,20 @@ final class ApiKernel
             return new ApiResponse($error->status, $error->body, $headers);
         }
 
-        $response = $handler($player);
+        $response = $this->handleAuthenticatedRequest($method, $player, $handler);
 
         return new ApiResponse($response->status, $response->body, array_merge($response->headers, $headers));
+    }
+
+    private function handleAuthenticatedRequest(string $method, Player $player, callable $handler): ApiResponse
+    {
+        $response = $handler($player);
+        if (in_array($method, ['POST', 'PATCH', 'PUT', 'DELETE'], true)
+            && $response->status >= 200 && $response->status < 300) {
+            $this->players->recordGameAction($player->id);
+        }
+
+        return $response;
     }
 
     private function protectedOthersRoute(ApiRouteContext $ctx, callable $handler): ApiResponse

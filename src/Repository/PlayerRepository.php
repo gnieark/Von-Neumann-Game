@@ -81,6 +81,16 @@ final class PlayerRepository
         ]);
     }
 
+    public function recordGameAction(int $playerId): void
+    {
+        $now = gmdate('c');
+        $stmt = $this->pdo->prepare(
+            'UPDATE players SET last_game_action_at = :action_at
+             WHERE id = :id AND (last_game_action_at IS NULL OR last_game_action_at < :newer_than)'
+        );
+        $stmt->execute(['id' => $playerId, 'action_at' => $now, 'newer_than' => $now]);
+    }
+
     private function hydrate(array $row): Player
     {
         return new Player(
@@ -96,6 +106,7 @@ final class PlayerRepository
             (bool) ($row['can_control_others'] ?? false),
             (int) $row['others_ships_destroyed'],
             (int) $row['others_motherships_destroyed'],
+            $row['last_game_action_at'] !== null ? (string) $row['last_game_action_at'] : null,
         );
     }
 

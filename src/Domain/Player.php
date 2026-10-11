@@ -21,6 +21,7 @@ final class Player
         public bool $canControlOthers = false,
         public readonly int $othersShipsDestroyed = 0,
         public readonly int $othersMothershipsDestroyed = 0,
+        public readonly ?string $lastGameActionAt = null,
     ) {}
 
     public function publicArray(): array

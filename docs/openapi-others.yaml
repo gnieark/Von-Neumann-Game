@@ -7,6 +7,11 @@ info:
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
     are recorded on ship arrival or successful depot construction by that fleet.
+    Successful (2xx) bearer-authenticated POST, PATCH, PUT and DELETE requests
+    record an internal last-action timestamp for the authenticated player,
+    including writes with no effective change. GET requests, errors and
+    scheduler events do not refresh it. This timestamp is not exposed in
+    API responses; no inactivity or looting restriction is enabled.
 security:
 - bearerAuth: []
 servers:

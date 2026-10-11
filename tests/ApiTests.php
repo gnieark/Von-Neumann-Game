@@ -2571,6 +2571,25 @@ exec($alertIllustrationMigrationCommand . ' 2>&1', $secondAlertIllustrationMigra
 $test->assertEquals(0, $secondAlertIllustrationMigrationStatus, 'alert illustration migration can be replayed safely');
 $test->assert(str_contains(implode("\n", $secondAlertIllustrationMigrationOutput), 'column_added=no'), 'replayed alert illustration migration reports an unchanged schema');
 
+$activityMigrationPath = $tmp . DIRECTORY_SEPARATOR . 'player-activity-migration.sqlite';
+$activityMigrationPdo = new PDO('sqlite:' . $activityMigrationPath, options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$activityMigrationPdo->exec('CREATE TABLE players (id INTEGER PRIMARY KEY, username TEXT NOT NULL)');
+$activityMigrationPdo->exec("INSERT INTO players (id, username) VALUES (1, 'existing')");
+$activityMigrationConfig = $tmp . DIRECTORY_SEPARATOR . 'player-activity-migration.json';
+file_put_contents($activityMigrationConfig, json_encode(['driver' => 'sqlite', 'path' => $activityMigrationPath], JSON_THROW_ON_ERROR));
+$activityMigrationCommand = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/one-shot-scripts/migrate-player-last-game-action.php')
+    . ' --database-config=' . escapeshellarg($activityMigrationConfig);
+exec($activityMigrationCommand . ' 2>&1', $activityMigrationOutput, $activityMigrationStatus);
+$test->assertEquals(0, $activityMigrationStatus, 'player activity migration defaults to a successful dry run');
+$test->assertEquals(['id', 'username'], array_column($activityMigrationPdo->query('PRAGMA table_info(players)')->fetchAll(PDO::FETCH_ASSOC), 'name'), 'activity migration dry run leaves the schema unchanged');
+exec($activityMigrationCommand . ' --apply 2>&1', $activityMigrationOutput, $activityMigrationStatus);
+$test->assertEquals(0, $activityMigrationStatus, 'player activity migration adds the column');
+$test->assertEquals(null, $activityMigrationPdo->query('SELECT last_game_action_at FROM players WHERE id=1')->fetchColumn(), 'migration does not invent activity for existing players');
+$activityMigrationPdo->exec("UPDATE players SET last_game_action_at='2026-10-01T12:00:00+00:00' WHERE id=1");
+exec($activityMigrationCommand . ' --apply 2>&1', $activityMigrationOutput, $activityMigrationStatus);
+$test->assertEquals(0, $activityMigrationStatus, 'player activity migration can be rerun');
+$test->assertEquals('2026-10-01T12:00:00+00:00', $activityMigrationPdo->query('SELECT last_game_action_at FROM players WHERE id=1')->fetchColumn(), 'rerunning the migration preserves recorded activity');
+
 $itemMigrationDbPath = $tmp . DIRECTORY_SEPARATOR . 'item-metadata-migration.sqlite';
 $itemMigrationPdo = new PDO('sqlite:' . $itemMigrationDbPath);
 $itemMigrationPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -5859,6 +5878,9 @@ $test->assertEquals('remi', $me->body['player']['username'] ?? null, 'GET /api/m
 $queuedRateLimiter = new QueueTokenRateLimiter(
     new RateLimitDecision(true, 60, 12, 0, 1_750_000_060),
     new RateLimitDecision(false, 60, 0, 17, 1_750_000_060),
+    RateLimitDecision::unavailable(),
+    new RateLimitDecision(true, 60, 12, 0, 1_750_000_060),
+    new RateLimitDecision(false, 60, 0, 17, 1_750_000_060),
 );
 $rateLimitedKernel = new ApiKernel(
     $auth,
@@ -5889,6 +5911,71 @@ $test->assertEquals(429, $rateLimitedRejected->status, 'rate limiter rejects a b
 $test->assertEquals('rate_limit_exceeded', $rateLimitedRejected->body['error']['code'] ?? null, 'rate limit rejection exposes a stable API error code');
 $test->assertEquals('17', $rateLimitedRejected->headers['Retry-After'] ?? null, 'rate limit rejection tells clients when to retry');
 $test->assertEquals([(string) $token, (string) $token], $queuedRateLimiter->tokens, 'rate limiter receives the normalized bearer token for every authenticated request');
+
+$activityPlayer = $auth->registerPlayerWithPassword('activity-tracking', 'secret', 'Activity Tracking', 'Activity probe');
+$activityProbe = $probes->findByPlayerId($activityPlayer->id) ?? throw new RuntimeException('Activity probe missing.');
+$activitySession = $kernel->handle('POST', '/api/session', [], json_encode(['username' => 'activity-tracking', 'password' => 'secret'], JSON_THROW_ON_ERROR));
+$activityHeaders = ['Authorization' => 'Bearer ' . $activitySession->body['token']];
+$test->assertEquals(null, $players->findById($activityPlayer->id)?->lastGameActionAt, 'registration and session creation do not invent a game action');
+$activityOldDate = '2000-01-01T00:00:00+00:00';
+$setActivityDate = $pdo->prepare('UPDATE players SET last_game_action_at = :date WHERE id = :id');
+$otherPlayerActivity = $players->findById($player->id)?->lastGameActionAt;
+foreach ([
+    ['GET', '/api/me', null, 200, false],
+    ['POST', '/api/me/api-key', '{}', 201, true],
+    ['PATCH', '/api/probe/' . $activityProbe->id, json_encode(['name' => $activityProbe->name], JSON_THROW_ON_ERROR), 200, true],
+    ['DELETE', '/api/probe/' . $activityProbe->id . '/alerts', null, 200, true],
+    ['POST', '/api/probe/move', '{}', 400, false],
+    ['POST', '/api/probe/mind-snapshot/reassign', '{}', 409, false],
+    ['PATCH', '/api/probe/0', '{}', 404, false],
+    ['PUT', '/api/me', '{}', 405, false],
+    ['DELETE', '/api/nonexistent', null, 404, false],
+] as [$activityMethod, $activityPath, $activityBody, $activityStatus, $activityExpected]) {
+    $setActivityDate->execute(['id' => $activityPlayer->id, 'date' => $activityOldDate]);
+    $activityResponse = $kernel->handle($activityMethod, $activityPath, $activityHeaders, $activityBody);
+    $test->assertEquals($activityStatus, $activityResponse->status, 'activity fixture: ' . $activityMethod . ' ' . $activityPath);
+    $activityDate = $players->findById($activityPlayer->id)?->lastGameActionAt;
+    $test->assertEquals($activityExpected, $activityDate !== $activityOldDate, 'activity tracking: ' . $activityMethod . ' ' . $activityPath);
+    if ($activityExpected) {
+        $test->assert(is_string($activityDate) && abs(time() - strtotime($activityDate)) <= 5, 'successful writes record current UTC activity');
+    }
+}
+$test->assertEquals($otherPlayerActivity, $players->findById($player->id)?->lastGameActionAt, 'write requests update only the authenticated player');
+$activityUnauthorized = $kernel->handle('POST', '/api/me/api-key', ['Authorization' => 'Bearer invalid']);
+$test->assertEquals(401, $activityUnauthorized->status, 'activity tracking rejects invalid authentication');
+$test->assertEquals($activityOldDate, $players->findById($activityPlayer->id)?->lastGameActionAt, 'authentication errors preserve activity');
+$activityKey = $auth->createApiKeyForPlayer($activityPlayer);
+$activityKeyHeaders = ['Authorization' => 'Bearer ' . $activityKey['token']];
+$kernel->handle('GET', '/api/me', $activityKeyHeaders);
+$test->assertEquals($activityOldDate, $players->findById($activityPlayer->id)?->lastGameActionAt, 'API key GET requests preserve activity');
+$activityKeyWrite = $kernel->handle('POST', '/api/probe/alerts/mark-all-read', $activityKeyHeaders);
+$test->assertEquals(200, $activityKeyWrite->status, 'API key write succeeds');
+$test->assert($players->findById($activityPlayer->id)?->lastGameActionAt !== $activityOldDate, 'API key writes record activity');
+
+// No production PUT route exists yet; exercise the common authenticated route directly.
+$activityProtectedRoute = new ReflectionMethod(ApiKernel::class, 'protectedRoute');
+foreach ([200, 202, 204, 302, 400, 500] as $activityStatus) {
+    $setActivityDate->execute(['id' => $activityPlayer->id, 'date' => $activityOldDate]);
+    $activityProtectedRoute->invoke($kernel, 'PUT', ['PUT'], $activityHeaders,
+        static fn(Player $_player): \VonNeumannGame\Http\ApiResponse => new \VonNeumannGame\Http\ApiResponse($activityStatus, []));
+    $test->assertEquals($activityStatus < 300, $players->findById($activityPlayer->id)?->lastGameActionAt !== $activityOldDate, 'PUT activity requires a 2xx response, status ' . $activityStatus);
+}
+foreach ([true, true, false] as $activityAllowed) {
+    $setActivityDate->execute(['id' => $activityPlayer->id, 'date' => $activityOldDate]);
+    $activityLimitedResponse = $rateLimitedKernel->handle('POST', '/api/probe/alerts/mark-all-read', $activityHeaders);
+    $test->assertEquals($activityAllowed ? 200 : 429, $activityLimitedResponse->status, 'activity respects rate limiter decision');
+    $test->assertEquals($activityAllowed, $players->findById($activityPlayer->id)?->lastGameActionAt !== $activityOldDate, 'activity is recorded with an available or unavailable limiter, but not on 429');
+}
+$activityPublicPlayer = $kernel->handle('GET', '/api/me', $activityHeaders)->body['player'];
+$test->assert(!array_key_exists('lastGameActionAt', $activityPublicPlayer) && !array_key_exists('last_game_action_at', $activityPublicPlayer), 'activity date remains private');
+$setActivityDate->execute(['id' => $activityPlayer->id, 'date' => '2999-01-01T00:00:00+00:00']);
+$players->recordGameAction($activityPlayer->id);
+$test->assertEquals('2999-01-01T00:00:00+00:00', $players->findById($activityPlayer->id)?->lastGameActionAt, 'an older timestamp cannot overwrite a newer activity date');
+$setActivityDate->execute(['id' => $activityPlayer->id, 'date' => $activityOldDate]);
+$players->save($activityPlayer);
+$players->recordOthersShipDestroyed($activityPlayer->id, false);
+$test->assertEquals($activityOldDate, $players->findById($activityPlayer->id)?->lastGameActionAt, 'ordinary saves and engine counters do not refresh or overwrite activity');
+
 $sessionTouchHash = SessionRepository::hashToken((string) $token);
 $setSessionLastUsed = $pdo->prepare('UPDATE sessions SET last_used_at = :last_used_at WHERE token_hash = :hash');
 $getSessionLastUsed = $pdo->prepare('SELECT last_used_at FROM sessions WHERE token_hash = :hash');
@@ -5938,8 +6025,10 @@ $test->assertEquals(0, count($scutCircuitStillStored), 'SCUT relay turn-on consu
 $scutManny = $mannies->findByUidForProbe($scutProbe->id, $scutMannyId) ?? throw new RuntimeException('SCUT Manny task missing.');
 $scutManny->taskEndsAt = gmdate('c', time() - 5);
 $mannies->save($scutManny);
+$setActivityDate->execute(['id' => $scutPlayer->id, 'date' => $activityOldDate]);
 $processScheduledMannyNow($scutManny->id);
 $scutRefresh = $kernel->handle('GET', '/api/probe/mannies', $scutHeaders);
+$test->assertEquals($activityOldDate, $players->findById($scutPlayer->id)?->lastGameActionAt, 'scheduler execution and the following GET do not refresh player activity');
 $test->assertEquals(200, $scutRefresh->status, 'SCUT Manny list exposes the relay task completed by the scheduler');
 $scutRelay = $scutRelays->findById($scutRelay->id) ?? throw new RuntimeException('SCUT relay missing after activation.');
 $test->assertEquals('on', $scutRelay->status, 'SCUT relay is switched on after task completion');

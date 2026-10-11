@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-11
+
+### Added
+
+- Suivi interne de l'activité du joueur dans `players.last_game_action_at` : les requêtes authentifiées par session ou clé API en POST, PATCH, PUT et DELETE actualisent la date UTC après une réponse 2xx, y compris les écritures sans changement effectif. Les GET, erreurs, connexions seules et événements du scheduler ne comptent pas. Aucun champ public ajouté ; contrat API inchangé (v145).
+- Migration explicite `php scripts/one-shot-scripts/migrate-player-last-game-action.php --database-config=PATH --apply`, à appliquer avant le déploiement du code ; simulation par défaut et réexécution sans écrasement des dates. Les comptes existants commencent à `NULL`, sans reconstruction d'historique. Le document de cadrage du vampirisme retient la protection fondée uniquement sur ces écritures ; le pillage et son seuil restent à implémenter.
+
 ## 2026-10-05
 
 ### Changed
