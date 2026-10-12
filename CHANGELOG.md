@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-12
+
+### Changed
+
+- API **v146** : la fabrication d’un vaisseau Others standard (`standard_ship`) passe de sept à trois jours (259 200 secondes) pour les nouvelles constructions. Les constructions déjà planifiées conservent leur échéance. Documentation OpenAPI et version publique synchronisées ; aucune migration nécessaire.
+
 ## 2026-10-11
 
 ### Added

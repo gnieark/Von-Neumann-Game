@@ -32,7 +32,7 @@ use VonNeumannGame\Sector\SectorDriftingItem;
 final class OthersService
 {
     private const RECIPES = [
-        'standard_ship' => ['duration' => 604800, 'ingredients' => ['metals' => 6000.0, 'ice' => 1000.0, 'carbon_compounds' => 2000.0, 'deuterium' => 100.0], 'outputSpace' => 0.0],
+        'standard_ship' => ['duration' => 259200, 'ingredients' => ['metals' => 6000.0, 'ice' => 1000.0, 'carbon_compounds' => 2000.0, 'deuterium' => 100.0], 'outputSpace' => 0.0],
         'others_auxiliary' => ['duration' => 3600, 'ingredients' => ['metals' => 5.0, 'ice' => 0.5, 'carbon_compounds' => 1.0, 'deuterium' => 0.05], 'outputSpace' => 0.0],
         'missile' => ['duration' => 1800, 'ingredients' => ['metals' => 20.0, 'ice' => 2.0, 'carbon_compounds' => 5.0, 'deuterium' => 1.0], 'outputSpace' => 2.0],
     ];

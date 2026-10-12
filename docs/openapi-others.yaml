@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '145'
+  version: '146'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -1396,7 +1396,7 @@ paths:
         fuel. The assistant stays busy until completion. Read canonical costs
         and durations from GET /api/others/crafting/recipes.
 
-        standard_ship takes 604800 seconds (seven days) and consumes 6000 ECE
+        standard_ship takes 259200 seconds (three days) and consumes 6000 ECE
         of metals, 1000 of ice, 2000 of carbon_compounds and 100 of deuterium.
         On completion it creates a standard ship in the mothership's fleet
         and current sector, with one auxiliary and an empty 50-point fuel tank.
