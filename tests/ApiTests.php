@@ -630,6 +630,13 @@ $test->assertEquals('#/components/schemas/OthersInventoryJettisonRequest', $othe
 $test->assertEquals('#/components/schemas/OthersInventoryJettisonResponse', $othersJettisonOperation['responses']['200']['content']['application/json']['schema']['$ref'] ?? null, 'Others OpenAPI documents the immediate jettison response');
 $test->assertEquals('kind', $openApiOthersDocument['components']['schemas']['OthersInventoryJettisonRequest']['discriminator']['propertyName'] ?? null, 'Others inventory jettison request uses its canonical kind discriminator');
 $othersCraftOperation = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/crafts']['post'] ?? [];
+$fleetMoveOperation = $openApiOthersDocument['paths']['/api/others/fleets/{fleetId}/move']['post'] ?? [];
+$test->assertEquals('#/components/requestBodies/FleetMove', $fleetMoveOperation['requestBody']['$ref'] ?? null, 'fleet moves use their dedicated request body');
+$fleetMoveSchema = $openApiOthersDocument['components']['requestBodies']['FleetMove']['content']['application/json']['schema'] ?? [];
+$test->assertEquals(['target'], $fleetMoveSchema['required'] ?? null, 'fleet move exclusions remain optional');
+$test->assertEquals('array', $fleetMoveSchema['properties']['excludeShipIds']['type'] ?? null, 'fleet move documentation exposes the exclusion list');
+$test->assertEquals('string', $fleetMoveSchema['properties']['excludeShipIds']['items']['type'] ?? null, 'fleet move exclusions use public string identifiers');
+$test->assertEquals(['already_at_destination', 'excluded'], $openApiOthersDocument['components']['schemas']['OthersFleetMoveResponse']['properties']['ignored']['items']['properties']['reason']['enum'] ?? null, 'fleet move documentation distinguishes explicitly excluded ships');
 $test->assertEquals(
     ['recipeId', 'assistantAuxiliaryId'],
     $othersCraftOperation['requestBody']['content']['application/json']['schema']['required'] ?? null,
@@ -3679,12 +3686,24 @@ $test->assertEquals(['x' => 0, 'y' => 0, 'z' => 0], $othersFleetShipsById[$other
 $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $othersFleetShipsById[$othersStandardShip['public_id']]['sector']['relative'] ?? null, 'fleet detail exposes every ship in the same player-relative frame');
 $test->assertEquals($othersAlertFleet['public_id'], $othersFleetShipsById[$othersStandardShip['public_id']]['fleetId'] ?? null, 'fleet detail preserves each ship public fleet id');
 
+$fleetMovePath = '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/move';
+$fleetBeforeInvalidExclusions = $others->findShipsByFleetId((int) $othersAlertFleet['id']);
+foreach ([null, false, 'ship_example', 42, new stdClass(), (object) ['0' => $othersVictimShip['public_id']], ['ship' => $othersVictimShip['public_id']], [''], [42], [null], [[]], [$othersVictimShip['public_id'], false]] as $invalidExclusions) {
+    $invalidFleetMove = $kernel->handle('POST', $fleetMovePath, $othersAlertHeaders, json_encode([
+        'target' => ['x' => 2, 'y' => 0, 'z' => 0],
+        'excludeShipIds' => $invalidExclusions,
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(400, $invalidFleetMove->status, 'fleet movement rejects a malformed exclusion list before scheduling ships');
+    $test->assertEquals('bad_request', $invalidFleetMove->body['error']['code'] ?? null, 'malformed fleet exclusions return bad_request');
+}
+$test->assertEquals($fleetBeforeInvalidExclusions, $others->findShipsByFleetId((int) $othersAlertFleet['id']), 'malformed exclusions leave every ship and its fuel unchanged');
+
 $longRangeTarget = ['x' => 639, 'y' => -777, 'z' => 132];
 $longRangeFleetMove = $kernel->handle(
     'POST',
     '/api/others/fleets/' . rawurlencode((string) $othersAlertFleet['public_id']) . '/move',
     $othersAlertHeaders,
-    json_encode(['target' => $longRangeTarget, 'leaveAuxiliariesBehind' => true], JSON_THROW_ON_ERROR),
+    json_encode(['target' => $longRangeTarget, 'leaveAuxiliariesBehind' => true, 'excludeShipIds' => []], JSON_THROW_ON_ERROR),
 );
 $test->assertEquals(202, $longRangeFleetMove->status, 'Others fleet accepts a destination hundreds of sectors away');
 $test->assertEquals(2, count($longRangeFleetMove->body['actions'] ?? []), 'long-range fleet move schedules both the mothership and its dispersed escort');
@@ -3705,6 +3724,46 @@ foreach (($longRangeFleetMove->body['actions'] ?? []) as $longRangeEntry) {
     $test->assertEquals(202, $longRangeCancel->status, 'long-range fleet member movement remains cancelable');
     $processOthersActionNow($others->findActionByPublicId($longRangeEntry['action']['id']) ?? throw new RuntimeException('Long-range cancellation not found.'));
     $test->assertEquals('canceled', $others->findActionByPublicId($longRangeEntry['action']['id'])['status'] ?? null, 'scheduler finalizes long-range movement cancellation');
+}
+
+foreach ([$othersVictimShip, $othersStandardShip] as $excludedFleetShip) {
+    $excludedShipBefore = $others->findShipByPublicId($excludedFleetShip['public_id']);
+    $excludedAuxiliariesBefore = $others->findAuxiliariesPageByShipId((int) $excludedFleetShip['id'], null, 100);
+    $selectiveMovePayload = [
+        'target' => ['x' => 2, 'y' => 0, 'z' => 0],
+        'leaveAuxiliariesBehind' => true,
+        'excludeShipIds' => [$excludedFleetShip['public_id'], $excludedFleetShip['public_id'], 'ship_unknown', $harvestabilityFleet['ship']['public_id']],
+    ];
+    $selectiveMoveHeaders = $othersAlertHeaders + ['Idempotency-Key' => 'fleet-exclude-' . $excludedFleetShip['public_id']];
+    $selectiveMove = $kernel->handle('POST', $fleetMovePath, $selectiveMoveHeaders, json_encode($selectiveMovePayload, JSON_THROW_ON_ERROR));
+    $expectedMovingShipId = $excludedFleetShip['public_id'] === $othersVictimShip['public_id'] ? $othersStandardShip['public_id'] : $othersVictimShip['public_id'];
+    $test->assertEquals(202, $selectiveMove->status, 'fleet movement permits excluding either a standard ship or the mothership');
+    $test->assertEquals([$expectedMovingShipId], array_column($selectiveMove->body['actions'] ?? [], 'shipId'), 'only the non-excluded ship starts moving');
+    $test->assertEquals([['shipId' => $excludedFleetShip['public_id'], 'reason' => 'excluded']], $selectiveMove->body['ignored'] ?? null, 'duplicate exclusions produce one ignored entry and foreign or unknown ids are not disclosed');
+    $test->assertEquals([], $selectiveMove->body['blocked'] ?? null, 'excluding the mothership does not block the other fleet ships');
+    $test->assertEquals($excludedShipBefore, $others->findShipByPublicId($excludedFleetShip['public_id']), 'the excluded ship keeps its fuel, state and action');
+    $test->assertEquals($excludedAuxiliariesBefore, $others->findAuxiliariesPageByShipId((int) $excludedFleetShip['id'], null, 100), 'excluded ship auxiliaries remain untouched even with leaveAuxiliariesBehind');
+    $selectiveMoveReplay = $kernel->handle('POST', $fleetMovePath, $selectiveMoveHeaders, json_encode($selectiveMovePayload, JSON_THROW_ON_ERROR));
+    $test->assertEquals($selectiveMove->body, $selectiveMoveReplay->body, 'selective fleet movement replays idempotently');
+
+    $fleetBeforeAllExcluded = $others->findShipsByFleetId((int) $othersAlertFleet['id']);
+    $allExcludedMove = $kernel->handle('POST', $fleetMovePath, $othersAlertHeaders, json_encode([
+        'target' => ['x' => 0, 'y' => 0, 'z' => 0],
+        'excludeShipIds' => [$othersVictimShip['public_id'], $othersStandardShip['public_id']],
+    ], JSON_THROW_ON_ERROR));
+    $test->assertEquals(202, $allExcludedMove->status, 'excluding the whole fleet succeeds without new moves');
+    $test->assertEquals([], $allExcludedMove->body['actions'] ?? null, 'all-excluded movement creates no actions');
+    $test->assertEquals([], $allExcludedMove->body['blocked'] ?? null, 'an excluded busy ship is not reported as blocked');
+    $test->assertEquals([
+        ['shipId' => $othersVictimShip['public_id'], 'reason' => 'excluded'],
+        ['shipId' => $othersStandardShip['public_id'], 'reason' => 'excluded'],
+    ], $allExcludedMove->body['ignored'] ?? null, 'exclusion takes precedence over busy and already-at-destination checks');
+    $test->assertEquals($fleetBeforeAllExcluded, $others->findShipsByFleetId((int) $othersAlertFleet['id']), 'excluding a ship with an active movement preserves that movement and its fuel');
+
+    $selectiveMoveActionId = $selectiveMove->body['actions'][0]['action']['id'] ?? '';
+    $selectiveMoveCancel = $kernel->handle('DELETE', '/api/others/ships/' . rawurlencode($expectedMovingShipId) . '/move', $othersAlertHeaders);
+    $test->assertEquals(202, $selectiveMoveCancel->status, 'selective movement remains individually cancelable');
+    $processOthersActionNow($others->findActionByPublicId($selectiveMoveActionId) ?? throw new RuntimeException('Selective movement cancellation not found.'));
 }
 
 $othersAuxiliaryPage = $others->findAuxiliariesPageByShipId((int) $othersVictimShip['id'], null, 10);
@@ -4753,7 +4812,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(146, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(147, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');

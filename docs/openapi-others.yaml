@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '146'
+  version: '147'
   description: >
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
@@ -611,6 +611,14 @@ paths:
         is ignored or blocked. Destroyed ships are omitted. There is no maximum
         travel distance; travel duration depends on each ship's distance to the target.
 
+        Optional excludeShipIds skips the listed public ship identifiers, including
+        the mothership. Surviving fleet members explicitly excluded are returned
+        in ignored with reason excluded, before checking their destination or
+        availability. Their fuel, auxiliaries and existing actions are untouched.
+        An omitted or empty list excludes no ships. Duplicate identifiers have
+        no additional effect; identifiers absent from this fleet are silently
+        ignored and never appear in the response.
+
         Accepted actions are queued for asynchronous execution. Use action.id
         with GET /api/others/actions/{actionId} to follow a move, or cancel it
         through DELETE /api/others/ships/{shipId}/move before cancelableUntil.
@@ -618,7 +626,7 @@ paths:
       parameters:
       - "$ref": "#/components/parameters/IdempotencyKey"
       requestBody:
-        "$ref": "#/components/requestBodies/Move"
+        "$ref": "#/components/requestBodies/FleetMove"
       responses:
         '202':
           description: Moves accepted, ignored or blocked
@@ -658,7 +666,7 @@ paths:
                     - shipId: mother_example
                       reason: others_ship_busy
         '400':
-          description: bad_request — invalid JSON body or missing/malformed target coordinates.
+          description: bad_request — invalid JSON body, missing/malformed target coordinates, or excludeShipIds is not an array of non-empty strings.
           content:
             application/json:
               schema:
@@ -1620,6 +1628,31 @@ components:
         application/json:
           schema:
             "$ref": "#/components/schemas/OthersInventoryTransferRequest"
+    FleetMove:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [target]
+            properties:
+              target:
+                "$ref": "#/components/schemas/RelativeCoordinates"
+              leaveAuxiliariesBehind:
+                type: boolean
+              excludeShipIds:
+                type: array
+                default: []
+                description: >-
+                  Public identifiers of ships to exclude, including the mothership.
+                  Duplicates and identifiers absent from the fleet have no additional effect.
+                items:
+                  type: string
+                  minLength: 1
+          example:
+            target: {x: 2, y: 0, z: 0}
+            leaveAuxiliariesBehind: false
+            excludeShipIds: [ship_example]
     Move:
       required: true
       description: >-
@@ -1668,7 +1701,7 @@ components:
                 $ref: '#/components/schemas/OthersFleetMoveAcceptedAction'
         ignored:
           type: array
-          description: Ships already in the requested sector; no action is created for them.
+          description: Ships explicitly excluded or already in the requested sector; no action is created for them.
           items:
             type: object
             required: [shipId, reason]
@@ -1677,7 +1710,7 @@ components:
                 type: string
               reason:
                 type: string
-                enum: [already_at_destination]
+                enum: [already_at_destination, excluded]
         blocked:
           type: array
           description: >-

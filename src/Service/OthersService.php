@@ -297,6 +297,17 @@ final class OthersService
 
     public function moveFleet(array $fleet, array $payload, SectorCoordinates $homeSector): array
     {
+        $excludeShipIds = array_key_exists('excludeShipIds', $payload) ? $payload['excludeShipIds'] : [];
+        if (!is_array($excludeShipIds) || !array_is_list($excludeShipIds)) {
+            throw new OthersActionException(400, 'bad_request', 'excludeShipIds must be a list of non-empty public ship identifiers.');
+        }
+        $excluded = [];
+        foreach ($excludeShipIds as $shipId) {
+            if (!is_string($shipId) || $shipId === '') {
+                throw new OthersActionException(400, 'bad_request', 'excludeShipIds must be a list of non-empty public ship identifiers.');
+            }
+            $excluded[$shipId] = true;
+        }
         $ships = $this->others->findShipsByFleetId((int) $fleet['id']);
         $mothership = null;
         foreach ($ships as $ship) { if ($ship['type'] === 'mothership') { $mothership = $ship; break; } }
@@ -306,6 +317,10 @@ final class OthersService
         $absolute = $this->homeRelativeTarget($homeSector, $payload);
         $created = []; $ignored = []; $blocked = [];
         foreach ($ships as $ship) {
+            if (isset($excluded[(string) $ship['public_id']])) {
+                $ignored[] = ['shipId' => (string) $ship['public_id'], 'reason' => 'excluded'];
+                continue;
+            }
             try {
                 $created[] = ['shipId' => (string) $ship['public_id'], 'action' => $this->persistence->transaction->isolated(fn(): array => $this->moveShipToTarget($ship, $absolute, $payload, $homeSector))];
             } catch (OthersActionException $error) {

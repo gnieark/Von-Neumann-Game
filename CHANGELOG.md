@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API **v147** : `POST /api/others/fleets/{fleetId}/move` accepte `excludeShipIds`, une liste facultative d’identifiants publics de vaisseaux à exclure, y compris le vaisseau-mère. Les membres exclus sont renvoyés dans `ignored` avec le motif `excluded`, sans toucher à leur carburant, auxiliaires ou actions en cours. Liste vide ou absente : comportement habituel ; doublons sans effet supplémentaire et identifiants absents de la flotte ignorés. Une liste mal formée est rejetée en HTTP 400 avant tout déplacement. Documentation OpenAPI et version publique synchronisées ; aucune migration nécessaire.
 - API **v146** : la fabrication d’un vaisseau Others standard (`standard_ship`) passe de sept à trois jours (259 200 secondes) pour les nouvelles constructions. Les constructions déjà planifiées conservent leur échéance. Documentation OpenAPI et version publique synchronisées ; aucune migration nécessaire.
 
 ## 2026-10-11

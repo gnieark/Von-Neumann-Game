@@ -59,7 +59,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 146;
+    public const API_VERSION = 147;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -989,6 +989,10 @@ final class ApiKernel
         $payload = $this->decodeJsonBody($body);
         if (!is_array($payload)) {
             return ApiResponse::error(400, 'bad_request', 'A JSON object is required.');
+        }
+        // Associative decoding otherwise turns JSON objects such as {} into PHP lists.
+        if (array_key_exists('excludeShipIds', $payload) && !is_array(json_decode($body)->excludeShipIds)) {
+            return ApiResponse::error(400, 'bad_request', 'excludeShipIds must be a list of non-empty public ship identifiers.');
         }
         $result = $this->othersService?->moveFleet($fleet, $payload, $player->homeSector) ?? throw new \RuntimeException('Others movement service is unavailable.');
         return new ApiResponse(202, [
