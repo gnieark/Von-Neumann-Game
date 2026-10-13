@@ -32,7 +32,7 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
      * @param \Closure(string, ?string, string): array<string, mixed> $hiddenDetachedContainerDetectionPayload
      * @param \Closure(Manny): void $saveManny
      * @param \Closure(mixed): SectorContent $getOrCreateSector
-     * @param \Closure(SectorContent): void $saveSector
+     * @param \Closure(SectorContent): void $saveDetachedContainerChanges
      * @param \Closure(SectorDetachedContainer): array<string, mixed> $detachedContainerPublicArray
      * @param \Closure(Manny, array<string, mixed>): void $clearTask
      * @param \Closure(int): ?Manny $findMannyById
@@ -54,7 +54,7 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
         private readonly \Closure $hiddenDetachedContainerDetectionPayload,
         private readonly \Closure $saveManny,
         private readonly \Closure $getOrCreateSector,
-        private readonly \Closure $saveSector,
+        private readonly \Closure $saveDetachedContainerChanges,
         private readonly \Closure $detachedContainerPublicArray,
         private readonly \Closure $clearTask,
         private readonly \Closure $findMannyById,
@@ -223,7 +223,8 @@ final class DetachStorageContainerTaskHandler implements TaskHandlerInterface
                 $sector->addObject($object);
             }
         }
-        ($this->saveSector)($sector);
+        // Detached containers are stored entirely in SQL; the sector JSON is unchanged.
+        ($this->saveDetachedContainerChanges)($sector);
 
         ($this->clearTask)($manny, [
             'lastTask' => Manny::TASK_DETACHING_STORAGE_CONTAINER,

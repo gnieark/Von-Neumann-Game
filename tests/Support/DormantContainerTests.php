@@ -8,7 +8,7 @@ use VonNeumannGame\Sector\DormantConstruct;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 
-(static function () use ($test, $pdo, $auth, $probes, $kernel, $storage, $storageContainers, $mannies, $sectorService, $saveSectorFixture, $processScheduledMannyNow, $universePath): void {
+(static function () use ($test, $pdo, $auth, $probes, $kernel, $storage, $storageContainers, $mannies, $sectorService, $saveSectorFixture, $processScheduledMannyNow, $assertSectorFileUnchanged, $universePath): void {
     $coordinates = new SectorCoordinates(416, 17, -29);
     $wreck = DormantConstruct::fromOthersMothership('hidden-container-fixture', ['metals' => 0.02]);
     $fuelWreck = DormantConstruct::fromOthersMothership('hidden-container-fuel', ['deuterium' => 0.01]);
@@ -52,7 +52,7 @@ use VonNeumannGame\Sector\SectorCoordinates;
     $test->assertEquals('hidden_on_dormant_construct', $response->body['manny']['task']['artificialObjectDetected']['detection'] ?? null, 'detach detection exposes canonical dormant mode');
     $test->assert(!str_contains(json_encode($response->body['manny']['task'], JSON_THROW_ON_ERROR), '"sector"'), 'dormant detach does not expose absolute sector coordinates');
     $containerId = $response->body['manny']['task']['objectId'];
-    $finish($uid);
+    $assertSectorFileUnchanged($coordinates, fn() => $finish($uid), 'Wreck container detachment');
     $sector = $sectorService->getOrCreateSector($coordinates);
     $container = $sector->findHiddenDetachedContainerById($containerId);
     $test->assertEquals('hidden_on_dormant_construct', $container?->getMode(), 'SQL reload classifies dormant cache as hidden');

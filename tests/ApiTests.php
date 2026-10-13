@@ -2787,6 +2787,17 @@ $processScheduledMannyNow = static function (int|string $mannyId) use ($pdo, $sc
 
     return $stats;
 };
+$assertSectorFileUnchanged = static function (SectorCoordinates $coordinates, callable $operation, string $label) use ($test, $sectorRepository): void {
+    $path = $sectorRepository->getPath($coordinates);
+    clearstatcache(true, $path);
+    $inode = fileinode($path);
+    $contents = file_get_contents($path);
+    $operation();
+    clearstatcache(true, $path);
+    // Atomic sector saves replace the inode even if the JSON contents are identical.
+    $test->assertEquals($inode, fileinode($path), $label . ' does not rewrite the sector file');
+    $test->assertEquals($contents, file_get_contents($path), $label . ' preserves sector JSON');
+};
 $processOthersActionNow = static function (array $action) use ($pdo, $scheduledEvents, $othersService): void {
     $eventId = (int) ($action['scheduled_event_id'] ?? 0);
     $event = $scheduledEvents->findById($eventId) ?? throw new RuntimeException('Others action event not found.');
@@ -7283,7 +7294,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
-        $processScheduledMannyNow($detachMannyDbId);
+        $assertSectorFileUnchanged($detachProbe->currentSector, fn() => $processScheduledMannyNow($detachMannyDbId), 'Drifting container detachment');
         $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $driftingContainerSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $driftingDetachedContainer = $driftingContainerSector->findObjectById($detachedObjectId);
@@ -7479,7 +7490,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             'id' => $detachMannyDbId,
             'ended' => gmdate('c', time() - 1),
         ]);
-        $processScheduledMannyNow($detachMannyDbId);
+        $assertSectorFileUnchanged($detachProbe->currentSector, fn() => $processScheduledMannyNow($detachMannyDbId), 'Asteroid container detachment');
         $completedHiddenDetachList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $completedHiddenDetachManny = array_values(array_filter(
             $completedHiddenDetachList->body['mannies'] ?? [],

@@ -6,6 +6,7 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Fixed
 
+- Le détachement d’un conteneur flottant ou caché sur un astéroïde ou une épave enregistre désormais uniquement le conteneur en SQL, sans réécrire le JSON du secteur ni prendre le verrou de secteur associé à cette sauvegarde. Contrat API inchangé ; aucune migration nécessaire.
 - API **v148** : les en-têtes `X-RateLimit-Limit`, `X-RateLimit-Remaining` et `X-RateLimit-Reset` accompagnent désormais aussi les erreurs produites par exception après admission par le limiteur, ces requêtes ayant déjà consommé du quota. Les réponses 429 conservent ces en-têtes et `Retry-After`. Les requêtes rejetées avant le limiteur ou traitées avec un limiteur indisponible ou désactivé restent sans en-têtes de quota. Documentation OpenAPI et version publique synchronisées ; aucune migration nécessaire.
 
 ## 2026-10-12

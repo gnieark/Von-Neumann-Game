@@ -243,7 +243,7 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
             function (SectorContent $sector): void {
-                $this->sectors->saveSector($sector);
+                $this->sectors->saveDetachedContainerChanges($sector);
             },
             fn(SectorDetachedContainer $container): array => $this->detachedContainerPublicArray($container),
             function (Manny $manny, array $payload): void {
