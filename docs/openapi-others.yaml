@@ -2,8 +2,17 @@
 openapi: 3.0.3
 info:
   title: Von Neumann Game — Others API
-  version: '147'
+  version: '148'
   description: >
+    Authenticated endpoints are rate-limited per bearer token using a shared
+    sliding window. Whenever the rate limiter is consulted and available,
+    responses expose X-RateLimit-Limit (maximum requests per window),
+    X-RateLimit-Remaining (remaining requests) and X-RateLimit-Reset (Unix
+    timestamp when the oldest counted request expires), including errors
+    produced by exceptions. Requests admitted by the limiter consume quota
+    even if their handler fails. A token over its limit receives HTTP 429
+    with these headers and Retry-After. Headers are absent when a request is
+    rejected before the limiter or the limiter is unavailable or disabled.
     Fleet depot discoveries (`GET /api/others/fleets/{fleetId}/known-depots`)
     use coordinates relative to the owning player's home sector. Discoveries
     are recorded on ship arrival or successful depot construction by that fleet.

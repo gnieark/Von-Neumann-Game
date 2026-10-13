@@ -59,7 +59,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 147;
+    public const API_VERSION = 148;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -103,8 +103,14 @@ final class ApiKernel
             parse_str((string) $uri['query'], $query);
         }
 
+        return $this->errorHandledResponse(fn(): ApiResponse =>
+            $this->router()->dispatch(new ApiRouteContext($method, $routePath, $query, $headers, $body)));
+    }
+
+    private function errorHandledResponse(callable $handler): ApiResponse
+    {
         try {
-            return $this->router()->dispatch(new ApiRouteContext($method, $routePath, $query, $headers, $body));
+            return $handler();
         } catch (ProbeMovementException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (ProbeReinstantiationException $e) {
@@ -469,7 +475,9 @@ final class ApiKernel
             return new ApiResponse($error->status, $error->body, $headers);
         }
 
-        $response = $this->handleAuthenticatedRequest($method, $player, $handler);
+        // Convert exceptions before adding the quota already consumed by this request.
+        $response = $this->errorHandledResponse(fn(): ApiResponse =>
+            $this->handleAuthenticatedRequest($method, $player, $handler));
 
         return new ApiResponse($response->status, $response->body, array_merge($response->headers, $headers));
     }

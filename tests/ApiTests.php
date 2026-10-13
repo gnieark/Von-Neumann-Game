@@ -40,6 +40,10 @@ use VonNeumannGame\FrontRoute\FrontRouteMovement;
 use VonNeumannGame\FrontRoute\FrontRouteSectorStorage;
 use VonNeumannGame\FrontRoute\MenuLinkItem;
 use VonNeumannGame\Http\ApiKernel;
+use VonNeumannGame\Http\ApiResponse;
+use VonNeumannGame\Http\ApiRoute;
+use VonNeumannGame\Http\ApiRouteContext;
+use VonNeumannGame\Http\ApiRouter;
 use VonNeumannGame\RateLimit\RateLimitDecision;
 use VonNeumannGame\RateLimit\RedisScriptExecutor;
 use VonNeumannGame\RateLimit\RedisTokenRateLimiter;
@@ -4812,7 +4816,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(147, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(148, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -5969,7 +5973,91 @@ $rateLimitedRejected = $rateLimitedKernel->handle('GET', '/api/me', $headers);
 $test->assertEquals(429, $rateLimitedRejected->status, 'rate limiter rejects a bearer token over its sliding-window limit');
 $test->assertEquals('rate_limit_exceeded', $rateLimitedRejected->body['error']['code'] ?? null, 'rate limit rejection exposes a stable API error code');
 $test->assertEquals('17', $rateLimitedRejected->headers['Retry-After'] ?? null, 'rate limit rejection tells clients when to retry');
+$test->assertEquals('60', $rateLimitedRejected->headers['X-RateLimit-Limit'] ?? null, '429 exposes the configured rate limit');
+$test->assertEquals('0', $rateLimitedRejected->headers['X-RateLimit-Remaining'] ?? null, '429 exposes an exhausted quota');
+$test->assertEquals('1750000060', $rateLimitedRejected->headers['X-RateLimit-Reset'] ?? null, '429 exposes the reset timestamp');
 $test->assertEquals([(string) $token, (string) $token], $queuedRateLimiter->tokens, 'rate limiter receives the normalized bearer token for every authenticated request');
+
+// Exercise real error routes, then failures injected into an authenticated handler.
+$quotaErrorCases = [
+    ['POST', '/api/probe/move', '{}', 400],
+    ['PATCH', '/api/probe/0', '{}', 404],
+    ['GET', '/api/others', null, 403],
+    ['POST', '/api/probe/mind-snapshot/reassign', '{}', 409],
+];
+$quotaFailures = [
+    [new \VonNeumannGame\Service\ObservationAccessException('observation_denied', 'Observation denied', 422, ['reason' => 'test']), 422, 'observation_denied'],
+    [new \VonNeumannGame\Database\StorageBusyException('private storage details'), 503, 'storage_busy'],
+    [new RuntimeException('private failure details'), 500, 'internal_error'],
+];
+$quotaDecisionCount = count($quotaErrorCases) + count($quotaFailures) + 1;
+$errorRateLimiter = new QueueTokenRateLimiter(
+    ...array_map(static fn(int $index): RateLimitDecision => new RateLimitDecision(true, 60, 59 - $index, 0, 1_750_000_060), range(0, $quotaDecisionCount - 1)),
+);
+$errorRateKernel = new ApiKernel(
+    $auth, $players, $probes,
+    new SectorObservationService($sectorService, $visitedSectors, mannies: $mannies),
+    $movementService, $visitedSectors, $mannyService, $items, $storage,
+    $messages, $logbook, $damageWarnings, $forum, $missionService, $reinstantiation, $scut,
+    improvements: $probeImprovements,
+    rateLimiter: $errorRateLimiter,
+);
+$quotaResponseIndex = 0;
+$assertErrorQuota = static function (ApiResponse $response, int $status) use ($test, &$quotaResponseIndex): void {
+    $test->assertEquals($status, $response->status, 'quota headers preserve the handler status');
+    $test->assertEquals('60', $response->headers['X-RateLimit-Limit'] ?? null, 'error response exposes the configured quota');
+    $test->assertEquals((string) (59 - $quotaResponseIndex++), $response->headers['X-RateLimit-Remaining'] ?? null, 'error response exposes this request quota, not the previous request quota');
+    $test->assertEquals('1750000060', $response->headers['X-RateLimit-Reset'] ?? null, 'error response exposes the reset timestamp');
+    $test->assert(!isset($response->headers['Retry-After']), 'admitted requests do not gain a rate-limit retry delay');
+};
+foreach ($quotaErrorCases as [$quotaMethod, $quotaPath, $quotaBody, $quotaStatus]) {
+    $assertErrorQuota($errorRateKernel->handle($quotaMethod, $quotaPath, $headers, $quotaBody), $quotaStatus);
+}
+$quotaProtectedRoute = new ReflectionMethod(ApiKernel::class, 'protectedRoute');
+$quotaRouterProperty = new ReflectionProperty(ApiKernel::class, 'router');
+$quotaTestKernel = clone $errorRateKernel;
+foreach ($quotaFailures as [$quotaFailure, $quotaStatus, $quotaCode]) {
+    $quotaRouterProperty->setValue($quotaTestKernel, new ApiRouter([
+        ApiRoute::path('/api/test-quota', ['GET'], static fn(ApiRouteContext $ctx): ApiResponse =>
+            $quotaProtectedRoute->invoke($quotaTestKernel, $ctx->method, ['GET'], $ctx->headers,
+                static fn(Player $_player): ApiResponse => throw $quotaFailure)),
+    ]));
+    $quotaFailureResponse = $quotaTestKernel->handle('GET', '/api/test-quota', $headers);
+    $assertErrorQuota($quotaFailureResponse, $quotaStatus);
+    $test->assertEquals($quotaCode, $quotaFailureResponse->body['error']['code'] ?? null, 'exception mapping preserves the public error code');
+    if ($quotaStatus === 422) {
+        $test->assertEquals(['reason' => 'test'], $quotaFailureResponse->body['error']['details'] ?? null, 'exception mapping preserves public error details');
+    } else {
+        $test->assert(!str_contains(json_encode($quotaFailureResponse->body), 'private'), 'internal exception details remain private');
+    }
+}
+$quotaRouterProperty->setValue($quotaTestKernel, new ApiRouter([
+    ApiRoute::path('/api/test-quota', ['GET'], static fn(ApiRouteContext $ctx): ApiResponse =>
+        $quotaProtectedRoute->invoke($quotaTestKernel, $ctx->method, ['GET'], $ctx->headers,
+            static fn(Player $_player): ApiResponse => new ApiResponse(409, ['error' => ['code' => 'test_conflict']], ['Content-Type' => 'application/json', 'X-Test-Header' => 'preserved']))),
+]));
+$quotaReturnedError = $quotaTestKernel->handle('GET', '/api/test-quota', $headers);
+$assertErrorQuota($quotaReturnedError, 409);
+$test->assertEquals('preserved', $quotaReturnedError->headers['X-Test-Header'] ?? null, 'quota headers preserve other response headers');
+$test->assertEquals($quotaDecisionCount, count($errorRateLimiter->tokens), 'each admitted request checks the limiter exactly once');
+
+// Reuse the same kernel after errors: public/early rejections never inherit quota.
+foreach ([
+    ['GET', '/api/version', $headers, null, 200],
+    ['GET', '/api/me', [], null, 401],
+    ['GET', '/api/nonexistent', $headers, null, 404],
+    ['PUT', '/api/me', $headers, null, 405],
+    // The exhausted fake queue now reports the limiter as unavailable.
+    ['GET', '/api/me', $headers, null, 200],
+    ['POST', '/api/probe/move', $headers, '{}', 400],
+] as [$quotaMethod, $quotaPath, $quotaHeaders, $quotaBody, $quotaStatus]) {
+    $quotaUnmetered = $errorRateKernel->handle($quotaMethod, $quotaPath, $quotaHeaders, $quotaBody);
+    $test->assertEquals($quotaStatus, $quotaUnmetered->status, 'unmetered response preserves its status');
+    foreach (['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After'] as $quotaHeader) {
+        $test->assert(!isset($quotaUnmetered->headers[$quotaHeader]), 'unmetered response does not inherit ' . $quotaHeader);
+    }
+}
+$test->assertEquals($quotaDecisionCount + 2, count($errorRateLimiter->tokens), 'public routes and early rejections do not consult the limiter');
 
 $activityPlayer = $auth->registerPlayerWithPassword('activity-tracking', 'secret', 'Activity Tracking', 'Activity probe');
 $activityProbe = $probes->findByPlayerId($activityPlayer->id) ?? throw new RuntimeException('Activity probe missing.');
