@@ -370,7 +370,9 @@ final class MannyRepository
      */
     public function withMannyLock(int $id, callable $callback): mixed
     {
-        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($id, $callback): mixed {
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->isolated(function () use ($id, $callback): mixed {
+            $owner = $this->findById($id)?->probeId;
+            if ($owner !== null) { (new ProbeOperationRepository($this->pdo))->protect([$owner]); }
             return $callback($this->lockForTask($id) ?? throw new \RuntimeException('Manny not found while acquiring task lock.'));
         });
     }

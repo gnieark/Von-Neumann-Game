@@ -100,19 +100,11 @@ Le 16 octobre 2026, l’utilisateur a validé la réutilisation de `sector_effec
 
 Validation réalisée au lot 2 : créations concurrentes du même secteur sur SQLite et MariaDB ; rollback avant commit, arrêt après commit avant publication, après publication avant acquittement ; replay après minage ou suppression ultérieure. Un échec d’écriture du fichier conserve stock et intention, et remet l’événement de publication en attente. La reprise ne réinitialise pas le stock. Les garanties des transformations générales sont décrites dans la réalisation du lot 3 ci-dessous.
 
-## Admission et pertes de sonde : choix à réaliser au lot 4 bis
+## Admission et pertes de sonde : choix du lot 4 bis
 
-**Décision utilisateur du 16 octobre 2026 :** un verrou exclusif global de sonde est autorisé lors de la destruction, mais pas comme enveloppe du minage. La finalisation peut le prendre avant les verrous locaux d’inventaire, après résolution des traitements admis ; aucune attente de drainage ne conserve ce verrou. Ce verrou côté destruction ne bloque pas à lui seul les livraisons qui ne l’acquièrent plus et ne verrouille pas implicitement leurs conteneurs : la fermeture coordonnée des admissions et les protections locales restent à implémenter et à tester.
+Le protocole livré le 17 octobre est détaillé en fin de rapport. `probe_operation_gates` porte la fermeture, `probe_operations` les seules admissions actives, `probe_losses` la preuve durable de perte. Le minage n'utilise plus l'enveloppe exclusive générale de sonde. La destruction ferme les admissions puis attend leur résolution sans conserver le verrou de sonde ; elle le prend seulement pour finaliser le nettoyage. Le verrou local du réservoir demeure.
 
-Les missiles déjà lancés et les mouvements d’astéroïdes déjà initiés doivent continuer après disparition de la sonde initiatrice. Un rattachement à l’initiateur ne suffit donc pas à décider l’annulation. Les comportements existants de destination disparue doivent être conservés ; vérifier leurs garanties transactionnelles après retrait de l’enveloppe globale, sans inventer une nouvelle règle métier pour les transferts entrants.
-
-Prévoir une garde dédiée `probe_operation_guards`, une admission active avec token de propriétaire/bail et une opération durable de perte distincte du statut public de la sonde. La fermeture exclusive de la garde et l'admission partagée doivent être ordonnées dans une transaction courte réellement commise avant le traitement métier. Les opérations à plusieurs sondes prennent les gardes par ID croissant. Une admission est supprimée à sa résolution ; pas d'historique de chaque livraison.
-
-Le traitement métier verrouille et revalide le token d'admission et l'événement avant tout débit. La récupération ne peut pas invalider une transaction qui possède ces verrous ; un ancien token ne permet aucune reprise après reprise du bail. La perte reprogramme son drainage et rend la main au scheduler unique ; elle ne conserve pas de transaction pendant l'attente. La preuve terminale de perte demeure disponible pour refuser les anciens replays.
-
-Chemins terminaux recensés : dégâts de déplacement/poussières et trou noir dans `ProbeMovementService`, lasers et missiles `OthersService`, impacts `SystemImpactPhaseHandler`, réinstanciation HTTP via `ProbeReinstantiationService::reassignMindSnapshot`, pertes automatiques `handleTerminalProbeLoss`, suppression de compte. Préserver les missiles déjà en vol. Les réservations de transfert, carburant, fabrication, objets et capacité demandent leur annulation métier spécifique, pas un remboursement générique.
-
-Ce protocole n'est pas encore démontré par des tests concurrents ; aucune suppression de verrou n'est validée par le seul présent rapport.
+Les missiles en vol et les trajectoires d'astéroïdes initiées poursuivent leur progression. Les opérations entrantes sont identifiées depuis les projections canoniques `manny_tasks` et le payload résiduel du scheduler, pas depuis un `probeId` supposé présent sur tous les événements. Les planètes et le moissonnage collectif Others restent exclus du périmètre.
 
 ## Outil d'audit livré
 
@@ -276,3 +268,48 @@ Tests spécifiques : panne après crédit et avant sauvegarde Manny, rollback in
 La branche reste **non déployable** avant les lots 4 bis, 5, 6 et 7. En particulier, l'enveloppe exclusive de sonde n'est pas encore supprimée ; cette étape nécessite le protocole de destruction/admission du lot 4 bis et ses tests.
 
 Vérification du lot 4 : `php tests/SectorTests.php` — **495 succès** ; `php tests/ApiTests.php` — **4 558 succès** ; `php tests/StorageConcurrencyTests.php` et sa variante `--mysql-config=config/database.json` — succès sur SQLite et tables MariaDB isolées. Le scénario de très petites récoltes vérifie aussi que l'arrondi de plusieurs composantes ne dépasse pas le total demandé. Migration de schéma vérifiée en simulation sans connexion ; syntaxe des PHP modifiés/ajoutés et `git diff --check` validés. Logs : `/tmp/vng-lot4-sector.log`, `/tmp/vng-lot4-api.log`, `/tmp/vng-lot4-concurrency-sqlite.log`, `/tmp/vng-lot4-concurrency-mariadb.log`.
+
+
+## Lot 4 bis — Destruction coordonnée et retrait de l'enveloppe, 17 octobre
+
+### Protocole effectivement intégré
+
+- **Admission du minage et des traitements Manny du scheduler :** transaction courte en `READ COMMITTED`, gardes partagées prises par ID croissant, insertion d'un token durable avec bail de 60 secondes, commit. La transaction métier verrouille ensuite les lignes de ce token, vérifie leur présence et leur échéance, puis travaille sous les verrous locaux. Elle supprime le token dans son commit. Le token possède une ligne par sonde impliquée ; aucune FK ne reprend un verrou d'inventaire lors de son insertion.
+- Un lot API de tâches s'admet avant sa transaction et réutilise son contexte d'admission. Un appel de minage imbriqué dans une transaction sans admission préalable est refusé explicitement, sans commit du propriétaire. Les autres écritures historiques protègent leurs gardes partagées jusqu'au commit de leur transaction ; elles n'utilisent pas de faux commit d'admission imbriqué. Les gardes des transferts entre sondes sont triées.
+- **Perte :** `requested` est persisté dans la transaction causale avec un événement `probe.loss`. Une finalisation opportuniste après commit donne le comportement immédiat habituel en absence de travail actif. Le scheduler est la voie durable de reprise, y compris lorsque l'appelant utilise une transaction PDO sans callbacks. La fermeture exclusive utilise `NOWAIT` ; si un writer historique détient encore sa garde, le worker rend la main. La fermeture de la garde est le point d'ordonnancement avec les admissions concurrentes.
+- **Drainage :** la fermeture est commise séparément, puis la perte passe à `draining`. Un token non expiré fait reporter la destruction de cinq secondes. Un token expiré n'est récupéré que si son verrou SQL peut être pris sans attente : une transaction active reste protégée même après l'échéance. Le nettoyage périodique des admissions expirées applique la même règle, y compris sur les sondes qui ne seront jamais détruites. Un ancien token ne peut plus exécuter une opération après récupération. Les erreurs de finalisation sont reportées de trente secondes ; après quinze minutes de drainage, le journal serveur contient la sonde, l'état et les tokens bloquants. Aucun traitement n'est forcé à disparaître.
+- **Finalisation :** verrou de perte, joueur puis sonde ; relecture des Mannies sous verrous, annulation métier, libération des engagements, abandon des unités encore déployées, suppression des unités rentrées. Les décisions d'abandon ne réutilisent aucun inventaire préparé avant le drainage. Les effets de secteur et alertes sont enregistrés dans la transaction ; `completed` et la sonde de remplacement constituent la preuve de replay. Les gardes fermées et les preuves de perte sont conservées sans purge automatique ; les IDs ne sont pas réutilisés.
+- Les minages futurs/échus sont annulés sans débit. Les annulations de transferts utilisent l'instant causal persistant et les règles métier de leur service. Les transferts entrants de carburant/Mannies/conteneurs sont recensés via `manny_tasks`, annulés côté source sous verrous, sans double restitution. Les réservations de fabrication, réparation, récupération, assemblage et objets consommés suivent les fonctions d'annulation existantes. Un stock déjà livré n'est jamais recrédité à l'astéroïde.
+- La dernière sonde terminale reste l'ancrage public de réinstanciation. Celle-ci exige un drainage terminé, relit l'état et inscrit le nouvel ID dans la preuve de perte. La suppression de compte ferme et draine toutes ses gardes dans sa transaction, ou refuse l'opération pour nouvelle tentative sans supprimer de données ; elle applique aussi les annulations métier. Les scripts administratifs sont raccordés à ces services.
+- Le scheduler exclut de sa sélection les tâches des sondes fermées et privilégie les pertes dues : un grand nombre de missions annulables ne peut pas bloquer les autres sondes. `claim` reste protégé par les gardes, indépendamment de ce filtre de sélection. Les événements de projectiles et de trajectoires restent hors fermeture de leur sonde initiatrice.
+
+### Verrous après intégration 4 + 4 bis
+
+| Chemin | Protection effective |
+| --- | --- |
+| Admission du minage | Gardes partagées triées → token ; commit avant la récolte |
+| Lancement | Token → paire sonde/source → Manny/tâche ; aucune enveloppe exclusive de sonde |
+| Récolte | Token → Manny/tâche/événement avec contrôle du bail → source → conteneurs embarqués triés si retour → destination détachée |
+| Récolte de deutérium vers la sonde | Verrou local supplémentaire de `neumann_probes` pour le réservoir et ses réservations ; pas de séparation du réservoir dans ce lot |
+| Rappel de minage, retour/attente de place | Admission ou garde de transaction → Manny/tâche → capacités et inventaires locaux |
+| Fabrication et autres écritures | Admission/garde de transaction ; conteneur réservé ou ensemble de conteneurs candidats selon l'opération ; les déplacements/réservations de capacité partagent ces racines avec le minage |
+| Fermeture | Garde exclusive `NOWAIT` ; commit avant toute attente |
+| Nettoyage | Preuve de perte → joueur → sonde → Mannies/inventaires ; uniquement après drainage |
+
+Les verrous locaux peuvent encore entrer en conflit avec d'autres familles d'actions. Ce lot ne prétend pas supprimer tout interblocage du moteur : la politique progressive de reprise du scheduler reste le lot 5. SQLite sérialise ses writers à l'échelle du fichier ; la démonstration de parallélisme utilise MariaDB.
+
+### Migration et vérifications
+
+```bash
+php scripts/one-shot-scripts/migrate-probe-operations.php --database-config=PATH --dry-run
+# Sous maintenance, API writers et workers arrêtés :
+php scripts/one-shot-scripts/migrate-probe-operations.php --database-config=PATH --apply
+```
+
+Le schéma est déclaré dans `SchemaInitializer`. La simulation n'ouvre aucune connexion. L'application initialise seulement les gardes absentes et conserve les gardes fermées ; elle programme les pertes des sondes déjà terminales, sans nettoyer leurs inventaires pendant la migration. Pour ces seules pertes historiques sans preuve antérieure, la cause explicite est `migration_terminal` et l'instant causal est leur `updated_at` stocké. La répétition ne crée pas une seconde perte ni un second événement. Une garde manquante est refusée par le code courant ; aucun fallback ni réparation implicite.
+
+Validation : **541 tests moteur**, **4 558 tests API**, suites de concurrence SQLite et MariaDB sur tables isolées. Couverture ajoutée : admission/fermeture concurrentes, deux mineurs indépendants de la même sonde, fin de livraison après fermeture, source intacte si fermeture antérieure, retour de Manny pendant drainage, événement futur, anciens tokens, expiration pendant transaction active, crash avant transaction et après demande, rollback de finalisation après création d'alerte, reprise par un scheduler unique, transferts entrants, suppression de compte, renommage API concurrent au minage, rollback isolé d’un membre de lot API, deux causes de destruction simultanées et migration répétable. Les tests existants de missiles en vol et d'historique restent verts.
+
+Mesures locales MariaDB sur tables isolées : admission seule **0,534 ms en moyenne sur 25 opérations**, perte sans opération active **7,855 ms**, retour du drainage devant un token expiré mais encore verrouillé **5,5 ms**. Mesures indicatives de développement ; charge et volumétrie de production à vérifier au lot 6.
+
+Logs : `/tmp/vng-lot4bis-sector.log`, `/tmp/vng-lot4bis-api.log`, `/tmp/vng-lot4bis-concurrency-sqlite.log`, `/tmp/vng-lot4bis-concurrency-mariadb.log`. Aucun changement du contrat API (**v148**). Aucune écriture de production. Branche **non déployable avant les lots 5, 6 et 7** et la conversion explicite des données.

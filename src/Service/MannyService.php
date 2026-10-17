@@ -812,12 +812,20 @@ final class MannyService implements MannyTaskRuntime
      */
     private function withProbeLock(NeumannProbe $probe, callable $callback): mixed
     {
-        if ($this->preparedBatchProbeId === $probe->id) {
-            return $callback($this->probes->findById($probe->id) ?? $probe);
-        }
-
         return $this->probes->withProbeLock($probe->id, function () use ($probe, $callback): mixed {
             return $callback($this->probes->findById($probe->id) ?? $probe);
+        });
+    }
+
+    /** Historic orders keep their probe envelope but also fence the actual actor. */
+    private function withMannyOrder(NeumannProbe $probe, string $uid, callable $callback): mixed
+    {
+        return $this->withProbeLock($probe, function (NeumannProbe $currentProbe) use ($uid, $callback): mixed {
+            $id = $this->requiredManny($currentProbe, $uid)->id;
+            return $this->mannies->withMannyLock($id, function (Manny $current) use ($currentProbe, $callback): mixed {
+                if ($current->probeId !== $currentProbe->id) { throw new MannyActionException(404, 'manny_not_found', 'Manny not found.'); }
+                return $callback($currentProbe);
+            });
         });
     }
 
@@ -828,19 +836,23 @@ final class MannyService implements MannyTaskRuntime
      */
     private function withTaskLock(Manny $manny, NeumannProbe $probe, callable $callback): mixed
     {
-        if (in_array($manny->currentTask, [Manny::TASK_CRAFTING, Manny::TASK_ASSISTING_ATOMIC_PRINTER], true)) {
+        if (in_array($manny->currentTask, [Manny::TASK_CRAFTING, Manny::TASK_ASSISTING_ATOMIC_PRINTER, Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)) {
             return $this->mannies->withMannyLock($manny->id, function (Manny $lockedManny) use ($probe, $callback): mixed {
+                if (in_array($lockedManny->currentTask, [Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)) {
+                    if (($lockedManny->cargoArray()['deuterium'] ?? 0) > 0) { $this->storage->miningTankCapacity($probe); }
+                    $this->storage->lockMannyPlacement($probe);
+                }
                 return $callback($lockedManny, $this->probes->findById($probe->id) ?? $probe);
             });
         }
 
         return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($manny, $callback): mixed {
-            return $callback($this->mannies->findById($manny->id) ?? $manny, $lockedProbe);
+            return $this->mannies->withMannyLock($manny->id, fn(Manny $current): mixed => $callback($current, $lockedProbe));
         });
     }
 
     /**
-     * Runs a Manny task batch under one probe lock. Pre-existing tasks remain
+     * Admits a Manny task batch before its owning transaction. Pre-existing tasks remain
      * authoritative until their scheduled events are processed by the worker.
      *
      * @template T
@@ -853,7 +865,8 @@ final class MannyService implements MannyTaskRuntime
             throw new \LogicException('A Manny task batch is already being prepared.');
         }
 
-        return $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($callback): mixed {
+        return $this->probes->withAdmittedOperation([$probe->id], function () use ($probe, $callback): mixed {
+            $lockedProbe = $this->probes->findById($probe->id) ?? throw new \RuntimeException("Probe disappeared after admission.");
             $this->preparedBatchProbeId = $lockedProbe->id;
             try {
                 return $callback($lockedProbe);
@@ -911,25 +924,24 @@ final class MannyService implements MannyTaskRuntime
 
     public function renameManny(NeumannProbe $probe, string $uid, string $name): Manny
     {
-        $manny = $this->requiredManny($probe, $uid);
         $name = trim($name);
         if ($name === '' || strlen($name) > 40) {
             throw new MannyActionException(400, 'bad_request', 'Manny name must contain 1 to 40 characters.');
         }
-        if ($this->mannies->nameExistsForProbe($probe->id, $name, $manny->id)) {
-            throw new MannyActionException(409, 'duplicate_manny_name', 'Manny names must be unique for this probe.');
-        }
-
-        $manny->name = $name;
-        $this->mannies->save($manny);
-
-        return $this->requiredManny($probe, $uid);
+        return $this->withMannyOrder($probe, $uid, function (NeumannProbe $currentProbe) use ($uid, $name): Manny {
+            $manny = $this->requiredManny($currentProbe, $uid);
+            if ($this->mannies->nameExistsForProbe($currentProbe->id, $name, $manny->id)) {
+                throw new MannyActionException(409, 'duplicate_manny_name', 'Manny names must be unique for this probe.');
+            }
+            $manny->name = $name;
+            $this->mannies->save($manny);
+            return $this->requiredManny($currentProbe, $uid);
+        });
     }
 
     public function startRepair(NeumannProbe $probe, string $uid, float $integrityPercent): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startRepairLocked($lockedProbe, $uid, $integrityPercent),
         );
     }
@@ -941,9 +953,9 @@ final class MannyService implements MannyTaskRuntime
 
     public function startMining(NeumannProbe $probe, string $uid, string $objectId, string|array $resourceTypes, float $targetAmount, ?string $targetContainerId = null): Manny
     {
-        return $this->mannies->withMiningTransaction(fn(): Manny => $this->withProbeLock(
-            $probe,
-            fn(NeumannProbe $lockedProbe): Manny => $this->startMiningLocked($lockedProbe, $uid, $objectId, $resourceTypes, $targetAmount, $targetContainerId),
+        return $this->probes->withAdmittedOperation([$probe->id], fn(): Manny => $this->startMiningLocked(
+            $this->probes->findById($probe->id) ?? throw new \RuntimeException('Admitted probe missing.'),
+            $uid, $objectId, $resourceTypes, $targetAmount, $targetContainerId,
         ));
     }
 
@@ -958,8 +970,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startMotorizingAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             function (NeumannProbe $lockedProbe) use ($uid, $objectId): Manny {
                 if ($this->improvements?->findForProbe($lockedProbe->id, ProbeImprovementCatalog::DISTRIBUTED_THRUST_ANCHORING)?->available !== true) {
                     throw new MannyActionException(422, 'distributed_thrust_anchoring_unavailable', 'The Distributed Thrust Anchoring blueprint has not been unlocked.');
@@ -972,16 +983,14 @@ final class MannyService implements MannyTaskRuntime
 
     public function startRefuelingMotorizedAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->refuelMotorizedAsteroidTaskHandler->start($lockedProbe, $uid, $objectId),
         );
     }
 
     public function startSculptingDuckAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             function (NeumannProbe $lockedProbe) use ($uid, $objectId): Manny {
                 if ($this->improvements?->findForProbe($lockedProbe->id, ProbeImprovementCatalog::ANATIFORM_ASTEROID_SCULPTING)?->available !== true) {
                     throw new MannyActionException(422, 'anatiform_asteroid_sculpting_unavailable', 'The Anatiform Asteroid Sculpting blueprint has not been unlocked.');
@@ -994,8 +1003,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startCrafting(NeumannProbe $probe, string $uid, string $recipe): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startCraftingLocked($lockedProbe, $uid, $recipe),
         );
     }
@@ -1131,8 +1139,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startProbeImprovement(NeumannProbe $probe, string $uid, string $improvement): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startProbeImprovementLocked($lockedProbe, $uid, $improvement),
         );
     }
@@ -1147,8 +1154,7 @@ final class MannyService implements MannyTaskRuntime
      */
     public function startProbeAssembly(NeumannProbe $probe, string $uid, array $containerIds, string $model = ProbeModel::GENERIC): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startProbeAssemblyLocked($lockedProbe, $uid, $containerIds, $model),
         );
     }
@@ -1163,8 +1169,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startSalvage(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startSalvageLocked($lockedProbe, $uid, $objectId),
         );
     }
@@ -1176,10 +1181,11 @@ final class MannyService implements MannyTaskRuntime
 
     public function startDetachStorageContainer(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $mode, ?string $objectId = null): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        $ids = [$probe->id];
+        if ($mode === SectorDetachedContainer::MODE_ATTACH_TO_PROBE && is_numeric($objectId) && (int) $objectId > 0) { $ids[] = (int) $objectId; }
+        return $this->probes->withProbeGuards($ids, fn(): Manny => $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startDetachStorageContainerLocked($lockedProbe, $ownerPlayerId, $uid, $containerId, $mode, $objectId),
-        );
+        ));
     }
 
     private function startDetachStorageContainerLocked(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $mode, ?string $objectId = null): Manny
@@ -1197,8 +1203,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startDropStorageContainerOnPlanet(NeumannProbe $probe, int $ownerPlayerId, string $uid, string $containerId, string $planetId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startDropStorageContainerOnPlanetLocked($lockedProbe, $ownerPlayerId, $uid, $containerId, $planetId),
         );
     }
@@ -1210,8 +1215,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startInspectSectorObject(NeumannProbe $probe, string $uid, string $objectId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startInspectSectorObjectLocked($lockedProbe, $uid, $objectId),
         );
     }
@@ -1223,8 +1227,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startRecoverDetachedContainer(NeumannProbe $probe, string $uid, string $objectId, ?string $mannyId = null): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startRecoverDetachedContainerLocked($lockedProbe, $uid, $objectId, $mannyId),
         );
     }
@@ -1337,8 +1340,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startWaypointBookmarkInstallation(NeumannProbe $probe, Player $player, string $uid, string $objectId, string $name): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startWaypointBookmarkInstallationLocked($lockedProbe, $player, $uid, $objectId, $name),
         );
     }
@@ -1350,8 +1352,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startDeuteriumTankRefill(NeumannProbe $probe, string $uid): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startDeuteriumTankRefillLocked($lockedProbe, $uid),
         );
     }
@@ -1363,10 +1364,9 @@ final class MannyService implements MannyTaskRuntime
 
     public function startDeuteriumTransferToProbe(NeumannProbe $probe, string $uid, int $targetProbeId, float $amount): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->probes->withProbeGuards([$probe->id, $targetProbeId], fn(): Manny => $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startDeuteriumTransferToProbeLocked($lockedProbe, $uid, $targetProbeId, $amount),
-        );
+        ));
     }
 
     private function startDeuteriumTransferToProbeLocked(NeumannProbe $probe, string $uid, int $targetProbeId, float $amount): Manny
@@ -1379,10 +1379,9 @@ final class MannyService implements MannyTaskRuntime
 
     public function startMannyTransferToProbe(NeumannProbe $probe, string $uid, int $targetProbeId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->probes->withProbeGuards([$probe->id, $targetProbeId], fn(): Manny => $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startMannyTransferToProbeLocked($lockedProbe, $uid, $targetProbeId),
-        );
+        ));
     }
 
     private function startMannyTransferToProbeLocked(NeumannProbe $probe, string $uid, int $targetProbeId): Manny
@@ -1447,8 +1446,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startScutRelayTurnOn(NeumannProbe $probe, string $uid, int $relayId, ?string $networkName = null): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startScutRelayTurnOnLocked($lockedProbe, $uid, $relayId, $networkName),
         );
     }
@@ -1460,8 +1458,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function startScutTransitBeaconInstallation(NeumannProbe $probe, string $uid, int $relayId): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startScutTransitBeaconInstallationLocked($lockedProbe, $uid, $relayId),
         );
     }
@@ -1476,8 +1473,7 @@ final class MannyService implements MannyTaskRuntime
      */
     public function startStorageMove(NeumannProbe $probe, string $uid, array $payload): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->startStorageMoveLocked($lockedProbe, $uid, $payload),
         );
     }
@@ -1492,8 +1488,13 @@ final class MannyService implements MannyTaskRuntime
 
     public function recallManny(NeumannProbe $probe, string $uid): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        $candidate = $this->requiredManny($probe, $uid);
+        if (in_array($candidate->currentTask, [Manny::TASK_MINING, Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)) {
+            return $this->probes->withAdmittedOperation([$probe->id], fn(): Manny => $this->mannies->withMannyLock(
+                $candidate->id, fn(Manny $manny): Manny => $this->recallMannyLocked($this->probes->findById($probe->id), $uid),
+            ));
+        }
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->mannies->withMannyLock(
                 $this->requiredManny($lockedProbe, $uid)->id,
                 fn(Manny $manny): Manny => $this->recallMannyLocked($lockedProbe, $uid),
@@ -1621,7 +1622,24 @@ final class MannyService implements MannyTaskRuntime
         $this->mannies->save($manny);
     }
 
-    private function cancelMannyTaskForProbeTransfer(NeumannProbe $probe, Manny $manny): array
+    public function cancelForProbeLoss(NeumannProbe $probe, Manny $manny, ?string $causalAt = null): void
+    {
+        $lastTask = $manny->currentTask;
+        $this->cancelMannyTaskForProbeTransfer($probe, $manny, 'carrier_destroyed', $causalAt);
+        if ($lastTask === Manny::TASK_INSTALLING_WAYPOINT_BOOKMARK && is_array($manny->taskPayload['reservedItem'] ?? null)) {
+            $this->crafting->restoreConsumedItem($probe, $manny->taskPayload['reservedItem']);
+        }
+        if (in_array($lastTask, [Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)) {
+            $this->cargo->restoreReservedSalvageItem($manny);
+            $this->cargo->restoreReservedDetachedContainer($manny);
+        }
+        // Transfer completion may have changed the actor; read its resulting cargo.
+        $manny = $this->mannies->findById($manny->id) ?? $manny;
+        $this->clearTask($manny, ['lastTask' => $lastTask, 'result' => 'cancelled', 'reason' => 'carrier_destroyed']);
+        $this->mannies->save($manny);
+    }
+
+    private function cancelMannyTaskForProbeTransfer(NeumannProbe $probe, Manny $manny, string $reason = 'actor_reassigned', ?string $causalAt = null): array
     {
         $lastTask = $manny->currentTask;
         if ($lastTask === null) {
@@ -1629,7 +1647,7 @@ final class MannyService implements MannyTaskRuntime
         }
 
         if ($lastTask === MannyStorageTransferService::TASK) {
-            ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->complete($manny->taskPayload['transferId'],gmdate('c'),'actor_reassigned');
+            ($this->sectorStorageTransfers ?? throw new \RuntimeException('Storage transfer service required.'))->complete($manny->taskPayload['transferId'], $causalAt ?? gmdate('c'), $reason);
         }
 
         if ($lastTask === Manny::TASK_REPAIR) {
@@ -1756,8 +1774,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function dropMannyCargo(NeumannProbe $probe, string $uid): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->dropMannyCargoLocked($lockedProbe, $uid),
         );
     }
@@ -1802,8 +1819,7 @@ final class MannyService implements MannyTaskRuntime
 
     public function jettisonMannyFromProbe(NeumannProbe $probe, string $uid): Manny
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->jettisonMannyFromProbeLocked($lockedProbe, $uid),
         );
     }
@@ -1833,8 +1849,7 @@ final class MannyService implements MannyTaskRuntime
      */
     public function jettisonProbeItemFromProbe(NeumannProbe $probe, string $uid): array
     {
-        return $this->withProbeLock(
-            $probe,
+        return $this->withProbeLock($probe,
             fn(NeumannProbe $lockedProbe): array => $this->jettisonProbeItemFromProbeLocked($lockedProbe, $uid),
         );
     }
@@ -1893,31 +1908,24 @@ final class MannyService implements MannyTaskRuntime
         $candidate = $this->mannies->findById($event->entityId);
         if ($event->entityType !== 'manny' || $candidate?->currentTask !== Manny::TASK_MINING || $candidate->probeId === null) { return null; }
         $events = $this->scheduledEvents ?? throw new \LogicException('Mining requires the scheduler repository.');
-        return $this->mannies->withMiningTransaction(function () use ($candidate, $events, $event): bool {
-            // Temporary outer envelope, removed only with lot 4 bis admissions.
-            return $this->probes->withProbeLock($candidate->probeId, function () use ($candidate, $events, $event): bool {
-                $probe = $this->probes->findById($candidate->probeId);
-                if ($probe === null || $probe->status === ProbeStatus::Dead) {
-                    $events->lockOwned($event);
-                    $events->markDone($event);
-                    return true;
-                }
-                $manny = $this->mannies->lockForTask($candidate->id);
-                $events->lockOwned($event);
-                if ($manny === null || $manny->probeId !== $probe->id || $manny->taskScheduledEventId !== $event->id || $manny->currentTask !== Manny::TASK_MINING) {
-                    $events->markDone($event);
-                    return true;
-                }
-                $manny = $this->miningTaskHandler->refresh($this, $manny, $probe, new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
-                if ($manny->currentTask === null || $manny->taskScheduledEventId !== $event->id) {
-                    $events->markDone($event);
-                    return true;
-                }
-                $runAt = $manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? $manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT;
-                if ($runAt <= gmdate('c')) { $runAt = gmdate('c', time() + 60); }
-                $events->release($event, $runAt, $manny->taskPayload);
-                return false;
-            });
+        return $this->probes->withAdmittedOperation([$candidate->probeId], function () use ($candidate, $events, $event): bool {
+            $probe = $this->probes->findById($candidate->probeId)
+                ?? throw new \RuntimeException('Admitted mining probe disappeared before its operation resolved.');
+            $manny = $this->mannies->lockForTask($candidate->id);
+            $events->lockOwned($event);
+            if ($manny === null || $manny->probeId !== $probe->id || $manny->taskScheduledEventId !== $event->id || $manny->currentTask !== Manny::TASK_MINING) {
+                $events->markDone($event);
+                return true;
+            }
+            $manny = $this->miningTaskHandler->refresh($this, $manny, $probe, new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
+            if ($manny->currentTask === null || $manny->taskScheduledEventId !== $event->id) {
+                $events->markDone($event);
+                return true;
+            }
+            $runAt = $manny->taskPayload[Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY] ?? $manny->taskEndsAt ?? ScheduledEventRepository::UNSCHEDULED_RUN_AT;
+            if ($runAt <= gmdate('c')) { $runAt = gmdate('c', time() + 60); }
+            $events->release($event, $runAt, $manny->taskPayload);
+            return false;
         });
     }
 
@@ -1944,7 +1952,13 @@ final class MannyService implements MannyTaskRuntime
             return $manny;
         }
 
-        return $this->taskRefresher->refreshAllowingOutOfRange($manny, $probe);
+        $events = $this->scheduledEvents ?? throw new \LogicException('Task execution requires scheduler fencing.');
+        return $this->probes->withProbeGuards($events->probeIdsFor($event), function () use ($manny, $probe, $event, $events): Manny {
+            return $this->withTaskLock($manny, $probe, function (Manny $current, NeumannProbe $currentProbe) use ($event, $events): Manny {
+                $events->lockOwned($event);
+                return $this->taskRefresher->refreshAllowingOutOfRange($current, $currentProbe);
+            });
+        });
     }
 
     private function canRefreshMannyTaskFromProbe(NeumannProbe $probe, Manny $manny): bool

@@ -115,6 +115,8 @@ final class ApiKernel
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (ProbeReinstantiationException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
+        } catch (\VonNeumannGame\Repository\ProbeAdmissionClosedException $e) {
+            return ApiResponse::error(409, $e->errorCode, 'The probe is no longer operational.');
         } catch (MannyActionException $e) {
             return ApiResponse::error($e->httpStatus, $e->errorCode, $e->getMessage());
         } catch (ObservationAccessException $e) {
@@ -1303,8 +1305,11 @@ final class ApiKernel
                 return ApiResponse::error(400, 'bad_request', 'Probe name must be a string.');
             }
 
-            $targetProbe->name = $data['name'];
-            $this->probes->save($targetProbe);
+            $this->probes->withProbeLock($targetProbe->id, function () use ($targetProbe, $data): void {
+                $current = $this->probes->findById($targetProbe->id) ?? throw new \RuntimeException('Probe disappeared.');
+                $current->name = $data['name'];
+                $this->probes->save($current);
+            });
             $modified = true;
         }
 
@@ -1327,8 +1332,8 @@ final class ApiKernel
                 return ApiResponse::error(422, 'probe_not_in_same_sector', 'Default probe can only be changed when both probes are in the same sector or inside the same SCUT network coverage.');
             }
 
-            $player->defaultProbeId = $targetProbe->id;
-            $this->players->save($player);
+            $this->probes->withProbeGuards([$targetProbe->id], fn() => $this->players->setDefaultProbe($player->id, $targetProbe->id));
+            $player = $this->players->findById($player->id) ?? $player;
             $modified = true;
         }
 

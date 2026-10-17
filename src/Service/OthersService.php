@@ -1198,12 +1198,9 @@ final class OthersService
                     $probe = $this->probes->findById((int) $target['id']);
                     if ($probe !== null) {
                         $probe->subtractIntegrityPercent(5.0);
-                        if ($probe->status === ProbeStatus::Dead) {
-                            $this->interruptProbeStorageTransfers($probe->id, (string) $lock['next_damage_at']);
-                        }
                         $this->probes->save($probe);
                         if ($probe->status === ProbeStatus::Dead) {
-                            $this->reinstantiation->handleTerminalProbeLoss($probe, ProbeReinstantiationService::TERMINAL_REASON_LASER);
+                            $this->reinstantiation->handleTerminalProbeLoss($probe, ProbeReinstantiationService::TERMINAL_REASON_LASER, (string) $lock['next_damage_at']);
                             $this->stopLaser($action, $lock, $now, 'target_destroyed');
                             return;
                         }
@@ -1343,7 +1340,7 @@ final class OthersService
         if ($target['kind'] === 'probe' && ($details['destroyed'] ?? false)) {
             $probe = $this->probes?->findById((int) $target['id']);
             if ($probe !== null) {
-                $this->reinstantiation->handleTerminalProbeLoss($probe, ProbeReinstantiationService::TERMINAL_REASON_MISSILE);
+                $this->reinstantiation->handleTerminalProbeLoss($probe, ProbeReinstantiationService::TERMINAL_REASON_MISSILE, (string) $projectile['impact_at']);
             }
         }
     }
@@ -1367,7 +1364,7 @@ final class OthersService
         if (!$this->persistence->combat->recordDamage(['key'=>$key,'kind'=>$target['kind'],'target'=>$target['id'],'damage'=>$damage,'now'=>gmdate('c')])) { return ['damage'=>0,'replayed'=>true]; }
         if($target['kind']==='manny'){ $victim=$this->mannies?->findByUid($target['id']); if($victim!==null){$this->mannyStorageTransfers?->interruptManny($victim->id,$projectile['impact_at']);} $this->persistence->combat->deleteImpactedManny(['uid'=>$target['id']]);return ['damage'=>1,'destroyed'=>true];}
         if($target['kind']==='others_auxiliary'){$this->destroyAuxiliary($target,$projectile['impact_at']);return ['damage'=>1,'destroyed'=>true];}
-        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$applied=$probe->subtractIntegrityPercent($damage);if($probe->status===ProbeStatus::Dead){$this->interruptProbeStorageTransfers($probe->id,$projectile['impact_at']);}$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->status===ProbeStatus::Dead];}
+        if($target['kind']==='probe' && $this->probes!==null){$probe=$this->probes->findById((int)$target['id']);$applied=0.0;if($probe!==null){$applied=$probe->subtractIntegrityPercent($damage);$this->probes->save($probe);}return ['damage'=>$applied,'damagePercent'=>$applied,'destroyed'=>$probe?->status===ProbeStatus::Dead];}
         if ($target['kind'] === 'motorized_asteroid') {
             $trajectoryId = (int) $target['trajectory_id'];
             $now = gmdate('c');

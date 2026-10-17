@@ -60,6 +60,12 @@ final class PlayerRepository
         return (bool) $stmt->fetchColumn();
     }
 
+    public function setDefaultProbe(int $playerId, int $probeId): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE players SET default_probe_id=?,updated_at=? WHERE id=?');
+        $stmt->execute([$probeId, gmdate('c'), $playerId]);
+    }
+
     public function save(Player $player): void
     {
         $player->updatedAt = gmdate('c');

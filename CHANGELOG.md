@@ -6,12 +6,16 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Stocks minables SQL, lot 4 bis : admission durable avant minage, fermeture et drainage reprenables des sondes perdues, annulation métier des tâches et transferts entrants, relecture de l'inventaire avant destruction. Retrait de l'enveloppe exclusive générale de sonde du minage ; verrou local du réservoir conservé. Missiles en vol et trajectoires déjà initiées préservés. Contrat API inchangé (v148) ; lots 5 à 7 requis avant déploiement global.
+
 - Stocks minables SQL, lot 4 : débit, livraison, état de Manny et événement scheduler atomiques, contrôle du bail et absence de double crédit après reprise. Livraison directe aux conteneurs détachés sous verrou de capacité (réservations comprises), sans sauvegarde de secteur ; verrous locaux au lancement/rappel et découvertes de caches en SQL. Le réservoir conserve la place réservée aux transferts. Contrat API inchangé (v148). L’enveloppe de sonde reste en place jusqu’au lot 4 bis.
 - Stocks minables SQL, lot 3 : motorisation et références actives, fusion/fragmentation, transit/capture/perte, destruction, sculpture, ravitaillement, renommage et inspection passent par des intentions de secteur publiées après commit. Les transformations utilisent les stocks courants sous verrou et préservent les cargaisons attachées ; les replays ne recréent pas les ressources. Le minage revalide la trajectoire lorsqu'un fichier de départ est en retard. Contrat public inchangé (v148).
 - Stocks minables SQL, lot 2 bis : les Mannies oubliées utilisent `mannies.is_forgotten` et leurs données SQL courantes. Observations et recherches par identifiant composent leur présence sans l'écrire dans les secteurs ; récupération et embarquement revalident l'état et la place sous verrous. Les Mannies abandonnées conservent leur format et leurs règles, avec publication durable après commit. Contrat API inchangé (v148).
 - Statistiques : comptage SQL des Mannies oubliées et extraction des requêtes dans `UniverseStatsRepository`, conformément à la garde d'architecture.
 
 ### Added
+
+- Migration explicite de la coordination des sondes : `scripts/one-shot-scripts/migrate-probe-operations.php --database-config=PATH`, simulation sans connexion par défaut, `--apply` sous maintenance. Initialisation des gardes, conservation des fermetures et programmation idempotente du nettoyage des sondes déjà terminales ; aucune modification des stocks par ce script.
 
 - Migration additive des verrous locaux de lancement : `scripts/one-shot-scripts/migrate-mining-order-locks.php --database-config=PATH`, simulation par défaut, `--apply` sous maintenance. Aucune réservation de ressources ni conversion implicite ; lots 4 bis, 5, 6 et 7 requis avant déploiement global.
 - Conversion explicite des snapshots de trajectoires actives : `scripts/one-shot-scripts/migrate-asteroid-snapshot-descriptors.php`, simulation par défaut, `--apply --backup=NEW_FILE` puis `--verify`, sous maintenance après import des stocks. Les historiques terminaux restent inchangés. Les lots 4, 4 bis, 5, 6 et 7 restent requis avant déploiement de la migration globale.

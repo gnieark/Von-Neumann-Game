@@ -76,6 +76,7 @@ function run(array $argv): int
         new NeumannProbeRepository($pdo, $gameplayConfig),
         new MannyRepository($pdo, $gameplayConfig),
         $sectorService,
+        $factory->mannyServiceForCleanup($pdo, $sectorService),
     );
 
     $stats = $deleter->deletePlayer($player, $options['dryRun']);

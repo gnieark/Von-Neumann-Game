@@ -46,6 +46,11 @@ final class ProbeMovementService
     private readonly array $gameplayConfig;
     private readonly array $movementConfig;
 
+    public function resumeProbeLoss(int $probeId): bool
+    {
+        return ($this->reinstantiation ?? throw new \LogicException('Probe loss coordinator unavailable.'))->resumeLoss($probeId);
+    }
+
     public function __construct(
         private readonly NeumannProbeRepository $probes,
         private readonly ProbeMovementRepository $movements,
@@ -919,17 +924,21 @@ final class ProbeMovementService
             return;
         }
 
-        $probe->status = ProbeStatus::TrappedByBlackHole;
-        $probe->velocityC = 0.0;
-        $probe->accelerationCPerDay = 0.0;
-        $probe->direction = new ProbeDirection(0.0, 0.0, 0.0);
-        $probe->currentTask = null;
-        $probe->integrityPercent = 0.0;
-        $this->probes->save($probe);
-        $this->reinstantiation?->switchDefaultProbeAfterTerminalLoss(
-            $probe,
-            ProbeReinstantiationService::TERMINAL_REASON_BLACK_HOLE,
-        );
+        $this->probes->withProbeLock($probe->id, function () use ($probe): void {
+            $probe = $this->probes->findById($probe->id) ?? throw new \RuntimeException('Probe disappeared.');
+            if ($this->movements->findActiveByProbeId($probe->id) !== null || in_array($probe->status, [ProbeStatus::Dead, ProbeStatus::TrappedByBlackHole], true)) { return; }
+            $probe->status = ProbeStatus::TrappedByBlackHole;
+            $probe->velocityC = 0.0;
+            $probe->accelerationCPerDay = 0.0;
+            $probe->direction = new ProbeDirection(0.0, 0.0, 0.0);
+            $probe->currentTask = null;
+            $probe->integrityPercent = 0.0;
+            $this->probes->save($probe);
+            $this->reinstantiation?->switchDefaultProbeAfterTerminalLoss(
+                $probe,
+                ProbeReinstantiationService::TERMINAL_REASON_BLACK_HOLE,
+            );
+        });
     }
 
     private function applyIntersectorIntegrityLoss(NeumannProbe $probe, ProbeMovement $movement): void

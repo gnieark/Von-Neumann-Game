@@ -167,7 +167,7 @@ require_once __DIR__ . '/OthersTestFixture.php';
             $manny->taskEndsAt = gmdate('c', time() - 1);
             $manny->taskPayload = ['objectId' => $objectId];
             $mannies->save($manny);
-            $event = $events->findById($manny->taskScheduledEventId);
+            $event = $events->claim($events->findById($manny->taskScheduledEventId));
             return [$event, $taskService->refreshScheduledMannyTask($event)];
         };
         [$othersRepo, $othersService] = othersTestFixture($db, $directory);

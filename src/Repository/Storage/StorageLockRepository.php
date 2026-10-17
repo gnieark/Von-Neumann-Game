@@ -39,6 +39,7 @@ final class StorageLockRepository
     public function lock(string $kind, int|string $id): ?array
     {
         if (!$this->pdo->inTransaction()) { throw new \LogicException('Storage locks require a transaction.'); }
+        if ($kind === 'probe') { (new \VonNeumannGame\Repository\ProbeOperationRepository($this->pdo))->protect([(int) $id]); }
         [$table, $key] = match ($kind) {
             'fleet' => ['others_fleets', 'id'], 'projectile' => ['others_projectiles', 'id'],
             'trajectory' => ['asteroid_trajectories', 'id'], 'launch' => ['missile_launches', 'id'], 'ship' => ['others_ships', 'id'], 'auxiliary' => ['others_auxiliaries', 'id'],

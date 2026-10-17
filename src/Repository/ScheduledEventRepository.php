@@ -52,52 +52,103 @@ final class ScheduledEventRepository
     {
         $limit = max(1, $limit);
         $stmt = $this->pdo->query(
-            "SELECT * FROM scheduled_events
-             WHERE status = 'pending' AND run_at <= " . $this->pdo->quote($now) . "
-             ORDER BY run_at ASC, id ASC
-             LIMIT $limit"
+            'SELECT se.* ' . $this->pendingFromSql() . ' AND se.run_at <= ' . $this->pdo->quote($now)
+            . " ORDER BY CASE WHEN se.type='probe.loss' THEN 0 ELSE 1 END, se.run_at, se.id LIMIT $limit"
         );
-
         return array_map(fn(array $row): ScheduledEvent => $this->hydrate($row), $stmt->fetchAll());
     }
 
     public function findNextPendingRunAt(): ?string
     {
-        $value = $this->pdo->query(
-            "SELECT run_at FROM scheduled_events
-             WHERE status = 'pending'
-             ORDER BY run_at ASC, id ASC
-             LIMIT 1"
-        )->fetchColumn();
+        $value = $this->pdo->query('SELECT se.run_at ' . $this->pendingFromSql() . ' ORDER BY se.run_at,se.id LIMIT 1')->fetchColumn();
+        return $value === false ? null : (string) $value;
+    }
 
-        return $value !== false ? (string) $value : null;
+    /** Selection avoids starving other probes during a drain; admission remains authoritative. */
+    private function pendingFromSql(): string
+    {
+        $mode = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? "JSON_UNQUOTE(JSON_EXTRACT(se.payload_json,'$.mode'))" : "JSON_EXTRACT(se.payload_json,'$.mode')";
+        $integer = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'UNSIGNED' : 'INTEGER';
+        return "FROM scheduled_events se
+            LEFT JOIN mannies m ON se.entity_type='manny' AND m.id=se.entity_id
+            LEFT JOIN manny_tasks mt ON mt.scheduled_event_id=se.id AND mt.manny_id=m.id
+            LEFT JOIN probe_movements pm ON se.entity_type='probe_movement' AND pm.id=se.entity_id
+            LEFT JOIN probe_damage_warnings pw ON se.entity_type='probe_damage_warning' AND pw.id=se.entity_id
+            LEFT JOIN probe_operation_gates actor_gate ON actor_gate.probe_id=COALESCE(m.probe_id,pm.probe_id,pw.probe_id,CASE WHEN se.entity_type='probe' THEN se.entity_id END)
+            LEFT JOIN probe_operation_gates target_gate ON target_gate.probe_id=COALESCE(mt.target_probe_id,CASE WHEN $mode='attach_to_probe' THEN CAST(mt.target_object_id AS $integer) END)
+            WHERE se.status='pending' AND COALESCE(actor_gate.closed,0)=0 AND COALESCE(target_gate.closed,0)=0";
+    }
+
+    public function recoverExpiredAdmissions(): int
+    {
+        return (new ProbeOperationRepository($this->pdo))->recoverExpired();
+    }
+
+    /** Probe actor plus receiving probe, never the initiator of an in-flight projectile. */
+    public function probeIdsFor(ScheduledEvent $event): array
+    {
+        $sql = match ($event->entityType) {
+            'probe' => 'SELECT id FROM neumann_probes WHERE id=?',
+            'probe_movement' => 'SELECT probe_id FROM probe_movements WHERE id=?',
+            'probe_damage_warning' => 'SELECT probe_id FROM probe_damage_warnings WHERE id=?',
+            'manny' => 'SELECT probe_id FROM mannies WHERE id=?',
+            default => null,
+        };
+        if ($sql === null) { return []; }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$event->entityId]);
+        $id = $stmt->fetchColumn();
+        $ids = $id ? [(int) $id] : [];
+        $payload = $event->entityType === 'manny' ? ((new MannyRepository($this->pdo))->findById($event->entityId)?->taskPayload ?? []) : $event->payload;
+        $target = self::targetProbeId($payload);
+        if (is_numeric($target) && (int) $target > 0) { $ids[] = (int) $target; }
+        sort($ids, SORT_NUMERIC);
+        return array_values(array_unique($ids));
+    }
+
+    public static function targetProbeId(array $payload): ?int
+    {
+        $target = $payload['targetProbeId'] ?? (($payload['mode'] ?? null) === 'attach_to_probe' ? ($payload['targetObjectId'] ?? null) : null);
+        return is_numeric($target) && (int) $target > 0 ? (int) $target : null;
+    }
+
+    public function withAdmission(ScheduledEvent $event, callable $operation): mixed
+    {
+        // Movement/storage-break handlers prepare sectors before owning their protected transaction.
+        if ($event->entityType !== 'manny') { return $operation(); }
+        $ids = $this->probeIdsFor($event);
+        return $ids === [] ? $operation() : (new ProbeOperationRepository($this->pdo))->run($ids, $operation);
     }
 
     public function claim(ScheduledEvent $event): ?ScheduledEvent
     {
-        $now = gmdate('c');
-        $stmt = $this->pdo->prepare(
-            "UPDATE scheduled_events
-             SET status = 'running', locked_at = :locked_at, locked_by = :locked_by, attempts = attempts + 1, updated_at = :updated_at
-             WHERE id = :id AND status = 'pending'"
-        );
-        $stmt->execute([
-            'id' => $event->id,
-            'locked_at' => $now,
-            'locked_by' => $this->workerId,
-            'updated_at' => $now,
-        ]);
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($event): ?ScheduledEvent {
+            (new ProbeOperationRepository($this->pdo))->protect($this->probeIdsFor($event));
+            $now = gmdate('c');
+            $stmt = $this->pdo->prepare(
+                "UPDATE scheduled_events
+                 SET status = 'running', locked_at = :locked_at, locked_by = :locked_by, attempts = attempts + 1, updated_at = :updated_at
+                 WHERE id = :id AND status = 'pending'"
+            );
+            $stmt->execute([
+                'id' => $event->id,
+                'locked_at' => $now,
+                'locked_by' => $this->workerId,
+                'updated_at' => $now,
+            ]);
 
-        if ($stmt->rowCount() !== 1) {
-            return null;
-        }
-        $event->status = 'running';
-        $event->lockedAt = $now;
-        $event->lockedBy = $this->workerId;
-        $event->attempts++;
-        $event->updatedAt = $now;
+            if ($stmt->rowCount() !== 1) {
+                return null;
+            }
+            $event->status = 'running';
+            $event->lockedAt = $now;
+            $event->lockedBy = $this->workerId;
+            $event->attempts++;
+            $event->updatedAt = $now;
 
-        return $event;
+            return $event;
+        });
     }
 
     public function markDone(ScheduledEvent $event): void

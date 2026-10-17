@@ -133,7 +133,6 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
             $damage = (float) ($resolution['integrityDamagePercent'] ?? 0.0);
             $appliedDamage = $targetProbe->subtractIntegrityPercent($damage);
             if ($targetProbe->status === ProbeStatus::Dead) {
-                $this->othersService?->interruptProbeStorageTransfers($targetProbe->id,$now->format('c'));
                 $this->destroyObject($sector, $source->getId());
             }
             $this->probes->save($targetProbe);
@@ -324,7 +323,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         }
 
         if ($target instanceof NeumannProbe && $target->status === ProbeStatus::Dead && $status === AsteroidTrajectory::STATUS_DESTROYED) {
-            $this->reinstantiation->handleTerminalProbeLoss($target, ProbeReinstantiationService::TERMINAL_REASON_ASTEROID);
+            $this->reinstantiation->handleTerminalProbeLoss($target, ProbeReinstantiationService::TERMINAL_REASON_ASTEROID, $scheduledAt);
         }
 
         return $updated;

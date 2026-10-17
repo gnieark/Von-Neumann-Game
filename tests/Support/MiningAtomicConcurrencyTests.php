@@ -12,8 +12,8 @@ use VonNeumannGame\Sector\SectorDetachedContainer;
 
 require_once __DIR__ . '/MiningAtomicFixture.php';
 (static function () use ($connect, $race, $assert, $directory, $mysqlConfig): void {
-    foreach (['asteroid', 'wreck', 'shared-destination', 'independent'] as $index => $scenario) {
-        if ($scenario === 'independent' && $mysqlConfig === null) { continue; }
+    foreach (['asteroid', 'wreck', 'shared-destination', 'independent', 'same-probe'] as $index => $scenario) {
+        if (in_array($scenario, ['independent', 'same-probe'], true) && $mysqlConfig === null) { continue; }
         $db = $connect(); $f = miningAtomicFixture($db, $directory);
         $sector = new SectorCoordinates(980 + 2 * $index, 980, 0);
         $zero = MineableResourceAmounts::zero();
@@ -31,7 +31,13 @@ require_once __DIR__ . '/MiningAtomicFixture.php';
         });
         $actors = []; $destinations = [];
         for ($i = 0; $i < 2; ++$i) {
-            [$probe, $manny] = miningAtomicActor($f, 'atomic-race-' . $scenario . '-' . $i, $sector);
+            if ($scenario === 'same-probe' && $i === 1) {
+                $probe->currentSector = $sector; $f['probes']->save($probe);
+                $manny = $f['mannies']->createForProbe($probe->id, 'Second parallel miner');
+                $f['storage']->repairProbeStorage($probe);
+            } else {
+                [$probe, $manny] = miningAtomicActor($f, 'atomic-race-' . $scenario . '-' . $i, $sector);
+            }
             $destinations[$i] = 'atomic-destination-' . $scenario . '-' . ($scenario === 'shared-destination' ? 0 : $i);
             if ($i === 0 || $scenario !== 'shared-destination') {
                 $f['detached']->save($sector, new SectorDetachedContainer($destinations[$i], 'Destination', 'drifting', $probe->id, $probe->playerId, null, null, 0.1, 'ECE', gmdate('c'), [
@@ -49,7 +55,7 @@ require_once __DIR__ . '/MiningAtomicFixture.php';
         }
         $hash = hash_file('sha256', $f['files']->getPath($sector));
         $f = $db = null;
-        $held = $directory . '/mining-atomic-held'; $done = $directory . '/mining-atomic-done';
+        $held = $directory . '/mining-atomic-held-' . $scenario; $done = $directory . '/mining-atomic-done-' . $scenario;
         $waitFor = static function (string $path): void {
             $deadline = microtime(true) + 8;
             while (!is_file($path)) {
@@ -62,15 +68,15 @@ require_once __DIR__ . '/MiningAtomicFixture.php';
             $operations[] = static function (PDO $db) use ($directory, $eventId, $scenario, $i, $held, $done, $waitFor): bool {
                 $f = miningAtomicFixture($db, $directory);
                 $event = $f['events']->claim($f['events']->findById($eventId));
-                if ($scenario === 'independent' && $i === 1) { $waitFor($held); }
-                $result = (new StorageTransaction($db, maxAttempts: 1, readCommitted: true))->run(function () use ($f, $event, $scenario, $i, $held, $done, $waitFor): bool {
+                if (in_array($scenario, ['independent', 'same-probe'], true) && $i === 1) { $waitFor($held); }
+                $result = $f['events']->withAdmission($event, function () use ($f, $event, $scenario, $i, $held, $done, $waitFor): bool {
                     $result = $f['mining']->processScheduledMiningTask($event);
-                    if ($scenario === 'independent' && $i === 0) {
+                    if (in_array($scenario, ['independent', 'same-probe'], true) && $i === 0) {
                         file_put_contents($held, 'held'); $waitFor($done);
                     }
                     return $result;
                 });
-                if ($scenario === 'independent' && $i === 1) { file_put_contents($done, 'done'); }
+                if (in_array($scenario, ['independent', 'same-probe'], true) && $i === 1) { file_put_contents($done, 'done'); }
                 return $result;
             };
         }
@@ -81,7 +87,7 @@ require_once __DIR__ . '/MiningAtomicFixture.php';
         foreach (array_unique($destinations) as $id) { $delivered += $f['detached']->findByObjectId($id)->getPayload()['resources']['metals'] ?? 0; }
         $remaining = array_sum(array_column(array_column($f['stocks']->findMany($sourceIds), 'amounts'), 'metals'));
         $assert(round($remaining + $delivered, 4) === 0.2, 'concurrent delivery conserves source plus destination: ' . $scenario);
-        $assert(round($delivered, 4) === ($scenario === 'independent' ? 0.12 : 0.1), 'source/destination capacity limits both real workers: ' . $scenario);
+        $assert(round($delivered, 4) === (in_array($scenario, ['independent', 'same-probe'], true) ? 0.12 : 0.1), 'source/destination capacity limits both real workers: ' . $scenario);
         foreach ($actors as [$mannyId, $eventId]) {
             $assert($f['mannies']->findById($mannyId)->isForgotten && $f['events']->findById($eventId)->status === 'done', 'remote miner and event commit together: ' . $scenario);
         }
@@ -140,5 +146,27 @@ require_once __DIR__ . '/MiningAtomicFixture.php';
     $remaining = $f['stocks']->find($sourceId)['amounts']['metals'];
     $delivered = $f['storage']->resourceStock($f['probes']->findById($probeId), 'metals');
     $assert(round($remaining + $delivered, 4) === 0.1 && in_array($delivered, [0.0, 0.06], true), 'recall commits either before or after one complete harvest, never a partial delivery');
+
+    [$probe, $manny] = miningAtomicActor($f, 'atomic-rename-race', $sector);
+    $f['mining']->startMining($probe, $manny->uid, $sourceId, 'metals', 0.02);
+    $manny = $f['mannies']->findById($manny->id);
+    $manny->taskEndsAt = gmdate('c', time() - 1); $f['mannies']->save($manny);
+    $eventId = $manny->taskScheduledEventId; $probeId = $probe->id; $uid = $manny->uid; $mannyId = $manny->id;
+    $f = $db = null;
+    $results = $race([
+        static function (PDO $db) use ($directory, $eventId): bool {
+            $f = miningAtomicFixture($db, $directory);
+            $event = $f['events']->claim($f['events']->findById($eventId));
+            return $f['mining']->processScheduledMiningTask($event);
+        },
+        static function (PDO $db) use ($directory, $probeId, $uid): string {
+            $f = miningAtomicFixture($db, $directory);
+            return $f['mining']->renameManny($f['probes']->findById($probeId), $uid, 'Renamed during harvest')->name;
+        },
+    ]);
+    $assert($results[0]['ok'] && $results[1]['ok'], 'API rename and harvest settle under the same Manny lock: ' . json_encode($results));
+    $db = $connect(); $f = miningAtomicFixture($db, $directory);
+    $current = $f['mannies']->findById($mannyId);
+    $assert($current->currentTask === null && $current->name === 'Renamed during harvest' && $f['events']->findById($eventId)->status === 'done', 'rename preserves the committed task result and cannot recreate a completed mining event');
 
 })();

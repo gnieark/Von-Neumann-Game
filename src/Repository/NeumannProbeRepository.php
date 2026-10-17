@@ -21,35 +21,38 @@ final class NeumannProbeRepository
 
     public function createForPlayer(int $playerId, string $name, ?SectorCoordinates $sector = null, string $model = ProbeModel::GENERIC): NeumannProbe
     {
-        if (!ProbeModel::isValid($model)) {
-            throw new \InvalidArgumentException('Unknown probe model.');
-        }
-        $sector ??= SectorCoordinates::origin();
-        $now = gmdate('c');
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO neumann_probes
-             (player_id, name, model, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
-             VALUES (:player_id, :name, :model, :x, :y, :z, 0, 0, 0, 0, 0, :status, :integrity_percent, 0, :deuterium_stock, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
-        );
-        $stmt->execute([
-            'player_id' => $playerId,
-            'name' => $name,
-            'model' => $model,
-            'x' => $sector->getX(),
-            'y' => $sector->getY(),
-            'z' => $sector->getZ(),
-            'status' => ProbeStatus::Idle->value,
-            'integrity_percent' => $this->initialIntegrityPercent(),
-            'deuterium_stock' => $this->initialDeuteriumPercent(),
-            'entered_current_sector_at' => $now,
-            'created_at' => $now,
-            'updated_at' => $now,
-        ]);
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($playerId, $name, $sector, $model): NeumannProbe {
+            if (!ProbeModel::isValid($model)) {
+                throw new \InvalidArgumentException('Unknown probe model.');
+            }
+            $sector ??= SectorCoordinates::origin();
+            $now = gmdate('c');
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO neumann_probes
+                 (player_id, name, model, sector_x, sector_y, sector_z, velocity_c, acceleration_c_per_day, direction_x, direction_y, direction_z, status, integrity_percent, energy_stored, deuterium_stock, internal_clock_rate, current_task, entered_current_sector_at, created_at, updated_at)
+                 VALUES (:player_id, :name, :model, :x, :y, :z, 0, 0, 0, 0, 0, :status, :integrity_percent, 0, :deuterium_stock, 1, NULL, :entered_current_sector_at, :created_at, :updated_at)'
+            );
+            $stmt->execute([
+                'player_id' => $playerId,
+                'name' => $name,
+                'model' => $model,
+                'x' => $sector->getX(),
+                'y' => $sector->getY(),
+                'z' => $sector->getZ(),
+                'status' => ProbeStatus::Idle->value,
+                'integrity_percent' => $this->initialIntegrityPercent(),
+                'deuterium_stock' => $this->initialDeuteriumPercent(),
+                'entered_current_sector_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
 
-        $probe = $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe creation failed.');
-        $this->assignDefaultProbeIfMissing($playerId, $probe->id);
+            $probe = $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Probe creation failed.');
+            (new ProbeOperationRepository($this->pdo))->create($probe->id);
+            $this->assignDefaultProbeIfMissing($playerId, $probe->id);
 
-        return $probe;
+            return $probe;
+        });
     }
 
     public function findByPlayerId(int $playerId): ?NeumannProbe
@@ -93,14 +96,36 @@ final class NeumannProbeRepository
      * @param callable(): T $callback
      * @return T
      */
+    public function withProbeGuards(array $probeIds, callable $operation): mixed
+    {
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($probeIds, $operation): mixed {
+            (new ProbeOperationRepository($this->pdo))->protect($probeIds);
+            return $operation();
+        });
+    }
+
+    public function withAdmittedOperation(array $probeIds, callable $operation): mixed
+    {
+        return (new ProbeOperationRepository($this->pdo))->run($probeIds, $operation);
+    }
+
     public function withProbeLock(int $probeId, callable $callback): mixed
     {
         // The callback can still contain non-migrated file writes: do not retry it here.
-        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1, sqliteWriteIntent: false))->run(function () use ($probeId, $callback): mixed {
+        $result = (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($probeId, $callback): mixed {
+            (new ProbeOperationRepository($this->pdo))->protect([$probeId]);
             $lock = $this->pdo->prepare('UPDATE neumann_probes SET updated_at=updated_at WHERE id=?');
             $lock->execute([$probeId]);
             return $callback();
         });
+        // A causal movement may finalize its loss in an after-commit callback.
+        if ($result instanceof NeumannProbe && $this->findById($result->id) === null) {
+            $loss = (new ProbeReinstantiationRepository($this->pdo))->loss($result->id);
+            if ($loss !== null && $loss['replacement_probe_id'] !== null) {
+                return $this->findById((int) $loss['replacement_probe_id']) ?? $result;
+            }
+        }
+        return $result;
     }
 
     /**
@@ -307,13 +332,16 @@ final class NeumannProbeRepository
         }
 
         try {
+            (new ProbeOperationRepository($this->pdo))->protect([$probeId]);
             $sql = 'SELECT deuterium_stock FROM neumann_probes WHERE id = :id';
             if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
                 $sql .= ' FOR UPDATE';
             }
             $select = $this->pdo->prepare($sql);
             $select->execute(['id' => $probeId]);
-            $before = max(0.0, min($maxStockPercent, (float) $select->fetchColumn()));
+            $value = $select->fetchColumn();
+            if ($value === false) { throw new ProbeAdmissionClosedException('Fuel destination disappeared.'); }
+            $before = max(0.0, min($maxStockPercent, (float) $value));
             $accepted = round(min($stockPercent, max(0.0, $maxStockPercent - $before)), 4);
             $after = round(min($maxStockPercent, $before + $accepted), 4);
 
@@ -371,6 +399,7 @@ final class NeumannProbeRepository
         }
 
         try {
+            (new ProbeOperationRepository($this->pdo))->protect([$probeId]);
             $update = $this->pdo->prepare(
                 'UPDATE neumann_probes
                  SET deuterium_stock = ROUND(

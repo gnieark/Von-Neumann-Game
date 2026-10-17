@@ -48,24 +48,32 @@ final class SchedulerService
         ];
 
         foreach ($due as $event) {
-            $claimed = $this->events->claim($event);
-            if ($claimed === null) {
-                continue;
-            }
-
+            $claimed = null;
             try {
-                if ($this->process($claimed)) {
-                    $this->events->markDone($claimed);
-                    $stats['processed']++;
-                } else {
-                    $stats['deferred']++;
-                }
+                $result = $this->events->withAdmission($event, function () use ($event, &$claimed): ?bool {
+                    $claimed = $this->events->claim($event);
+                    if ($claimed === null) { return null; }
+                    $done = $this->process($claimed);
+                    if ($done) { $this->events->markDone($claimed); }
+                    return $done;
+                });
+                if ($result !== null) { $stats[$result ? 'processed' : 'deferred']++; }
+            } catch (\VonNeumannGame\Repository\ProbeAdmissionClosedException) {
+                // The loss event owns cancellation and reservation release.
+                $stats['deferred']++;
             } catch (ScheduledEventLeaseLostException $error) {
-                // Continuing would claim more work while leaving the current event
-                // running. Stop the batch so systemd restarts a visibly failed worker.
                 throw $error;
             } catch (\Throwable $error) {
-                $this->events->markFailed($claimed, $error);
+                if ($event->type === 'probe.loss') {
+                    $this->events->release($event, gmdate('c', time() + 30), $event->payload);
+                    error_log('Probe loss ' . $event->entityId . ' deferred: ' . $error->getMessage());
+                    $stats['deferred']++;
+                    continue;
+                }
+                // A rolled-back claim is still pending. Reclaim only to record its failure.
+                $current = $this->events->findById($event->id);
+                if ($current?->status === 'pending') { $claimed = $this->events->claim($current); }
+                if ($claimed !== null && $current !== null) { $this->events->markFailed($claimed, $error); }
                 $stats['failed']++;
             }
         }
@@ -75,6 +83,7 @@ final class SchedulerService
 
     public function recoverExpiredRunningEvents(int $leaseSeconds): int
     {
+        $this->events->recoverExpiredAdmissions();
         $leaseSeconds = max(60, $leaseSeconds);
         $expiredBefore = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
             ->modify('-' . $leaseSeconds . ' seconds')
@@ -86,6 +95,7 @@ final class SchedulerService
     private function process(ScheduledEvent $event): bool
     {
         return match ($event->type) {
+            'probe.loss' => $this->processProbeLoss($event),
             self::PROBE_MOVEMENT_PHASE => $this->processProbeMovementPhase($event),
             self::PROBE_BLACK_HOLE_TRAP => $this->processProbeBlackHoleTrap($event),
             self::PROBE_STORAGE_CONTAINER_BREAK => $this->processProbeStorageContainerBreak($event),
@@ -97,6 +107,14 @@ final class SchedulerService
             self::MISSILE_PROJECTILE => $this->processMissileProjectile($event),
             default => throw new \RuntimeException('Unsupported scheduled event type: ' . $event->type),
         };
+    }
+
+    private function processProbeLoss(ScheduledEvent $event): bool
+    {
+        $done = $this->movementService->resumeProbeLoss($event->entityId);
+        if ($done) { return true; }
+        $this->events->release($event, gmdate('c', time() + 5), $event->payload);
+        return false;
     }
 
     private function processSectorEffect(ScheduledEvent $event): bool

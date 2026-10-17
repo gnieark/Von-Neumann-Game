@@ -1053,9 +1053,23 @@ final class SchemaInitializer
         ];
         array_push($statements, ...$this->mineableObjectStockStatements());
         array_push($statements, ...$this->miningOrderLockStatements());
+        array_push($statements, ...$this->probeOperationStatements());
         return $this->driver === 'mysql'
             ? array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements)
             : $statements;
+    }
+
+    /** Tombstones deliberately survive deletion of probes and players. */
+    public function probeOperationStatements(): array
+    {
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $statements = [
+            'CREATE TABLE IF NOT EXISTS probe_operation_gates (probe_id INTEGER PRIMARY KEY, closed INTEGER NOT NULL DEFAULT 0)',
+            "CREATE TABLE IF NOT EXISTS probe_operations (token $text NOT NULL, probe_id INTEGER NOT NULL, expires_at BIGINT NOT NULL, PRIMARY KEY(token,probe_id))",
+            'CREATE INDEX IF NOT EXISTS idx_probe_operations_probe ON probe_operations(probe_id,expires_at)',
+            "CREATE TABLE IF NOT EXISTS probe_losses (probe_id INTEGER PRIMARY KEY, reason $text NOT NULL, causal_at $text NOT NULL, state $text NOT NULL, replacement_probe_id INTEGER NULL, scheduled_event_id INTEGER NULL, updated_at $text NOT NULL)",
+        ];
+        return $this->driver === 'mysql' ? array_map(fn(string $sql): string => $this->withMysqlEngine($sql), $statements) : $statements;
     }
 
     /** Also used by the explicit schema migration; never imports or repairs existing data. */

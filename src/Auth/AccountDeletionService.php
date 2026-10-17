@@ -19,6 +19,7 @@ final class AccountDeletionService
         private readonly NeumannProbeRepository $probes,
         private readonly MannyRepository $mannies,
         private readonly ?SectorService $sectors = null,
+        private readonly ?\VonNeumannGame\Service\MannyService $mannyService = null,
     ) {}
 
     /**
@@ -43,19 +44,47 @@ final class AccountDeletionService
         }
 
         (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($probeIds, $player): void {
+            $operations = new \VonNeumannGame\Repository\ProbeOperationRepository($this->pdo);
             foreach ($probeIds as $probeId) {
-                $this->probes->withProbeLock($probeId, function () use ($probeId): void {
-                    foreach ($this->mannies->findByProbeId($probeId) as $manny) {
-                        if ($manny->isOnProbe() || $manny->sector === null) { continue; }
-                        $this->mannies->withMannyLock($manny->id, function (Manny $manny): void {
-                            $this->detachManny($manny);
-                            $this->registerAbandonedManny($manny);
-                        });
-                    }
-                    $this->deleteProbeData($probeId);
-                });
+                if (!$operations->close($probeId) || !$operations->drained($probeId)) {
+                    throw new \RuntimeException('Account deletion must retry after active probe operations have drained.');
+                }
             }
-            $this->deletePlayerData($player->id);
+            $operations->internal($probeIds, function () use ($probeIds, $player): void {
+                foreach ($probeIds as $probeId) {
+                    $this->probes->withProbeLock($probeId, function () use ($probeId): void {
+                        $probe = $this->probes->findById($probeId) ?? throw new \RuntimeException('Probe disappeared during account deletion.');
+                        $persistence = new \VonNeumannGame\Repository\ProbeReinstantiationRepository($this->pdo);
+                        foreach ($persistence->incomingMannyIds($probeId) as $id) {
+                            $incoming = $this->mannies->findById($id);
+                            if ($incoming?->probeId === null || $incoming->probeId === $probeId) { continue; }
+                            $source = $this->probes->findById($incoming->probeId);
+                            if ($source === null) { continue; }
+                            (new \VonNeumannGame\Repository\ProbeOperationRepository($this->pdo))->internal([$source->id], fn() => $this->probes->withProbeLock($source->id, function () use ($source, $id, $probeId): void {
+                                $source = $this->probes->findById($source->id) ?? throw new \RuntimeException('Incoming source disappeared.');
+                                $this->mannies->withMannyLock($id, function (Manny $current) use ($source, $probeId): void {
+                                    if ($current->probeId === $source->id && \VonNeumannGame\Repository\ScheduledEventRepository::targetProbeId($current->taskPayload) === $probeId) {
+                                        ($this->mannyService ?? throw new \LogicException('Account deletion requires business cancellation.'))->cancelForProbeLoss($source, $current);
+                                    }
+                                });
+                            }));
+                        }
+                        foreach ($this->mannies->findByProbeId($probeId) as $manny) {
+                            if ($manny->currentTask !== null) {
+                                $this->mannies->withMannyLock($manny->id, fn(Manny $current) => ($this->mannyService ?? throw new \LogicException('Account deletion requires business cancellation.'))->cancelForProbeLoss($probe, $current));
+                                $manny = $this->mannies->findById($manny->id);
+                            }
+                            if ($manny->isOnProbe() || $manny->sector === null) { continue; }
+                            $this->mannies->withMannyLock($manny->id, function (Manny $manny): void {
+                                $this->detachManny($manny);
+                                $this->registerAbandonedManny($manny);
+                            });
+                        }
+                        $this->deleteProbeData($probeId);
+                    });
+                }
+                $this->deletePlayerData($player->id);
+            });
         });
 
         return $stats;

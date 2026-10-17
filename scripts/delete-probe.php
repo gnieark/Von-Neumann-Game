@@ -83,6 +83,7 @@ function deleteProbeRun(array $argv): int
         $damageWarnings,
         gameplayConfig: $gameplayConfig,
         universeConfig: $universeConfig,
+        mannyService: $factory->mannyServiceForCleanup($pdo, $sectorService),
         sectorChanges: new \VonNeumannGame\Service\OthersSectorService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), new \VonNeumannGame\Service\SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), new \VonNeumannGame\Repository\ScheduledEventRepository($pdo), $sectorService), $sectorService),
     );
 
@@ -111,18 +112,13 @@ function deleteProbeRun(array $argv): int
         $remainingProbeCount = $ownedProbeCount - 1;
         $defaultProbeId = $wasDefault ? ($alertProbe?->id ?? null) : $player->defaultProbeId;
     } else {
-        $pdo->beginTransaction();
-        try {
-            $alertProbe = $reinstantiation->handleTerminalProbeLoss($probe, $options['reason']);
-            $updatedPlayer = $players->findById($player->id) ?? $player;
-            $remainingProbeCount = count($probes->findAllByPlayerId($player->id));
-            $defaultProbeId = $updatedPlayer->defaultProbeId;
-            $pdo->commit();
-        } catch (Throwable $error) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $error;
+        $alertProbe = $reinstantiation->handleTerminalProbeLoss($probe, $options['reason']);
+        $updatedPlayer = $players->findById($player->id) ?? $player;
+        $remainingProbeCount = count($probes->findAllByPlayerId($player->id));
+        $defaultProbeId = $updatedPlayer->defaultProbeId;
+        if ($probes->findById($probe->id) !== null) {
+            echo 'Loss recorded; the scheduler will finish after active operations drain.' . "\n";
+            return 0;
         }
     }
 

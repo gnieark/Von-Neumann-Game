@@ -29,6 +29,7 @@ final class StorageContainerRepository
     public function withPlacementLock(int $probeId, callable $operation): mixed
     {
         return (new StorageTransaction($this->pdo, maxAttempts: 1, readCommitted: true))->run(function () use ($probeId, $operation): mixed {
+            (new ProbeOperationRepository($this->pdo))->protect([$probeId]);
             $this->lockForMannyPlacement($probeId);
             return $operation();
         });

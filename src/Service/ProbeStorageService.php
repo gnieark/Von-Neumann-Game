@@ -45,6 +45,26 @@ final class ProbeStorageService
     private function withProbeLock(NeumannProbe $probe, callable $callback): mixed
     {
         return $this->probes->withProbeLock($probe->id, function () use ($probe, $callback): mixed {
+            $this->containers->lockForMannyPlacement($probe->id);
+            return $callback($this->probes->findById($probe->id) ?? $probe);
+        });
+    }
+
+    private function withStoredMannyLocks(NeumannProbe $probe, array $uids, callable $callback): mixed
+    {
+        return $this->probes->withProbeLock($probe->id, function () use ($probe, $uids, $callback): mixed {
+            $ids = [];
+            foreach ($uids as $uid) {
+                $manny = $this->mannies->findByUidForProbe($probe->id, $uid)
+                    ?? throw new MannyActionException(404, 'manny_not_found', 'Manny not found.');
+                $ids[] = $manny->id;
+            }
+            sort($ids, SORT_NUMERIC);
+            foreach (array_unique($ids) as $id) {
+                $current = $this->mannies->lockForTask($id);
+                if ($current?->probeId !== $probe->id) { throw new MannyActionException(404, 'manny_not_found', 'Manny not found.'); }
+            }
+            $this->containers->lockForMannyPlacement($probe->id);
             return $callback($this->probes->findById($probe->id) ?? $probe);
         });
     }
@@ -598,6 +618,7 @@ final class ProbeStorageService
 
     public function reserveCraftingOutput(NeumannProbe $probe, string $type, float $space): ?int
     {
+        $this->containers->lockForMannyPlacement($probe->id);
         $space = round(max(0.0, $space), 4);
         return ($this->placeUnit($probe, $type, $space)
             ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.'))->id;
@@ -824,6 +845,12 @@ final class ProbeStorageService
      */
     public function detachAdditionalContainerSnapshot(NeumannProbe $probe, string $containerUid, int $ownerPlayerId): array
     {
+        return $this->containers->withPlacementLock($probe->id, fn(): array => $this->detachAdditionalContainerSnapshotLocked($probe, $containerUid, $ownerPlayerId));
+    }
+
+    private function detachAdditionalContainerSnapshotLocked(NeumannProbe $probe, string $containerUid, int $ownerPlayerId): array
+    {
+        $this->containers->lockForMannyPlacement($probe->id);
         $this->ensureProbeStorage($probe);
         if ($containerUid === StorageContainer::CORE_UID) {
             throw new MannyActionException(422, 'storage_container_not_detachable', 'The probe core storage cannot be detached.');
@@ -1094,7 +1121,7 @@ final class ProbeStorageService
 
     public function moveStoredManny(NeumannProbe $probe, string $mannyUid, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
-        $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($mannyUid, $toContainerUid, $ignoredStorageMoveMannyId): void {
+        $this->withStoredMannyLocks($probe, [$mannyUid], function (NeumannProbe $lockedProbe) use ($mannyUid, $toContainerUid, $ignoredStorageMoveMannyId): void {
             $this->moveStoredMannyLocked($lockedProbe, $mannyUid, $toContainerUid, $ignoredStorageMoveMannyId);
         });
     }
@@ -1115,7 +1142,7 @@ final class ProbeStorageService
      */
     public function moveStoredMannies(NeumannProbe $probe, array $mannyUids, string $toContainerUid, ?int $ignoredStorageMoveMannyId = null): void
     {
-        $this->withProbeLock($probe, function (NeumannProbe $lockedProbe) use ($mannyUids, $toContainerUid, $ignoredStorageMoveMannyId): void {
+        $this->withStoredMannyLocks($probe, $mannyUids, function (NeumannProbe $lockedProbe) use ($mannyUids, $toContainerUid, $ignoredStorageMoveMannyId): void {
             $this->moveStoredManniesLocked($lockedProbe, $mannyUids, $toContainerUid, $ignoredStorageMoveMannyId);
         });
     }
